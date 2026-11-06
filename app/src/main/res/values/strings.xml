@@ -1,6 +1,7 @@
 <resources>
     <string name="camera_video_fps_unavailable">Recording is unavailable because the camera did not provide valid frame rate ranges.</string>
     <string name="app_name">Photon Camera</string>
+    <string name="raw_hal_restart_required">RAW capture failed. The camera driver needs a phone restart before RAW (Pro mode) works again.</string>
 
     <!-- Camera Controls -->
     <string name="switch_camera">Switch Camera</string>
