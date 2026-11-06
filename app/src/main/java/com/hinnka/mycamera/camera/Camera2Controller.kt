@@ -627,7 +627,21 @@ class Camera2Controller(private val context: Context) {
         if (!shot.failed || shot.delivered) return
         // A failed frame does not cancel its sibling requests. Hold their slots
         // until the sequence tells us which requests actually produced images.
-        if (shot.submitted && !shot.sequenceCompleted) return
+        if (shot.submitted && !shot.sequenceCompleted) {
+            // If the HAL never completes or aborts the sequence, isCapturing would stay true forever.
+            if (shot.timeout == null) {
+                val timeout = Runnable {
+                    shot.timeout = null
+                    PLog.e(TAG, "Failed capture sequence never completed: id=${shot.id}")
+                    finishPhotoCaptureSequence(shot, successful = false)
+                }
+                shot.timeout = timeout
+                cameraHandler?.postDelayed(timeout, CAPTURE_IMAGE_DELIVERY_TIMEOUT_MS)
+            }
+            return
+        }
+        shot.timeout?.let { cameraHandler?.removeCallbacks(it) }
+        shot.timeout = null
         shot.reservedFrames = if (shot.submitted) {
             shot.expectedImageTimestamps.count { it !in shot.acquiredTimestamps }
         } else {
