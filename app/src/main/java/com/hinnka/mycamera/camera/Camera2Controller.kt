@@ -277,6 +277,8 @@ class Camera2Controller(private val context: Context) {
     private var previewSurfaceTexture: SurfaceTexture? = null
     private var imageReader: ImageReader? = null
     private var stabilizationImageReader: StabilizationImageReader? = null
+    // lilac raw19 shim: serves full-res RAW only when the same request also targets a full-size JPEG; the JPEG is discarded
+    private var rawCompanionJpegReader: ImageReader? = null
 
     // 降噪等级 (0=Off, 1=Fast, 2=High Quality, 3=ZSL, 4=Minimal)
     private var nrLevel = NoiseReductionLevel.DEFAULT
@@ -2171,6 +2173,8 @@ class Camera2Controller(private val context: Context) {
         if (closeImageReader) {
             safeCloseImageReader(imageReader)
             imageReader = null
+            safeCloseImageReader(rawCompanionJpegReader)
+            rawCompanionJpegReader = null
             closeStabilizationImageReader()
         }
     }
@@ -2895,10 +2899,20 @@ class Camera2Controller(private val context: Context) {
                         }
                     }, cameraHandler)
                 }
+                safeCloseImageReader(rawCompanionJpegReader)
+                rawCompanionJpegReader = if (captureFormat == ImageFormat.RAW_SENSOR || captureFormat == ImageFormat.RAW10) {
+                    // shortcut: assumes JPEG is offered at the RAW size (true on lilac); check the stream map before upstreaming
+                    ImageReader.newInstance(captureSize.width, captureSize.height, ImageFormat.JPEG, 2).apply {
+                        // drain anything that arrives so the stream can never stall the camera
+                        setOnImageAvailableListener({ it.acquireLatestImage()?.close() }, cameraHandler)
+                    }
+                } else null
 
             } else {
                 safeCloseImageReader(imageReader)
                 imageReader = null
+                safeCloseImageReader(rawCompanionJpegReader)
+                rawCompanionJpegReader = null
                 activeHighResolutionCaptureProfile = null
                 _state.value = _state.value.copy(isP3Supported = false)
             }
@@ -3278,6 +3292,7 @@ class Camera2Controller(private val context: Context) {
                 reader?.surface?.let { captureSurface ->
                     add(createOutputConfiguration(captureSurface))
                 }
+                rawCompanionJpegReader?.surface?.let { add(createOutputConfiguration(it)) }
             }
             val sessionConfig = SessionConfiguration(
                 SessionConfiguration.SESSION_REGULAR,
@@ -3971,6 +3986,9 @@ class Camera2Controller(private val context: Context) {
         useStillFlashTrigger: Boolean = isCapture,
         currentState: CameraState = _state.value,
     ) {
+        // every RAW still request passes through here; the raw19 shim needs the JPEG beside the RAW (see rawCompanionJpegReader)
+        if (isCapture && isRawCapture) rawCompanionJpegReader?.surface?.let { builder.addTarget(it) }
+
         // 1. 曝光设置
         applyExposureSettings(
             builder = builder,
