@@ -33,6 +33,7 @@ import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.ui.theme.OnAccentColor
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
+import com.hinnka.mycamera.camera.DeviceQuirks
 import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.raw.HncsFilmCurveMode
@@ -93,6 +94,8 @@ fun CameraTopSheet(
     photoPreviewStabilizationEnabled: Boolean,
     photoPreviewStabilizationAvailable: Boolean,
     onPhotoPreviewStabilizationChange: (Boolean) -> Unit,
+    photoResolutionCapMp: Int,
+    onPhotoResolutionCapChange: (Int) -> Unit,
     onRawDcpChange: (String?) -> Unit,
     onRawDcpIdsByLensChange: ((Map<String, String?>) -> Unit)? = null,
     onRawHncsFilmCurveModeChange: (HncsFilmCurveMode) -> Unit,
@@ -221,11 +224,31 @@ fun CameraTopSheet(
                             onCheckedChange = onUltraHdrToggle,
                             modifier = itemModifier
                         )
-                        QuickSettingToggle(
-                            title = stringResource(R.string.camera_preview_stabilization),
-                            checked = photoPreviewStabilizationEnabled,
-                            onCheckedChange = onPhotoPreviewStabilizationChange,
-                            enabled = photoPreviewStabilizationAvailable,
+                        if (!DeviceQuirks.isLilac) {
+                            QuickSettingToggle(
+                                title = stringResource(R.string.camera_preview_stabilization),
+                                checked = photoPreviewStabilizationEnabled,
+                                onCheckedChange = onPhotoPreviewStabilizationChange,
+                                enabled = photoPreviewStabilizationAvailable,
+                                modifier = itemModifier
+                            )
+                        }
+                        // Pro (RAW) is always full size: the RAW stream only exists at full sensor size.
+                        val resolutionCap = if (isProfessionalMode) 0 else photoResolutionCapMp
+                        QuickSettingValue(
+                            title = stringResource(R.string.photo_resolution),
+                            value = if (resolutionCap > 0) "$resolutionCap MP" else stringResource(R.string.photo_resolution_full),
+                            onClick = {
+                                if (!isProfessionalMode) {
+                                    onPhotoResolutionCapChange(
+                                        when (photoResolutionCapMp) {
+                                            0 -> 12
+                                            12 -> 8
+                                            else -> 0
+                                        }
+                                    )
+                                }
+                            },
                             modifier = itemModifier
                         )
                         MeteringModeQuickSetting(

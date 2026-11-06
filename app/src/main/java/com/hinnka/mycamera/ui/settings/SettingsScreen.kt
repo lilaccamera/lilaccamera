@@ -1164,7 +1164,7 @@ fun SettingsScreen(
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
 
-                        SwitchSettingItem(
+                        if (!com.hinnka.mycamera.camera.DeviceQuirks.isLilac) SwitchSettingItem(
                             title = stringResource(
                                 R.string.settings_photo_preview_stabilization
                             ),

@@ -1977,6 +1977,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setPhotoPreviewStabilizationEnabled(
                     it.photoPreviewStabilizationEnabled
                 )
+                cameraController.setPhotoResolutionCapMp(it.photoResolutionCapMp)
                 cameraController.setVideoCodec(it.videoCodec)
                 multipleExposureState = multipleExposureState.copy(enabled = it.useMultipleExposure)
                 // 同步 Live Photo 设置到相机控制器
@@ -3653,6 +3654,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val resolvedEnabled = state.value.photoPreviewStabilizationEnabled
         viewModelScope.launch {
             userPreferencesRepository.update { photoPreviewStabilizationEnabled = resolvedEnabled }
+        }
+    }
+
+    fun setPhotoResolutionCapMp(megapixels: Int) {
+        cameraController.setPhotoResolutionCapMp(megapixels)
+        viewModelScope.launch {
+            userPreferencesRepository.update { photoResolutionCapMp = megapixels }
         }
     }
 

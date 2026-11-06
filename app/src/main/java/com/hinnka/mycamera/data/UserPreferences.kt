@@ -142,6 +142,7 @@ class UserPreferences internal constructor(
     var videoBitrate by enum("video_bitrate", VideoBitratePreset.P1)
     var oppoSuperStabilizationEnabled by bool("oppo_super_stabilization_enabled", false)
     var photoPreviewStabilizationEnabled by bool("photo_preview_stabilization_enabled", false)
+    var photoResolutionCapMp by int("photo_resolution_cap_mp", 0)
     var videoCodec by enum("video_codec", com.hinnka.mycamera.video.VideoCodec.H264)
     var ultraHdrGainMapEnabled by bool("auto_enable_hdr_for_hdr_capture", false)
     var phantomMode by bool("phantom_mode", false)

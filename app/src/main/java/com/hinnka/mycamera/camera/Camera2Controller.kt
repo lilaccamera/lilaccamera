@@ -2881,7 +2881,8 @@ class Camera2Controller(private val context: Context) {
                         outputCharacteristicsForStreams,
                         aspectRatio,
                         captureFormat,
-                        includeHighResolution = highResolutionProfile !in failedHighResolutionCaptureProfiles
+                        includeHighResolution = highResolutionProfile !in failedHighResolutionCaptureProfiles,
+                        maxMegapixels = _state.value.photoResolutionCapMp,
                     )
                 }
                 val captureSize = rawOutput?.size ?: captureSizeSelection!!.size
@@ -7175,7 +7176,26 @@ class Camera2Controller(private val context: Context) {
         realtimeStabilizationCoordinator.setExternalLensStabilizationConfig(config)
     }
 
+    /** Caps the Photo-mode (YUV) capture size; 0 = full sensor size. RAW is always full size. */
+    fun setPhotoResolutionCapMp(megapixels: Int) {
+        if (_state.value.photoResolutionCapMp == megapixels) return
+        _state.value = _state.value.copy(photoResolutionCapMp = megapixels)
+        // The capture size is fixed when the camera opens, so a running YUV camera must reopen.
+        val reader = imageReader ?: return
+        if (isRawCaptureReader(reader) || _state.value.captureMode != CaptureMode.PHOTO || _state.value.isCapturing) return
+        val surfaceTexture = previewSurfaceTexture ?: return
+        if (cameraDevice == null) return
+        PLog.i(TAG, "Restarting camera for photo resolution cap: ${megapixels} MP")
+        openCamera(surfaceTexture)
+    }
+
     fun setPhotoPreviewStabilizationEnabled(enabled: Boolean) {
+        if (enabled && IS_LILAC) {
+            // lilac: the extra stabilization stream makes the HAL refuse requests (-38) and close the camera.
+            PLog.w(TAG, "Photo preview stabilization blocked on lilac")
+            if (_state.value.photoPreviewStabilizationEnabled) setPhotoPreviewStabilizationEnabled(false)
+            return
+        }
         if (enabled && cameraDevice != null &&
             !realtimeStabilizationCoordinator.isCurrentCameraSupported
         ) {

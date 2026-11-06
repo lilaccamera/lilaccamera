@@ -400,6 +400,8 @@ data class CameraState(
     val isP3Supported: Boolean = false,
     val captureMode: CaptureMode = CaptureMode.PHOTO,
     val photoPreviewStabilizationEnabled: Boolean = false,
+    /** Photo-mode capture size cap in megapixels; 0 = full sensor size. */
+    val photoResolutionCapMp: Int = 0,
     val videoConfig: VideoConfig = VideoConfig(),
     val videoCapabilities: VideoCapabilities = VideoCapabilities(),
     val videoRecordingState: VideoRecordingState = VideoRecordingState(),

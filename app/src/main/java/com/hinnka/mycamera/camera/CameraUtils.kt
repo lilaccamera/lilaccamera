@@ -141,7 +141,8 @@ object CameraUtils {
         characteristics: CameraCharacteristics,
         aspectRatio: AspectRatio,
         format: Int = ImageFormat.YUV_420_888,
-        includeHighResolution: Boolean = true
+        includeHighResolution: Boolean = true,
+        maxMegapixels: Int = 0,
     ): CaptureSizeSelection {
         val fallback = CaptureSizeSelection(Size(1920, 1080), false, null, null)
         return try {
@@ -152,7 +153,12 @@ object CameraUtils {
             val highResolutionSizes = getHighResolutionOutputSizes(map, outputFormat)
                 .filterNot { it in standardSizes }
             val candidates = if (includeHighResolution) standardSizes + highResolutionSizes else standardSizes
-            val size = chooseCaptureSize(candidates, aspectRatio.getValue(true)) ?: return fallback
+            // 5% slack so "12 MP" keeps 4000x3000 and "8 MP" keeps 3264x2448 (7.99 MP)
+            val maxPixels = maxMegapixels * 1_050_000L
+            val capped = if (maxMegapixels > 0) {
+                candidates.filter { it.width.toLong() * it.height <= maxPixels }.ifEmpty { candidates }
+            } else candidates
+            val size = chooseCaptureSize(capped, aspectRatio.getValue(true)) ?: return fallback
             CaptureSizeSelection(
                 size = size,
                 isHighResolution = size in highResolutionSizes,
