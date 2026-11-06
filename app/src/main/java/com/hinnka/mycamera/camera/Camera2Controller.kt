@@ -2903,8 +2903,12 @@ class Camera2Controller(private val context: Context) {
                 rawCompanionJpegReader = if (captureFormat == ImageFormat.RAW_SENSOR || captureFormat == ImageFormat.RAW10) {
                     // shortcut: assumes JPEG is offered at the RAW size (true on lilac); check the stream map before upstreaming
                     ImageReader.newInstance(captureSize.width, captureSize.height, ImageFormat.JPEG, 2).apply {
-                        // drain anything that arrives so the stream can never stall the camera
-                        setOnImageAvailableListener({ it.acquireLatestImage()?.close() }, cameraHandler)
+                        // drain anything that arrives so the stream can never stall the camera,
+                        // and drop the freed buffer so the discarded JPEG holds no memory between shots
+                        setOnImageAvailableListener({
+                            it.acquireLatestImage()?.close()
+                            it.discardFreeBuffers()
+                        }, cameraHandler)
                     }
                 } else null
 

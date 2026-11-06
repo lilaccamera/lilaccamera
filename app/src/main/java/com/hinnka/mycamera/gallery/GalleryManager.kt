@@ -2574,6 +2574,9 @@ object GalleryManager {
                 if (!persistDng()) return@withContext
                 renderPersistedDng() ?: return@withContext
             }
+            // The DNG is written and the render is done; free the 38 MB CFA copy before JPEG encode.
+            LargeDirectBuffer.free(rawBufferToRelease)
+            rawBufferToRelease = null
             var bitmap = rawResult.sdrBitmap
 
             if (updatedMetadata.isMirrored) {

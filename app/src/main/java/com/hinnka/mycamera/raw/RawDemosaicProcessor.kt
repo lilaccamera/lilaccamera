@@ -4262,6 +4262,9 @@ class RawDemosaicProcessor {
             if (rawTextureId == borrowedGpuSource?.textureId) {
                 rawTextureId = 0
             }
+            // lilac: keeping ~612 MB of full-res targets resident after a render gets the app killed on
+            // 4 GB phones. Not after the capture-profile pass, which runs right before the main render.
+            if (!captureProfilePreparationRequested) releaseTiledRenderFramebuffers()
             embeddedDngJpegPreview?.takeIf { !it.isRecycled }?.recycle()
             dngRawDataCleanup?.close()
         }
@@ -5192,11 +5195,12 @@ class RawDemosaicProcessor {
         height: Int,
         @Suppress("UNUSED_PARAMETER") setupLegacyAccumulator: Boolean = false,
     ) {
-        if (gfWidth == width && gfHeight == height && gfTexId[0] != 0) return
+        if (gfWidth == width && gfHeight == height && gfTexId[1] != 0) return
         releaseDenoiseProfileFramebuffers()
         gfWidth = width
         gfHeight = height
-        for (index in 0..1) {
+        // Only slot 1 is read (renderPhotonUserAdjustmentDenoise); slot 0 would be an unused full-size RGBA16F.
+        for (index in 1..1) {
             val textures = IntArray(1)
             val framebuffers = IntArray(1)
             GLES30.glGenTextures(1, textures, 0)
@@ -5318,11 +5322,12 @@ class RawDemosaicProcessor {
             PhotonDenoiseDump.write(context, "${params.pipeline.name}_USER", sourceTextureId, width, height,
                 metadata, params, lensShadingSource)
         }
-        setupNLMFramebuffers(width, height, setupLegacyAccumulator = false)
         val startNs = System.nanoTime()
         val denoised = checkNotNull(photonDenoiser.denoise(sourceTextureId, width, height, params)) {
             "Photon denoise programs are unavailable"
         }
+        // Allocated after the denoiser has freed its working set, so it does not add to the peak.
+        setupNLMFramebuffers(width, height, setupLegacyAccumulator = false)
         try {
             renderPassthroughToTexture(denoised, width, height, gfFboId[1])
         } finally {
