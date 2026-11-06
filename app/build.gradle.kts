@@ -207,12 +207,6 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.gson)
 
-    // Bugly for default flavor
-    "defaultImplementation"(libs.bugly.crashreport)
-    "samsungImplementation"(libs.bugly.crashreport)
-    "meituImplementation"(libs.bugly.crashreport)
-    "devImplementation"(libs.bugly.crashreport)
-
     // Billing for google flavor
     "googleImplementation"(libs.google.billing)
     "googleImplementation"(libs.google.billing.ktx)
