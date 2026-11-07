@@ -74,6 +74,7 @@ import com.hinnka.mycamera.MyCameraApplication
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.CameraState
+import com.hinnka.mycamera.camera.DeviceQuirks
 import com.hinnka.mycamera.camera.FocusPointSource
 import com.hinnka.mycamera.camera.PhotoCaptureProgress
 import com.hinnka.mycamera.data.CaptureButtonStyle
@@ -2066,8 +2067,10 @@ private fun Controls(
     val captureButtonImagePath by preferenceValue { it.captureButtonImagePath }
     val captureProcessingState by viewModel.captureProcessingState.collectAsState()
     val capturedThumbnail by viewModel.capturedThumbnail.collectAsState()
-    // Same rule as the lilac refusal in Camera2Controller.reservePhotoCapture.
-    val rawCaptureBusy = state.rawCaptureBusy
+    // Same rule as the lilac refusal in Camera2Controller.reservePhotoCapture (pending saves part is a T1b shortcut).
+    val rawCaptureBusy = state.rawCaptureBusy || (
+        DeviceQuirks.isLilac && state.useRaw && state.isRawSupported && captureProcessingState.pendingCount > 0
+    )
 
     Box(
         modifier = modifier,

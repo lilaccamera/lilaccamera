@@ -571,8 +571,11 @@ class Camera2Controller(private val context: Context) {
             return null
         }
         // The raw19 shim fails a RAW still started while a previous RAW image is still open, and RAW stays broken until reboot.
-        if (IS_LILAC && isRawCaptureReader(reader) && occupied > 0) {
-            PLog.w(TAG, "lilac: RAW capture refused while a RAW image is still open: occupied=$occupied")
+        // shortcut: also waits for the whole save, because a second in-process RAW render gets the app killed
+        // for memory and loses that photo (L3); drop the pendingCount part once Pro renders run in their own process (T1b).
+        val pendingSaves = com.hinnka.mycamera.processor.CaptureProcessingQueue.state.value.pendingCount
+        if (IS_LILAC && isRawCaptureReader(reader) && (occupied > 0 || pendingSaves > 0)) {
+            PLog.w(TAG, "lilac: RAW capture refused while a RAW image is still open or saving: occupied=$occupied pendingSaves=$pendingSaves")
             Handler(Looper.getMainLooper()).post {
                 android.widget.Toast.makeText(context, com.hinnka.mycamera.R.string.raw_capture_busy, android.widget.Toast.LENGTH_SHORT).show()
             }
