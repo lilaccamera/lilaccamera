@@ -5418,6 +5418,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     1.0f,
                     includeCropRegionInOutputSize = shouldIncludeCropRegionInOutputSize(image.format),
                     photoId = settings.photoId,
+                    createPhotoPlaceholder = !GalleryManager.rendersInQueue(image.format),
                 )
             if (photoId == null) {
                 PLog.e(TAG, "Failed to save image")

@@ -68,6 +68,10 @@ import com.hinnka.mycamera.raw.RawAdaptiveExposureMode
 import com.hinnka.mycamera.raw.RawCaptureExposureInputs
 import com.hinnka.mycamera.raw.RawCaptureProfileCoordinator
 import com.hinnka.mycamera.raw.RawSceneExposureMath
+import com.hinnka.mycamera.raw.RawSceneExposureDeviceLimits
+import com.hinnka.mycamera.raw.RawColorCalibrationPolicy
+import com.hinnka.mycamera.render.RenderJob
+import com.hinnka.mycamera.render.RenderQueue
 import com.hinnka.mycamera.raw.RawAppliedLensShading
 import com.hinnka.mycamera.raw.RawAppliedLensShadingMetadata
 import com.hinnka.mycamera.raw.RawDenoiseHistoryMetadata
@@ -138,6 +142,8 @@ object GalleryManager {
     private const val HDR_FILE = "original_hdr.bin"
     private const val VIDEO_FILE = "video.mp4"
     private const val DNG_FILE = "original.dng"
+    /** False brings back the in-memory single-frame RAW render in the camera process (compare tests). */
+    private const val QUEUE_SINGLE_FRAME_RAW_RENDERS = true
     private const val AI_DENOISE_FILE = "ai_denoise.jpg"
     private const val THUMBNAIL_FILE = "thumbnail.jpg"
     private const val BOKEH_FILE = "bokeh.jpg"
@@ -444,16 +450,63 @@ object GalleryManager {
 
     suspend fun finishProcessingPhoto(context: Context, photoId: String, saved: Boolean) {
         if (photoId !in _processingPhotos.value) return
-        withContext(Dispatchers.IO) {
+        val waitsForRender = withContext(Dispatchers.IO) {
+            if (saved && hasQueuedRender(context, photoId)) return@withContext true
             // Remove only an unsuccessful capture's empty draft; never discard saved image/RAW data.
             if (!saved && getOriginalImageFile(context, photoId) == null && getDngFile(context, photoId).length() == 0L) {
                 GalleryMediaStore.deleteMedia(context, photoId)
                 getPhotoDir(context, photoId).deleteRecursively()
             }
+            false
         }
-        _processingPhotos.update { it - photoId }
-        PLog.d(TAG, "Finished processing photo: $photoId, saved=$saved")
+        if (waitsForRender) {
+            // followRenderQueue ends the processing state once the queue is done with the photo.
+            renderQueuePhotoIds += photoId
+        } else {
+            _processingPhotos.update { it - photoId }
+        }
+        PLog.d(TAG, "Finished processing photo: $photoId, saved=$saved, waitsForRender=$waitsForRender")
         notifyPhotoLibraryChanged()
+    }
+
+    /** Single-frame RAW captures render later in the `:render` queue, so they get no JPEG placeholder. */
+    fun rendersInQueue(imageFormat: Int): Boolean = QUEUE_SINGLE_FRAME_RAW_RENDERS &&
+        imageFormat in intArrayOf(ImageFormat.RAW_SENSOR, ImageFormat.RAW10, ImageFormat.RAW12)
+
+    private val renderQueuePhotoIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val followingRenderQueue = AtomicBoolean(false)
+
+    private fun hasQueuedRender(context: Context, photoId: String): Boolean =
+        File(getPhotoDir(context, photoId), RenderJob.JOB_FILE).isFile &&
+            RenderJob.read(context, photoId)?.state == RenderJob.State.QUEUED
+
+    /**
+     * Main process: keeps photos whose render waits in [RenderQueue] in [processingPhotos], also
+     * after an app restart, until the queue applies their result or gives up on them.
+     */
+    fun followRenderQueue(context: Context) {
+        if (!followingRenderQueue.compareAndSet(false, true)) return
+        val appContext = context.applicationContext
+        processingScope.launch {
+            RenderQueue.pendingPhotoIds.collect { pending ->
+                for (photoId in pending) {
+                    renderQueuePhotoIds += photoId
+                    if (photoId in _processingPhotos.value) continue
+                    val metadata = loadMetadata(appContext, photoId)?.takeIf { it.dateTaken != null } ?: continue
+                    registerProcessingPhoto(appContext, photoId, metadata, null)
+                }
+                for (photoId in renderQueuePhotoIds - pending) {
+                    // A scan that began before the job was written can briefly miss it.
+                    if (withContext(Dispatchers.IO) { hasQueuedRender(appContext, photoId) }) continue
+                    renderQueuePhotoIds -= photoId
+                    if (getOriginalImageFile(appContext, photoId) == null) {
+                        PLog.e(TAG, "Render of $photoId ended without a JPEG; the gallery shows its thumbnail, the DNG is kept")
+                    }
+                    _processingPhotos.update { it - photoId }
+                    notifyPhotoLibraryChanged()
+                }
+            }
+        }
     }
 
     /** Main process: applies a finished `:render` result to the gallery and refreshes its views. */
@@ -1893,6 +1946,8 @@ object GalleryManager {
         superResolutionScale: Float,
         includeCropRegionInOutputSize: Boolean = true,
         photoId: String? = null,
+        /** False when the JPEG comes from the render queue; the gallery shows the thumbnail until then. */
+        createPhotoPlaceholder: Boolean = true,
     ) = withContext(Dispatchers.IO) {
         try {
             val photoId = photoId ?: UUID.randomUUID().toString()
@@ -1956,7 +2011,7 @@ object GalleryManager {
             } else {
                 PLog.d(TAG, "Thumbnail unavailable: $thumbnail")
             }
-            photoFile.createNewFile()
+            if (createPhotoPlaceholder) photoFile.createNewFile()
             if (useLivePhoto) {
                 videoFile.createNewFile()
             }
@@ -2311,6 +2366,99 @@ object GalleryManager {
                 )
             } ?: return@withContext
             rawBufferToRelease = rawBuffer
+            suspend fun persistDng(
+                profileOptions: RawDngProfilePreparationOptions?,
+                preparedProfile: RawDngProfilePreparation?,
+            ): Boolean {
+                tempDngFile.delete()
+                val written = try {
+                    FileOutputStream(tempDngFile).use { outputStream ->
+                        RawProcessor.saveRawBufferToDng(
+                            rawBuffer = rawBuffer.duplicate(),
+                            width = rawWidth,
+                            height = rawHeight,
+                            characteristics = characteristics,
+                            captureResult = resolvedCaptureResult,
+                            outputStream = outputStream,
+                            rotation = rotation,
+                            thumbnail = dngThumbnail,
+                            cfaPattern = sourceRawMetadata.cfaPattern,
+                            blackLevel = sourceRawMetadata.blackLevel,
+                            whiteLevel = sourceRawMetadata.whiteLevel.toInt(),
+                            valueDomain = RawProcessor.RawBufferValueDomain.SENSOR,
+                            blackLevelMode = metadata.rawBlackLevelMode,
+                            customBlackLevel = metadata.rawCustomBlackLevel,
+                            whiteLevelMode = metadata.rawWhiteLevelMode,
+                            customWhiteLevel = metadata.rawCustomWhiteLevel,
+                            cfaCorrectionMode = metadata.rawCfaCorrectionMode,
+                            effectiveFocalLengthMm = captureInfo.focalLength,
+                            effectiveFocalLength35mm = captureInfo.focalLength35mm,
+                            captureInfo = captureInfo,
+                            dngProfilePreparationOptions = profileOptions,
+                            defaultCrop = processingRawBounds,
+                            preparedDngProfile = preparedProfile,
+                            physicalRawCrop = physicalRawCrop,
+                        )
+                    }
+                } catch (error: Throwable) {
+                    PLog.e(TAG, "DNG save failed", error)
+                    false
+                }
+                if (!written || !tempDngFile.exists() || tempDngFile.length() <= 0L) {
+                    tempDngFile.delete()
+                    return false
+                }
+                patchSavedDngCorrections(tempDngFile, metadata)
+                if (dngFile.exists()) dngFile.delete()
+                if (!tempDngFile.renameTo(dngFile)) {
+                    tempDngFile.copyTo(dngFile, overwrite = true)
+                    tempDngFile.delete()
+                }
+                if (shouldAutoSave && exportDngWithRawExport) {
+                    if (!exportDng(context, photoId, dngFile, metadata)) {
+                        PLog.e(TAG, "RAW DNG auto-export failed for photo $photoId")
+                    }
+                }
+                return true
+            }
+
+            if (QUEUE_SINGLE_FRAME_RAW_RENDERS) {
+                // Plain DNG: the `:render` process prepares the profile and renders, so the GPU
+                // driver memory of that work never stays in the camera process.
+                if (!persistDng(profileOptions = null, preparedProfile = null)) return@withContext
+                LargeDirectBuffer.free(rawBufferToRelease)
+                rawBufferToRelease = null
+                saveMetadata(context, photoId, updatedMetadata)
+                val job = RenderJob(
+                    photoId = photoId,
+                    aspectRatio = aspectRatio.name,
+                    rotation = rotation,
+                    exposureBias = exposureBias,
+                    // Raw arguments: renderRawDngPhotoOutputs resolves them against the metadata as above.
+                    sharpeningValue = sharpeningValue,
+                    noiseReductionValue = noiseReductionValue,
+                    chromaNoiseReductionValue = chromaNoiseReductionValue,
+                    photoQuality = photoQuality,
+                    shouldAutoSave = shouldAutoSave,
+                    rawNoiseProfileId = resolveRawNoiseProfileId(context, updatedMetadata),
+                    rawColorCalibrationMode = RawColorCalibrationPolicy.mode,
+                    viewfinderMirroredHorizontally = characteristics.get(
+                        CameraCharacteristics.LENS_FACING,
+                    ) == CameraCharacteristics.LENS_FACING_FRONT,
+                    viewfinderPreviewToCaptureRotationDegrees =
+                        viewfinderPreviewToCaptureRotationDegrees(rotation, characteristics),
+                    sceneExposureDeviceLimits = RawSceneExposureDeviceLimits.fromCameraCharacteristics(characteristics),
+                    maxHdrRatio = resolveMlAeMaxHdrRatio(context),
+                    portraitMask = capturePortraitMask?.let(RenderJob.PortraitMask::of),
+                )
+                if (!RenderJob.write(context, job, dngThumbnail?.takeUnless { it.isRecycled })) {
+                    PLog.e(TAG, "Render job for $photoId not written; the photo keeps its DNG and thumbnail only")
+                    return@withContext
+                }
+                PLog.i(TAG, "Single-frame RAW $photoId saved as DNG; render queued")
+                RenderQueue.start(context)
+                return@withContext
+            }
             val processor = RawDemosaicProcessor.getInstance()
             val profileOptions = rawDngProfilePreparationOptions(
                 context = context,
@@ -2366,59 +2514,6 @@ object GalleryManager {
                     null,
                 ),
             )
-
-            suspend fun persistDng(): Boolean {
-                tempDngFile.delete()
-                val written = try {
-                    FileOutputStream(tempDngFile).use { outputStream ->
-                        RawProcessor.saveRawBufferToDng(
-                            rawBuffer = rawBuffer.duplicate(),
-                            width = rawWidth,
-                            height = rawHeight,
-                            characteristics = characteristics,
-                            captureResult = resolvedCaptureResult,
-                            outputStream = outputStream,
-                            rotation = rotation,
-                            thumbnail = dngThumbnail,
-                            cfaPattern = sourceRawMetadata.cfaPattern,
-                            blackLevel = sourceRawMetadata.blackLevel,
-                            whiteLevel = sourceRawMetadata.whiteLevel.toInt(),
-                            valueDomain = RawProcessor.RawBufferValueDomain.SENSOR,
-                            blackLevelMode = metadata.rawBlackLevelMode,
-                            customBlackLevel = metadata.rawCustomBlackLevel,
-                            whiteLevelMode = metadata.rawWhiteLevelMode,
-                            customWhiteLevel = metadata.rawCustomWhiteLevel,
-                            cfaCorrectionMode = metadata.rawCfaCorrectionMode,
-                            effectiveFocalLengthMm = captureInfo.focalLength,
-                            effectiveFocalLength35mm = captureInfo.focalLength35mm,
-                            captureInfo = captureInfo,
-                            dngProfilePreparationOptions = profileOptions,
-                            defaultCrop = processingRawBounds,
-                            preparedDngProfile = preparedProfile,
-                            physicalRawCrop = physicalRawCrop,
-                        )
-                    }
-                } catch (error: Throwable) {
-                    PLog.e(TAG, "DNG save failed", error)
-                    false
-                }
-                if (!written || !tempDngFile.exists() || tempDngFile.length() <= 0L) {
-                    tempDngFile.delete()
-                    return false
-                }
-                patchSavedDngCorrections(tempDngFile, metadata)
-                if (dngFile.exists()) dngFile.delete()
-                if (!tempDngFile.renameTo(dngFile)) {
-                    tempDngFile.copyTo(dngFile, overwrite = true)
-                    tempDngFile.delete()
-                }
-                if (shouldAutoSave && exportDngWithRawExport) {
-                    if (!exportDng(context, photoId, dngFile, metadata)) {
-                        PLog.e(TAG, "RAW DNG auto-export failed for photo $photoId")
-                    }
-                }
-                return true
-            }
 
             suspend fun renderPersistedDng() = processor.processForHdrSources(
                 context,
@@ -2563,7 +2658,7 @@ object GalleryManager {
             }
             val rawResult = if (inMemoryResult != null) {
                 PLog.i(TAG, "Single-frame RAW rendered from memory before DNG persistence")
-                if (!persistDng()) {
+                if (!persistDng(profileOptions, preparedProfile)) {
                     inMemoryResult.hdrReferenceBitmap?.let { hdrBitmap ->
                         if (hdrBitmap !== inMemoryResult.sdrBitmap && !hdrBitmap.isRecycled) {
                             hdrBitmap.recycle()
@@ -2582,7 +2677,7 @@ object GalleryManager {
                 // full-resolution RGBA16F demosaics alive at the same time.
                 processor.releaseGpuDemosaicedRawSource(preparedDemosaicSourceToRelease)
                 preparedDemosaicSourceToRelease = null
-                if (!persistDng()) return@withContext
+                if (!persistDng(profileOptions, preparedProfile)) return@withContext
                 renderPersistedDng() ?: return@withContext
             }
             // The DNG is written and the render is done; free the 38 MB CFA copy before JPEG encode.
@@ -4599,9 +4694,7 @@ object GalleryManager {
         viewfinderPreviewToCaptureRotationDegrees: Int,
         capturePortraitMask: PortraitMaskSnapshot? = null,
     ): RawDngProfilePreparationOptions {
-        val mlAeMaxHdrRatio = ContentRepository.getInstance(context)
-            .userPreferencesRepository.userPreferences.firstOrNull()?.mlAeMaxHdrRatio
-            ?: RawSceneExposureMath.FAST_MOMENTS_MAX_HDR_RATIO
+        val mlAeMaxHdrRatio = resolveMlAeMaxHdrRatio(context)
         val exposureMode = RawAdaptiveExposureMode.resolve(
             usePhotonHdr = metadata.rawToneMappingParameters.usePhotonHdr,
             useLegacyAutoExposure = metadata.rawAutoExposure ?: true,
@@ -4673,6 +4766,11 @@ object GalleryManager {
             captureProfilePreparer = captureProfilePreparer,
         )
     }
+
+    private suspend fun resolveMlAeMaxHdrRatio(context: Context): Float =
+        ContentRepository.getInstance(context)
+            .userPreferencesRepository.userPreferences.firstOrNull()?.mlAeMaxHdrRatio
+            ?: RawSceneExposureMath.FAST_MOMENTS_MAX_HDR_RATIO
 
     private fun didMainFlashFire(captureResult: CaptureResult?): Boolean {
         val flashState = captureResult?.get(CaptureResult.FLASH_STATE)

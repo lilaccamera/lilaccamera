@@ -445,6 +445,8 @@ object GalleryMediaStore {
         }
 
         val displayFile = photoFile.takeIf { it.exists() } ?: highQualityPhotoFile.takeIf { it.exists() }
+            // A RAW photo whose render is queued or failed shows its styled thumbnail until a JPEG exists.
+            ?: thumbnailFile.takeIf { sourceUri == null && it.exists() && dngFile.exists() }
         if (displayFile == null) {
             val resolvedSourceUri = sourceUri?.let(Uri::parse) ?: return null
             return MediaData(

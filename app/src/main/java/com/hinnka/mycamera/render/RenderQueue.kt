@@ -37,6 +37,7 @@ object RenderQueue {
     /** Tidies job files, then starts the queue if a job waits; while paused it shows the paused notice. */
     fun start(context: Context) {
         val appContext = context.applicationContext
+        GalleryManager.followRenderQueue(appContext)
         scope.launch {
             val waiting = scan(appContext).size
             if (waiting == 0) return@launch
