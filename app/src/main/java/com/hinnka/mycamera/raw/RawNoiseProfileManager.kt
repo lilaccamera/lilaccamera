@@ -2,6 +2,7 @@ package com.hinnka.mycamera.raw
 
 import android.content.Context
 import com.hinnka.mycamera.R
+import com.hinnka.mycamera.camera.DeviceQuirks
 import com.hinnka.mycamera.data.CustomImportManager
 import com.hinnka.mycamera.processor.CalibratedRawNoiseProfile
 import com.hinnka.mycamera.processor.RawNoiseProfileSelection
@@ -150,7 +151,8 @@ class RawNoiseProfileManager(context: Context) {
         const val X9_ULTRA_PROFILE_ID = "builtin_noise_x9_ultra"
         const val X9_ULTRA_3X_PROFILE_ID = "builtin_noise_x9_ultra_3x"
         const val XZ1C_PROFILE_ID = "builtin_noise_xz1c_measured"
-        const val DEFAULT_PROFILE_ID = SYSTEM_PROFILE_ID
+        // lilac: the raw19 shim reports a fixed noise profile 0.66x to 3.7x off, so default to the measured one.
+        val DEFAULT_PROFILE_ID = if (DeviceQuirks.isLilac) XZ1C_PROFILE_ID else SYSTEM_PROFILE_ID
 
         private val BUILT_IN_PROFILES = listOf(
             RawNoiseProfileInfo(
