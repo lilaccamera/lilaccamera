@@ -570,6 +570,14 @@ class Camera2Controller(private val context: Context) {
             PLog.w(TAG, "Capture rejected: occupied=$occupied requested=$frameCount capacity=$CAPTURE_READER_MAX_IMAGES")
             return null
         }
+        // The raw19 shim fails a RAW still started while a previous RAW image is still open, and RAW stays broken until reboot.
+        if (IS_LILAC && isRawCaptureReader(reader) && occupied > 0) {
+            PLog.w(TAG, "lilac: RAW capture refused while a RAW image is still open: occupied=$occupied")
+            Handler(Looper.getMainLooper()).post {
+                android.widget.Toast.makeText(context, com.hinnka.mycamera.R.string.raw_capture_busy, android.widget.Toast.LENGTH_SHORT).show()
+            }
+            return null
+        }
         val shot = PhotoCaptureContext(
             id = ++nextPhotoCaptureId,
             state = state,
