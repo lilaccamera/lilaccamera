@@ -2425,16 +2425,10 @@ object GalleryManager {
                 return true
             }
 
-            // TEST ONLY (render compare): revert. The queued branch became queueRender() so the
-            // compare shot can run it after the in-memory render; returns are `return` inside it.
-            val renderCompare = QUEUE_SINGLE_FRAME_RAW_RENDERS &&
-                File(context.filesDir, "render_compare").exists()
-            val metadataBeforeCompare = updatedMetadata
-            var compareRawMetadata: RawMetadata? = null
-            suspend fun queueRender() {
+            if (QUEUE_SINGLE_FRAME_RAW_RENDERS) {
                 // Plain DNG: the `:render` process prepares the profile and renders, so the GPU
                 // driver memory of that work never stays in the camera process.
-                if (!persistDng(profileOptions = null, preparedProfile = null)) return
+                if (!persistDng(profileOptions = null, preparedProfile = null)) return@withContext
                 LargeDirectBuffer.free(rawBufferToRelease)
                 rawBufferToRelease = null
                 saveMetadata(context, photoId, updatedMetadata)
@@ -2462,14 +2456,10 @@ object GalleryManager {
                 )
                 if (!RenderJob.write(context, job, dngThumbnail?.takeUnless { it.isRecycled })) {
                     PLog.e(TAG, "Render job for $photoId not written; the photo keeps its DNG and thumbnail only")
-                    return
+                    return@withContext
                 }
                 PLog.i(TAG, "Single-frame RAW $photoId saved as DNG; render queued")
                 RenderQueue.start(context)
-            }
-            // TEST ONLY (render compare): revert
-            if (QUEUE_SINGLE_FRAME_RAW_RENDERS && !renderCompare) {
-                queueRender()
                 return@withContext
             }
             val processor = RawDemosaicProcessor.getInstance()
@@ -2509,11 +2499,7 @@ object GalleryManager {
                 options = profileOptions,
                 defaultCrop = processingRawBounds,
                 physicalRawCrop = physicalRawCrop,
-            ) ?: run {
-                // TEST ONLY (render compare): revert
-                if (renderCompare) queueRender()
-                return@withContext
-            }
+            ) ?: return@withContext
             preparedDemosaicSourceToRelease = preparedProfile.gpuDemosaicedRawSource
             updatedMetadata = updatedMetadata.copy(
                 // Single-frame CFA keeps its gain map in the DNG; nothing is pre-applied or denoised.
@@ -2668,24 +2654,10 @@ object GalleryManager {
                         yDensityGain = updatedMetadata.spectralFilmYDensityGain,
                     ),
                     fotufilmDocument = FotufilmDocumentStorage.decode(updatedMetadata.fotufilmDocument, "photo metadata"),
-                    onMetadata = { raw ->
-                        updatedMetadata = updatedMetadata.merge(raw)
-                        compareRawMetadata = raw // TEST ONLY (render compare): revert
-                    },
+                    onMetadata = { raw -> updatedMetadata = updatedMetadata.merge(raw) },
                 )
             } else {
                 null
-            }
-            // TEST ONLY (render compare): revert
-            if (renderCompare) {
-                writeRenderCompare(
-                    photoDir, photoId, inMemoryResult, updatedMetadata, compareRawMetadata, preparedProfile, photoQuality,
-                )
-                processor.releaseGpuDemosaicedRawSource(preparedDemosaicSourceToRelease)
-                preparedDemosaicSourceToRelease = null
-                updatedMetadata = metadataBeforeCompare
-                queueRender()
-                return@withContext
             }
             val rawResult = if (inMemoryResult != null) {
                 PLog.i(TAG, "Single-frame RAW rendered from memory before DNG persistence")
@@ -2824,72 +2796,6 @@ object GalleryManager {
                 preparedDemosaicSourceToRelease,
             )
             LargeDirectBuffer.free(rawBufferToRelease)
-        }
-    }
-
-    // TEST ONLY (render compare): revert. Writes the old in-memory render of a queued shot as
-    // compare_inmemory.jpg/.json; the old path's metadata, export, bokeh and HDR steps are skipped.
-    private fun writeRenderCompare(
-        photoDir: File,
-        photoId: String,
-        result: RawHdrRenderResult?,
-        metadata: MediaMetadata,
-        raw: RawMetadata?,
-        profile: RawDngProfilePreparation,
-        photoQuality: Int,
-    ) {
-        fun num(value: Float?): Any = value?.let { if (it.isFinite()) it.toDouble() else it.toString() }
-            ?: org.json.JSONObject.NULL
-        try {
-            var size: String? = null
-            if (result != null) {
-                var bitmap = result.sdrBitmap
-                if (metadata.isMirrored) bitmap = BitmapUtils.flipHorizontal(bitmap)
-                size = "${bitmap.width}x${bitmap.height}"
-                val tempFile = File(photoDir, "compare_inmemory.tmp")
-                val written = FileOutputStream(tempFile).use { writeFinalJpeg(bitmap, it, photoQuality) }
-                if (!written || !tempFile.renameTo(File(photoDir, "compare_inmemory.jpg"))) {
-                    tempFile.delete()
-                    PLog.e(TAG, "RAW_COMPARE inmemory JPEG not written for $photoId")
-                }
-                if (bitmap !== result.sdrBitmap && !bitmap.isRecycled) bitmap.recycle()
-            }
-            val json = org.json.JSONObject()
-                .put("photoId", photoId)
-                .put("rendered", result != null)
-                .put("size", size ?: org.json.JSONObject.NULL)
-                .put("mirrored", metadata.isMirrored)
-                .put("hdrRatio", num(profile.hdrRatio))
-                .put("finalShortGain", num(profile.finalShortGain))
-                .put("hdrNetPostExposureEv", num(profile.hdrNetPostExposureEv))
-                .put("hdrNetInputExposureEv", num(profile.hdrNetInputExposureEv))
-                .put("profileBaselineExposureEv", num(profile.baselineExposureEv))
-                .put("hasProfileGainTableMap", profile.profileGainTableMap != null)
-                .put("rawSceneExposureSummaryText", profile.rawSceneExposureSummaryText ?: org.json.JSONObject.NULL)
-                .put("renderBaselineExposureEv", num(raw?.baselineExposure))
-                .put("iso", raw?.iso ?: org.json.JSONObject.NULL)
-                .put("shutterNs", raw?.shutterSpeed ?: org.json.JSONObject.NULL)
-                .put("exposureBias", num(raw?.exposureBias))
-                .put("exposureCompensation", num(raw?.exposureCompensation))
-                .put("postRawSensitivityBoost", num(raw?.postRawSensitivityBoost))
-                .put("mgcSharpenTuningSnr", num(raw?.mgcSharpenTuningSnr))
-                .put("rotation", raw?.rotation ?: org.json.JSONObject.NULL)
-            File(photoDir, "compare_inmemory.json").writeText(json.toString(2))
-            PLog.i(
-                TAG,
-                "RAW_COMPARE inmemory photo=$photoId rendered=${result != null} size=$size " +
-                    "hdrRatio=${profile.hdrRatio} finalShortGain=${profile.finalShortGain} " +
-                    "hdrNetPostExposureEv=${profile.hdrNetPostExposureEv} " +
-                    "hdrNetInputExposureEv=${profile.hdrNetInputExposureEv} " +
-                    "baselineExposureEv=${profile.baselineExposureEv} " +
-                    "renderBaselineExposureEv=${raw?.baselineExposure} iso=${raw?.iso} " +
-                    "shutterNs=${raw?.shutterSpeed}",
-            )
-        } catch (e: Exception) {
-            PLog.e(TAG, "RAW_COMPARE inmemory failed for $photoId", e)
-        } finally {
-            result?.hdrReferenceBitmap?.let { if (it !== result.sdrBitmap && !it.isRecycled) it.recycle() }
-            result?.sdrBitmap?.let { if (!it.isRecycled) it.recycle() }
         }
     }
 
