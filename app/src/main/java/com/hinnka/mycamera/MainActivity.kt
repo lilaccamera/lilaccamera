@@ -74,6 +74,7 @@ import com.hinnka.mycamera.data.CustomImportManager
 import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.lut.creator.LutCreatorScreen
 import com.hinnka.mycamera.lut.creator.LutCreatorViewModel
+import com.hinnka.mycamera.render.RenderQueue
 import com.hinnka.mycamera.screencapture.ScreenCaptureRenderConfigStore
 import com.hinnka.mycamera.ui.camera.CameraScreen
 import com.hinnka.mycamera.data.FilmData
@@ -366,6 +367,12 @@ class MainActivity : AppCompatActivity() {
             reportFullyDrawn()
             StartupTrace.reportFullyDrawn("MainActivity.reportFullyDrawn")
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Visible here, so the queue may start its foreground service.
+        RenderQueue.start(this)
     }
 
     override fun onResume() {

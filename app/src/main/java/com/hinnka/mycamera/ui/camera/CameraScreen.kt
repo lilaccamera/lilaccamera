@@ -4,12 +4,14 @@ import com.hinnka.mycamera.ui.prefs.rememberUserPreferencesRepository
 import com.hinnka.mycamera.data.UserPreferences
 import com.hinnka.mycamera.ui.prefs.rememberPreference
 import com.hinnka.mycamera.ui.prefs.preferenceValue
+import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
+import android.os.Build
 import android.os.Environment
 import android.os.SystemClock
 import android.provider.Settings
@@ -83,6 +85,7 @@ import com.hinnka.mycamera.model.CameraPreset
 import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.model.LutSelectorMode
 import com.hinnka.mycamera.raw.SpectralFilmSelection
+import com.hinnka.mycamera.render.RenderQueue
 import com.hinnka.mycamera.ui.components.*
 import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.viewmodel.CameraViewModel
@@ -355,6 +358,12 @@ fun CameraScreen(
         onResult = { _ ->
             // Results are handled via the ON_RESUME lifecycle effect to avoid self-reference issues
         }
+    )
+
+    // The RAW render queue's progress notification; the queue works without it.
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { _ -> }
     )
 
     val dcpImportLauncher = rememberLauncherForActivityResult(
@@ -634,6 +643,13 @@ fun CameraScreen(
 
     fun setShootingModeWithPreviewTransition(mode: CameraShootingMode) {
         if (mode == CameraShootingMode.PROFESSIONAL && !state.isRawSupported) return
+        if (
+            mode == CameraShootingMode.PROFESSIONAL &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            RenderQueue.shouldAskNotificationPermission(context)
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
 
         val targetCaptureMode = when (mode) {
             CameraShootingMode.PROFESSIONAL,

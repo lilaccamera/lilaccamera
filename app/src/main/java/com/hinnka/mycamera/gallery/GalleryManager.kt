@@ -455,6 +455,16 @@ object GalleryManager {
         PLog.d(TAG, "Finished processing photo: $photoId, saved=$saved")
         notifyPhotoLibraryChanged()
     }
+
+    /** Main process: applies a finished `:render` result to the gallery and refreshes its views. */
+    suspend fun applyRenderResult(context: Context, photoId: String): Boolean {
+        val metadata = metadataMutex.withLock { GalleryMediaStore.applyRenderResult(context, photoId) } ?: return false
+        notifyPhotoMetadataUpdated(photoId, metadata)
+        notifyPhotoThumbnailUpdated(photoId)
+        notifyPhotoLibraryChanged()
+        return true
+    }
+
     private val hdrWorkLock = Any()
     private val hdrWorkCounts = ConcurrentHashMap<String, Int>()
 
@@ -474,7 +484,7 @@ object GalleryManager {
         _preparedPhotoThumbnailEvents.tryEmit(photoId)
     }
 
-    private fun getPhotosBaseDir(context: Context): File {
+    internal fun getPhotosBaseDir(context: Context): File {
         return File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), PHOTOS_DIR)
     }
 

@@ -151,6 +151,34 @@ object GalleryMediaStore {
             }
         }
 
+    /**
+     * Main process: upserts the row a `:render` render left in [RENDER_RESULT_FILE], keeping the
+     * existing row's dateAdded, then deletes the file. Returns the applied metadata, or null when
+     * there is no result or it cannot be applied (the file is then kept).
+     */
+    suspend fun applyRenderResult(context: Context, photoId: String): MediaMetadata? {
+        check(!RenderProcess.isCurrent) { "Render results are applied by the main process" }
+        ensureMigrated(context)
+        return withContext(Dispatchers.IO) {
+            val file = File(getPhotoDir(context, photoId), RENDER_RESULT_FILE)
+            if (!file.isFile) return@withContext null
+            try {
+                val result = renderResultGson.fromJson(file.readText(), GalleryMediaEntity::class.java)
+                check(result?.id == photoId) { "Render result belongs to ${result?.id}" }
+                val dao = GalleryDatabase.getInstance(context.applicationContext).galleryMediaDao()
+                val entity = dao.getById(photoId)?.dateAdded?.takeIf { it > 0L }
+                    ?.let { result.copy(dateAdded = it) } ?: result
+                dao.upsert(entity)
+                file.delete()
+                entity.toMetadata()
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                PLog.e(TAG, "Failed to apply render result for photo: $photoId", e)
+                null
+            }
+        }
+    }
+
     suspend fun deleteMedia(context: Context, photoId: String) {
         if (RenderProcess.isCurrent) {
             PLog.w(TAG, "Render process: gallery delete ignored for photo: $photoId")

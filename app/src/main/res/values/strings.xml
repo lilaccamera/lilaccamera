@@ -1524,4 +1524,14 @@
     <string name="fotufilm_value_minutes">%1$s min</string>
     <string name="fotufilm_value_years">%1$s yr</string>
     <!-- /Fotufilm controls -->
+    <string name="render_queue_channel">RAW rendering</string>
+    <string name="render_queue_title">Rendering %1$d of %2$d</string>
+    <string name="render_queue_paused">Rendering paused, %1$d waiting</string>
+    <string name="render_queue_pause">Pause</string>
+    <string name="render_queue_resume">Resume</string>
+    <string name="render_queue_stage_waiting">Starting the renderer</string>
+    <string name="render_queue_stage_started">Loading the RAW file</string>
+    <string name="render_queue_stage_rendering">Rendering the photo</string>
+    <string name="render_queue_stage_done">Saving to the gallery</string>
+    <string name="render_queue_stage_failed">Render failed</string>
 </resources>
