@@ -23,6 +23,7 @@ import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.gallery.ProcessingPhoto
 import com.hinnka.mycamera.gallery.MediaData
 import com.hinnka.mycamera.gallery.MediaMetadata
+import com.hinnka.mycamera.gallery.PhotoStacks
 import com.hinnka.mycamera.gallery.MediaType
 import com.hinnka.mycamera.gallery.PostEditGeometry
 import com.hinnka.mycamera.hdr.HdrGainmapStrength
@@ -1624,7 +1625,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * 全选/取消全选
      */
     fun toggleSelectAll() {
-        val selectable = _photos.value.filterNot { it.id in processingPhotos.value }
+        // The grid shows one tile per photo stack; selecting all selects those tiles.
+        val selectable = PhotoStacks.of(_photos.value).tiles.filterNot { it.id in processingPhotos.value }
         if (selectedPhotos.size == selectable.size) {
             selectedPhotos.clear()
         } else {
@@ -1858,8 +1860,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * - true: Android 11+ 会使用 MediaStore.createDeleteRequest 弹出系统确认对话框
      * - false: 只删除应用内部照片，不删除系统相册
      */
-    fun deleteSelectedPhotos(deleteExported: Boolean = true) {
-        val toDelete = selectedPhotos.toList()
+    fun deleteSelectedPhotos(deleteExported: Boolean = true, toDelete: List<MediaData> = selectedPhotos.toList()) {
         if (toDelete.isEmpty()) return
 
         if (selectedTab == GalleryTab.SYSTEM) {
@@ -2709,9 +2710,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             CropAspectOption.Custom(it.width(), it.height())
         } ?: CropAspectOption.Free
         editApplyEffectsToVideo.value = settings.applyEffectsToVideo
-        currentMediaMetadata = (currentMediaMetadata ?: MediaMetadata()).copy(
-            customProperties = settings.customProperties.toMap()
-        )
+        currentMediaMetadata = (currentMediaMetadata ?: MediaMetadata()).let {
+            it.copy(customProperties = PhotoStacks.keepStackOf(it.customProperties, settings.customProperties))
+        }
 
         clearIncompatibleVideoLut()
         editLutId.value?.let { lutId ->
@@ -4238,8 +4239,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         return current.copy(
             lutId = settings.lutId,
             frameId = settings.frameId,
-            customProperties = (settings.customProperties - VideoColorMetadata.OVERRIDE_KEY) +
-                current.customProperties.filterKeys { it == VideoColorMetadata.OVERRIDE_KEY },
+            customProperties = PhotoStacks.keepStackOf(
+                current.customProperties,
+                (settings.customProperties - VideoColorMetadata.OVERRIDE_KEY) +
+                    current.customProperties.filterKeys { it == VideoColorMetadata.OVERRIDE_KEY },
+            ),
             colorRecipeParams = settings.colorRecipeParams?.deepCopy(),
             sharpening = if (copyDetailProcessing && settings.sharpening != null) {
                 settings.sharpening

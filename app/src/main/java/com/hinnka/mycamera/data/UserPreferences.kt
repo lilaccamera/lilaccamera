@@ -143,6 +143,8 @@ class UserPreferences internal constructor(
     var oppoSuperStabilizationEnabled by bool("oppo_super_stabilization_enabled", false)
     var photoPreviewStabilizationEnabled by bool("photo_preview_stabilization_enabled", false)
     var photoResolutionCapMp by int("photo_resolution_cap_mp", 0)
+    // Pro: also save the full-size JPEG the camera delivers beside each RAW, in the shot's photo stack.
+    var saveCameraJpeg by bool("save_camera_jpeg", false)
     var videoCodec by enum("video_codec", com.hinnka.mycamera.video.VideoCodec.H264)
     var ultraHdrGainMapEnabled by bool("auto_enable_hdr_for_hdr_capture", false)
     var phantomMode by bool("phantom_mode", false)

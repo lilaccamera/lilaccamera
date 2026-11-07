@@ -1659,6 +1659,24 @@
     <string name="render_again_batch_queued">%1$d queued</string>
     <string name="render_again_batch_skipped">%1$d skipped</string>
     <string name="render_again_batch_failed">%1$d failed</string>
+    <string name="photo_version_camera_jpeg_label">Camera JPEG · before PhotonCamera</string>
+    <string name="photo_version_before">Before</string>
+    <string name="photo_version_original">Original</string>
+    <plurals name="gallery_stack_versions">
+        <item quantity="one">%1$d version</item>
+        <item quantity="other">%1$d versions</item>
+    </plurals>
+    <string name="delete_this_version">Delete this version</string>
+    <plurals name="delete_all_versions">
+        <item quantity="one">Delete %1$d version</item>
+        <item quantity="other">Delete all %1$d versions</item>
+    </plurals>
+    <string name="delete_shown_versions">Delete shown versions</string>
+    <string name="delete_all_versions_selected">Delete all versions</string>
+    <string name="camera_jpeg">Camera JPEG</string>
+    <string name="camera_jpeg_on">On</string>
+    <string name="camera_jpeg_off">Off</string>
+    <string name="camera_jpeg_turned_on">Pro shots also keep the camera’s JPEG</string>
     <string name="render_chip_description">%1$s. Opens Processing photos.</string>
     <string name="render_chip_queue">RAW queue · %1$s</string>
     <string name="render_chip_struggle">Short of memory · How to finish</string>

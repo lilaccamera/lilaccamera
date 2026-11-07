@@ -438,6 +438,7 @@ class Camera2Controller(private val context: Context) {
         val lostImageFrameNumbers = mutableSetOf<Long>()
         val acquiredTimestamps = mutableSetOf<Long>()
         val frames = sortedMapOf<Long, CapturedPhotoFrame>()
+        var companionJpegTaken = false
     }
 
     private var nextPhotoCaptureId = 0L
@@ -534,6 +535,10 @@ class Camera2Controller(private val context: Context) {
     var onPhotoCaptureCompleted: ((Long, CaptureInfo) -> Unit)? = null
     var onPhotoCaptureFailed: ((Long) -> Unit)? = null
     var onHdrBracketCaptureFailed: (() -> Unit)? = null
+    /** Pro: when [keepRawCompanionJpeg], gets the bytes of each shot's first companion JPEG with the shot id. */
+    var onRawCompanionJpeg: ((Long, ByteArray) -> Unit)? = null
+    @Volatile
+    var keepRawCompanionJpeg = false
 
     private fun reservedImageCount(): Int = photoCaptures.values.sumOf { it.reservedFrames }
 
@@ -964,6 +969,19 @@ class Camera2Controller(private val context: Context) {
         val frameNumber = result.frameNumber
         val startedTimestamp = pendingCaptureStartedTimestamps.remove(frameNumber)
         return result.get(CaptureResult.SENSOR_TIMESTAMP) ?: startedTimestamp
+    }
+
+    /** The id of the shot whose first companion JPEG has [timestamp], when it is to be kept. */
+    private fun takeRawCompanionJpeg(timestamp: Long): Long? {
+        if (!keepRawCompanionJpeg) return null
+        val shot = photoCaptureByTimestamp[timestamp]
+        if (shot == null) {
+            PLog.w(TAG, "Camera JPEG without a shot: timestamp=$timestamp")
+            return null
+        }
+        if (shot.companionJpegTaken || shot.continuousBurst) return null
+        shot.companionJpegTaken = true
+        return shot.id
     }
 
     private fun processOrBufferImageForCaptureResult(image: SafeImage) {
@@ -2988,9 +3006,24 @@ class Camera2Controller(private val context: Context) {
                     ImageReader.newInstance(captureSize.width, captureSize.height, ImageFormat.JPEG, 2).apply {
                         // drain anything that arrives so the stream can never stall the camera,
                         // and drop the freed buffer so the discarded JPEG holds no memory between shots
-                        setOnImageAvailableListener({
-                            it.acquireLatestImage()?.close()
-                            it.discardFreeBuffers()
+                        setOnImageAvailableListener({ reader ->
+                            // Next, not latest: a burst's first frame is the one kept.
+                            while (true) {
+                                val image = reader.acquireNextImage() ?: break
+                                val bytes = try {
+                                    takeRawCompanionJpeg(image.timestamp)?.let { shotId ->
+                                        val buffer = image.planes[0].buffer
+                                        shotId to ByteArray(buffer.remaining()).also(buffer::get)
+                                    }
+                                } catch (e: Exception) {
+                                    PLog.e(TAG, "Cannot copy the camera JPEG", e)
+                                    null
+                                } finally {
+                                    image.close()
+                                }
+                                bytes?.let { (shotId, jpeg) -> onRawCompanionJpeg?.invoke(shotId, jpeg) }
+                            }
+                            reader.discardFreeBuffers()
                         }, cameraHandler)
                     }
                 } else null

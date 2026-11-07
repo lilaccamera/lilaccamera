@@ -33,6 +33,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.gallery.GalleryManager
@@ -440,7 +441,7 @@ private fun MemoryInfoRow(icon: ImageVector, title: Int?, text: Int) {
 /**
  * The photo viewer's one processing label. A queued RAW photo gets its queue state as a chip that opens
  * [RenderQueueScreen]; a photo still finishing in the camera ([processingInCamera]) gets the same chip,
- * not tappable. Draws nothing otherwise.
+ * not tappable. Otherwise the photo's version [label] in the same look, or nothing.
  */
 @Composable
 fun RenderQueuePhotoChip(
@@ -448,6 +449,7 @@ fun RenderQueuePhotoChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     processingInCamera: Boolean = false,
+    label: String? = null,
 ) {
     val context = LocalContext.current
     val status by RenderQueue.status.collectAsState()
@@ -461,7 +463,7 @@ fun RenderQueuePhotoChip(
     val processing = status.running && photoId == status.currentPhotoId
     val job = jobs.firstOrNull { it.photoId == photoId }
     if (!processing && job == null) {
-        if (processingInCamera) InCameraProcessingChip(modifier)
+        if (processingInCamera) InCameraProcessingChip(modifier) else if (label != null) VersionLabelChip(label, modifier)
         return
     }
     val failed = !processing && job?.state == RenderJob.State.FAILED
@@ -501,6 +503,21 @@ fun RenderQueuePhotoChip(
         ),
         border = null,
         modifier = modifier.semantics { contentDescription = description }
+    )
+}
+
+/** Same look as the queue chip, not tappable: says which version of a photo stack this is. */
+@Composable
+private fun VersionLabelChip(label: String, modifier: Modifier) {
+    val surface = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    AssistChip(
+        onClick = {},
+        enabled = false,
+        label = { Text(label, textAlign = TextAlign.Center) },
+        colors = AssistChipDefaults.assistChipColors(disabledContainerColor = surface, disabledLabelColor = onSurface),
+        border = null,
+        modifier = modifier
     )
 }
 

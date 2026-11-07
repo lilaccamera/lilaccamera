@@ -115,6 +115,16 @@ data class RenderLook(
             noiseProfileId = job.rawNoiseProfileId,
         )
 
+        /**
+         * A strip caption for [label]: its first part that some other re-render of the same stack in
+         * [stackLabels] lacks, so siblings read apart ("Sharp 0.60"); else its first part ("NR 0.80").
+         */
+        fun shortLabel(label: String, stackLabels: List<String>): String {
+            val parts = label.split(LABEL_SEPARATOR)
+            val others = stackLabels.filter { it != label }.map { it.split(LABEL_SEPARATOR) }
+            return parts.firstOrNull { part -> others.any { part !in it } } ?: parts.first()
+        }
+
         fun fileSuffixOf(label: String): String =
             label.replace(LABEL_SEPARATOR, "_").replace(" ", "").replace(Regex("[^A-Za-z0-9._+-]"), "")
     }

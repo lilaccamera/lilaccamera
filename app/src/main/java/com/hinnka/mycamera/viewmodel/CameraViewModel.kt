@@ -42,6 +42,7 @@ import com.hinnka.mycamera.frame.FramePreviewFactory
 import com.hinnka.mycamera.frame.FramePreviewSelection
 import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.gallery.MediaMetadata
+import com.hinnka.mycamera.gallery.db.GalleryMediaStore
 import com.hinnka.mycamera.gallery.PhotoSavePath
 import com.hinnka.mycamera.lut.BaselineColorCorrectionTarget
 import com.hinnka.mycamera.lut.BakedLutExporter
@@ -1551,6 +1552,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _capturedThumbnail = MutableStateFlow<CapturedThumbnail?>(null)
     val capturedThumbnail = _capturedThumbnail.asStateFlow()
     private val pendingCaptureSettings = java.util.concurrent.ConcurrentHashMap<Long, CaptureSettingsSnapshot>()
+    // Pro shots whose camera JPEG is to be saved, until it arrives; it may come after the shot is ready.
+    private val cameraJpegShots = java.util.concurrent.ConcurrentHashMap<Long, CaptureSettingsSnapshot>()
     private var multipleExposureMetadata: MediaMetadata? = null
     var multipleExposureState by mutableStateOf(MultipleExposureSessionState())
         private set
@@ -1738,6 +1741,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         shotSettings.galleryRegistration.await()
                         processCapturedPhoto(photo, shotSettings)
                     } finally {
+                        cameraJpegShots.remove(photo.id)
                         GalleryManager.finishProcessingPhoto(
                             getApplication(), shotSettings.photoId, shotSettings.savedPhotoId != null
                         )
@@ -1751,7 +1755,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+        cameraController.onRawCompanionJpeg = { id, jpeg ->
+            cameraJpegShots.remove(id)?.let { settings -> viewModelScope.launch { saveCameraJpeg(settings, jpeg) } }
+        }
         cameraController.onPhotoCaptureFailed = { id ->
+            cameraJpegShots.remove(id)
             pendingCaptureSettings.remove(id)?.let { settings ->
                 settings.processingFinished = true
                 publishCapturedThumbnail(settings)
@@ -1939,6 +1947,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     it.photoPreviewStabilizationEnabled
                 )
                 cameraController.setPhotoResolutionCapMp(it.photoResolutionCapMp)
+                cameraController.keepRawCompanionJpeg = it.saveCameraJpeg
                 cameraController.setVideoCodec(it.videoCodec)
                 multipleExposureState = multipleExposureState.copy(enabled = it.useMultipleExposure)
                 // 同步 Live Photo 设置到相机控制器
@@ -3115,6 +3124,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (settings.state.useRaw && settings.state.isRawSupported) RenderQueue.holdForProShot(getApplication())
             settings.captureId = id
             pendingCaptureSettings[id] = settings
+            if (settings.state.useRaw && settings.state.isRawSupported && settings.preferences.saveCameraJpeg &&
+                !settings.multipleExposure
+            ) {
+                cameraJpegShots[id] = settings
+            }
             capturePhotoThumbnails(settings)
             if (settings.state.useLivePhoto) {
                 cameraController.setCapturingLivePhoto(true)
@@ -3124,6 +3138,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     cameraController.setCapturingLivePhoto(false)
                 }
             }
+        }
+    }
+
+    /** Saves a Pro shot's camera JPEG into the shot's photo stack; a failure is logged and never fails the shot. */
+    private suspend fun saveCameraJpeg(settings: CaptureSettingsSnapshot, jpeg: ByteArray) {
+        try {
+            settings.galleryRegistration.await()
+            val context = getApplication<Application>()
+            // The shot's date orders the stack (the JPEG sorts as its oldest version); its rotation turns the JPEG too.
+            val shot = GalleryManager.processingPhotos.value[settings.photoId]?.photo
+                ?: GalleryMediaStore.getPhotoData(context, settings.photoId)
+                ?: error("the shot is not in the gallery")
+            GalleryManager.saveCameraJpeg(context, jpeg, settings.photoId, shot.dateAdded - 1, shot.metadata?.rotation ?: 0)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            PLog.e(TAG, "Cannot save the camera JPEG of ${settings.photoId}", e)
         }
     }
 

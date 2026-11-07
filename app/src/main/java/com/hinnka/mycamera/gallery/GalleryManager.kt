@@ -150,6 +150,7 @@ object GalleryManager {
     private const val QUEUE_SINGLE_FRAME_RAW_RENDERS = true
     private const val AI_DENOISE_FILE = "ai_denoise.jpg"
     private const val THUMBNAIL_FILE = "thumbnail.jpg"
+    private const val CAMERA_JPEG_FILE_SUFFIX = "CameraJPEG"
     private const val BOKEH_FILE = "bokeh.jpg"
     private const val DETAIL_HDR_FILE = "detail_hdr.jpg"
     private const val MULTIPLE_EXPOSURE_DIR = "multiple_exposure_sessions"
@@ -1415,8 +1416,9 @@ object GalleryManager {
     ): Boolean {
         return withContext(Dispatchers.IO) {
             val tempExportFile = File(context.cacheDir, "temp_export_${System.nanoTime()}.jpg")
-            // A re-render's look tells its exports apart from the original's.
-            val fileSuffix = suffix ?: metadata.customProperties[RenderLook.LABEL_PROPERTY]?.let(RenderLook::fileSuffixOf)
+            // A re-render's look, or the camera JPEG mark, tells its exports apart from the shot's.
+            val fileSuffix = suffix ?: CAMERA_JPEG_FILE_SUFFIX.takeIf { PhotoStacks.isCameraJpeg(metadata) }
+                ?: metadata.customProperties[RenderLook.LABEL_PROPERTY]?.let(RenderLook::fileSuffixOf)
             try {
                 val hasEncodingOverride =
                     preferHeicExport != null || preferJpeg444Export != null
@@ -5664,6 +5666,63 @@ object GalleryManager {
     /**
      * 从系统相册导入照片
      */
+    /**
+     * Saves [jpeg], the full-size JPEG the camera delivered beside a Pro RAW, as a new photo in the
+     * shot's stack [stackId], dated [dateAdded]. Pixels and EXIF stay as the camera made them, except
+     * that the orientation tag is set from the shot's [rotation] when the camera left it unset; no
+     * look, edit or auto-save applies. Returns the new photo's id, or null after logging why.
+     */
+    suspend fun saveCameraJpeg(context: Context, jpeg: ByteArray, stackId: String, dateAdded: Long, rotation: Int): String? =
+        withContext(Dispatchers.IO) {
+            val photoId = UUID.randomUUID().toString()
+            val photoDir = getPhotoDir(context, photoId, true)
+            try {
+                val photoFile = File(photoDir, PHOTO_FILE)
+                val tempFile = File(photoDir, "$PHOTO_FILE.tmp")
+                tempFile.writeBytes(jpeg)
+                val exif = ExifInterface(tempFile)
+                val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_UNDEFINED)
+                if (rotation != 0 && (orientation == ExifInterface.ORIENTATION_UNDEFINED || orientation == ExifInterface.ORIENTATION_NORMAL)) {
+                    val tag = when (rotation) {
+                        90 -> ExifInterface.ORIENTATION_ROTATE_90
+                        180 -> ExifInterface.ORIENTATION_ROTATE_180
+                        270 -> ExifInterface.ORIENTATION_ROTATE_270
+                        else -> ExifInterface.ORIENTATION_NORMAL
+                    }
+                    exif.setAttribute(ExifInterface.TAG_ORIENTATION, tag.toString())
+                    exif.saveAttributes()
+                }
+                check(tempFile.renameTo(photoFile)) { "Cannot rename ${tempFile.absolutePath}" }
+                // The decoder turns the image by its EXIF orientation, so the gallery sees it upright.
+                val exifMetadata = MediaMetadata.fromUri(context, Uri.fromFile(photoFile))
+                val turned = exifMetadata.rotation % 180 != 0
+                val metadata = exifMetadata.copy(
+                    width = if (turned) exifMetadata.height else exifMetadata.width,
+                    height = if (turned) exifMetadata.width else exifMetadata.height,
+                    rotation = 0,
+                    isImported = false,
+                    mimeType = "image/jpeg",
+                    customProperties = mapOf(
+                        PhotoStacks.STACK_ID_PROPERTY to stackId,
+                        PhotoStacks.CAMERA_JPEG_PROPERTY to "true",
+                    ),
+                )
+                loadBitmap(context, Uri.fromFile(photoFile), THUMBNAIL_MAX_EDGE)?.let { thumbnail ->
+                    generateThumbnail(thumbnail, File(photoDir, THUMBNAIL_FILE))
+                    thumbnail.recycle()
+                }
+                check(saveMetadata(context, photoId, metadata, dateAdded)) { "Cannot save the metadata" }
+                notifyPhotoLibraryChanged()
+                PLog.i(TAG, "Saved the camera JPEG of $stackId as $photoId (${jpeg.size} bytes)")
+                photoId
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                PLog.e(TAG, "Cannot save the camera JPEG of $stackId", e)
+                photoDir.deleteRecursively()
+                null
+            }
+        }
+
     suspend fun importPhoto(
         context: Context,
         uri: Uri,

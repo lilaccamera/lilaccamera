@@ -109,6 +109,36 @@
                 android:layout_marginStart="4dp"
                 android:layout_marginBottom="0dp"
                 android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/gallery_photo_stack_badge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:background="@drawable/bg_gallery_badge_rect"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="4dp"
+                android:paddingVertical="2dp"
+                android:visibility="gone">
+
+                <ImageView
+                    android:layout_width="10dp"
+                    android:layout_height="10dp"
+                    android:src="@drawable/ic_material_layers_24"
+                    android:tint="#FFFFFFFF" />
+
+                <TextView
+                    android:id="@+id/gallery_photo_stack_count"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="2dp"
+                    android:fontFamily="sans"
+                    android:includeFontPadding="false"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="8sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
         </LinearLayout>
 
         <FrameLayout

@@ -19,13 +19,16 @@ internal sealed interface GalleryGridEntry {
 
     data class Photo(
         val photo: MediaData,
-        val index: Int
+        val index: Int,
+        /** Versions in the photo's stack; the tile shows a stack badge from 2. */
+        val versionCount: Int = 1,
     ) : GalleryGridEntry
 }
 
 internal fun buildGalleryGridEntries(
     context: Context,
-    photos: List<MediaData>
+    photos: List<MediaData>,
+    versionCount: (MediaData) -> Int = { 1 },
 ): List<GalleryGridEntry> {
     if (photos.isEmpty()) return emptyList()
 
@@ -49,7 +52,8 @@ internal fun buildGalleryGridEntries(
                     add(
                         GalleryGridEntry.Photo(
                             photo = indexedPhoto.value,
-                            index = indexedPhoto.index
+                            index = indexedPhoto.index,
+                            versionCount = versionCount(indexedPhoto.value),
                         )
                     )
                 }

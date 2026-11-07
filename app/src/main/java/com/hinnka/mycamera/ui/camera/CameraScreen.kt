@@ -266,6 +266,7 @@ fun CameraScreen(
     val useLivePhoto by preferenceValue { it.useLivePhoto }
     val enableDevelopAnimation by preferenceValue { it.enableDevelopAnimation }
     var showHistogram by rememberPreference(UserPreferences::showHistogram)
+    var saveCameraJpeg by rememberPreference(UserPreferences::saveCameraJpeg)
     var videoTorchEnabled by rememberPreference(UserPreferences::videoTorchEnabled)
     var videoAudioInputId by rememberPreference(UserPreferences::videoAudioInputId)
     val developAnimationStyle by preferenceValue { it.developAnimationStyle }
@@ -1803,6 +1804,8 @@ fun CameraScreen(
             photoResolutionCapMp = state.photoResolutionCapMp,
             photoResolutionAdjustable = state.photoResolutionAdjustable,
             onPhotoResolutionCapChange = viewModel::setPhotoResolutionCapMp,
+            saveCameraJpeg = saveCameraJpeg,
+            onSaveCameraJpegChange = { saveCameraJpeg = it },
             onRawDcpChange = { viewModel.setRawDcpId(it) },
             onRawDcpIdsByLensChange = { viewModel.setRawDcpIdsByLens(it) },
             onRawHncsFilmCurveModeChange = { viewModel.setRawHncsFilmCurveMode(it) },

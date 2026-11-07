@@ -13,6 +13,7 @@ import androidx.annotation.StringRes
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
 import com.hinnka.mycamera.gallery.GalleryManager
+import com.hinnka.mycamera.gallery.PhotoStacks
 import com.hinnka.mycamera.gallery.db.GalleryMediaStore
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.RenderProcess
@@ -485,7 +486,8 @@ object RenderQueue {
                 val copyMetadata = look.applyTo(metadata).copy(
                     exportedUris = emptyList(),
                     hasAiDenoisedBase = false,
-                    customProperties = metadata.customProperties + (RenderLook.LABEL_PROPERTY to label),
+                    customProperties = metadata.customProperties + (RenderLook.LABEL_PROPERTY to label) +
+                        (PhotoStacks.STACK_ID_PROPERTY to PhotoStacks.stackIdOf(sourcePhotoId, metadata)),
                 )
                 // The gallery sorts by dateAdded, newest first, so the copy sits right above its original.
                 check(GalleryManager.saveMetadata(context, photoId, copyMetadata, dateAdded = source.dateAdded + 1)) {

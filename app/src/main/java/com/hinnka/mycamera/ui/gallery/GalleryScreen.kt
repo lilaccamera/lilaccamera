@@ -67,6 +67,7 @@ import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.gallery.MediaData
 import com.hinnka.mycamera.gallery.GalleryManager
+import com.hinnka.mycamera.gallery.PhotoStacks
 import com.hinnka.mycamera.gallery.ProcessingPhoto
 import com.hinnka.mycamera.render.RenderLook
 import com.hinnka.mycamera.render.RenderQueue
@@ -102,7 +103,10 @@ fun GalleryScreen(
     onRenderQueueClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val photos by viewModel.currentPhotos.collectAsState()
+    val allPhotos by viewModel.currentPhotos.collectAsState()
+    val stacks = remember(allPhotos) { PhotoStacks.of(allPhotos) }
+    // One tile per photo stack: selection and batch actions act on the version the tile shows.
+    val photos = stacks.tiles
     val processingPhotos by viewModel.processingPhotos.collectAsState()
     val renderPendingIds by RenderQueue.pendingPhotoIds.collectAsState()
     val renderFailedIds by RenderQueue.failedPhotoIds.collectAsState()
@@ -661,11 +665,11 @@ fun GalleryScreen(
                     )
                 }
             } else {
-                val currentPhotos = photos
-                val gridEntries = remember(currentPhotos, context) {
+                val gridEntries = remember(stacks, context) {
                     buildGalleryGridEntries(
                         context = context,
-                        photos = currentPhotos
+                        photos = stacks.tiles,
+                        versionCount = { stacks.versionsOf(it).size },
                     )
                 }
                 GalleryRecyclerGrid(
@@ -748,22 +752,36 @@ fun GalleryScreen(
                 }
             },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        val finalDeleteExported = if (viewModel.selectedTab == GalleryTab.PHOTON && exportedPhotosCount > 0) deleteExportedState else true
-                        if (viewModel.selectedTab == GalleryTab.PHOTON && exportedPhotosCount > 0) {
-                            deleteExportedPref = deleteExportedState
-                        }
-                        viewModel.deleteSelectedPhotos(finalDeleteExported)
-                        showDeleteDialog = false
+                fun delete(photos: List<MediaData>) {
+                    val finalDeleteExported = if (viewModel.selectedTab == GalleryTab.PHOTON && exportedPhotosCount > 0) deleteExportedState else true
+                    if (viewModel.selectedTab == GalleryTab.PHOTON && exportedPhotosCount > 0) {
+                        deleteExportedPref = deleteExportedState
                     }
-                ) {
-                    Text(stringResource(R.string.delete), color = Color.Red)
+                    viewModel.deleteSelectedPhotos(finalDeleteExported, photos)
+                    showDeleteDialog = false
+                }
+                val shown = selectedPhotos.toList()
+                if (shown.any { stacks.versionsOf(it).size > 1 }) {
+                    DeleteVersionsButtons(
+                        thisVersionText = stringResource(R.string.delete_shown_versions),
+                        allVersionsText = stringResource(R.string.delete_all_versions_selected),
+                        onDeleteThis = { delete(shown) },
+                        onDeleteAll = {
+                            delete(shown.flatMap(stacks::versionsOf).filterNot { it.id in processingPhotos })
+                        },
+                        onCancel = { showDeleteDialog = false },
+                    )
+                } else {
+                    TextButton(onClick = { delete(shown) }) {
+                        Text(stringResource(R.string.delete), color = Color.Red)
+                    }
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
-                    Text(stringResource(R.string.cancel))
+                if (selectedPhotos.none { stacks.versionsOf(it).size > 1 }) {
+                    TextButton(onClick = { showDeleteDialog = false }) {
+                        Text(stringResource(R.string.cancel))
+                    }
                 }
             },
             containerColor = Color(0xFF2D2D2D),
@@ -1267,6 +1285,7 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                         val wasSelected = id in oldSelectedPhotoIds
                         val isSelected = id in selectedPhotoIds
                         wasSelected == isSelected && oldEntry.photo == newEntry.photo &&
+                            oldEntry.versionCount == newEntry.versionCount &&
                             oldProcessingPhotos[id] == processingPhotos[id]
                     }
 
@@ -1342,6 +1361,7 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                 }
                 (holder as PhotoHolder).bind(
                     photo = photo,
+                    versionCount = entry.versionCount,
                     processingPhoto = processingPhotos[photo.id],
                     viewModel = model,
                     isSelected = photo.id in selectedPhotoIds,
@@ -1353,7 +1373,8 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                         if (isSelectionMode) {
                             if (photo.id !in processingPhotos) model.togglePhotoSelection(photo)
                         } else {
-                            model.setCurrentPhoto(entry.index)
+                            // entry.index is the tile's page in the photo view; the view model indexes all versions.
+                            model.setCurrentPhotoById(photo.id)
                             onPhotoClick(selectedTab, entry.index)
                         }
                     },
@@ -1413,6 +1434,7 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
 
         fun bind(
             photo: MediaData,
+            versionCount: Int,
             processingPhoto: ProcessingPhoto?,
             viewModel: GalleryViewModel,
             isSelected: Boolean,
@@ -1430,6 +1452,7 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
             processingPhotoId = processingPhoto?.photo?.id
             view.bindStatic(
                 photo = photo,
+                versionCount = versionCount,
                 viewModel = viewModel,
                 isSelected = isSelected,
                 isSelectionMode = isSelectionMode && processingPhoto == null,
@@ -1479,6 +1502,8 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
     private val videoDuration: TextView
     private val motionIcon: ImageView
     private val burstIcon: ImageView
+    private val stackBadge: LinearLayout
+    private val stackCount: TextView
     private val rawBadge: TextView
     private val importedBadge: TextView
     private val relatedBadge: View
@@ -1502,6 +1527,8 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
         videoDuration = findViewById(R.id.gallery_photo_video_duration)
         motionIcon = findViewById(R.id.gallery_photo_motion_icon)
         burstIcon = findViewById(R.id.gallery_photo_burst_icon)
+        stackBadge = findViewById(R.id.gallery_photo_stack_badge)
+        stackCount = findViewById(R.id.gallery_photo_stack_count)
         rawBadge = findViewById(R.id.gallery_photo_raw_badge)
         importedBadge = findViewById(R.id.gallery_photo_imported_badge)
         relatedBadge = findViewById(R.id.gallery_photo_related_badge)
@@ -1515,6 +1542,7 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
 
     fun bindStatic(
         photo: MediaData,
+        versionCount: Int,
         viewModel: GalleryViewModel,
         isSelected: Boolean,
         isSelectionMode: Boolean,
@@ -1543,6 +1571,10 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
             GalleryTab.SYSTEM -> photo.isSystemRawImage()
         }
         rawBadge.visibility = if (photo.isImage && isRawPhoto) VISIBLE else GONE
+        stackBadge.visibility = if (versionCount > 1 && !isProcessing) VISIBLE else GONE
+        stackCount.text = versionCount.toString()
+        stackBadge.contentDescription =
+            context.resources.getQuantityString(R.plurals.gallery_stack_versions, versionCount, versionCount)
         rawBadge.text = context.getString(R.string.gallery_raw_badge)
         importedBadge.visibility =
             if (viewModel.selectedTab == GalleryTab.PHOTON && photo.sourceUri != null) VISIBLE else GONE

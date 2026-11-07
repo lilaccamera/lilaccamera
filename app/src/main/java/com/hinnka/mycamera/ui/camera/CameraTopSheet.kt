@@ -98,6 +98,8 @@ fun CameraTopSheet(
     photoResolutionCapMp: Int,
     photoResolutionAdjustable: Boolean,
     onPhotoResolutionCapChange: (Int) -> Unit,
+    saveCameraJpeg: Boolean,
+    onSaveCameraJpegChange: (Boolean) -> Unit,
     onRawDcpChange: (String?) -> Unit,
     onRawDcpIdsByLensChange: ((Map<String, String?>) -> Unit)? = null,
     onRawHncsFilmCurveModeChange: (HncsFilmCurveMode) -> Unit,
@@ -204,6 +206,21 @@ fun CameraTopSheet(
                                 title = stringResource(R.string.settings_raw_color_engine),
                                 checked = true,
                                 onClick = { showRenderingEngineSheet = true },
+                                modifier = itemModifier
+                            )
+                            val cameraJpegContext = LocalContext.current
+                            QuickSettingValue(
+                                title = stringResource(R.string.camera_jpeg),
+                                value = stringResource(if (saveCameraJpeg) R.string.camera_jpeg_on else R.string.camera_jpeg_off),
+                                onClick = {
+                                    // The tile's name alone does not say where the JPEG goes.
+                                    if (!saveCameraJpeg) {
+                                        android.widget.Toast.makeText(
+                                            cameraJpegContext, R.string.camera_jpeg_turned_on, android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                    onSaveCameraJpegChange(!saveCameraJpeg)
+                                },
                                 modifier = itemModifier
                             )
                         } else {

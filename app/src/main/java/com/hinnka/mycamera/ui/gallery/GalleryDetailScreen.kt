@@ -50,6 +50,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -60,6 +61,7 @@ import com.hinnka.mycamera.ui.theme.WarningYellow
 import com.hinnka.mycamera.R
 import androidx.compose.ui.res.painterResource
 import com.hinnka.mycamera.gallery.MediaData
+import com.hinnka.mycamera.gallery.PhotoStacks
 import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.ui.theme.OnAccentColor
@@ -177,7 +179,16 @@ fun GalleryDetailScreen(
     onOpenRenderQueue: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val photos by viewModel.currentPhotos.collectAsState()
+    val allPhotos by viewModel.currentPhotos.collectAsState()
+    val stacks = remember(allPhotos) { PhotoStacks.of(allPhotos) }
+    // Pages are photo stacks; the strip picks which version of a stack shows (its newest until then).
+    val photos = stacks.tiles
+    val shownVersionIds = remember { mutableStateMapOf<String, String>() }
+    fun shownVersion(tile: MediaData): MediaData = stacks.versionsOf(tile)
+        .firstOrNull { it.id == shownVersionIds[PhotoStacks.stackIdOf(tile)] } ?: tile
+    fun showVersion(photo: MediaData) {
+        shownVersionIds[PhotoStacks.stackIdOf(photo)] = photo.id
+    }
     val processingPhotos by viewModel.processingPhotos.collectAsState()
     var previousProcessingIds by remember { mutableStateOf(processingPhotos.keys.toSet()) }
     LaunchedEffect(processingPhotos.keys) {
@@ -232,6 +243,28 @@ fun GalleryDetailScreen(
         }
     }
 
+    // "Delete all versions" deletes a list, which asks once for all exported copies.
+    val batchDeletePhotoLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK || viewModel.selectedTab == GalleryTab.PHOTON) {
+            viewModel.deleteBatchPhotosAfterConfirmation {
+                if (viewModel.currentPhotos.value.isEmpty()) onBack()
+            }
+        } else {
+            viewModel.clearBatchDeleteRequest()
+        }
+    }
+    LaunchedEffect(viewModel.batchDeletePendingIntent) {
+        viewModel.batchDeletePendingIntent?.let { pendingIntent ->
+            try {
+                batchDeletePhotoLauncher.launch(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
+            } catch (e: Exception) {
+                viewModel.clearBatchDeleteRequest()
+            }
+        }
+    }
+
     val systemDeletePhotoLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
@@ -282,7 +315,7 @@ fun GalleryDetailScreen(
         initialPage = remember(initialIndex, photoId) {
             // 初始页只在首次组合时计算，后续通过 LaunchedEffect 跳转
             if (photoId != null) {
-                val index = photos.indexOfFirst { it.id == photoId }
+                val index = allPhotos.firstOrNull { it.id == photoId }?.let(stacks::tileIndexOf) ?: -1
                 if (index != -1) index else initialIndex
             } else {
                 initialIndex
@@ -297,9 +330,10 @@ fun GalleryDetailScreen(
     var lastPhotosCount by rememberSaveable { mutableIntStateOf(photos.size) }
 
     // 同步当前索引
-    LaunchedEffect(pagerState.currentPage, photos.getOrNull(pagerState.currentPage)?.id,
-        photos.getOrNull(pagerState.currentPage)?.id in processingPhotos) {
-        viewModel.setCurrentPhoto(pagerState.currentPage)
+    val currentPhoto = photos.getOrNull(pagerState.currentPage)?.let(::shownVersion)
+    LaunchedEffect(pagerState.currentPage, currentPhoto?.id, currentPhoto?.id in processingPhotos) {
+        // The view model indexes every version, not the stacks this pager pages through.
+        allPhotos.indexOfFirst { it.id == currentPhoto?.id }.takeIf { it >= 0 }?.let(viewModel::setCurrentPhoto)
         currentColorSpace.value = null
     }
 
@@ -310,8 +344,10 @@ fun GalleryDetailScreen(
         }
     }
 
-    LaunchedEffect(viewModel.selectedTab, photos, viewModel.currentPhotoIndex) {
-        val targetIndex = viewModel.currentPhotoIndex
+    LaunchedEffect(viewModel.selectedTab, allPhotos, viewModel.currentPhotoIndex) {
+        val target = allPhotos.getOrNull(viewModel.currentPhotoIndex) ?: return@LaunchedEffect
+        showVersion(target)
+        val targetIndex = stacks.tileIndexOf(target)
         if (targetIndex in photos.indices && pagerState.currentPage != targetIndex) {
             pagerState.scrollToPage(targetIndex)
         }
@@ -328,7 +364,7 @@ fun GalleryDetailScreen(
     // 当 photoId 提供时，确保在照片列表加载后自动跳转到该照片（仅执行一次）
     LaunchedEffect(photos, photoId) {
         if (photoId != null && initialJumpDone == false) {
-            val index = photos.indexOfFirst { it.id == photoId }
+            val index = allPhotos.firstOrNull { it.id == photoId }?.let { showVersion(it); stacks.tileIndexOf(it) } ?: -1
             if (index != -1) {
                 // 即使 index == currentPage 也执行跳转，以应对 HorizontalPager 内部键位同步导致的索引偏移
                 pagerState.scrollToPage(index)
@@ -337,7 +373,6 @@ fun GalleryDetailScreen(
         }
     }
 
-    val currentPhoto = photos.getOrNull(pagerState.currentPage)
     val isCurrentPhotoProcessing = currentPhoto?.id?.let(processingPhotos::containsKey) == true
 
     LaunchedEffect(currentPhoto?.id, isCurrentPhotoProcessing) {
@@ -597,7 +632,7 @@ fun GalleryDetailScreen(
                             isLoading = preparingEditPhotoId == currentPhoto.id,
                             onClick = {
                                 viewModel.prepareCurrentPhotoForEdit(
-                                    index = pagerState.currentPage,
+                                    index = allPhotos.indexOf(currentPhoto),
                                     onReady = onEdit,
                                     onFailure = {
                                         Toast.makeText(
@@ -652,7 +687,7 @@ fun GalleryDetailScreen(
                     userScrollEnabled = !isZoomed,
                     beyondViewportPageCount = 1
                 ) { page ->
-                    val photo = photos.getOrNull(page)
+                    val photo = photos.getOrNull(page)?.let(::shownVersion)
                     if (photo != null) {
                         val processingPhoto = processingPhotos[photo.id]
                         val waitingForImage = processingPhoto != null && !processingPhoto.isDisplayReady
@@ -767,9 +802,24 @@ fun GalleryDetailScreen(
                     photoId = currentPhoto.id,
                     onClick = onOpenRenderQueue,
                     processingInCamera = isCurrentPhotoProcessing,
+                    label = photoVersionLabel(context, currentPhoto.metadata),
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 12.dp)
+                        .padding(top = 12.dp, start = 16.dp, end = 16.dp)
+                )
+            }
+            val currentVersions = photos.getOrNull(pagerState.currentPage)?.let(stacks::versionsOf).orEmpty()
+            if (currentPhoto != null && currentVersions.size > 1 && !isZoomed) {
+                val renderPendingIds by RenderQueue.pendingPhotoIds.collectAsState()
+                PhotoVersionStrip(
+                    versions = currentVersions,
+                    selectedId = currentPhoto.id,
+                    processingIds = processingPhotos.keys + renderPendingIds,
+                    viewModel = viewModel,
+                    onSelect = ::showVersion,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
                 )
             }
             if (
@@ -820,6 +870,7 @@ fun GalleryDetailScreen(
             baseCount + (if (isVideoAndCaptured) 1 else 0)
         }
         var deleteExportedState by remember(showDeleteDialog) { mutableStateOf(deleteExportedPref) }
+        val deleteVersions = currentPhoto?.let(stacks::versionsOf).orEmpty()
 
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
@@ -862,24 +913,54 @@ fun GalleryDetailScreen(
                 }
             },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        currentPhoto?.let { photo ->
-                            val finalDeleteExported = if (viewModel.selectedTab == GalleryTab.PHOTON && exportedPhotosCount > 0) deleteExportedState else true
-                            if (viewModel.selectedTab == GalleryTab.PHOTON && exportedPhotosCount > 0) {
-                                deleteExportedPref = deleteExportedState
-                            }
-                            viewModel.requestDeletePhoto(photo, finalDeleteExported)
-                        }
-                        showDeleteDialog = false
+                fun resolveDeleteExported(): Boolean {
+                    if (viewModel.selectedTab == GalleryTab.PHOTON && exportedPhotosCount > 0) {
+                        deleteExportedPref = deleteExportedState
+                        return deleteExportedState
                     }
-                ) {
-                    Text(stringResource(R.string.delete), color = Color.Red)
+                    return true
+                }
+                if (deleteVersions.size > 1) {
+                    DeleteVersionsButtons(
+                        thisVersionText = stringResource(R.string.delete_this_version),
+                        allVersionsText = pluralStringResource(R.plurals.delete_all_versions, deleteVersions.size, deleteVersions.size),
+                        onDeleteThis = {
+                            currentPhoto?.let { photo ->
+                                // The view model keeps its index after a delete, so point it at the next newer
+                                // version first; the newest one leaves the next older in its place. Either stays in this stack.
+                                deleteVersions.getOrNull(deleteVersions.indexOf(photo) + 1)?.let { newer ->
+                                    showVersion(newer)
+                                    viewModel.setCurrentPhoto(allPhotos.indexOf(newer))
+                                }
+                                viewModel.requestDeletePhoto(photo, resolveDeleteExported())
+                            }
+                            showDeleteDialog = false
+                        },
+                        onDeleteAll = {
+                            viewModel.deleteSelectedPhotos(
+                                resolveDeleteExported(),
+                                deleteVersions.filterNot { it.id in processingPhotos }
+                            )
+                            showDeleteDialog = false
+                        },
+                        onCancel = { showDeleteDialog = false },
+                    )
+                } else {
+                    TextButton(
+                        onClick = {
+                            currentPhoto?.let { viewModel.requestDeletePhoto(it, resolveDeleteExported()) }
+                            showDeleteDialog = false
+                        }
+                    ) {
+                        Text(stringResource(R.string.delete), color = Color.Red)
+                    }
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
-                    Text(stringResource(R.string.cancel))
+                if (deleteVersions.size <= 1) {
+                    TextButton(onClick = { showDeleteDialog = false }) {
+                        Text(stringResource(R.string.cancel))
+                    }
                 }
             },
             containerColor = Color(0xFF2D2D2D),
