@@ -27,6 +27,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -204,6 +205,14 @@ class MainActivity : AppCompatActivity() {
     private val permissions =
         arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
 
+    // Notifications are asked on the same screen but are optional: the render queue works without them.
+    private val requestedPermissions =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions + Manifest.permission.POST_NOTIFICATIONS
+        } else {
+            permissions
+        }
+
     private var hasPermissions by mutableStateOf(false)
     private var pendingRoute by mutableStateOf<String?>(null)
     private var pendingLutImportUris by mutableStateOf<List<Uri>>(emptyList())
@@ -211,8 +220,10 @@ class MainActivity : AppCompatActivity() {
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { result ->
-        hasPermissions = result.values.all { it }
+    ) { _ ->
+        hasPermissions = permissions.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
     }
 
     private fun applyPreferredWindowColorMode(useHdrScreenMode: Boolean, useP3ColorSpace: Boolean) {
@@ -353,7 +364,8 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             PermissionScreen(
                                 onRequestPermission = {
-                                    permissionLauncher.launch(permissions)
+                                    RenderQueue.markNotificationPermissionAsked(this@MainActivity)
+                                    permissionLauncher.launch(requestedPermissions)
                                 }
                             )
                         }
@@ -1140,6 +1152,16 @@ fun PermissionScreen(
                 style = MaterialTheme.typography.headlineSmall,
                 textAlign = TextAlign.Center
             )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                Text(
+                    text = stringResource(R.string.notification_permission_reason),
+                    color = Color.White.copy(alpha = 0.7f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 32.dp)
+                )
+            }
 
             Button(
                 onClick = onRequestPermission,

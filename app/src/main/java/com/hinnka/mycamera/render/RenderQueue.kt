@@ -447,6 +447,12 @@ object RenderQueue {
 
     private fun pausedFile(context: Context) = File(context.filesDir, PAUSED_FILE)
 
+    /** The first-run permission screen already asked, so switching to Pro does not ask again. */
+    fun markNotificationPermissionAsked(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_NOTIFICATION_PERMISSION_ASKED, true).apply()
+    }
+
     /** True the first time only, and only while POST_NOTIFICATIONS is not granted (API 33+). */
     fun shouldAskNotificationPermission(context: Context): Boolean {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==

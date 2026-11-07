@@ -79,6 +79,7 @@
     <!-- Permissions -->
     <string name="camera_permission_required">Camera and Microphone permissions are required</string>
     <string name="grant_permission">Grant Permission</string>
+    <string name="notification_permission_reason">Notifications are optional. They show the progress of Pro photos that finish processing in the background.</string>
 
     <!-- Zoom -->
 
