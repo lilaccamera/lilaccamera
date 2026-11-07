@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -123,22 +124,8 @@ fun RenderQueueScreen(
             if (status.running) {
                 if (paused) Notice(stringResource(R.string.render_queue_pausing))
                 RenderProgressBar(status.progress)
-                // Memory is awaited before a photo starts, so this and the photo's own lines never show together.
+                // Memory is awaited before a photo starts, so this never shows beside a current photo's row.
                 if (status.waitingForMemory) Notice(stringResource(status.stageText))
-                status.currentPhotoId?.let { photoId ->
-                    StatusLine(stringResource(R.string.render_queue_photo, photoId))
-                    StatusLine(
-                        stringResource(
-                            R.string.render_queue_joined,
-                            stringResource(status.stageText),
-                            DateUtils.formatElapsedTime(((now - status.photoStartedAt) / 1000).coerceAtLeast(0L))
-                        )
-                    )
-                    if (status.resumed && status.stageText != R.string.render_queue_stage_resumed) {
-                        StatusLine(stringResource(R.string.render_queue_stage_resumed))
-                    }
-                    RenderProgressBar(status.photoProgress)
-                }
             }
             StatusLine(
                 status.renderPssKb?.takeIf { status.running }
@@ -174,19 +161,43 @@ fun RenderQueueScreen(
                     )
                 }
             }
-            if (jobs.isEmpty()) {
+            if (jobs.isEmpty() && status.finishedPhotoIds.isEmpty()) {
                 StatusLine(stringResource(R.string.render_queue_empty))
             }
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(jobs, key = { it.photoId }) { job ->
-                    RenderJobRow(
-                        job = job,
-                        stageText = status.stageText.takeIf { status.running && job.photoId == status.currentPhotoId },
-                        onRetry = { scope.launch { RenderQueue.retry(context, listOf(job)) } }
-                    )
+                items(status.finishedPhotoIds, key = { it }) { photoId ->
+                    RenderJobRow(photoId, progress = 1f, label = stringResource(R.string.render_queue_stage_finished))
+                }
+                items(jobs.filter { it.photoId !in status.finishedPhotoIds }, key = { it.photoId }) { job ->
+                    when {
+                        job.state == RenderJob.State.FAILED -> RenderJobRow(
+                            job.photoId,
+                            progress = 1f,
+                            label = pluralStringResource(R.plurals.render_queue_failed_after, job.attempts, job.attempts),
+                            failed = true,
+                            onRetry = { scope.launch { RenderQueue.retry(context, listOf(job)) } }
+                        )
+                        status.running && job.photoId == status.currentPhotoId -> RenderJobRow(
+                            job.photoId,
+                            progress = status.photoProgress,
+                            label = stringResource(
+                                R.string.render_queue_joined,
+                                stringResource(status.stageText),
+                                DateUtils.formatElapsedTime(((now - status.photoStartedAt) / 1000).coerceAtLeast(0L))
+                            ),
+                            detail = stringResource(R.string.render_queue_stage_resumed)
+                                .takeIf { status.resumed && status.stageText != R.string.render_queue_stage_resumed }
+                        )
+                        else -> RenderJobRow(
+                            job.photoId,
+                            progress = 0f,
+                            label = stringResource(R.string.render_queue_job_waiting),
+                            detail = stringResource(R.string.render_queue_attempts, job.attempts).takeIf { job.attempts > 0 }
+                        )
+                    }
                 }
             }
         }
@@ -204,25 +215,32 @@ private fun Notice(text: String) {
 }
 
 @Composable
-private fun RenderProgressBar(progress: Float) {
+private fun RenderProgressBar(progress: Float, color: Color = AccentColor) {
     LinearProgressIndicator(
         progress = { progress },
         modifier = Modifier
             .fillMaxWidth()
             .height(4.dp),
-        color = AccentColor,
+        color = color,
         trackColor = Color.White.copy(alpha = 0.15f)
     )
 }
 
 @Composable
-private fun RenderJobRow(job: RenderJob, stageText: Int?, onRetry: () -> Unit) {
+private fun RenderJobRow(
+    photoId: String,
+    progress: Float,
+    label: String,
+    detail: String? = null,
+    failed: Boolean = false,
+    onRetry: () -> Unit = {},
+) {
     val context = LocalContext.current
-    val thumbnail by produceState<ImageBitmap?>(null, job.photoId) {
+    val thumbnail by produceState<ImageBitmap?>(null, photoId) {
         value = withContext(Dispatchers.IO) {
             // Software decode (never a hardware bitmap): thumbnails are at most 512 px, a quarter fits the row.
             BitmapFactory.decodeFile(
-                GalleryManager.getThumbnailFile(context, job.photoId).path,
+                GalleryManager.getThumbnailFile(context, photoId).path,
                 BitmapFactory.Options().apply { inSampleSize = 4 }
             )?.asImageBitmap()
         }
@@ -240,26 +258,14 @@ private fun RenderJobRow(job: RenderJob, stageText: Int?, onRetry: () -> Unit) {
         Column(
             modifier = Modifier
                 .weight(1f)
-                .padding(horizontal = 12.dp)
+                .padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text(
-                text = stringResource(
-                    when {
-                        job.state == RenderJob.State.FAILED -> R.string.render_queue_stage_failed
-                        stageText != null -> stageText
-                        else -> R.string.render_queue_job_waiting
-                    }
-                ),
-                color = Color.White,
-                fontSize = 14.sp
-            )
-            Text(
-                text = stringResource(R.string.render_queue_attempts, job.attempts),
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 12.sp
-            )
+            Text(text = label, color = Color.White, fontSize = 14.sp)
+            detail?.let { Text(text = it, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp) }
+            RenderProgressBar(progress, if (failed) MaterialTheme.colorScheme.error else AccentColor)
         }
-        if (job.state == RenderJob.State.FAILED) {
+        if (failed) {
             TextButton(onClick = onRetry) {
                 Text(stringResource(R.string.render_queue_retry), color = AccentColor)
             }

@@ -1555,9 +1555,12 @@
     <string name="render_queue_retry">Retry</string>
     <string name="render_queue_idle">Not rendering, %1$d waiting</string>
     <string name="render_queue_pausing">Pauses after this photo</string>
-    <string name="render_queue_photo">Photo %1$s</string>
     <string name="render_queue_job_waiting">Waiting</string>
     <string name="render_queue_attempts">Attempts: %1$d</string>
+    <plurals name="render_queue_failed_after">
+        <item quantity="one">Failed after %1$d try</item>
+        <item quantity="other">Failed after %1$d tries</item>
+    </plurals>
     <string name="render_queue_empty">No photos waiting</string>
     <string name="render_queue_hint">A render needs lots of free memory. This screen has let go of the gallery\'s cached images; closing other apps frees more.</string>
 </resources>

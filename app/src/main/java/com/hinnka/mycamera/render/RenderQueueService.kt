@@ -48,6 +48,8 @@ class RenderQueueService : Service() {
     private var lastStartId = 0
     private var rescanRequested = false
     private var done = 0
+    /** Photos rendered (DONE) in this run, in order; the screen lists them until the queue stops. */
+    private val finishedIds = mutableListOf<String>()
     private var total = 0
     private var currentPhotoId: String? = null
     private var stage: RawRenderService.Stage? = null
@@ -88,6 +90,16 @@ class RenderQueueService : Service() {
         ContextCompat.registerReceiver(
             this, stageReceiver, IntentFilter(RawRenderService.ACTION_STAGE), ContextCompat.RECEIVER_NOT_EXPORTED
         )
+        // Every scan (each capture's RenderQueue.start, a retry, the loop's own) updates the set, so a
+        // photo taken mid-render counts at once instead of after the current photo.
+        scope.launch {
+            RenderQueue.pendingPhotoIds.collect { pending ->
+                if (loop?.isActive != true) return@collect
+                // A scan that read the job just before it turned DONE may still list it.
+                total = done + pending.count { it !in finishedIds }
+                updateNotification()
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -137,6 +149,7 @@ class RenderQueueService : Service() {
 
     private suspend fun runQueue() {
         done = 0
+        finishedIds.clear()
         while (true) {
             rescanRequested = false
             val queued = RenderQueue.scan(this)
@@ -180,6 +193,7 @@ class RenderQueueService : Service() {
                 // Full renders only: a resumed one would pull the estimate down.
                 if (rawRenderRan) photoAvgMs += (SystemClock.elapsedRealtime() - photoStartedAt - photoAvgMs) / ++photoCount
                 done++
+                finishedIds += photoId
             }
             // Capped, so a phone that always kills the render does not retry (and heat up) forever.
             wasLowMemoryKill(startedAt) &&
@@ -324,6 +338,7 @@ class RenderQueueService : Service() {
             photoStartedAt = photoStartedAt,
             resumed = resumed,
             leftMs = ((total - done - photoProgress) * photoAvgMs).toLong().coerceAtLeast(0L),
+            finishedPhotoIds = finishedIds.toList(),
         )
     }
 
