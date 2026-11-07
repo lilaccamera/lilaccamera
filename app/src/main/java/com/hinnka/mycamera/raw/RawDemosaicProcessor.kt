@@ -3675,6 +3675,23 @@ class RawDemosaicProcessor {
                         " postExposureEv=${regeneratedPhotonPgtm.hdrNetPostExposureEv}" +
                         " inputExposureEv=${regeneratedPhotonPgtm.hdrNetInputExposureEv}",
                 )
+                // TEST ONLY (render compare): revert
+                if (com.hinnka.mycamera.utils.RenderProcess.isCurrent &&
+                    File(context.filesDir, "render_compare").exists()
+                ) {
+                    PLog.i(
+                        TAG,
+                        "RAW_COMPARE queued photo=${dngFile?.parentFile?.name} " +
+                            "hdrRatio=${regeneratedPhotonPgtm.hdrRatio} " +
+                            "finalShortGain=${regeneratedPhotonPgtm.sourceToShortGain} " +
+                            "hdrNetPostExposureEv=${regeneratedPhotonPgtm.hdrNetPostExposureEv} " +
+                            "hdrNetInputExposureEv=${regeneratedPhotonPgtm.hdrNetInputExposureEv} " +
+                            "baselineExposureEv=${actualMetadata.baselineExposure} " +
+                            "aeSource=$regenerationAeSource iso=${actualMetadata.iso} " +
+                            "shutterNs=${actualMetadata.shutterSpeed} " +
+                            "viewfinderReference=${regenerationViewfinderReference != null}",
+                    )
+                }
             }
 
             // Newly generated HDRNet maps contain the downstream Dehaze + DHA curve. The DCP
