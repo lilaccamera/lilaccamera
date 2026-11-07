@@ -502,13 +502,15 @@ class RenderQueueService : Service() {
                     DateUtils.formatElapsedTime(status.leftMs / 1000),
                 )
             )
-            // Memory first: it is what the user watches, unless a pause waits; the stage goes in the header.
-            .setContentText(status.pausingText?.takeIf { paused } ?: memoryText())
-            .setSubText(
-                if (status.resumed && stage != RawRenderService.Stage.RESUMED) {
-                    getString(R.string.render_queue_joined, stageText, getString(R.string.render_queue_stage_resumed))
-                } else stageText
+            // What happens now (or where a pause will stop) in the text; memory, kept as an indicator, in the header.
+            .setContentText(
+                status.pausingText?.takeIf { paused }
+                    ?: if (status.resumed && stage != RawRenderService.Stage.RESUMED) {
+                        getString(R.string.render_queue_joined, stageText, getString(R.string.render_queue_stage_resumed))
+                    } else stageText
             )
+            .setSubText(memoryText())
+            .setContentIntent(openAppIntent(this))
             .setProgress(PROGRESS_MAX, (status.progress * PROGRESS_MAX).toInt(), total == 0)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -574,6 +576,12 @@ class RenderQueueService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
+        /** Tapping a queue notification opens the app, as the failed notice always did. */
+        private fun openAppIntent(context: Context): PendingIntent? =
+            context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
+                PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            }
+
         /**
          * A normal (not silent) notice that photos could not be finished, on its own channel so it
          * is seen after the progress notification has gone; tapping it opens the app.
@@ -587,14 +595,13 @@ class RenderQueueService : Service() {
                     NotificationManager.IMPORTANCE_DEFAULT,
                 )
             )
-            val open = context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
-                PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            }
+            val text = context.getString(R.string.render_failed_text)
             val notification = NotificationCompat.Builder(context, FAILED_CHANNEL_ID)
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentTitle(context.resources.getQuantityString(R.plurals.render_failed_title, count, count))
-                .setContentText(context.getString(R.string.render_failed_text))
-                .setContentIntent(open)
+                .setContentText(text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .setContentIntent(openAppIntent(context))
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_ERROR)
                 .build()
@@ -606,7 +613,9 @@ class RenderQueueService : Service() {
             createChannel(context)
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentTitle(context.getString(R.string.render_queue_paused, waiting))
+                .setContentTitle(context.getString(R.string.render_queue_paused))
+                .setContentText(context.resources.getQuantityString(R.plurals.render_queue_paused_detail, waiting, waiting))
+                .setContentIntent(openAppIntent(context))
                 .setSilent(true)
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
                 .addAction(0, context.getString(R.string.render_queue_resume), actionIntent(context, ACTION_RESUME))

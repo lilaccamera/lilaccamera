@@ -301,6 +301,7 @@ fun GalleryScreen(
                                 BadgedBox(
                                     badge = {
                                         when {
+                                            // The "!" says it too, not only the error colour.
                                             renderFailedIds.isNotEmpty() -> Badge { Text("!") }
                                             renderPendingIds.isNotEmpty() -> Badge(containerColor = AccentColor) {
                                                 Text(renderPendingIds.size.toString(), color = OnAccentColor)
@@ -309,7 +310,7 @@ fun GalleryScreen(
                                     }
                                 ) {
                                     Icon(
-                                        imageVector = AppIcons.FilterNone,
+                                        imageVector = AppIcons.Layers,
                                         contentDescription = stringResource(
                                             R.string.render_queue_button_description,
                                             renderPendingIds.size,

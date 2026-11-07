@@ -8,29 +8,25 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.render.RawRenderService
 import com.hinnka.mycamera.render.RenderJob
 import com.hinnka.mycamera.render.RenderQueue
-import com.hinnka.mycamera.ui.theme.AccentColor
-import com.hinnka.mycamera.ui.theme.OnAccentColor
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -59,6 +55,16 @@ fun RenderQueueScreen(
     var confirmSkipId by remember { mutableStateOf<String?>(null) }
     val skipText = stringResource(R.string.render_queue_skip)
     val skip: (String) -> Unit = { photoId -> scope.launch { RenderQueue.skip(context, photoId) } }
+    val setPaused: (Boolean) -> Unit = { pause ->
+        RenderQueue.setPaused(context, pause)
+        paused = pause
+        if (!pause) RenderQueue.start(context)
+    }
+    val processAll: () -> Unit = {
+        RenderQueue.setPaused(context, false)
+        paused = false
+        scope.launch { RenderQueue.retry(context, jobs) }
+    }
 
     LaunchedEffect(Unit) { viewModel.dropBitmapCaches() }
     LaunchedEffect(Unit) {
@@ -77,14 +83,8 @@ fun RenderQueueScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        text = stringResource(R.string.render_queue_screen_title),
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                },
+            TopAppBar(
+                title = { Text(stringResource(R.string.render_queue_screen_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -93,143 +93,89 @@ fun RenderQueueScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = Color.Black,
-                    titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White
-                )
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
             )
         },
-        containerColor = Color.Black,
         modifier = Modifier.fillMaxSize()
     ) { padding ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .padding(padding)
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text(
-                text = when {
-                    status.running -> stringResource(
-                        R.string.render_queue_title_left,
-                        (status.done + 1).coerceAtMost(status.total),
-                        status.total,
-                        DateUtils.formatElapsedTime(status.leftMs / 1000)
+            item(key = "summary") {
+                StatusCard(
+                    status = status,
+                    paused = paused,
+                    waitingCount = pendingIds.size,
+                    failedCount = failedIds.size,
+                    freeMb = freeMb,
+                    onPause = { setPaused(true) },
+                    onResume = { setPaused(false) },
+                    onProcessAll = processAll,
+                )
+            }
+            item(key = "hint") {
+                Text(
+                    text = stringResource(R.string.render_queue_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+                )
+            }
+            items(status.finishedPhotoIds, key = { it }) { photoId ->
+                RenderJobRow(photoId, label = stringResource(R.string.render_queue_finished_row))
+            }
+            items(jobs.filter { it.photoId !in status.finishedPhotoIds }, key = { it.photoId }) { job ->
+                val triedText = pluralStringResource(R.plurals.render_queue_attempts, job.attempts, job.attempts)
+                    .takeIf { job.attempts > 0 }
+                when {
+                    job.state == RenderJob.State.FAILED -> RenderJobRow(
+                        job.photoId,
+                        label = pluralStringResource(R.plurals.render_queue_failed_after, job.attempts, job.attempts),
+                        failed = true,
+                        action = stringResource(R.string.render_queue_retry),
+                        onAction = { scope.launch { RenderQueue.retry(context, listOf(job)) } }
                     )
-                    paused -> stringResource(R.string.render_queue_paused, pendingIds.size)
-                    else -> stringResource(R.string.render_queue_idle, pendingIds.size)
-                },
-                color = if (paused && !status.running) AccentColor else Color.White,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
-            )
-            if (status.running) {
-                if (paused) status.pausingText?.let { Notice(it) }
-                RenderProgressBar(status.progress)
-                // Memory is awaited before a photo starts, so this never shows beside a current photo's row.
-                if (status.waitingForMemory) Notice(stringResource(status.stageText))
-            }
-            StatusLine(
-                status.renderPssKb?.takeIf { status.running }
-                    ?.let { stringResource(R.string.render_queue_memory, it / 1024, freeMb) }
-                    ?: stringResource(R.string.render_queue_memory_free, freeMb)
-            )
-            Text(
-                text = stringResource(R.string.render_queue_hint),
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 12.sp
-            )
-            Text(
-                text = stringResource(R.string.render_queue_pause_hint),
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 12.sp
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {
-                        RenderQueue.setPaused(context, false)
-                        paused = false
-                        scope.launch { RenderQueue.retry(context, jobs) }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentColor, contentColor = OnAccentColor)
-                ) {
-                    Text(stringResource(R.string.render_queue_render_now))
-                }
-                OutlinedButton(
-                    onClick = {
-                        RenderQueue.setPaused(context, !paused)
-                        paused = !paused
-                        if (!paused) RenderQueue.start(context)
-                    }
-                ) {
-                    Text(
-                        text = stringResource(if (paused) R.string.render_queue_resume else R.string.render_queue_pause),
-                        color = Color.White
+                    job.state == RenderJob.State.SKIPPED -> RenderJobRow(
+                        job.photoId,
+                        label = stringResource(R.string.render_queue_skipped),
+                        action = stringResource(R.string.render_queue_render),
+                        onAction = { scope.launch { RenderQueue.unskip(context, job.photoId) } }
                     )
-                }
-            }
-            if (jobs.isEmpty() && status.finishedPhotoIds.isEmpty()) {
-                StatusLine(stringResource(R.string.render_queue_empty))
-            }
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(status.finishedPhotoIds, key = { it }) { photoId ->
-                    RenderJobRow(photoId, progress = 1f, label = stringResource(R.string.render_queue_stage_finished))
-                }
-                items(jobs.filter { it.photoId !in status.finishedPhotoIds }, key = { it.photoId }) { job ->
-                    when {
-                        job.state == RenderJob.State.FAILED -> RenderJobRow(
-                            job.photoId,
-                            progress = 1f,
-                            label = pluralStringResource(R.plurals.render_queue_failed_after, job.attempts, job.attempts),
-                            failed = true,
-                            action = stringResource(R.string.render_queue_retry),
-                            onAction = { scope.launch { RenderQueue.retry(context, listOf(job)) } }
-                        )
-                        job.state == RenderJob.State.SKIPPED -> RenderJobRow(
-                            job.photoId,
-                            progress = 0f,
-                            label = stringResource(R.string.render_queue_skipped),
-                            action = stringResource(R.string.render_queue_render),
-                            onAction = { scope.launch { RenderQueue.unskip(context, job.photoId) } }
-                        )
-                        status.running && job.photoId == status.currentPhotoId -> RenderJobRow(
-                            job.photoId,
-                            progress = status.photoProgress,
-                            label = stringResource(
-                                R.string.render_queue_joined,
-                                stringResource(status.stageText),
-                                DateUtils.formatElapsedTime(((now - status.photoStartedAt) / 1000).coerceAtLeast(0L))
-                            ),
-                            detail = stringResource(R.string.render_queue_stage_resumed)
-                                .takeIf { status.resumed && status.stageText != R.string.render_queue_stage_resumed },
-                            action = skipText,
-                            onAction = { confirmSkipId = job.photoId }
-                        )
-                        // Stopped at a checkpoint (or killed after one); a resume continues from it.
-                        paused && (job.jpegDone || job.rawRendered) -> RenderJobRow(
-                            job.photoId,
-                            progress = if (job.jpegDone) RawRenderService.Stage.HDR.start else RawRenderService.Stage.CHECKPOINT.end,
-                            label = stringResource(
-                                if (job.jpegDone) R.string.render_queue_paused_after_jpeg else R.string.render_queue_paused_after_raw
-                            ),
-                            detail = stringResource(R.string.render_queue_attempts, job.attempts).takeIf { job.attempts > 0 },
-                            action = skipText,
-                            onAction = { skip(job.photoId) }
-                        )
-                        else -> RenderJobRow(
-                            job.photoId,
-                            progress = 0f,
-                            label = stringResource(R.string.render_queue_job_waiting),
-                            detail = stringResource(R.string.render_queue_attempts, job.attempts).takeIf { job.attempts > 0 },
-                            action = skipText,
-                            onAction = { skip(job.photoId) }
-                        )
-                    }
+                    status.running && job.photoId == status.currentPhotoId -> RenderJobRow(
+                        job.photoId,
+                        progress = status.photoProgress,
+                        label = stringResource(
+                            R.string.render_queue_joined,
+                            stringResource(status.stageText),
+                            DateUtils.formatElapsedTime(((now - status.photoStartedAt) / 1000).coerceAtLeast(0L))
+                        ),
+                        detail = stringResource(R.string.render_queue_stage_resumed)
+                            .takeIf { status.resumed && status.stageText != R.string.render_queue_stage_resumed },
+                        action = skipText,
+                        onAction = { confirmSkipId = job.photoId }
+                    )
+                    // Stopped at a checkpoint (or killed after one); a resume continues from it.
+                    paused && (job.jpegDone || job.rawRendered) -> RenderJobRow(
+                        job.photoId,
+                        progress = if (job.jpegDone) RawRenderService.Stage.HDR.start else RawRenderService.Stage.CHECKPOINT.end,
+                        label = stringResource(
+                            if (job.jpegDone) R.string.render_queue_paused_after_jpeg else R.string.render_queue_paused_after_raw
+                        ),
+                        detail = triedText,
+                        action = skipText,
+                        onAction = { skip(job.photoId) }
+                    )
+                    else -> RenderJobRow(
+                        job.photoId,
+                        label = stringResource(R.string.render_queue_job_waiting),
+                        detail = triedText,
+                        action = skipText,
+                        onAction = { skip(job.photoId) }
+                    )
                 }
             }
         }
@@ -238,53 +184,119 @@ fun RenderQueueScreen(
     confirmSkipId?.let { photoId ->
         AlertDialog(
             onDismissRequest = { confirmSkipId = null },
+            title = { Text(stringResource(R.string.render_queue_skip_confirm_title)) },
             text = { Text(stringResource(R.string.render_queue_skip_confirm)) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmSkipId = null
                     skip(photoId)
                 }) {
-                    Text(skipText, color = AccentColor)
+                    Text(skipText)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { confirmSkipId = null }) {
-                    Text(stringResource(R.string.cancel), color = Color.White)
+                    Text(stringResource(R.string.render_queue_keep_processing))
                 }
             },
-            containerColor = Color(0xFF2D2D2D),
-            textContentColor = Color.White
+            containerColor = MaterialTheme.colorScheme.surface
         )
     }
 }
 
+/** What the queue does now in one sentence, its overall progress, memory, and the one action that fits the state. */
 @Composable
-private fun StatusLine(text: String) {
-    Text(text = text, color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp)
-}
-
-@Composable
-private fun Notice(text: String) {
-    Text(text = text, color = AccentColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-}
-
-@Composable
-private fun RenderProgressBar(progress: Float, color: Color = AccentColor) {
-    LinearProgressIndicator(
-        progress = { progress },
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(4.dp),
-        color = color,
-        trackColor = Color.White.copy(alpha = 0.15f)
-    )
+private fun StatusCard(
+    status: RenderQueue.Status,
+    paused: Boolean,
+    waitingCount: Int,
+    failedCount: Int,
+    freeMb: Int,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onProcessAll: () -> Unit,
+) {
+    val headline: String
+    val supporting: String?
+    when {
+        status.running && paused -> {
+            headline = stringResource(R.string.render_queue_pausing_title)
+            supporting = status.pausingText ?: stringResource(R.string.render_queue_pausing)
+        }
+        // Memory is awaited before a photo starts, so no photo row shows a step meanwhile.
+        status.running && status.waitingForMemory -> {
+            headline = stringResource(R.string.render_queue_stage_waiting_memory)
+            supporting = stringResource(R.string.render_queue_waiting_memory_hint)
+        }
+        status.running -> {
+            headline = stringResource(R.string.render_queue_running, (status.done + 1).coerceAtMost(status.total), status.total)
+            supporting = status.leftMs.takeIf { it >= 1_000L }
+                ?.let { stringResource(R.string.render_queue_time_left, DateUtils.formatElapsedTime(it / 1000)) }
+        }
+        paused -> {
+            headline = stringResource(R.string.render_queue_paused)
+            supporting = if (waitingCount > 0) {
+                pluralStringResource(R.plurals.render_queue_paused_detail, waitingCount, waitingCount)
+            } else stringResource(R.string.render_queue_paused_empty_hint)
+        }
+        waitingCount > 0 -> {
+            headline = pluralStringResource(R.plurals.render_queue_waiting_count, waitingCount, waitingCount)
+            supporting = stringResource(R.string.render_queue_idle_hint)
+        }
+        failedCount > 0 -> {
+            headline = pluralStringResource(R.plurals.render_failed_title, failedCount, failedCount)
+            supporting = stringResource(R.string.render_queue_failed_hint)
+        }
+        else -> {
+            headline = stringResource(R.string.render_queue_empty)
+            supporting = stringResource(R.string.render_queue_empty_hint)
+        }
+    }
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(text = headline, style = MaterialTheme.typography.titleLarge)
+            supporting?.let {
+                Text(text = it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (status.running) {
+                LinearProgressIndicator(progress = { status.progress }, modifier = Modifier.fillMaxWidth())
+            }
+            // Shown on purpose: how close a render is to being killed for memory.
+            Text(
+                text = status.renderPssKb?.takeIf { status.running }
+                    ?.let { stringResource(R.string.render_queue_memory, it / 1024, freeMb) }
+                    ?: stringResource(R.string.render_queue_memory_free, freeMb),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            when {
+                paused -> Button(onClick = onResume) { Text(stringResource(R.string.render_queue_resume)) }
+                status.running -> {
+                    FilledTonalButton(onClick = onPause) { Text(stringResource(R.string.render_queue_pause)) }
+                    Text(
+                        text = stringResource(R.string.render_queue_pause_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                waitingCount > 0 -> Button(onClick = onProcessAll) { Text(stringResource(R.string.render_queue_render_now)) }
+                failedCount > 0 -> Button(onClick = onProcessAll) { Text(stringResource(R.string.render_queue_retry_all)) }
+            }
+        }
+    }
 }
 
 @Composable
 private fun RenderJobRow(
     photoId: String,
-    progress: Float,
     label: String,
+    progress: Float? = null,
     detail: String? = null,
     failed: Boolean = false,
     action: String? = null,
@@ -300,30 +312,33 @@ private fun RenderJobRow(
             )?.asImageBitmap()
         }
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(56.dp)
-                .background(Color.White.copy(alpha = 0.1f))
-        ) {
-            thumbnail?.let {
-                Image(bitmap = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+    ListItem(
+        headlineContent = {
+            Text(text = label, color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+        },
+        supportingContent = if (progress == null && detail == null) null else {
+            {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    detail?.let { Text(it) }
+                    progress?.let {
+                        LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                    }
+                }
             }
-        }
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(text = label, color = Color.White, fontSize = 14.sp)
-            detail?.let { Text(text = it, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp) }
-            RenderProgressBar(progress, if (failed) MaterialTheme.colorScheme.error else AccentColor)
-        }
-        action?.let {
-            TextButton(onClick = onAction) {
-                Text(it, color = AccentColor)
+        },
+        leadingContent = {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                thumbnail?.let {
+                    Image(bitmap = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                }
             }
-        }
-    }
+        },
+        trailingContent = action?.let { { TextButton(onClick = onAction) { Text(it) } } },
+        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.background)
+    )
 }
