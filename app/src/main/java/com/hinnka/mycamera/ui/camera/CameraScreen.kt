@@ -33,6 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.draw.paint
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
@@ -2064,6 +2066,8 @@ private fun Controls(
     val captureButtonImagePath by preferenceValue { it.captureButtonImagePath }
     val captureProcessingState by viewModel.captureProcessingState.collectAsState()
     val capturedThumbnail by viewModel.capturedThumbnail.collectAsState()
+    // Same rule as the lilac refusal in Camera2Controller.reservePhotoCapture.
+    val rawCaptureBusy = state.rawCaptureBusy
 
     Box(
         modifier = modifier,
@@ -2105,6 +2109,7 @@ private fun Controls(
                                 0
                             },
                             completedCount = captureProcessingState.completedCount,
+                            shutterWaiting = rawCaptureBusy && state.captureMode == CaptureMode.PHOTO && !state.isCapturing,
                             modifier = Modifier.matchParentSize()
                         )
                     }
@@ -2114,6 +2119,7 @@ private fun Controls(
                     captureMode = state.captureMode,
                     isProfessionalMode = state.useRaw && state.isRawSupported,
                     isCapturing = state.isCapturing,
+                    isRawBusy = rawCaptureBusy,
                     photoCaptureProgress = state.photoCaptureProgress,
                     isBurstCapturing = state.burstCapturing,
                     isVideoRecording = state.videoRecordingState.isRecording,
@@ -2217,11 +2223,22 @@ private fun Controls(
     }
 }
 
+/** Shared breathing for the waiting shutter ring and thumbnail edge; both start when waiting starts, so they stay in step. */
+@Composable
+private fun rememberRawBusyPulse(): Float =
+    rememberInfiniteTransition(label = "rawBusyPulse").animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(durationMillis = 1200), RepeatMode.Reverse),
+        label = "rawBusyPulse"
+    ).value
+
 /** Keeps render progress independent of the shutter and the optional photo fly-in animation. */
 @Composable
 private fun GalleryProcessingOverlay(
     pendingCount: Int,
     completedCount: Long,
+    shutterWaiting: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val completionAlpha = remember { Animatable(0f) }
@@ -2281,6 +2298,26 @@ private fun GalleryProcessingOverlay(
                 )
             }
         }
+        if (shutterWaiting) {
+            // Breathes with the shutter ring: the button is waiting for this photo to be saved.
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .border(1.5.dp, Color.White.copy(alpha = rememberRawBusyPulse()), thumbnailShape)
+            )
+        }
+        if (pendingCount >= 2) {
+            Text(
+                text = pendingCount.toString(),
+                color = Color.White,
+                fontSize = 10.sp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(3.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), CircleShape)
+                    .padding(horizontal = 5.dp, vertical = 1.dp)
+            )
+        }
         if (completionAlpha.value > 0f) {
             Box(
                 modifier = Modifier
@@ -2306,6 +2343,7 @@ fun CaptureButton(
     captureMode: CaptureMode,
     isProfessionalMode: Boolean,
     isCapturing: Boolean,
+    isRawBusy: Boolean = false,
     photoCaptureProgress: PhotoCaptureProgress?,
     isBurstCapturing: Boolean,
     isVideoRecording: Boolean,
@@ -2326,9 +2364,12 @@ fun CaptureButton(
     val showMultipleExposureProgress = captureMode == CaptureMode.PHOTO && multipleExposureEnabled
     val showCaptureProgress = captureMode == CaptureMode.PHOTO && isCapturing
     val showVideoProcessingProgress = captureMode == CaptureMode.VIDEO && isVideoProcessing
+    // While a RAW shot would be refused: grey centre and a breathing white ring (capture uses a spinning
+    // accent ring); a pop and a light tick when it is usable again.
+    val showRawBusy = captureMode == CaptureMode.PHOTO && isRawBusy && !isCapturing
     val showActivityProgress = showCaptureProgress || showVideoProcessingProgress
     val progressRingCount = (if (showMultipleExposureProgress) 1 else 0) +
-        (if (showActivityProgress) 1 else 0)
+        (if (showActivityProgress || showRawBusy) 1 else 0)
     val infiniteTransition = rememberInfiniteTransition(label = "infinite transition")
     var isPressed by remember { mutableStateOf(false) }
     val customImage = remember(customImagePath) {
@@ -2342,6 +2383,23 @@ fun CaptureButton(
         animationSpec = spring(dampingRatio = 0.5f),
         label = "captureScale"
     )
+    // Opaque neutral grey on top of the centre: a dark tint over the yellow would read as muddy olive.
+    val busyTint by animateFloatAsState(
+        targetValue = if (showRawBusy) 1f else 0f,
+        animationSpec = tween(250),
+        label = "captureBusyTint"
+    )
+    val haptics = LocalHapticFeedback.current
+    val readyPop = remember { Animatable(1f) }
+    var wasRawBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(showRawBusy) {
+        if (wasRawBusy && !showRawBusy) {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            readyPop.animateTo(1.15f, tween(120))
+            readyPop.animateTo(1f, spring(dampingRatio = 0.4f))
+        }
+        wasRawBusy = showRawBusy
+    }
 
     val pulseAlpha by infiniteTransition.animateFloat(
         initialValue = 0.35f,
@@ -2373,7 +2431,7 @@ fun CaptureButton(
     PhysicalButton(
         modifier = modifier
             .size(CameraControlsLayoutDefaults.CaptureButtonSize)
-            .scale(scale)
+            .scale(scale * readyPop.value)
             .pointerInput(allowLongPress) {
                 var isLongPressStarted = false
                 detectTapGestures(
@@ -2492,6 +2550,19 @@ fun CaptureButton(
                         .autoRotate(matchParentSize = true)
                 )
             }
+            if (busyTint > 0f) {
+                Box(Modifier.fillMaxSize().background(Color(0xFF3C3C3C).copy(alpha = busyTint)))
+            }
+        }
+        if (showRawBusy) {
+            CaptureProgressRing(
+                color = Color.White.copy(alpha = rememberRawBusyPulse()),
+                startAngle = -90f,
+                sweepAngle = 360f,
+                inset = CaptureProgressRingDefaults.OuterInset +
+                    if (showMultipleExposureProgress) CaptureProgressRingDefaults.RingSpacing else 0.dp,
+                modifier = Modifier.progressSemantics()
+            )
         }
         if (showMultipleExposureProgress) {
             CaptureProgressRing(

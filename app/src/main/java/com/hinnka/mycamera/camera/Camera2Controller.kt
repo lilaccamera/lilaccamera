@@ -945,6 +945,7 @@ class Camera2Controller(private val context: Context) {
     private fun trackImage(image: Image?): SafeImage? {
         if (image != null) {
             openImagesCount.getAndIncrement()
+            updateRawCaptureBusy()
         }
         return image?.let { SafeImage(it, this) }
     }
@@ -1138,6 +1139,14 @@ class Camera2Controller(private val context: Context) {
         if (openImagesCount.decrementAndGet() == 0) {
             checkAndClosePendingReaders()
         }
+        updateRawCaptureBusy()
+    }
+
+    /** Mirrors the lilac RAW refusal in [reservePhotoCapture] so the shutter button can show it. */
+    private fun updateRawCaptureBusy() {
+        if (!IS_LILAC) return
+        val busy = isRawCaptureReader(imageReader) && openImagesCount.get() > 0
+        _state.update { if (it.rawCaptureBusy == busy) it else it.copy(rawCaptureBusy = busy) }
     }
 
     private fun resolveImageReaderMaxImages(): Int = CAPTURE_READER_MAX_IMAGES
