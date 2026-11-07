@@ -1597,6 +1597,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private var burstSettings: CaptureSettingsSnapshot? = null
     private var livePhotoIndicatorJob: Job? = null
+    private var countdownJob: Job? = null
     private var burstPhotoId: String? = null
     var burstImageCount by mutableStateOf(0)
         private set
@@ -3096,6 +3097,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
+        // A press during the self-timer cancels it; starting a second countdown took two staggered photos.
+        countdownJob?.takeIf { it.isActive }?.let { job ->
+            job.cancel()
+            cameraController.setCountdownValue(0)
+            return
+        }
+
         startupPrewarmJob?.takeIf { it.isActive }?.let { job ->
             PLog.d(TAG, "Canceling idle capture prewarm for shutter priority")
             job.cancel()
@@ -3119,7 +3127,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         if (timerSeconds > 0) {
             // 延时拍摄：开始倒计时
-            viewModelScope.launch {
+            countdownJob = viewModelScope.launch {
                 for (i in timerSeconds downTo 1) {
                     cameraController.setCountdownValue(i)
                     delay(1000)
