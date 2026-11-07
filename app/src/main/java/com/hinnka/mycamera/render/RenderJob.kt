@@ -42,7 +42,7 @@ data class RenderJob(
     val portraitMask: PortraitMask?,
     val version: Int = VERSION,
     val state: State = State.QUEUED,
-    /** Counted by the main-process queue, never by the render. */
+    /** Counted by the `:queue` process's queue, never by the render. */
     val attempts: Int = 0,
     /** Set by the render once `original.jpg` and its render result are both saved. */
     val jpegDone: Boolean = false,

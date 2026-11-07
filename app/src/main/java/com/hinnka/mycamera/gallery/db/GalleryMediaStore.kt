@@ -56,7 +56,7 @@ object GalleryMediaStore {
 
     suspend fun ensureMigrated(context: Context) {
         // The index rebuild writes Room and SharedPreferences; the main process has already run it.
-        if (migrationChecked || RenderProcess.isCurrent) return
+        if (migrationChecked || !RenderProcess.isMain) return
         val appContext = context.applicationContext
         migrationMutex.withLock {
             if (migrationChecked) return
@@ -164,7 +164,7 @@ object GalleryMediaStore {
      * there is no result or it cannot be applied (the file is then kept).
      */
     suspend fun applyRenderResult(context: Context, photoId: String): MediaMetadata? {
-        check(!RenderProcess.isCurrent) { "Render results are applied by the main process" }
+        check(RenderProcess.isMain) { "Render results are applied by the main process" }
         ensureMigrated(context)
         return withContext(Dispatchers.IO) {
             val file = File(getPhotoDir(context, photoId), RENDER_RESULT_FILE)

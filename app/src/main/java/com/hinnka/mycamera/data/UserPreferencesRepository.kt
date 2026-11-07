@@ -27,8 +27,8 @@ import kotlinx.coroutines.launch
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
     name = "user_preferences",
     produceMigrations = { context ->
-        // Migrations write the file; :render only reads what the main process migrated.
-        if (RenderProcess.isCurrent) emptyList() else listOf(
+        // Migrations write the file; :render and :queue only read what the main process migrated.
+        if (!RenderProcess.isMain) emptyList() else listOf(
             OpenAiApiKeyEncryptionMigration(),
             BuiltInDeviceConfigurationMigration.create(context),
         )
@@ -119,9 +119,9 @@ class UserPreferencesRepository(private val context: Context) {
      * ```
      */
     suspend fun update(block: UserPreferences.() -> Unit) {
-        if (RenderProcess.isCurrent) {
+        if (!RenderProcess.isMain) {
             // DataStore is single-process: only the main process writes user_preferences.
-            PLog.w("UserPreferencesRepository", "Render process: preference write ignored")
+            PLog.w("UserPreferencesRepository", "Background process: preference write ignored")
             return
         }
         context.dataStore.edit { preferences -> UserPreferences(preferences, writable = true).block() }

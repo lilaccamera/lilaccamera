@@ -23,7 +23,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.hinnka.mycamera.R
-import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.RenderProcess
 import kotlinx.coroutines.CompletableDeferred
@@ -34,14 +33,16 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * Main-process foreground service that renders the [RenderQueue] one photo at a time, each in a
- * fresh `:render` process ([RawRenderService]). Pause takes effect between photos, or at the
- * current photo's next checkpoint, which the render stops at.
+ * Foreground service in the `:queue` process that renders the [RenderQueue] one photo at a time,
+ * each in a fresh `:render` process ([RawRenderService]). Its own process, so the UI process (and
+ * the GPU memory it holds) can end while photos render. It touches only job files, never Room or
+ * settings: it tells the main process about each photo's end ([RenderQueue.ACTION_PHOTO_ENDED]) and
+ * its progress ([RenderQueue.ACTION_STATUS]). Pause takes effect between photos, or at the current
+ * photo's next checkpoint, which the render stops at.
  */
 class RenderQueueService : Service() {
     // Main thread: start commands, stage broadcasts and the loop's stop decision never interleave.
@@ -67,6 +68,15 @@ class RenderQueueService : Service() {
     private var startedJob: RenderJob? = null
     /** The photo whose render reported PAUSED. */
     private var pausedPhotoId: String? = null
+    private var statusSentAt = 0L
+    /** A throttled [RenderQueue.ACTION_STATUS] that is due. */
+    private var statusSend: Job? = null
+
+    private val statusRequestReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (loop?.isActive == true) sendStatus(immediately = true)
+        }
+    }
 
     private val stageReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -99,7 +109,10 @@ class RenderQueueService : Service() {
         ContextCompat.registerReceiver(
             this, stageReceiver, IntentFilter(RawRenderService.ACTION_STAGE), ContextCompat.RECEIVER_NOT_EXPORTED
         )
-        // Every scan (each capture's RenderQueue.start, a retry, the loop's own) updates the set, so a
+        ContextCompat.registerReceiver(
+            this, statusRequestReceiver, IntentFilter(RenderQueue.ACTION_REQUEST_STATUS), ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        // Every scan in this process (the loop's own, one per start command, a skip) updates the set, so a
         // photo taken mid-render counts at once instead of after the current photo.
         scope.launch {
             RenderQueue.pendingPhotoIds.collect { pending ->
@@ -115,6 +128,7 @@ class RenderQueueService : Service() {
         when (intent?.action) {
             ACTION_PAUSE -> RenderQueue.setPaused(this, true)
             ACTION_RESUME -> RenderQueue.setPaused(this, false)
+            ACTION_SKIP -> intent.getStringExtra(RawRenderService.EXTRA_PHOTO_ID)?.let { RenderQueue.launchSkip(this, it) }
         }
         // Every start comes from startForegroundService or a getForegroundService action.
         val type = when {
@@ -136,7 +150,12 @@ class RenderQueueService : Service() {
         getSystemService(NotificationManager::class.java).cancel(PAUSED_NOTIFICATION_ID)
         lastStartId = startId
         rescanRequested = true
-        if (loop?.isActive != true) loop = scope.launch { runQueue() }
+        if (loop?.isActive != true) {
+            loop = scope.launch { runQueue() }
+        } else {
+            // A capture in the main process starts the service again: count its job now, not after this photo.
+            scope.launch { RenderQueue.scan(this@RenderQueueService) }
+        }
         return START_NOT_STICKY
     }
 
@@ -150,9 +169,10 @@ class RenderQueueService : Service() {
     }
 
     override fun onDestroy() {
-        RenderQueue.publishStatus(RenderQueue.Status())
+        RenderQueue.publishStatus(this, RenderQueue.Status())
         scope.cancel()
         unregisterReceiver(stageReceiver)
+        unregisterReceiver(statusRequestReceiver)
         super.onDestroy()
     }
 
@@ -186,10 +206,10 @@ class RenderQueueService : Service() {
         // Pause applies between photos, including while waiting for memory; nothing is counted.
         if (RenderQueue.isPaused(this)) return
         // Under the lock, a skip lands either before this (the job is no longer QUEUED) or on this render.
-        val job = RenderQueue.jobLock.withLock {
+        val job = RenderQueue.withJobLock(this) {
             val current = withContext(Dispatchers.IO) { RenderJob.read(this@RenderQueueService, photoId) }
                 ?.takeIf { it.state == RenderJob.State.QUEUED } ?: return // skipped while it waited
-            // Counted before binding, so a render that takes the main process down still counts.
+            // Counted before binding, so a render that takes this process down still counts.
             if (!withContext(Dispatchers.IO) { RenderJob.write(this@RenderQueueService, current.copy(attempts = current.attempts + 1)) }) {
                 PLog.e(TAG, "Cannot count the attempt for $photoId; stopping the queue")
                 return stopQueue()
@@ -205,7 +225,8 @@ class RenderQueueService : Service() {
         // A hung render is killed at once and counts as a failed attempt.
         awaitRenderProcessGone(if (finished) RENDER_EXIT_TIMEOUT_MS else 0L)
         var retryAfterLowMemory = false
-        RenderQueue.jobLock.withLock<Unit> {
+        var ended: RenderJob.State? = null
+        RenderQueue.withJobLock<Unit>(this) {
             val after = withContext(Dispatchers.IO) { RenderJob.read(this@RenderQueueService, photoId) }
             // The flag too: the render may have written its job (still QUEUED) after the skip did.
             val skipped = RenderQueue.renderSkipped || after?.state == RenderJob.State.SKIPPED
@@ -213,7 +234,8 @@ class RenderQueueService : Service() {
             when {
                 after == null -> PLog.w(TAG, "Render job for $photoId disappeared")
                 after.state == RenderJob.State.DONE -> {
-                    GalleryManager.applyRenderResult(this, photoId)
+                    // The main process applies the render result to Room, now if it runs, else at its next start.
+                    ended = RenderJob.State.DONE
                     // Full renders only: a resumed one would pull the estimate down.
                     if (rawRenderRan) photoAvgMs += (SystemClock.elapsedRealtime() - photoStartedAt - photoAvgMs) / ++photoCount
                     done++
@@ -226,6 +248,7 @@ class RenderQueueService : Service() {
                         RenderJob.write(this@RenderQueueService, after.copy(state = RenderJob.State.SKIPPED, attempts = job.attempts))
                         RawRenderCheckpoint.delete(this@RenderQueueService, photoId)
                     }
+                    ended = RenderJob.State.SKIPPED
                 }
                 // Not a failure: the render stopped at a checkpoint and kept its progress; the loop then stops paused.
                 pausedPhotoId == photoId -> {
@@ -239,9 +262,17 @@ class RenderQueueService : Service() {
                     withContext(Dispatchers.IO) { RenderJob.write(this@RenderQueueService, after.copy(attempts = job.attempts)) }
                     retryAfterLowMemory = true
                 }
-                after.attempts >= MAX_ATTEMPTS -> markFailed(after)
+                after.attempts >= MAX_ATTEMPTS -> {
+                    markFailed(after)
+                    ended = RenderJob.State.FAILED
+                }
                 else -> PLog.w(TAG, "Render of $photoId failed (attempt ${after.attempts} of $MAX_ATTEMPTS)")
             }
+        }
+        ended?.let { state ->
+            // Scanned first, so no status sent after this still lists the photo as pending.
+            RenderQueue.scan(this)
+            RenderQueue.publishPhotoEnded(this, photoId, state)
         }
         // Outside the lock, so a skip meanwhile does not wait for it.
         if (retryAfterLowMemory) delay(LOW_MEMORY_RETRY_DELAY_MS)
@@ -349,7 +380,7 @@ class RenderQueueService : Service() {
     /** Leaves the foreground and stops, unless a newer start command already arrived. */
     private fun stopQueue() {
         loop?.cancel()
-        RenderQueue.publishStatus(RenderQueue.Status())
+        sendStatus(immediately = true)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf(lastStartId)
     }
@@ -358,8 +389,28 @@ class RenderQueueService : Service() {
         if (loop?.isActive == true) {
             val status = currentStatus()
             getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildProgress(status))
-            RenderQueue.publishStatus(status)
+            sendStatus()
         }
+    }
+
+    /** Broadcasts the status to the main process, at most once per [STATUS_INTERVAL_MS] unless [immediately]. */
+    private fun sendStatus(immediately: Boolean = false) {
+        if (!immediately && statusSend?.isActive == true) return // a send is already due and reads the status then
+        statusSend?.cancel()
+        val wait = if (immediately) 0L else statusSentAt + STATUS_INTERVAL_MS - SystemClock.elapsedRealtime()
+        if (wait <= 0L) {
+            broadcastStatus()
+        } else {
+            statusSend = scope.launch {
+                delay(wait)
+                broadcastStatus()
+            }
+        }
+    }
+
+    private fun broadcastStatus() {
+        statusSentAt = SystemClock.elapsedRealtime()
+        RenderQueue.publishStatus(this, if (loop?.isActive == true) currentStatus() else RenderQueue.Status())
     }
 
     private fun currentStatus(): RenderQueue.Status {
@@ -480,6 +531,9 @@ class RenderQueueService : Service() {
         private const val FAILED_CHANNEL_ID = "raw_render_failed"
         private const val ACTION_PAUSE = "com.hinnka.mycamera.render.action.PAUSE"
         private const val ACTION_RESUME = "com.hinnka.mycamera.render.action.RESUME"
+        /** Skips the photo in [RawRenderService.EXTRA_PHOTO_ID], ending its render if it runs ([RenderQueue.skip]). */
+        const val ACTION_SKIP = "com.hinnka.mycamera.render.action.SKIP"
+        private const val STATUS_INTERVAL_MS = 1_000L
         private const val MAX_ATTEMPTS = 3
         private const val MAX_LOW_MEMORY_RETRIES = 5
         // Measured on a 4 GB phone: renders that started with 690-940 MB free finished, those that
@@ -498,7 +552,8 @@ class RenderQueueService : Service() {
         private const val RAW_RENDER_PROGRESS_CAP = 0.97f
 
         // Running means over this process's renders (main thread only), so estimates follow the
-        // phone. First guesses from a 5056x3792 render on a 2017 phone: RAW render 24 s of 35 s.
+        // phone; they last as long as the :queue process. First guesses from a 5056x3792 render on a
+        // 2017 phone: RAW render 24 s of 35 s.
         private var rawRenderAvgMs = 24_000f
         private var rawRenderCount = 0
         private var photoAvgMs = 35_000f

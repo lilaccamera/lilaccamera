@@ -31,6 +31,11 @@ class MyCameraApplication : Application() {
         super.onCreate()
         StartupTrace.mark("Application.onCreate start")
         instance = this
+        if (RenderProcess.isQueue) {
+            // The queue only reads and writes job files and binds :render; no GPU, settings or gallery here.
+            PLog.i(TAG, "Queue process: skipped app startup work")
+            return
+        }
         if (RenderProcess.isCurrent) {
             // The render needs only the LUT, DCP and noise profile lists. Everything below writes shared
             // state (gallery recovery) or serves the UI. RawColorCalibrationPolicy.mode comes from the

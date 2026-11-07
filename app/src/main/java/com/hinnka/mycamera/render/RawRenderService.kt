@@ -25,8 +25,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Renders one queued RAW photo from its DNG and [RenderJob] in the `:render` process, then ends the
- * process: the GPU driver keeps hundreds of MB that only process exit frees. The main process binds
- * it once per job, follows [ACTION_STAGE] broadcasts and decides retries.
+ * process: the GPU driver keeps hundreds of MB that only process exit frees. [RenderQueueService] in
+ * `:queue` binds it once per job, follows [ACTION_STAGE] broadcasts and decides retries.
  */
 class RawRenderService : Service() {
     /**
@@ -166,7 +166,7 @@ class RawRenderService : Service() {
         } catch (_: PausedAtCheckpoint) {
             Stage.PAUSED
         } catch (e: Exception) {
-            // The job stays QUEUED; the main-process queue counts the attempt.
+            // The job stays QUEUED; the queue in :queue counts the attempt.
             PLog.e(TAG, "Render of $photoId failed", e)
             Stage.FAILED
         } finally {

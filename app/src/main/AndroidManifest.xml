@@ -248,10 +248,12 @@
                 android:exported="false"
                 android:process=":render" />
 
-        <!-- The RAW render queue; RenderQueueService picks dataSync on API 34, mediaProcessing on 35+. -->
+        <!-- The RAW render queue; RenderQueueService picks dataSync on API 34, mediaProcessing on 35+.
+             Its own process (name must match RenderProcess), so the UI process can end while it renders. -->
         <service
                 android:name=".render.RenderQueueService"
                 android:exported="false"
+                android:process=":queue"
                 android:foregroundServiceType="mediaProcessing|dataSync" />
 
         <service
