@@ -1659,9 +1659,11 @@
     <string name="render_again_batch_queued">%1$d queued</string>
     <string name="render_again_batch_skipped">%1$d skipped</string>
     <string name="render_again_batch_failed">%1$d failed</string>
+    <string name="photo_info_version">Version</string>
+    <string name="photo_info_version_original">Original · %1$s</string>
+    <string name="photo_info_version_camera_jpeg">The camera\'s own JPEG, with its built-in noise reduction. Not processed by PhotonCamera.</string>
+    <string name="photo_info_brightness">Brightness</string>
     <string name="photo_version_camera_jpeg_label">Camera JPEG · before PhotonCamera</string>
-    <string name="photo_version_before">Before</string>
-    <string name="photo_version_original">Original</string>
     <plurals name="gallery_stack_versions">
         <item quantity="one">%1$d version</item>
         <item quantity="other">%1$d versions</item>
