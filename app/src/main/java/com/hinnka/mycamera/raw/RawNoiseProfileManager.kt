@@ -188,7 +188,7 @@ class RawNoiseProfileManager(context: Context) {
                 nameMap = emptyMap(),
                 filePath = null,
                 isBuiltIn = true,
-                nameResId = R.string.raw_noise_profile_system,
+                nameResId = if (DeviceQuirks.isLilac) R.string.raw_noise_profile_system_lilac else R.string.raw_noise_profile_system,
             ),
             RawNoiseProfileInfo(
                 id = ADAPTIVE_PROFILE_ID,

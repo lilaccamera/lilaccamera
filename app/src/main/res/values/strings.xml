@@ -355,6 +355,7 @@
     <string name="raw_noise_profile_lens_override_value">Override: %1$s</string>
     <string name="raw_noise_profile_use_unified">Use unified model (%1$s)</string>
     <string name="raw_noise_profile_system">System default (Camera2 API)</string>
+    <string name="raw_noise_profile_system_lilac">System default (inaccurate on this phone)</string>
     <string name="raw_noise_profile_adaptive">Adaptive (estimated for current lens)</string>
     <string name="raw_noise_profile_agc26" translatable="false">26 · GC02M1 - LMIPRO</string>
     <string name="raw_noise_profile_lgv50" translatable="false">48 · LG V50 IMX363</string>
