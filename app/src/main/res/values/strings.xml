@@ -355,6 +355,14 @@
     <string name="raw_noise_profile_lens_override_value">Override: %1$s</string>
     <string name="raw_noise_profile_use_unified">Use unified model (%1$s)</string>
     <string name="raw_noise_profile_system">System default (Camera2 API)</string>
+    <string name="pro_unavailable_title">Pro mode is not available</string>
+    <string name="pro_unavailable_needs_raw_camera">Pro mode works from RAW images, the unprocessed data straight from the sensor. This camera does not provide them.</string>
+    <string name="pro_unavailable_needs_raw_front">Pro mode works from RAW images, the unprocessed data straight from the sensor. The front camera does not provide them.</string>
+    <string name="pro_unavailable_use_back_camera">Switch to the back camera to use Pro mode.</string>
+    <string name="pro_unavailable_needs_raw_system">Pro mode works from RAW images, the unprocessed data straight from the sensor. This phone\'s system does not provide them.</string>
+    <string name="pro_unavailable_lilac_shim">On the Xperia XZ1 Compact (lilac), RAW comes from the raw19 camera shim by sunplex07, which is part of their unofficial LineageOS 23.2 for lilac, posted on XDA Forums. Other ROMs for this phone do not include it.</string>
+    <string name="pro_unavailable_photo_mode">Photo mode still works, with multi-frame noise reduction, HDR and LUTs.</string>
+    <string name="pro_unavailable_open_xda">Open XDA thread</string>
     <string name="manual_sensor_unavailable">Not available on this camera</string>
     <string name="raw_noise_profile_system_lilac">System default (inaccurate on this phone)</string>
     <string name="raw_noise_profile_adaptive">Adaptive (estimated for current lens)</string>

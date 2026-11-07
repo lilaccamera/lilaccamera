@@ -76,6 +76,7 @@ import com.hinnka.mycamera.MyCameraApplication
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.CameraState
+import com.hinnka.mycamera.camera.DeviceQuirks
 import com.hinnka.mycamera.camera.FocusPointSource
 import com.hinnka.mycamera.camera.PhotoCaptureProgress
 import com.hinnka.mycamera.data.CaptureButtonStyle
@@ -90,6 +91,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import com.hinnka.mycamera.ui.components.*
 import com.hinnka.mycamera.utils.OrientationObserver
+import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import com.hinnka.mycamera.video.CaptureMode
@@ -639,12 +641,17 @@ fun CameraScreen(
         }
     }
 
+    var showProUnavailableDialog by remember { mutableStateOf(false) }
+
     fun switchCameraWithPreviewTransition() {
         runPreviewTransition { viewModel.switchCamera() }
     }
 
     fun setShootingModeWithPreviewTransition(mode: CameraShootingMode) {
-        if (mode == CameraShootingMode.PROFESSIONAL && !state.isRawSupported) return
+        if (mode == CameraShootingMode.PROFESSIONAL && !state.isRawSupported) {
+            showProUnavailableDialog = true
+            return
+        }
         if (
             mode == CameraShootingMode.PROFESSIONAL &&
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -795,6 +802,14 @@ fun CameraScreen(
                     Text(stringResource(R.string.close))
                 }
             },
+        )
+    }
+
+    if (showProUnavailableDialog) {
+        ProModeUnavailableDialog(
+            isFrontCamera = state.getCurrentCameraInfo()?.lensFacing ==
+                android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT,
+            onDismiss = { showProUnavailableDialog = false },
         )
     }
 
@@ -2786,7 +2801,9 @@ private fun CaptureModeSwitcher(
                 label = stringResource(R.string.capture_mode_professional),
                 selectedContentColor = accentContentColor(selectedBackground),
                 selected = shootingMode == CameraShootingMode.PROFESSIONAL,
-                enabled = enabled && professionalModeEnabled,
+                // Still tappable without RAW, so the tap can explain why Pro is unavailable.
+                enabled = enabled,
+                dimmed = !professionalModeEnabled,
                 onClick = { onModeSelected(CameraShootingMode.PROFESSIONAL) },
                 modifier = Modifier.weight(1f)
             )
@@ -2815,7 +2832,8 @@ private fun ModeSwitcherItem(
     enabled: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    selectedContentColor: Color = Color.Black
+    selectedContentColor: Color = Color.Black,
+    dimmed: Boolean = false
 ) {
     Box(
         modifier = modifier
@@ -2828,7 +2846,7 @@ private fun ModeSwitcherItem(
             text = label,
             color = when {
                 selected -> selectedContentColor.copy(alpha = 0.88f)
-                enabled -> Color.White.copy(alpha = 0.82f)
+                enabled && !dimmed -> Color.White.copy(alpha = 0.82f)
                 else -> Color.White.copy(alpha = 0.3f)
             },
             fontSize = 12.sp,
@@ -2979,3 +2997,51 @@ private fun Context.findActivity(): Activity? {
     }
     return null
 }
+
+/** Explains a tap on the greyed Pro button; on the lilac back camera it names where RAW comes from, so users of other ROMs can find it. */
+@Composable
+private fun ProModeUnavailableDialog(isFrontCamera: Boolean, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    // The shim only serves the back camera; the front camera never has RAW, so it gets the plain message.
+    val showShimInfo = DeviceQuirks.isLilac && !isFrontCamera
+    val paragraphs = when {
+        isFrontCamera -> listOf(R.string.pro_unavailable_needs_raw_front, R.string.pro_unavailable_use_back_camera)
+        showShimInfo -> listOf(R.string.pro_unavailable_needs_raw_system, R.string.pro_unavailable_lilac_shim, R.string.pro_unavailable_photo_mode)
+        else -> listOf(R.string.pro_unavailable_needs_raw_camera, R.string.pro_unavailable_photo_mode)
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = stringResource(R.string.pro_unavailable_title),
+                style = MaterialTheme.typography.titleLarge,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                paragraphs.forEach {
+                    Text(text = stringResource(it), style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.close))
+            }
+        },
+        dismissButton = if (showShimInfo) {
+            {
+                TextButton(onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, LILAC_ROM_THREAD_URL.toUri()))
+                    }.onFailure { PLog.w("CameraScreen", "No app to open $LILAC_ROM_THREAD_URL", it) }
+                }) {
+                    Text(stringResource(R.string.pro_unavailable_open_xda))
+                }
+            }
+        } else null,
+    )
+}
+
+private const val LILAC_ROM_THREAD_URL =
+    "https://xdaforums.com/t/rom-a16-lineageos-23-2-unofficial-lilac-stable.4797464/"
