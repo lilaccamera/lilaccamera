@@ -1534,6 +1534,13 @@
     <string name="render_queue_stage_rendering">Rendering the photo</string>
     <string name="render_queue_stage_done">Saving to the gallery</string>
     <string name="render_queue_stage_failed">Render failed</string>
+    <string name="render_queue_stage_waiting_memory">Waiting for free memory</string>
     <string name="render_queue_memory">Render %1$d MB · Free %2$d MB</string>
     <string name="render_queue_memory_free">Free %1$d MB</string>
+    <string name="render_failed_channel">RAW rendering problems</string>
+    <string name="render_failed_text">The RAW file (DNG) is kept. Tap to open the app.</string>
+    <plurals name="render_failed_title">
+        <item quantity="one">%1$d photo could not be finished</item>
+        <item quantity="other">%1$d photos could not be finished</item>
+    </plurals>
 </resources>
