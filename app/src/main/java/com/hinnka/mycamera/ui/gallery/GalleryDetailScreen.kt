@@ -49,6 +49,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -2382,7 +2383,10 @@ private fun ZoomableImage(
         )
         val refreshKey = viewModel.photoRefreshKeys[displayPhoto.id] ?: 0L
         val isSettledActive = isActive && !isScrollInProgress
-        val previewMaxEdge = if (isSettledActive) 4096 else 1024
+        // 1.5x the screen's long edge (not 4096): a 4096 px LUT pass bloats the GPU driver memory that renders need.
+        val windowSize = LocalWindowInfo.current.containerSize
+        val settledMaxEdge = (max(windowSize.width, windowSize.height) * 1.5f).toInt().coerceIn(1024, 4096)
+        val previewMaxEdge = if (isSettledActive) settledMaxEdge else 1024
 
         LaunchedEffect(displayPhoto.id, metadataHash, showOrigin, refreshKey, isSettledActive) {
             isLoading = bitmap == null
