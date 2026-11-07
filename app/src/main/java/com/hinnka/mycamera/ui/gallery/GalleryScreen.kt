@@ -67,6 +67,7 @@ import com.hinnka.mycamera.R
 import com.hinnka.mycamera.gallery.MediaData
 import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.gallery.ProcessingPhoto
+import com.hinnka.mycamera.render.RenderQueue
 import com.hinnka.mycamera.ui.components.ProcessingPhotoShimmerView
 import coil.load
 import coil.dispose
@@ -96,10 +97,13 @@ fun GalleryScreen(
     onBack: () -> Unit,
     onPhotoClick: (GalleryTab, Int) -> Unit,
     onNavigateToEdit: (String?) -> Unit = {},
+    onRenderQueueClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val photos by viewModel.currentPhotos.collectAsState()
     val processingPhotos by viewModel.processingPhotos.collectAsState()
+    val renderPendingIds by RenderQueue.pendingPhotoIds.collectAsState()
+    val renderFailedIds by RenderQueue.failedPhotoIds.collectAsState()
     var previousProcessingIds by remember { mutableStateOf(processingPhotos.keys.toSet()) }
     LaunchedEffect(processingPhotos.keys) {
         (previousProcessingIds - processingPhotos.keys).forEach(viewModel::invalidatePreviewCache)
@@ -293,6 +297,28 @@ fun GalleryScreen(
                                 )
                             }
                         } else {
+                            IconButton(onClick = onRenderQueueClick) {
+                                BadgedBox(
+                                    badge = {
+                                        when {
+                                            renderFailedIds.isNotEmpty() -> Badge { Text("!") }
+                                            renderPendingIds.isNotEmpty() -> Badge(containerColor = AccentColor) {
+                                                Text(renderPendingIds.size.toString(), color = OnAccentColor)
+                                            }
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = AppIcons.FilterNone,
+                                        contentDescription = stringResource(
+                                            R.string.render_queue_button_description,
+                                            renderPendingIds.size,
+                                            renderFailedIds.size,
+                                        ),
+                                        tint = Color.White
+                                    )
+                                }
+                            }
                             IconButton(onClick = {
                                 launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
                             }) {

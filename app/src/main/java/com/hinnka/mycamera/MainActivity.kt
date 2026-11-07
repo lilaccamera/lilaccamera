@@ -87,6 +87,7 @@ import com.hinnka.mycamera.ui.gallery.BurstDetailScreen
 import com.hinnka.mycamera.ui.gallery.GalleryDetailScreen
 import com.hinnka.mycamera.ui.gallery.GalleryScreen
 import com.hinnka.mycamera.ui.gallery.GalleryEditScreen
+import com.hinnka.mycamera.ui.gallery.RenderQueueScreen
 import com.hinnka.mycamera.ui.settings.FilterManagementScreen
 import com.hinnka.mycamera.ui.settings.FrameEditorScreen
 import com.hinnka.mycamera.ui.settings.FrameManagementScreen
@@ -126,6 +127,7 @@ object Routes {
     const val PUZZLE = "puzzle"
     const val PRESET_EDITOR = "preset_editor?presetId={presetId}"
     const val PRESET_MANAGEMENT = "preset_management"
+    const val RENDER_QUEUE = "render_queue"
 
     fun presetEditor(presetId: String? = null): String {
         return if (presetId != null) "preset_editor?presetId=$presetId" else "preset_editor"
@@ -814,6 +816,18 @@ fun NavigationHost(
                             navController.navigate(Routes.photoDetail(galleryViewModel.selectedTab, 0, photoId))
                         }
                         navController.navigate(Routes.PHOTO_EDIT)
+                    },
+                    onRenderQueueClick = {
+                        navController.navigate(Routes.RENDER_QUEUE)
+                    }
+                )
+            }
+
+            composable(Routes.RENDER_QUEUE) {
+                RenderQueueScreen(
+                    viewModel = galleryViewModel,
+                    onBack = {
+                        navController.popBackStack()
                     }
                 )
             }

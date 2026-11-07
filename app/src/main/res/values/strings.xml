@@ -1543,4 +1543,15 @@
         <item quantity="one">%1$d photo could not be finished</item>
         <item quantity="other">%1$d photos could not be finished</item>
     </plurals>
+    <string name="render_queue_screen_title">Render queue</string>
+    <string name="render_queue_button_description">Render queue, %1$d waiting, %2$d failed</string>
+    <string name="render_queue_render_now">Render now</string>
+    <string name="render_queue_retry">Retry</string>
+    <string name="render_queue_idle">Not rendering, %1$d waiting</string>
+    <string name="render_queue_pausing">Pauses after this photo</string>
+    <string name="render_queue_photo">Photo %1$s</string>
+    <string name="render_queue_job_waiting">Waiting</string>
+    <string name="render_queue_attempts">Attempts: %1$d</string>
+    <string name="render_queue_empty">No photos waiting</string>
+    <string name="render_queue_hint">A render needs lots of free memory. This screen has let go of the gallery\'s cached images; closing other apps frees more.</string>
 </resources>

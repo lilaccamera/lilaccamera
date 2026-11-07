@@ -3438,6 +3438,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         return GalleryManager.getOriginalImageFile(context, photoId)?.length() ?: 0L
     }
 
+    /** Drops every cached preview, HDR detail and grid bitmap; screens reload what they show. */
+    fun dropBitmapCaches() {
+        previewBitmapCache.evictAll()
+        detailBitmapCache.evictAll()
+        gridThumbnailCache.evictAll()
+    }
+
     private fun invalidateGridThumbnailCache(photoId: String) {
         val snapshot = gridThumbnailCache.snapshot()
         snapshot.keys.filter { it.startsWith("${photoId}_") }.forEach {

@@ -115,6 +115,7 @@ class RenderQueueService : Service() {
     }
 
     override fun onDestroy() {
+        RenderQueue.publishStatus(RenderQueue.Status())
         scope.cancel()
         unregisterReceiver(stageReceiver)
         super.onDestroy()
@@ -256,10 +257,7 @@ class RenderQueueService : Service() {
         waitingForMemory = false
     }
 
-    private fun freeMemoryMb(): Int {
-        val info = ActivityManager.MemoryInfo().also { getSystemService(ActivityManager::class.java).getMemoryInfo(it) }
-        return (info.availMem / (1024 * 1024)).toInt()
-    }
+    private fun freeMemoryMb(): Int = RenderQueue.freeMemoryMb(this)
 
     private suspend fun wasLowMemoryKill(since: Long): Boolean {
         val processName = packageName + RenderProcess.PROCESS_SUFFIX
@@ -277,6 +275,7 @@ class RenderQueueService : Service() {
     /** Leaves the foreground and stops, unless a newer start command already arrived. */
     private fun stopQueue() {
         loop?.cancel()
+        RenderQueue.publishStatus(RenderQueue.Status())
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf(lastStartId)
     }
@@ -284,6 +283,9 @@ class RenderQueueService : Service() {
     private fun updateNotification() {
         if (loop?.isActive == true) {
             getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildProgress())
+            RenderQueue.publishStatus(
+                RenderQueue.Status(true, waitingForMemory, done, total, currentPhotoId, stageText(), renderPssKb)
+            )
         }
     }
 
@@ -294,15 +296,17 @@ class RenderQueueService : Service() {
             ?: getString(R.string.render_queue_memory_free, freeMb)
     }
 
+    private fun stageText(): Int = if (waitingForMemory) R.string.render_queue_stage_waiting_memory else when (stage) {
+        null -> R.string.render_queue_stage_waiting
+        RawRenderService.Stage.STARTED -> R.string.render_queue_stage_started
+        RawRenderService.Stage.RENDERING -> R.string.render_queue_stage_rendering
+        RawRenderService.Stage.DONE -> R.string.render_queue_stage_done
+        RawRenderService.Stage.FAILED -> R.string.render_queue_stage_failed
+    }
+
     private fun buildProgress(): Notification {
         val paused = RenderQueue.isPaused(this)
-        val stageText = if (waitingForMemory) R.string.render_queue_stage_waiting_memory else when (stage) {
-            null -> R.string.render_queue_stage_waiting
-            RawRenderService.Stage.STARTED -> R.string.render_queue_stage_started
-            RawRenderService.Stage.RENDERING -> R.string.render_queue_stage_rendering
-            RawRenderService.Stage.DONE -> R.string.render_queue_stage_done
-            RawRenderService.Stage.FAILED -> R.string.render_queue_stage_failed
-        }
+        val stageText = stageText()
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(
