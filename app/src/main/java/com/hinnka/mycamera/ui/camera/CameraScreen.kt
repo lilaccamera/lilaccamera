@@ -1801,6 +1801,7 @@ fun CameraScreen(
             onPhotoPreviewStabilizationChange =
                 viewModel::setPhotoPreviewStabilizationEnabled,
             photoResolutionCapMp = state.photoResolutionCapMp,
+            photoResolutionAdjustable = state.photoResolutionAdjustable,
             onPhotoResolutionCapChange = viewModel::setPhotoResolutionCapMp,
             onRawDcpChange = { viewModel.setRawDcpId(it) },
             onRawDcpIdsByLensChange = { viewModel.setRawDcpIdsByLens(it) },

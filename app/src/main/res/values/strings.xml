@@ -260,6 +260,8 @@
     <string name="camera_preview_stabilization">Preview Stabilization</string>
     <string name="photo_resolution">Resolution</string>
     <string name="photo_resolution_full">Full</string>
+    <string name="photo_resolution_small_camera">This camera is 8 MP at most</string>
+    <string name="photo_resolution_pro_full">Pro mode is always full size</string>
     <string name="settings_photo_preview_stabilization_description">Stabilize the photo viewfinder using gyro motion. The saved photo is unchanged; rear cameras only.</string>
     <string name="settings_grid_lines">Grid Lines</string>
     <string name="settings_grid_description">Show grid lines for composition</string>

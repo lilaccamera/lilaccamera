@@ -2932,6 +2932,10 @@ class Camera2Controller(private val context: Context) {
                                 "maxHighResolution=${selection.maxHighResolutionSize?.let { "${it.width}x${it.height}" }}, " +
                                 "highResolutionDisabled=${highResolutionProfile in failedHighResolutionCaptureProfiles}"
                     )
+                    val maxPixels = listOfNotNull(selection.maxStandardSize, selection.maxHighResolutionSize)
+                        .maxOfOrNull { it.width.toLong() * it.height } ?: 0L
+                    // Same 5% slack as the cap itself: at or below 8 MP, Full, 12 MP and 8 MP all pick one size.
+                    _state.update { it.copy(photoResolutionAdjustable = maxPixels > 8 * 1_050_000L) }
                 }
 
                 val isP3Supported = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {

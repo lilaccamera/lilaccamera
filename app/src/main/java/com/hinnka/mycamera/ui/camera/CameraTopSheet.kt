@@ -34,6 +34,7 @@ import com.hinnka.mycamera.ui.theme.OnAccentColor
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.DeviceQuirks
+import androidx.compose.ui.platform.LocalContext
 import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.raw.HncsFilmCurveMode
@@ -95,6 +96,7 @@ fun CameraTopSheet(
     photoPreviewStabilizationAvailable: Boolean,
     onPhotoPreviewStabilizationChange: (Boolean) -> Unit,
     photoResolutionCapMp: Int,
+    photoResolutionAdjustable: Boolean,
     onPhotoResolutionCapChange: (Int) -> Unit,
     onRawDcpChange: (String?) -> Unit,
     onRawDcpIdsByLensChange: ((Map<String, String?>) -> Unit)? = null,
@@ -234,12 +236,15 @@ fun CameraTopSheet(
                             )
                         }
                         // Pro (RAW) is always full size: the RAW stream only exists at full sensor size.
-                        val resolutionCap = if (isProfessionalMode) 0 else photoResolutionCapMp
+                        val resolutionEnabled = !isProfessionalMode && photoResolutionAdjustable
+                        val resolutionCap = if (resolutionEnabled) photoResolutionCapMp else 0
+                        val resolutionContext = LocalContext.current
                         QuickSettingValue(
                             title = stringResource(R.string.photo_resolution),
                             value = if (resolutionCap > 0) "$resolutionCap MP" else stringResource(R.string.photo_resolution_full),
+                            enabled = resolutionEnabled,
                             onClick = {
-                                if (!isProfessionalMode) {
+                                if (resolutionEnabled) {
                                     onPhotoResolutionCapChange(
                                         when (photoResolutionCapMp) {
                                             0 -> 12
@@ -247,6 +252,12 @@ fun CameraTopSheet(
                                             else -> 0
                                         }
                                     )
+                                } else {
+                                    android.widget.Toast.makeText(
+                                        resolutionContext,
+                                        if (isProfessionalMode) R.string.photo_resolution_pro_full else R.string.photo_resolution_small_camera,
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
                                 }
                             },
                             modifier = itemModifier
@@ -855,13 +866,15 @@ fun QuickSettingValue(
     title: String,
     value: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // A disabled tile is greyed but still takes taps, so the caller can say why.
+    enabled: Boolean = true
 ) {
     Box(
         modifier = modifier
             .height(48.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.15f))
+            .background(Color.White.copy(alpha = if (enabled) 0.15f else 0.06f))
             .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         contentAlignment = Alignment.CenterStart
@@ -869,7 +882,7 @@ fun QuickSettingValue(
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 text = title,
-                color = Color.White.copy(alpha = 0.6f),
+                color = Color.White.copy(alpha = if (enabled) 0.6f else 0.3f),
                 fontSize = 8.sp,
                 lineHeight = 10.sp,
                 fontWeight = FontWeight.Normal,
@@ -877,7 +890,7 @@ fun QuickSettingValue(
             )
             QuickSettingLabel(
                 text = value,
-                color = Color.White,
+                color = Color.White.copy(alpha = if (enabled) 1f else 0.38f),
                 fontWeight = FontWeight.Medium
             )
         }
