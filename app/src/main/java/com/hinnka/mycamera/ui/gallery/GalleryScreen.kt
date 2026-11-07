@@ -202,6 +202,8 @@ fun GalleryScreen(
 
     // 首次进入时先让导航过渡完成，再挂载重型网格，避免首屏动画和列表构建抢主线程。
     LaunchedEffect(Unit) {
+        // Leaving the camera for the gallery: waiting RAW renders may start now.
+        RenderQueue.releaseCameraHold(context)
         viewModel.loadCurrentTabData()
         delay(300L)
         shouldRenderGrid = true

@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.hinnka.mycamera.camera.*
+import com.hinnka.mycamera.render.RenderQueue
 import com.hinnka.mycamera.data.ContentRepository
 import com.hinnka.mycamera.data.CaptureButtonStyle
 import com.hinnka.mycamera.data.CaptureSoundRepository
@@ -3159,6 +3160,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private fun submitPhotoCapture() {
         val settings = snapshotCaptureSettings()
         cameraController.capture { id ->
+            // Only Pro: a RAW capture beside a render got renders killed; Photo mode stacking never did.
+            if (settings.state.useRaw && settings.state.isRawSupported) RenderQueue.holdForProShot(getApplication())
             settings.captureId = id
             pendingCaptureSettings[id] = settings
             capturePhotoThumbnails(settings)

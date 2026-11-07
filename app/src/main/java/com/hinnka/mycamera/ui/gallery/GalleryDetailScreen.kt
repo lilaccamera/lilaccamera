@@ -94,6 +94,7 @@ import com.hinnka.mycamera.ui.components.PhysicalButton
 import com.hinnka.mycamera.ui.components.ProcessingPhotoPreview
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.render.RenderQueue
 import com.hinnka.mycamera.viewmodel.GalleryTab
 import kotlinx.coroutines.Dispatchers
 import me.saket.telephoto.zoomable.ZoomSpec
@@ -183,6 +184,8 @@ fun GalleryDetailScreen(
         previousProcessingIds = processingPhotos.keys.toSet()
     }
     val context = LocalContext.current
+    // Opening a photo (often straight from the camera's thumbnail): waiting RAW renders may start now.
+    LaunchedEffect(Unit) { RenderQueue.releaseCameraHold(context) }
 
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showInfoDialog by remember { mutableStateOf(false) }

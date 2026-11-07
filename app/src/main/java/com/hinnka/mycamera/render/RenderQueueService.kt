@@ -202,6 +202,8 @@ class RenderQueueService : Service() {
         val photoId = queued.photoId
         if (queued.attempts >= MAX_ATTEMPTS) return markFailed(queued)
         awaitRenderProcessGone()
+        // Before the memory wait: the camera's memory is back once it stops shooting.
+        RenderQueue.awaitCameraHold(this)
         awaitFreeMemory()
         // Pause applies between photos, including while waiting for memory; nothing is counted.
         if (RenderQueue.isPaused(this)) return

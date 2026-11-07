@@ -468,6 +468,8 @@ object GalleryManager {
         } else {
             _processingPhotos.update { it - photoId }
         }
+        // A Pro shot's hold ends a few seconds after it is saved.
+        RenderQueue.endCameraHoldSoon(context)
         PLog.d(TAG, "Finished processing photo: $photoId, saved=$saved, waitsForRender=$waitsForRender")
         notifyPhotoLibraryChanged()
     }

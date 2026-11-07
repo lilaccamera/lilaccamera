@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Process
+import android.os.SystemClock
 import androidx.annotation.StringRes
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
@@ -45,6 +46,12 @@ object RenderQueue {
     private const val JOB_LOCK_FILE = "render_queue.lock"
     /** With no status for this long, the main process checks whether `:queue` still lives. */
     private const val STATUS_SILENCE_MS = 5_000L
+    /** Holds back new renders while Pro shots are taken; a render and a RAW capture together got renders killed. */
+    private const val CAMERA_HOLD_FILE = "render_camera_hold"
+    /** New renders start this long after the last Pro shot was saved. */
+    private const val CAMERA_IDLE_MS = 5_000L
+    /** While a Pro shot is in flight; it ends early when the photo is saved, and by itself if a failure never says so. */
+    private const val CAMERA_BUSY_HOLD_MS = 60_000L
 
     /** `:queue` to main: the [Status] in [EXTRA_STATUS], the pending and failed ids in [EXTRA_PENDING_IDS], [EXTRA_FAILED_IDS]. */
     const val ACTION_STATUS = "com.hinnka.mycamera.render.action.QUEUE_STATUS"
@@ -205,6 +212,49 @@ object RenderQueue {
         }
         context.sendBroadcast(Intent(ACTION_REQUEST_STATUS).setPackage(context.packageName))
     }
+
+    /**
+     * Main process: a Pro (RAW) shot was taken, so new renders wait until it is saved, at most
+     * [CAMERA_BUSY_HOLD_MS]. Photo mode shots never hold renders: their stacking has not collided with them.
+     */
+    fun holdForProShot(context: Context) = writeCameraHold(context, CAMERA_BUSY_HOLD_MS)
+
+    /** Main process: a photo finished in the camera; a hold still on ends [CAMERA_IDLE_MS] from now. */
+    fun endCameraHoldSoon(context: Context) {
+        if (cameraHoldLeftMs(context) > 0) writeCameraHold(context, CAMERA_IDLE_MS)
+    }
+
+    private fun writeCameraHold(context: Context, ms: Long) {
+        // Time since boot, the same in every process; this phone's wall clock jumps after a restart.
+        runCatching { cameraHoldFile(context).writeText((SystemClock.elapsedRealtime() + ms).toString()) }
+            .onFailure { PLog.w(TAG, "Cannot write the camera hold", it) }
+    }
+
+    /** 0 when no hold is on, including one longer than any hold: written before a phone restart reset the clock. */
+    private fun cameraHoldLeftMs(context: Context): Long {
+        val until = runCatching { cameraHoldFile(context).readText().trim().toLong() }.getOrNull() ?: return 0
+        val left = until - SystemClock.elapsedRealtime()
+        return if (left in 1..CAMERA_BUSY_HOLD_MS) left else 0
+    }
+
+    /** Main process: the gallery or photo view is open, so renders may start now. */
+    fun releaseCameraHold(context: Context) {
+        cameraHoldFile(context).delete()
+        start(context)
+    }
+
+    /** Both processes: returns once the camera holds no more renders back (or the queue is paused). */
+    suspend fun awaitCameraHold(context: Context) {
+        var logged = false
+        while (!isPaused(context)) {
+            if (withContext(Dispatchers.IO) { cameraHoldLeftMs(context) } == 0L) return
+            if (!logged) PLog.i(TAG, "Holding renders while a Pro shot is saved")
+            logged = true
+            delay(500)
+        }
+    }
+
+    private fun cameraHoldFile(context: Context) = File(context.filesDir, CAMERA_HOLD_FILE)
 
     /** Main process: tidies job files, then starts the queue if a job waits; while paused it shows the paused notice. */
     fun start(context: Context) {
