@@ -24,6 +24,8 @@ import com.hinnka.mycamera.raw.RawRenderingEngine
 import com.hinnka.mycamera.raw.RawToneMappingParameters
 import com.hinnka.mycamera.raw.RawAdaptiveExposureMode
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.utils.RenderProcess
+import com.google.gson.GsonBuilder
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -48,8 +50,13 @@ object GalleryMediaStore {
     @Volatile
     private var migrationChecked = false
 
+    // Written by :render instead of Room; the main process applies it.
+    private const val RENDER_RESULT_FILE = "render_result.json"
+    private val renderResultGson = GsonBuilder().serializeSpecialFloatingPointValues().create()
+
     suspend fun ensureMigrated(context: Context) {
-        if (migrationChecked) return
+        // The index rebuild writes Room and SharedPreferences; the main process has already run it.
+        if (migrationChecked || RenderProcess.isCurrent) return
         val appContext = context.applicationContext
         migrationMutex.withLock {
             if (migrationChecked) return
@@ -75,6 +82,15 @@ object GalleryMediaStore {
     }
 
     suspend fun loadMetadata(context: Context, photoId: String): MediaMetadata? {
+        // :render reads back its own unapplied saves, so updateMetadata builds on them.
+        if (RenderProcess.isCurrent) {
+            val file = File(getPhotoDir(context, photoId), RENDER_RESULT_FILE)
+            withContext(Dispatchers.IO) {
+                file.takeIf { it.isFile }?.let {
+                    renderResultGson.fromJson(it.readText(), GalleryMediaEntity::class.java).toMetadata()
+                }
+            }?.let { return it }
+        }
         ensureMigrated(context)
         return withContext(Dispatchers.IO) {
             val dao = GalleryDatabase.getInstance(context.applicationContext).galleryMediaDao()
@@ -84,6 +100,7 @@ object GalleryMediaStore {
     }
 
     suspend fun saveMetadata(context: Context, photoId: String, metadata: MediaMetadata): Boolean {
+        if (RenderProcess.isCurrent) return saveRenderResult(context, photoId, metadata)
         ensureMigrated(context)
         return withContext(Dispatchers.IO) {
             try {
@@ -116,7 +133,29 @@ object GalleryMediaStore {
         return if (saveMetadata(context, photoId, updated)) updated else null
     }
 
+    private suspend fun saveRenderResult(context: Context, photoId: String, metadata: MediaMetadata): Boolean =
+        withContext(Dispatchers.IO) {
+            val file = File(getPhotoDir(context, photoId), RENDER_RESULT_FILE)
+            val temp = File(file.parentFile, "$RENDER_RESULT_FILE.tmp")
+            try {
+                // The flat Room row, not MediaMetadata: plain columns round-trip safely, and the main
+                // process can upsert it as is (keeping its own dateAdded).
+                temp.writeText(renderResultGson.toJson(buildEntity(context.applicationContext, photoId, metadata)))
+                check(temp.renameTo(file)) { "Cannot rename ${temp.absolutePath}" }
+                true
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                PLog.e(TAG, "Failed to save render result for photo: $photoId", e)
+                temp.delete()
+                false
+            }
+        }
+
     suspend fun deleteMedia(context: Context, photoId: String) {
+        if (RenderProcess.isCurrent) {
+            PLog.w(TAG, "Render process: gallery delete ignored for photo: $photoId")
+            return
+        }
         ensureMigrated(context)
         withContext(Dispatchers.IO) {
             GalleryDatabase.getInstance(context.applicationContext).galleryMediaDao().deleteById(photoId)

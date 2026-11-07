@@ -5,6 +5,8 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
+import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.utils.RenderProcess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,7 +27,8 @@ import kotlinx.coroutines.launch
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
     name = "user_preferences",
     produceMigrations = { context ->
-        listOf(
+        // Migrations write the file; :render only reads what the main process migrated.
+        if (RenderProcess.isCurrent) emptyList() else listOf(
             OpenAiApiKeyEncryptionMigration(),
             BuiltInDeviceConfigurationMigration.create(context),
         )
@@ -116,6 +119,11 @@ class UserPreferencesRepository(private val context: Context) {
      * ```
      */
     suspend fun update(block: UserPreferences.() -> Unit) {
+        if (RenderProcess.isCurrent) {
+            // DataStore is single-process: only the main process writes user_preferences.
+            PLog.w("UserPreferencesRepository", "Render process: preference write ignored")
+            return
+        }
         context.dataStore.edit { preferences -> UserPreferences(preferences, writable = true).block() }
     }
 

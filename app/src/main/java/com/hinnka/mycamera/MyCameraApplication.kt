@@ -15,6 +15,7 @@ import com.hinnka.mycamera.update.AppUpdateManager
 import com.hinnka.mycamera.utils.BuglyHelper
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.utils.RenderProcess
 import com.hinnka.mycamera.utils.StartupTrace
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
@@ -30,6 +31,14 @@ class MyCameraApplication : Application() {
         super.onCreate()
         StartupTrace.mark("Application.onCreate start")
         instance = this
+        if (RenderProcess.isCurrent) {
+            // The render needs only the LUT, DCP and noise profile lists. Everything below writes shared
+            // state (gallery recovery) or serves the UI. RawColorCalibrationPolicy.mode comes from the
+            // render job, set by the render service before it renders.
+            ContentRepository.getInstance(this).initialize()
+            PLog.i(TAG, "Render process: skipped app startup work")
+            return
+        }
         applicationScope.launch(Dispatchers.Default) {
             RawSceneExposureEstimator.warmUp(this@MyCameraApplication)
         }
