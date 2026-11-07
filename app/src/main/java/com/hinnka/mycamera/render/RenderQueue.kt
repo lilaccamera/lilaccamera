@@ -13,6 +13,7 @@ import androidx.annotation.StringRes
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
 import com.hinnka.mycamera.gallery.GalleryManager
+import com.hinnka.mycamera.gallery.MediaData
 import com.hinnka.mycamera.gallery.PhotoStacks
 import com.hinnka.mycamera.gallery.db.GalleryMediaStore
 import com.hinnka.mycamera.utils.PLog
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.RandomAccessFile
@@ -441,12 +443,18 @@ object RenderQueue {
      * Main process: renders the DNG of [sourcePhotoId] again with [look] as a new gallery photo next to
      * it, labelled with the look; the original stays untouched. Capture facts are kept from the source.
      */
+    // NonCancellable: leaving the screen mid-copy must not leave a half-made photo behind.
     suspend fun renderAgain(context: Context, sourcePhotoId: String, look: RenderLook): RenderAgainResult =
-        copyForRenderAgain(context.applicationContext, sourcePhotoId, look)
-            .also { if (it is RenderAgainResult.Queued) queueCopies(context.applicationContext) }
+        withContext(NonCancellable) {
+            copyForRenderAgain(context.applicationContext, sourcePhotoId, look)
+                .also { if (it is RenderAgainResult.Queued) queueCopies(context.applicationContext) }
+        }
 
     /** [renderAgain] for each of [photoIds], skipping the ones it refuses. */
-    suspend fun renderAgainBatch(context: Context, photoIds: Collection<String>, look: RenderLook): RenderAgainBatchResult {
+    suspend fun renderAgainBatch(context: Context, photoIds: Collection<String>, look: RenderLook): RenderAgainBatchResult =
+        withContext(NonCancellable) { renderAgainBatchNow(context, photoIds, look) }
+
+    private suspend fun renderAgainBatchNow(context: Context, photoIds: Collection<String>, look: RenderLook): RenderAgainBatchResult {
         val results = photoIds.map { copyForRenderAgain(context.applicationContext, it, look) }
         val queued = results.count { it is RenderAgainResult.Queued }
         if (queued > 0) queueCopies(context.applicationContext)
@@ -463,13 +471,20 @@ object RenderQueue {
         GalleryManager.notifyPhotoLibraryChanged()
     }
 
+    /** The gallery record and finished render job of [photoId] when it can be rendered again: a single-frame Pro photo with its DNG. */
+    internal suspend fun renderAgainSource(context: Context, photoId: String): Pair<MediaData, RenderJob>? =
+        withContext(Dispatchers.IO) {
+            val job = RenderJob.read(context, photoId)?.takeIf { it.state == RenderJob.State.DONE } ?: return@withContext null
+            val source = GalleryMediaStore.getPhotoData(context, photoId)?.takeIf { it.metadata != null } ?: return@withContext null
+            if (!GalleryManager.getDngFile(context, photoId).isFile) return@withContext null
+            source to job
+        }
+
     private suspend fun copyForRenderAgain(context: Context, sourcePhotoId: String, look: RenderLook): RenderAgainResult =
         withContext(Dispatchers.IO) {
-            val job = RenderJob.read(context, sourcePhotoId)?.takeIf { it.state == RenderJob.State.DONE }
-            val source = GalleryMediaStore.getPhotoData(context, sourcePhotoId)
-            val metadata = source?.metadata
+            val (source, job) = renderAgainSource(context, sourcePhotoId) ?: return@withContext RenderAgainResult.NotEligible
+            val metadata = checkNotNull(source.metadata)
             val sourceDng = GalleryManager.getDngFile(context, sourcePhotoId)
-            if (job == null || metadata == null || !sourceDng.isFile) return@withContext RenderAgainResult.NotEligible
             if (RenderLook.fromPhoto(metadata, job) == look) return@withContext RenderAgainResult.SameLook
             val photoId = UUID.randomUUID().toString()
             val dir = RenderJob.photoDir(context, photoId)

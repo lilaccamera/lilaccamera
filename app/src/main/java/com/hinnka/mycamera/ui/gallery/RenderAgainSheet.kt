@@ -52,15 +52,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.data.ContentRepository
-import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.gallery.MediaMetadata
-import com.hinnka.mycamera.gallery.db.GalleryMediaStore
 import com.hinnka.mycamera.processor.DenoiseStrength
 import com.hinnka.mycamera.raw.MeteringSystem
 import com.hinnka.mycamera.raw.RawNoiseProfileInfo
 import com.hinnka.mycamera.raw.RawNoiseProfileManager
-import com.hinnka.mycamera.render.RenderJob
 import com.hinnka.mycamera.render.RenderLook
+import com.hinnka.mycamera.render.RenderQueue
 import com.hinnka.mycamera.ui.components.AppModalBottomSheet
 import com.hinnka.mycamera.ui.components.SliderSettingItem
 import com.hinnka.mycamera.ui.components.SwitchSettingItem
@@ -74,13 +72,10 @@ import kotlin.math.roundToInt
 /** A photo that can be rendered again, with the look it was rendered with. */
 internal data class RenderAgainSource(val metadata: MediaMetadata, val look: RenderLook)
 
-/** The checks of RenderQueue.renderAgain, so the UI offers it only where it works. */
+/** The same check RenderQueue.renderAgain makes, so the UI offers it only where it works. */
 internal suspend fun loadRenderAgainSource(context: Context, photoId: String): RenderAgainSource? =
-    withContext(Dispatchers.IO) {
-        val job = RenderJob.read(context, photoId)?.takeIf { it.state == RenderJob.State.DONE }
-            ?: return@withContext null
-        val metadata = GalleryMediaStore.getPhotoData(context, photoId)?.metadata ?: return@withContext null
-        if (!GalleryManager.getDngFile(context, photoId).isFile) return@withContext null
+    RenderQueue.renderAgainSource(context, photoId)?.let { (source, job) ->
+        val metadata = checkNotNull(source.metadata)
         RenderAgainSource(metadata, RenderLook.fromPhoto(metadata, job))
     }
 
@@ -268,7 +263,10 @@ internal fun RenderAgainSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
             Text(
-                text = stringResource(R.string.render_again_preview, look.label(context)),
+                text = stringResource(
+                    R.string.render_again_preview,
+                    look.label(context, noiseModelName(context, look.noiseProfileId, profiles))
+                ),
                 color = GalleryToolbarContent.copy(alpha = 0.5f),
                 fontSize = 12.sp,
                 lineHeight = 16.sp,

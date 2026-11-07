@@ -93,6 +93,7 @@ sealed interface EnhancedStabilizationFallback {
 class Camera2Controller(private val context: Context) {
 
     companion object {
+        private const val COMPANION_JPEG_SHOTS_KEPT = 8
         private const val TAG = "Camera2Controller"
 
         // 自定义错误代码
@@ -539,6 +540,8 @@ class Camera2Controller(private val context: Context) {
     var onRawCompanionJpeg: ((Long, ByteArray) -> Unit)? = null
     @Volatile
     var keepRawCompanionJpeg = false
+    /** Sensor timestamp of each Pro shot's first frame to its shot id, until its camera JPEG arrives (oldest dropped). */
+    private val companionJpegShotIds = LinkedHashMap<Long, Long>()
 
     private fun reservedImageCount(): Int = photoCaptures.values.sumOf { it.reservedFrames }
 
@@ -616,6 +619,16 @@ class Camera2Controller(private val context: Context) {
         }
         shot.timestamps.add(timestamp)
         photoCaptureByTimestamp[timestamp] = shot
+        // The camera JPEG often arrives after the shot is delivered and unmapped, so its shot is kept apart.
+        if (keepRawCompanionJpeg && !shot.continuousBurst && !shot.companionJpegTaken) {
+            shot.companionJpegTaken = true
+            synchronized(companionJpegShotIds) {
+                companionJpegShotIds[timestamp] = shot.id
+                while (companionJpegShotIds.size > COMPANION_JPEG_SHOTS_KEPT) {
+                    companionJpegShotIds.remove(companionJpegShotIds.keys.first())
+                }
+            }
+        }
         if (pendingImages.containsKey(timestamp)) {
             accountAcquiredPhotoImage(shot, timestamp)
             if (shot.failed) pendingImages.remove(timestamp)?.close()
@@ -972,17 +985,8 @@ class Camera2Controller(private val context: Context) {
     }
 
     /** The id of the shot whose first companion JPEG has [timestamp], when it is to be kept. */
-    private fun takeRawCompanionJpeg(timestamp: Long): Long? {
-        if (!keepRawCompanionJpeg) return null
-        val shot = photoCaptureByTimestamp[timestamp]
-        if (shot == null) {
-            PLog.w(TAG, "Camera JPEG without a shot: timestamp=$timestamp")
-            return null
-        }
-        if (shot.companionJpegTaken || shot.continuousBurst) return null
-        shot.companionJpegTaken = true
-        return shot.id
-    }
+    private fun takeRawCompanionJpeg(timestamp: Long): Long? =
+        if (!keepRawCompanionJpeg) null else synchronized(companionJpegShotIds) { companionJpegShotIds.remove(timestamp) }
 
     private fun processOrBufferImageForCaptureResult(image: SafeImage) {
         val timestamp = image.timestamp

@@ -52,7 +52,8 @@ data class RenderLook(
     )
 
     /** Like "NR 0.50 · CNR 0.30 · Sharp 0.30 · UHDR"; settings at their defaults are left out. */
-    fun label(context: Context): String = buildList {
+    /** [profileName] skips looking the noise model up, which reads the imported-profile list from disk. */
+    fun label(context: Context, profileName: String? = null): String = buildList {
         add("NR %.2f".format(Locale.US, noiseReduction))
         add("CNR %.2f".format(Locale.US, chromaNoiseReduction))
         add("Sharp %.2f".format(Locale.US, sharpening))
@@ -62,11 +63,8 @@ data class RenderLook(
         if (!lensShadingCorrection) add("LSC off")
         if (renderingEngine != RawRenderingEngine.AdobeCurve) add(renderingEngine.name)
         if (ultraHdr) add("UHDR")
-        if (noiseProfileId != RawNoiseProfileManager.DEFAULT_PROFILE_ID) add(noiseProfileName(context))
+        if (noiseProfileId != RawNoiseProfileManager.DEFAULT_PROFILE_ID) add(profileName ?: noiseProfileName(context))
     }.joinToString(LABEL_SEPARATOR)
-
-    /** [label] in ASCII for a file name, like `NR0.50_CNR0.30_Sharp0.30_UHDR`. */
-    fun fileSuffix(context: Context): String = fileSuffixOf(label(context))
 
     private fun noiseProfileName(context: Context): String = when (noiseProfileId) {
         RawNoiseProfileManager.SYSTEM_PROFILE_ID -> "System"

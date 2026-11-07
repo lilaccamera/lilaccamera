@@ -1554,6 +1554,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val pendingCaptureSettings = java.util.concurrent.ConcurrentHashMap<Long, CaptureSettingsSnapshot>()
     // Pro shots whose camera JPEG is to be saved, until it arrives; it may come after the shot is ready.
     private val cameraJpegShots = java.util.concurrent.ConcurrentHashMap<Long, CaptureSettingsSnapshot>()
+    private val CAMERA_JPEG_GRACE_MS = 10_000L
     private var multipleExposureMetadata: MediaMetadata? = null
     var multipleExposureState by mutableStateOf(MultipleExposureSessionState())
         private set
@@ -1741,7 +1742,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         shotSettings.galleryRegistration.await()
                         processCapturedPhoto(photo, shotSettings)
                     } finally {
-                        cameraJpegShots.remove(photo.id)
+                        // The camera JPEG may still arrive after the shot is processed; give it a few seconds.
+                        viewModelScope.launch { delay(CAMERA_JPEG_GRACE_MS); cameraJpegShots.remove(photo.id) }
                         GalleryManager.finishProcessingPhoto(
                             getApplication(), shotSettings.photoId, shotSettings.savedPhotoId != null
                         )
