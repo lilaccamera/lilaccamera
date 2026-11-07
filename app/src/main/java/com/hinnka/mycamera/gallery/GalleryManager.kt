@@ -4121,7 +4121,7 @@ object GalleryManager {
         )
     }
 
-    private suspend fun renderRawDngPhotoOutputs(
+    internal suspend fun renderRawDngPhotoOutputs(
         context: Context,
         photoId: String,
         dngFile: File,
@@ -4137,6 +4137,8 @@ object GalleryManager {
         shouldAutoSave: Boolean,
         capturePreviewThumbnail: Bitmap? = null,
         captureExposureInputs: RawCaptureExposureInputs? = null,
+        /** Capture-time profile for a queued render; null reads the current preference. */
+        rawNoiseProfileId: String? = null,
     ) {
         val photoDir = getPhotoDir(context, photoId, true)
         val photoFile = File(photoDir, PHOTO_FILE)
@@ -4172,7 +4174,7 @@ object GalleryManager {
             chromaDenoiseValue = rawChromaNoiseReduction,
             rawDcpId = updatedMetadata.rawDcpId,
             rawEmbeddedDngProfileId = updatedMetadata.rawEmbeddedDngProfileId,
-            rawNoiseProfileId = resolveRawNoiseProfileId(context, updatedMetadata),
+            rawNoiseProfileId = rawNoiseProfileId ?: resolveRawNoiseProfileId(context, updatedMetadata),
             rawHncsProfileId = updatedMetadata.rawHncsProfileId,
             rawHncsRenderIntent = updatedMetadata.rawHncsRenderIntent,
             rawHncsFilmCurveMode = updatedMetadata.rawHncsFilmCurveMode,

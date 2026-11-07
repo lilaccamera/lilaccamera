@@ -33,3 +33,11 @@
     native <methods>;
 }
 
+
+# render_job.json is Gson-encoded and may be read by a later app version: keep field and enum names.
+-keepclassmembers class com.hinnka.mycamera.render.RenderJob,
+    com.hinnka.mycamera.render.RenderJob$*,
+    com.hinnka.mycamera.raw.RawSceneExposureDeviceLimits,
+    com.hinnka.mycamera.raw.RawColorCalibrationMode {
+    <fields>;
+}

@@ -238,6 +238,12 @@
                     android:resource="@xml/phantom_widget_info" />
         </receiver>
 
+        <!-- Renders one queued RAW photo per process lifetime; the name must match RenderProcess. -->
+        <service
+                android:name=".render.RawRenderService"
+                android:exported="false"
+                android:process=":render" />
+
         <service
                 android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"
                 android:enabled="false"

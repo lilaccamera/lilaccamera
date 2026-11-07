@@ -51,7 +51,7 @@ object GalleryMediaStore {
     private var migrationChecked = false
 
     // Written by :render instead of Room; the main process applies it.
-    private const val RENDER_RESULT_FILE = "render_result.json"
+    const val RENDER_RESULT_FILE = "render_result.json"
     private val renderResultGson = GsonBuilder().serializeSpecialFloatingPointValues().create()
 
     suspend fun ensureMigrated(context: Context) {
