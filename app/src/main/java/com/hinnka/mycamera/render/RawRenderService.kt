@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Binder
+import android.os.Debug
 import android.os.IBinder
 import android.os.Process
 import com.hinnka.mycamera.data.ContentRepository
@@ -16,6 +17,8 @@ import com.hinnka.mycamera.utils.RenderProcess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -29,6 +32,7 @@ class RawRenderService : Service() {
     enum class Stage { STARTED, RENDERING, DONE, FAILED }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var currentStage = Stage.STARTED
 
     override fun onBind(intent: Intent): IBinder {
         val photoId = intent.getStringExtra(EXTRA_PHOTO_ID)
@@ -47,7 +51,15 @@ class RawRenderService : Service() {
 
     private suspend fun renderAndExit(photoId: String) {
         broadcast(photoId, Stage.STARTED)
+        // Repeats the current stage with a fresh memory reading for the queue notification.
+        val memoryTicker = scope.launch {
+            while (isActive) {
+                delay(MEMORY_REPORT_INTERVAL_MS)
+                broadcast(photoId, currentStage)
+            }
+        }
         val rendered = render(photoId)
+        memoryTicker.cancel()
         broadcast(photoId, if (rendered) Stage.DONE else Stage.FAILED)
         PLog.i(TAG, "Render of $photoId ${if (rendered) "done" else "failed"}; ending the render process")
         stopSelf()
@@ -102,11 +114,15 @@ class RawRenderService : Service() {
     }
 
     private fun broadcast(photoId: String, stage: Stage) {
+        currentStage = stage
+        // Total PSS of this process, GPU driver memory included: what decides a low-memory kill.
+        val pssKb = Debug.MemoryInfo().also(Debug::getMemoryInfo).totalPss
         sendBroadcast(
             Intent(ACTION_STAGE)
                 .setPackage(packageName)
                 .putExtra(EXTRA_PHOTO_ID, photoId)
                 .putExtra(EXTRA_STAGE, stage.name)
+                .putExtra(EXTRA_PSS_KB, pssKb)
         )
     }
 
@@ -116,6 +132,9 @@ class RawRenderService : Service() {
         const val EXTRA_PHOTO_ID = "com.hinnka.mycamera.render.extra.PHOTO_ID"
         /** A [Stage] name. */
         const val EXTRA_STAGE = "com.hinnka.mycamera.render.extra.STAGE"
+        /** Total PSS of the render process in kB, an Int. */
+        const val EXTRA_PSS_KB = "com.hinnka.mycamera.render.extra.PSS_KB"
+        private const val MEMORY_REPORT_INTERVAL_MS = 2_000L
 
         // One job per process lifetime: the process exits after it.
         private val renderClaimed = AtomicBoolean(false)

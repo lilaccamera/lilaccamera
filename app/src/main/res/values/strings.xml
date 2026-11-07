@@ -1534,4 +1534,6 @@
     <string name="render_queue_stage_rendering">Rendering the photo</string>
     <string name="render_queue_stage_done">Saving to the gallery</string>
     <string name="render_queue_stage_failed">Render failed</string>
+    <string name="render_queue_memory">Render %1$d MB · Free %2$d MB</string>
+    <string name="render_queue_memory_free">Free %1$d MB</string>
 </resources>

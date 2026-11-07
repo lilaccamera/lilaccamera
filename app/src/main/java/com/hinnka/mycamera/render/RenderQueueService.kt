@@ -51,6 +51,7 @@ class RenderQueueService : Service() {
     private var currentPhotoId: String? = null
     private var stage: RawRenderService.Stage? = null
     private val lowMemoryRetries = mutableMapOf<String, Int>()
+    private var renderPssKb: Int? = null
 
     private val stageReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -60,6 +61,7 @@ class RenderQueueService : Service() {
             // Only the notification follows stages: after DONE or FAILED the render ends its process,
             // which the connection reports.
             stage = received
+            renderPssKb = intent.getIntExtra(RawRenderService.EXTRA_PSS_KB, 0).takeIf { it > 0 }
             updateNotification()
         }
     }
@@ -177,6 +179,7 @@ class RenderQueueService : Service() {
         }
         currentPhotoId = photoId
         stage = null
+        renderPssKb = null
         updateNotification()
         return try {
             val intent = Intent(this, RawRenderService::class.java).putExtra(RawRenderService.EXTRA_PHOTO_ID, photoId)
@@ -242,6 +245,14 @@ class RenderQueueService : Service() {
         }
     }
 
+    /** The render process's memory and what the phone has left, to see how close a render is to a kill. */
+    private fun memoryText(): String {
+        val info = ActivityManager.MemoryInfo().also { getSystemService(ActivityManager::class.java).getMemoryInfo(it) }
+        val freeMb = (info.availMem / (1024 * 1024)).toInt()
+        return renderPssKb?.let { getString(R.string.render_queue_memory, it / 1024, freeMb) }
+            ?: getString(R.string.render_queue_memory_free, freeMb)
+    }
+
     private fun buildProgress(): Notification {
         val paused = RenderQueue.isPaused(this)
         val stageText = when (stage) {
@@ -257,7 +268,9 @@ class RenderQueueService : Service() {
                 if (total == 0) getString(R.string.render_queue_channel)
                 else getString(R.string.render_queue_title, (done + 1).coerceAtMost(total), total)
             )
-            .setContentText(getString(stageText))
+            // Memory first: it is what the user watches; the stage goes in the header.
+            .setContentText(memoryText())
+            .setSubText(getString(stageText))
             .setProgress(total, done, total == 0)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
