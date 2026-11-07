@@ -346,8 +346,8 @@ data class CameraState(
 
     // 是否正在拍照
     val isCapturing: Boolean = false,
-    // lilac: a RAW image is still open, so the next RAW shot would be refused.
-    val rawCaptureBusy: Boolean = false,
+    // The next shot would be refused: lilac RAW image still open, or the capture buffers are too full.
+    val captureBusy: Boolean = false,
     val photoCaptureProgress: PhotoCaptureProgress? = null,
 
     // LUT 设置

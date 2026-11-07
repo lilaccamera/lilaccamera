@@ -599,6 +599,7 @@ class Camera2Controller(private val context: Context) {
             exposureCompensationStep = state.getExposureCompensationStep(),
         )
         photoCaptures[shot.id] = shot
+        updateCaptureBusy()
         PLog.d(TAG, "Capture reserved: id=${shot.id} frames=$frameCount occupied=$occupied")
         return shot
     }
@@ -659,6 +660,7 @@ class Camera2Controller(private val context: Context) {
         shot.timeout?.let { cameraHandler?.removeCallbacks(it) }
         shot.timeout = null
         photoCaptures.remove(shot.id)
+        updateCaptureBusy()
         shot.startedFrameNumbers.forEach { pendingCaptureStartedTimestamps.remove(it) }
         shot.startedFrameNumbers.clear()
         shot.timestamps.forEach(::discardCaptureTimestamp)
@@ -953,7 +955,7 @@ class Camera2Controller(private val context: Context) {
     private fun trackImage(image: Image?): SafeImage? {
         if (image != null) {
             openImagesCount.getAndIncrement()
-            updateRawCaptureBusy()
+            updateCaptureBusy()
         }
         return image?.let { SafeImage(it, this) }
     }
@@ -1147,14 +1149,21 @@ class Camera2Controller(private val context: Context) {
         if (openImagesCount.decrementAndGet() == 0) {
             checkAndClosePendingReaders()
         }
-        updateRawCaptureBusy()
+        updateCaptureBusy()
     }
 
-    /** Mirrors the lilac RAW refusal in [reservePhotoCapture] so the shutter button can show it. */
-    private fun updateRawCaptureBusy() {
-        if (!IS_LILAC) return
-        val busy = isRawCaptureReader(imageReader) && openImagesCount.get() > 0
-        _state.update { if (it.rawCaptureBusy == busy) it else it.copy(rawCaptureBusy = busy) }
+    /**
+     * Mirrors the refusals in [reservePhotoCapture] so the shutter button can show them before a press:
+     * the lilac RAW guard, and buffers too full for the next shot (Photo mode shots still being stacked hold their frames).
+     */
+    private fun updateCaptureBusy() {
+        val reader = imageReader
+        val open = openImagesCount.get()
+        val rawBusy = IS_LILAC && isRawCaptureReader(reader) && open > 0
+        val full = reader != null &&
+            open + reservedImageCount() + captureImageRequestCount(_state.value, reader) > CAPTURE_READER_MAX_IMAGES
+        val busy = rawBusy || full
+        _state.update { if (it.captureBusy == busy) it else it.copy(captureBusy = busy) }
     }
 
     private fun resolveImageReaderMaxImages(): Int = CAPTURE_READER_MAX_IMAGES

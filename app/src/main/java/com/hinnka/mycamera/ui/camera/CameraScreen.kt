@@ -2083,7 +2083,7 @@ private fun Controls(
     val captureProcessingState by viewModel.captureProcessingState.collectAsState()
     val capturedThumbnail by viewModel.capturedThumbnail.collectAsState()
     // Same rule as the lilac refusal in Camera2Controller.reservePhotoCapture.
-    val rawCaptureBusy = state.rawCaptureBusy
+    val captureBusy = state.captureBusy
 
     Box(
         modifier = modifier,
@@ -2125,7 +2125,7 @@ private fun Controls(
                                 0
                             },
                             completedCount = captureProcessingState.completedCount,
-                            shutterWaiting = rawCaptureBusy && state.captureMode == CaptureMode.PHOTO && !state.isCapturing,
+                            shutterWaiting = captureBusy && state.captureMode == CaptureMode.PHOTO && !state.isCapturing,
                             modifier = Modifier.matchParentSize()
                         )
                     }
@@ -2135,7 +2135,7 @@ private fun Controls(
                     captureMode = state.captureMode,
                     isProfessionalMode = state.useRaw && state.isRawSupported,
                     isCapturing = state.isCapturing,
-                    isRawBusy = rawCaptureBusy,
+                    isCaptureBusy = captureBusy,
                     photoCaptureProgress = state.photoCaptureProgress,
                     isBurstCapturing = state.burstCapturing,
                     isVideoRecording = state.videoRecordingState.isRecording,
@@ -2359,7 +2359,7 @@ fun CaptureButton(
     captureMode: CaptureMode,
     isProfessionalMode: Boolean,
     isCapturing: Boolean,
-    isRawBusy: Boolean = false,
+    isCaptureBusy: Boolean = false,
     photoCaptureProgress: PhotoCaptureProgress?,
     isBurstCapturing: Boolean,
     isVideoRecording: Boolean,
@@ -2380,12 +2380,12 @@ fun CaptureButton(
     val showMultipleExposureProgress = captureMode == CaptureMode.PHOTO && multipleExposureEnabled
     val showCaptureProgress = captureMode == CaptureMode.PHOTO && isCapturing
     val showVideoProcessingProgress = captureMode == CaptureMode.VIDEO && isVideoProcessing
-    // While a RAW shot would be refused: grey centre and a breathing white ring (capture uses a spinning
-    // accent ring); a pop and a light tick when it is usable again.
-    val showRawBusy = captureMode == CaptureMode.PHOTO && isRawBusy && !isCapturing
+    // While a shot would be refused (Pro: RAW still saving; Photo: buffers full): grey centre and a breathing
+    // white ring (capture uses a spinning accent ring); a pop and a light tick when it is usable again.
+    val showBusy = captureMode == CaptureMode.PHOTO && isCaptureBusy && !isCapturing
     val showActivityProgress = showCaptureProgress || showVideoProcessingProgress
     val progressRingCount = (if (showMultipleExposureProgress) 1 else 0) +
-        (if (showActivityProgress || showRawBusy) 1 else 0)
+        (if (showActivityProgress || showBusy) 1 else 0)
     val infiniteTransition = rememberInfiniteTransition(label = "infinite transition")
     var isPressed by remember { mutableStateOf(false) }
     val customImage = remember(customImagePath) {
@@ -2401,21 +2401,21 @@ fun CaptureButton(
     )
     // Opaque neutral grey on top of the centre: a dark tint over the yellow would read as muddy olive.
     val busyTint by animateFloatAsState(
-        targetValue = if (showRawBusy) 1f else 0f,
+        targetValue = if (showBusy) 1f else 0f,
         animationSpec = tween(250),
         label = "captureBusyTint"
     )
     val haptics = LocalHapticFeedback.current
     val readyPop = remember { Animatable(1f) }
-    var wasRawBusy by remember { mutableStateOf(false) }
-    LaunchedEffect(showRawBusy) {
-        if (wasRawBusy && !showRawBusy) {
+    var wasBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(showBusy) {
+        if (wasBusy && !showBusy) {
             // VirtualKey (a short click): the XZ1 Compact's vibrator ignores TextHandleMove's texture tick.
             haptics.performHapticFeedback(HapticFeedbackType.VirtualKey)
             readyPop.animateTo(1.15f, tween(120))
             readyPop.animateTo(1f, spring(dampingRatio = 0.4f))
         }
-        wasRawBusy = showRawBusy
+        wasBusy = showBusy
     }
 
     val pulseAlpha by infiniteTransition.animateFloat(
@@ -2571,7 +2571,7 @@ fun CaptureButton(
                 Box(Modifier.fillMaxSize().background(Color(0xFF3C3C3C).copy(alpha = busyTint)))
             }
         }
-        if (showRawBusy) {
+        if (showBusy) {
             CaptureProgressRing(
                 color = Color.White.copy(alpha = rememberRawBusyPulse()),
                 startAngle = -90f,
