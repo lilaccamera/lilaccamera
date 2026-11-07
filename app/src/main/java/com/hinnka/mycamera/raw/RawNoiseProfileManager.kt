@@ -149,6 +149,7 @@ class RawNoiseProfileManager(context: Context) {
         const val PIXEL8_PRO_PROFILE_ID = "builtin_noise_pixel8_pro"
         const val X9_ULTRA_PROFILE_ID = "builtin_noise_x9_ultra"
         const val X9_ULTRA_3X_PROFILE_ID = "builtin_noise_x9_ultra_3x"
+        const val XZ1C_PROFILE_ID = "builtin_noise_xz1c_measured"
         const val DEFAULT_PROFILE_ID = SYSTEM_PROFILE_ID
 
         private val BUILT_IN_PROFILES = listOf(
@@ -214,6 +215,13 @@ class RawNoiseProfileManager(context: Context) {
                 filePath = "noise_profiles/X9Ultra3X.c",
                 isBuiltIn = true,
                 nameResId = R.string.raw_noise_profile_x9_ultra_3x,
+            ),
+            RawNoiseProfileInfo(
+                id = XZ1C_PROFILE_ID,
+                nameMap = emptyMap(),
+                filePath = "noise_profiles/XZ1c_Measured.c",
+                isBuiltIn = true,
+                nameResId = R.string.raw_noise_profile_xz1c,
             ),
         )
     }
