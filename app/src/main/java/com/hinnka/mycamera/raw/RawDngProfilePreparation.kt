@@ -1,8 +1,10 @@
 package com.hinnka.mycamera.raw
 
+import android.graphics.Bitmap
 import android.graphics.Rect
 import android.hardware.camera2.CameraCharacteristics
 import com.hinnka.mycamera.camera.readMetadataOrNull
+import com.hinnka.mycamera.preview.PortraitMaskSnapshot
 import com.hinnka.mycamera.processor.GpuLinearRgbSource
 import java.nio.ByteBuffer
 
@@ -69,6 +71,21 @@ data class RawSceneExposureDeviceLimits(
         }
     }
 }
+
+/**
+ * Capture-time inputs that a DNG does not carry. A later render that regenerates the Photon PGTM
+ * passes them so ML AE and HDRNet viewfinder matching see what the capture-time path saw.
+ */
+data class RawCaptureExposureInputs(
+    /** The un-styled viewfinder frame the capture path matched against. */
+    val capturePreviewThumbnail: Bitmap? = null,
+    val capturePortraitMask: PortraitMaskSnapshot? = null,
+    val viewfinderMirroredHorizontally: Boolean = false,
+    val viewfinderPreviewToCaptureRotationDegrees: Int = 0,
+    val sceneExposureDeviceLimits: RawSceneExposureDeviceLimits? = null,
+    /** ML AE ratio cap at capture time; null reads the current preference. */
+    val maxHdrRatio: Float? = null,
+)
 
 /** Metadata generated before a RAW buffer is written as DNG. */
 data class RawDngProfilePreparationOptions(

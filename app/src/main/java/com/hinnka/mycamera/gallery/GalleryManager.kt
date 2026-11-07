@@ -65,6 +65,7 @@ import com.hinnka.mycamera.raw.RawRenderingEngine
 import com.hinnka.mycamera.raw.RawDenoiseDefaults
 import com.hinnka.mycamera.raw.RawSharpeningDefaults
 import com.hinnka.mycamera.raw.RawAdaptiveExposureMode
+import com.hinnka.mycamera.raw.RawCaptureExposureInputs
 import com.hinnka.mycamera.raw.RawCaptureProfileCoordinator
 import com.hinnka.mycamera.raw.RawSceneExposureMath
 import com.hinnka.mycamera.raw.RawAppliedLensShading
@@ -4135,6 +4136,7 @@ object GalleryManager {
         photoQuality: Int,
         shouldAutoSave: Boolean,
         capturePreviewThumbnail: Bitmap? = null,
+        captureExposureInputs: RawCaptureExposureInputs? = null,
     ) {
         val photoDir = getPhotoDir(context, photoId, true)
         val photoFile = File(photoDir, PHOTO_FILE)
@@ -4189,6 +4191,7 @@ object GalleryManager {
                 yDensityGain = updatedMetadata.spectralFilmYDensityGain
             ),
             fotufilmDocument = FotufilmDocumentStorage.decode(updatedMetadata.fotufilmDocument, "photo metadata"),
+            captureExposureInputs = captureExposureInputs,
             onMetadata = { raw ->
                 updatedMetadata = updatedMetadata.merge(raw)
             }

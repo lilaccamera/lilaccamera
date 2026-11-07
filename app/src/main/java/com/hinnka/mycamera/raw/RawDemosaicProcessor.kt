@@ -1930,6 +1930,7 @@ class RawDemosaicProcessor {
         photonHdrNetInputExposureEv: Float? = null,
         appliedLensShading: RawAppliedLensShading? = null,
         denoiseHistory: RawDenoiseHistory? = null,
+        captureExposureInputs: RawCaptureExposureInputs? = null,
         onMetadata: ((RawMetadata) -> Unit)? = null
     ): RawHdrRenderResult? = withContext(glDispatcher) {
         val dngFile = File(dngFilePath)
@@ -1987,6 +1988,7 @@ class RawDemosaicProcessor {
                 photonHdrNetInputExposureEv = photonHdrNetInputExposureEv,
                 appliedLensShading = appliedLensShading,
                 denoiseHistory = denoiseHistory,
+                captureExposureInputs = captureExposureInputs,
             )
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to process RAW HDR sources: $dngFilePath", e)
@@ -2229,6 +2231,7 @@ class RawDemosaicProcessor {
         capturePhotonPgtmRequested: Boolean = false,
         captureProfileStatsBounds: Rect? = null,
         onCaptureProfilePrepared: ((RawDngCaptureProfileResult?) -> Unit)? = null,
+        captureExposureInputs: RawCaptureExposureInputs? = null,
         sourceDngRenderPlan: DcpRenderPlan? = null,
         defaultCropIsAuthoritative: Boolean = false,
     ): RawHdrRenderResult? = withContext(glDispatcher) {
@@ -3531,9 +3534,12 @@ class RawDemosaicProcessor {
                         request = RawSceneExposureMatcher.createRequest(
                             context = context,
                             metadata = actualMetadata,
-                            maxHdrRatio = ContentRepository.getInstance(context)
-                                .userPreferencesRepository.userPreferences.firstOrNull()
-                                ?.mlAeMaxHdrRatio
+                            deviceLimits = captureExposureInputs?.sceneExposureDeviceLimits,
+                            portraitMask = captureExposureInputs?.capturePortraitMask,
+                            maxHdrRatio = captureExposureInputs?.maxHdrRatio
+                                ?: ContentRepository.getInstance(context)
+                                    .userPreferencesRepository.userPreferences.firstOrNull()
+                                    ?.mlAeMaxHdrRatio
                                 ?: RawSceneExposureMath.FAST_MOMENTS_MAX_HDR_RATIO,
                         ),
                         metadata = actualMetadata,
@@ -3575,8 +3581,26 @@ class RawDemosaicProcessor {
                     useEstimatedAe -> checkNotNull(estimatedSourceToShortGain)
                     else -> persistedSourceToShortGain ?: 1f
                 }
+                // Same reference and preview-shutter guard as the capture-time HDRNet path.
+                val regenerationViewfinderReference = captureExposureInputs
+                    ?.takeUnless {
+                        actualMetadata.shutterSpeed >
+                            CameraState.MAX_PHOTO_PREVIEW_SHUTTER_SPEED_NS
+                    }
+                    ?.let { inputs ->
+                        RawLegacyAutoExposureMatcher.createRequest(
+                            capturePreviewThumbnail = inputs.capturePreviewThumbnail,
+                            capturePortraitMask = inputs.capturePortraitMask,
+                            viewfinderMirroredHorizontally =
+                                inputs.viewfinderMirroredHorizontally,
+                            viewfinderPreviewToCaptureRotationDegrees =
+                                inputs.viewfinderPreviewToCaptureRotationDegrees,
+                        )?.referenceFrame
+                    }
                 val regenerationAeSource = when {
                     usePersistedCaptureAe -> "PERSISTED_CAPTURE_AE"
+                    useEstimatedAe && regenerationViewfinderReference != null ->
+                        "MGC_ML_AE_REFRESH_WITH_VIEWFINDER_TARGET"
                     useEstimatedAe ->
                         "MGC_ML_AE_REFRESH_WITHOUT_VIEWFINDER_TARGET"
                     else -> "LEGACY_RATIO_SHORT_UNITY_FALLBACK"
@@ -3613,7 +3637,7 @@ class RawDemosaicProcessor {
                     statsBounds = outputSourceBounds,
                     rendererBaselineExposureEv = actualMetadata.baselineExposure +
                         dcpBaselineExposureOffsetOrZero(activeDcpRenderPlan),
-                    viewfinderReference = null,
+                    viewfinderReference = regenerationViewfinderReference,
                     outputRotation = actualRotation,
                     hdrRatio = regenerationHdrRatio,
                     sourceToShortGain = regenerationSourceToShortGain,
