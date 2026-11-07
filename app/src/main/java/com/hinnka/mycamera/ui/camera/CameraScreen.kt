@@ -2136,6 +2136,7 @@ private fun Controls(
                     isProfessionalMode = state.useRaw && state.isRawSupported,
                     isCapturing = state.isCapturing,
                     isCaptureBusy = captureBusy,
+                    isCountdownActive = state.countdownValue > 0,
                     photoCaptureProgress = state.photoCaptureProgress,
                     isBurstCapturing = state.burstCapturing,
                     isVideoRecording = state.videoRecordingState.isRecording,
@@ -2360,6 +2361,7 @@ fun CaptureButton(
     isProfessionalMode: Boolean,
     isCapturing: Boolean,
     isCaptureBusy: Boolean = false,
+    isCountdownActive: Boolean = false,
     photoCaptureProgress: PhotoCaptureProgress?,
     isBurstCapturing: Boolean,
     isVideoRecording: Boolean,
@@ -2383,6 +2385,8 @@ fun CaptureButton(
     // While a shot would be refused (Pro: RAW still saving; Photo: buffers full): grey centre and a breathing
     // white ring (capture uses a spinning accent ring); a pop and a light tick when it is usable again.
     val showBusy = captureMode == CaptureMode.PHOTO && isCaptureBusy && !isCapturing
+    // During the self-timer a press cancels it, so the centre shows a cross instead of a second shot.
+    val showCancelTimer = captureMode == CaptureMode.PHOTO && isCountdownActive && !isCapturing
     val showActivityProgress = showCaptureProgress || showVideoProcessingProgress
     val progressRingCount = (if (showMultipleExposureProgress) 1 else 0) +
         (if (showActivityProgress || showBusy) 1 else 0)
@@ -2401,7 +2405,7 @@ fun CaptureButton(
     )
     // Opaque neutral grey on top of the centre: a dark tint over the yellow would read as muddy olive.
     val busyTint by animateFloatAsState(
-        targetValue = if (showBusy) 1f else 0f,
+        targetValue = if (showBusy || showCancelTimer) 1f else 0f,
         animationSpec = tween(250),
         label = "captureBusyTint"
     )
@@ -2569,6 +2573,14 @@ fun CaptureButton(
             }
             if (busyTint > 0f) {
                 Box(Modifier.fillMaxSize().background(Color(0xFF3C3C3C).copy(alpha = busyTint)))
+            }
+            if (showCancelTimer) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = stringResource(R.string.capture_cancel_timer),
+                    tint = Color.White,
+                    modifier = Modifier.align(Alignment.Center).size(32.dp)
+                )
             }
         }
         if (showBusy) {
