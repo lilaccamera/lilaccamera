@@ -9126,6 +9126,9 @@ class RawDemosaicProcessor {
         )
     }
 
+    /** [release] on the GL thread, after any queued GL work; the next [getInstance] starts afresh. */
+    suspend fun releaseOnGlThread() = withContext(glDispatcher) { release() }
+
     /**
      * 释放资源
      */

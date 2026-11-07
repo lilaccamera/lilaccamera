@@ -90,6 +90,7 @@ import com.hinnka.mycamera.utils.DngWhiteLevelPatcher
 import com.hinnka.mycamera.utils.LargeDirectBuffer
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.RawProcessor
+import com.hinnka.mycamera.utils.RenderProcess
 import com.hinnka.mycamera.utils.SuperResolutionDngWriter
 import com.hinnka.mycamera.utils.YuvProcessor
 import kotlinx.coroutines.*
@@ -4305,6 +4306,9 @@ object GalleryManager {
                 updatedMetadata = updatedMetadata.merge(raw)
             }
         ) ?: return
+        // :render renders one photo and exits, so the RAW renderer's cached full-size textures are
+        // dead weight through the HDR outputs; the main process keeps them for the next capture.
+        if (RenderProcess.isCurrent) RawDemosaicProcessor.getInstance().releaseOnGlThread()
         var bitmap = rawResult.sdrBitmap
 
         if (updatedMetadata.isMirrored) {
@@ -4327,6 +4331,8 @@ object GalleryManager {
         if (saveMetadata(context, photoId, updatedMetadata)) onJpegSaved?.invoke()
         markProcessingPhotoDisplayReady(photoId, photoFile, updatedMetadata, isRawSource = true)
         val bokehBitmap = renderAndSaveBokehPhoto(context, photoId, updatedMetadata, bitmap)
+        // Before the HDR outputs, so the SDR bitmap can be freed while they run.
+        updateThumbnail(context, photoId, photoProcessor, updatedMetadata, bitmap)
 
         val preparedUltraHdrSource = if (updatedMetadata.manualHdrEffectEnabled) {
             photoProcessor.prepareUltraHdrSourceFromRawResult(
@@ -4343,12 +4349,22 @@ object GalleryManager {
         } else {
             null
         }
+        // With a RAW HDR source, the gain map, detail HDR and export read only the source, so the
+        // pre-LUT SDR and an uncropped HDR reference (full-size RGBA_F16 each) can go now.
+        preparedUltraHdrSource?.let { source ->
+            if (bokehBitmap !== source.sdrBase && !bokehBitmap.isRecycled) bokehBitmap.recycle()
+            if (bitmap !== source.sdrBase && !bitmap.isRecycled) bitmap.recycle()
+            rawResult.hdrReferenceBitmap?.takeIf { it !== source.hdrReference?.bitmap && !it.isRecycled }?.recycle()
+        }
         val preparedGainmapResult = preparedUltraHdrSource?.let { source ->
             var result: GainmapResult? = null
             val gainmapElapsed = measureTimeMillis {
                 result = gainmapProducer.build(source, HdrGainmapStrength.coerce(updatedMetadata.hdrEffectStrength))
             }
             PLog.d(TAG, "renderRawDngPhotoOutputs prepared gainmap for reuse, took=${gainmapElapsed}ms")
+            // Detail HDR and the export reuse the gain map and never read the HDR reference again.
+            if (result != null) source.hdrReference?.bitmap?.takeIf { !it.isRecycled }?.recycle()
+            PLog.d(TAG, "renderRawDngPhotoOutputs freed SDR and HDR reference before HDR outputs: sdrFreed=${bitmap.isRecycled}, hdrReferenceFreed=${source.hdrReference?.bitmap?.isRecycled}")
             result
         }
         preparedUltraHdrSource?.let {
@@ -4365,11 +4381,11 @@ object GalleryManager {
             )
         }
 
-        updateThumbnail(context, photoId, photoProcessor, updatedMetadata, bitmap)
         if (shouldAutoSave) {
             exportPhoto(
                 context,
                 photoId,
+                // Recycled when a RAW HDR source exists; exportPhoto then encodes the source instead.
                 bitmap,
                 photoProcessor,
                 updatedMetadata,
