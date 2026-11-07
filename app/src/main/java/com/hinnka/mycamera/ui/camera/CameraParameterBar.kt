@@ -1,6 +1,8 @@
 package com.hinnka.mycamera.ui.camera
 
 import android.hardware.camera2.CameraMetadata
+import android.widget.Toast
+import androidx.annotation.StringRes
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
@@ -60,7 +63,9 @@ internal data class CameraParameterItem(
     val label: String,
     val value: String?,
     val isEnabled: Boolean = true,
-    val isWarning: Boolean = false
+    val isWarning: Boolean = false,
+    /** Shown when a disabled item is tapped, so the tap is never silent. */
+    @StringRes val disabledMessage: Int? = null
 )
 
 @Composable
@@ -81,12 +86,16 @@ internal fun cameraParameterItems(state: CameraState): List<CameraParameterItem>
             CameraParameter.SHUTTER_SPEED,
             stringResource(R.string.camera_parameter_shutter),
             if (showValues) formatShutterSpeedValue(state.shutterSpeed) else null,
-            isWarning = showValues && state.isPreviewExposureLimited()
+            isEnabled = state.isManualSensorSupported,
+            isWarning = showValues && state.isPreviewExposureLimited(),
+            disabledMessage = R.string.manual_sensor_unavailable
         ),
         CameraParameterItem(
             CameraParameter.ISO,
             stringResource(R.string.camera_parameter_iso),
-            if (showValues) state.iso.toString() else null
+            if (showValues) state.iso.toString() else null,
+            isEnabled = state.isManualSensorSupported,
+            disabledMessage = R.string.manual_sensor_unavailable
         ),
         CameraParameterItem(
             CameraParameter.FOCUS,
@@ -112,6 +121,7 @@ internal fun ParameterItem(
     modifier: Modifier = Modifier
 ) {
     val titleOnly = item.value == null
+    val context = LocalContext.current
     val valueColor by animateColorAsState(
         targetValue = when {
             item.isWarning -> Color(0xFFFF6666)
@@ -138,7 +148,10 @@ internal fun ParameterItem(
             )
             .then(if (titleOnly) Modifier.clip(RoundedCornerShape(8.dp)) else Modifier)
             .semantics { selected = isSelected }
-            .clickable(enabled = item.isEnabled, role = Role.Button, onClick = onClick),
+            .clickable(enabled = item.isEnabled || item.disabledMessage != null, role = Role.Button) {
+                if (item.isEnabled) onClick()
+                else item.disabledMessage?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+            },
         contentAlignment = Alignment.Center
     ) {
         Box(

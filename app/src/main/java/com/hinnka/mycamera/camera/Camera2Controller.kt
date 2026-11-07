@@ -2827,6 +2827,7 @@ class Camera2Controller(private val context: Context) {
                     currentState.copy(
                         useRaw = requestedRawCaptureEnabled,
                         isRawSupported = isRawSupported,
+                        isManualSensorSupported = isManualSensorSupported,
                         isP010Supported = isP010Supported,
                         availableNrModes = selectableNrModes,
                         supportsCctWhiteBalance = supportsCctWhiteBalance(),

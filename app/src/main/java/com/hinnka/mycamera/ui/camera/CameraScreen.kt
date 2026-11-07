@@ -1038,7 +1038,7 @@ fun CameraScreen(
                 },
                 isAdjustable = when (selectedParameter) {
                     CameraParameter.EXPOSURE_COMPENSATION -> state.isAutoExposure
-                    CameraParameter.SHUTTER_SPEED, CameraParameter.ISO -> true
+                    CameraParameter.SHUTTER_SPEED, CameraParameter.ISO -> state.isManualSensorSupported
                     CameraParameter.FOCUS -> state.minimumFocusDistance > 0f
                     CameraParameter.WHITE_BALANCE -> state.canAdjustWhiteBalance
                 },

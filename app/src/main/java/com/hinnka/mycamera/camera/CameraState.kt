@@ -374,6 +374,8 @@ data class CameraState(
     val customVendorKeySettings: CustomVendorKeySettings = CustomVendorKeySettings.Empty,
 
     val isRawSupported: Boolean = false,
+    /** False on cameras that cannot take manual ISO or shutter (no MANUAL_SENSOR, e.g. the XZ1 Compact front camera). */
+    val isManualSensorSupported: Boolean = true,
     val rawCfaCorrectionModes: Map<String, String> = emptyMap(),
     val multiFrameOutputScale: Float? = null,
     val jpgMultiFrameDenoiseFrameCount: Int = MultiFrameConfig.DEFAULT_DENOISE_FRAME_COUNT,
