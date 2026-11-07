@@ -748,6 +748,9 @@ fun NavigationHost(
                             onViewBurst = { photoId ->
                                 navController.navigate(Routes.burstDetail(photoId))
                             },
+                            onOpenRenderQueue = {
+                                navController.navigate(Routes.RENDER_QUEUE)
+                            },
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -866,6 +869,9 @@ fun NavigationHost(
                     },
                     onViewBurst = { id ->
                         navController.navigate(Routes.burstDetail(id))
+                    },
+                    onOpenRenderQueue = {
+                        navController.navigate(Routes.RENDER_QUEUE)
                     }
                 )
             }

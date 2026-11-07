@@ -1,37 +1,51 @@
 package com.hinnka.mycamera.ui.gallery
 
 import android.graphics.BitmapFactory
+import android.icu.text.MessageFormat
 import android.os.SystemClock
 import android.text.format.DateUtils
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.render.RawRenderService
 import com.hinnka.mycamera.render.RenderJob
 import com.hinnka.mycamera.render.RenderQueue
+import com.hinnka.mycamera.ui.components.AppModalBottomSheet
+import com.hinnka.mycamera.ui.icons.AppIcons
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 /**
  * Queued, failed and skipped RAW renders with the queue's live state. Draws only small CPU-decoded
@@ -53,6 +67,7 @@ fun RenderQueueScreen(
     var jobs by remember { mutableStateOf(emptyList<RenderJob>()) }
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     var confirmSkipId by remember { mutableStateOf<String?>(null) }
+    var showMemoryInfo by remember { mutableStateOf(false) }
     val skipText = stringResource(R.string.render_queue_skip)
     val skip: (String) -> Unit = { photoId -> scope.launch { RenderQueue.skip(context, photoId) } }
     val setPaused: (Boolean) -> Unit = { pause ->
@@ -93,6 +108,14 @@ fun RenderQueueScreen(
                         )
                     }
                 },
+                actions = {
+                    IconButton(onClick = { showMemoryInfo = true }) {
+                        Icon(
+                            imageVector = Icons.Outlined.Info,
+                            contentDescription = stringResource(R.string.render_memory_info_title)
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
             )
         },
@@ -118,12 +141,18 @@ fun RenderQueueScreen(
                 )
             }
             item(key = "hint") {
-                Text(
-                    text = stringResource(R.string.render_queue_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
-                )
+                Column(
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf(R.string.render_queue_separate_hint, R.string.render_queue_hint).forEach {
+                        Text(
+                            text = stringResource(it),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
             items(status.finishedPhotoIds, key = { it }) { photoId ->
                 RenderJobRow(photoId, label = stringResource(R.string.render_queue_finished_row))
@@ -180,6 +209,7 @@ fun RenderQueueScreen(
             }
         }
     }
+    if (showMemoryInfo) MemoryInfoSheet(freeMb = freeMb, onDismiss = { showMemoryInfo = false })
     // Only the photo being rendered asks: skipping it throws away the render's progress.
     confirmSkipId?.let { photoId ->
         AlertDialog(
@@ -340,5 +370,115 @@ private fun RenderJobRow(
         },
         trailingContent = action?.let { { TextButton(onClick = onAction) { Text(it) } } },
         colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.background)
+    )
+}
+
+/** Plain-language help on why processing needs memory and how to free it. Opaque sheet: a blurred backdrop would cost memory. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MemoryInfoSheet(freeMb: Int, onDismiss: () -> Unit) {
+    AppModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(stringResource(R.string.render_memory_info_title), style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    text = stringResource(R.string.render_memory_info_free_now, freeMb),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            MemoryInfoRow(AppIcons.Photo, R.string.render_memory_info_why_title, R.string.render_memory_info_why)
+            MemoryInfoRow(Icons.Filled.Info, R.string.render_memory_info_tight_title, R.string.render_memory_info_tight)
+            MemoryInfoRow(AppIcons.Timer, R.string.render_memory_info_waiting_title, R.string.render_memory_info_waiting)
+            MemoryInfoHeading(R.string.render_memory_info_free_title)
+            MemoryInfoRow(Icons.Filled.Close, null, R.string.render_memory_info_close_apps)
+            MemoryInfoRow(Icons.Filled.KeyboardArrowUp, null, R.string.render_memory_info_swipe)
+            MemoryInfoRow(AppIcons.RestartAlt, null, R.string.render_memory_info_restart)
+            MemoryInfoHeading(R.string.render_memory_info_avoid_title)
+            MemoryInfoRow(Icons.Filled.Warning, null, R.string.render_memory_info_force_stop)
+        }
+    }
+}
+
+@Composable
+private fun MemoryInfoHeading(title: Int) {
+    Text(
+        text = stringResource(title),
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 8.dp)
+    )
+}
+
+@Composable
+private fun MemoryInfoRow(icon: ImageVector, title: Int?, text: Int) {
+    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            title?.let { Text(stringResource(it), style = MaterialTheme.typography.titleMedium) }
+            Text(stringResource(text), style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+/**
+ * The queue state of [photoId] as a chip that opens [RenderQueueScreen], for the photo viewer.
+ * Draws nothing for a photo that is not waiting, processing, failed or skipped.
+ */
+@Composable
+fun RenderQueuePhotoChip(photoId: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val status by RenderQueue.status.collectAsState()
+    val pendingIds by RenderQueue.pendingPhotoIds.collectAsState()
+    val failedIds by RenderQueue.failedPhotoIds.collectAsState()
+    // Skipped jobs and the queue order are only in the job files; every scan changes one of these keys.
+    val jobs by produceState(emptyList<RenderJob>(), pendingIds, failedIds, status.running, status.currentPhotoId) {
+        value = RenderQueue.jobs(context)
+    }
+    val paused = remember(jobs, status.pausingText) { RenderQueue.isPaused(context) }
+    val processing = status.running && photoId == status.currentPhotoId
+    val job = jobs.firstOrNull { it.photoId == photoId }
+    if (!processing && job == null) return
+    val failed = !processing && job?.state == RenderJob.State.FAILED
+    val label = when {
+        processing -> stringResource(R.string.render_chip_processing, (status.photoProgress * 100).roundToInt())
+        failed -> stringResource(R.string.render_chip_failed)
+        job?.state == RenderJob.State.SKIPPED -> stringResource(R.string.render_chip_skipped)
+        paused -> stringResource(R.string.render_chip_paused)
+        else -> {
+            val position = jobs.filter { it.state == RenderJob.State.QUEUED && it.photoId != status.currentPhotoId }
+                .indexOfFirst { it.photoId == photoId } + 1
+            if (position == 1 && status.running && status.waitingForMemory) {
+                stringResource(R.string.render_queue_stage_waiting_memory)
+            } else {
+                // RuleBasedNumberFormat is not in the public SDK; MessageFormat's ordinal type uses it internally.
+                val ordinal = MessageFormat("{0,ordinal}", context.resources.configuration.locales[0]).format(arrayOf(position))
+                stringResource(R.string.render_chip_waiting, ordinal)
+            }
+        }
+    }
+    val description = stringResource(R.string.render_chip_description, label)
+    AssistChip(
+        onClick = onClick,
+        label = { Text(label) },
+        leadingIcon = if (processing) {
+            { CircularProgressIndicator(progress = { status.photoProgress }, modifier = Modifier.size(AssistChipDefaults.IconSize), strokeWidth = 2.dp) }
+        } else null,
+        colors = AssistChipDefaults.assistChipColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+            labelColor = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+        ),
+        border = null,
+        modifier = modifier.semantics { contentDescription = description }
     )
 }

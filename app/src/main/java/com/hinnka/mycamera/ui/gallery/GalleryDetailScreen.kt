@@ -172,6 +172,7 @@ fun GalleryDetailScreen(
     onGoToGallery: (() -> Unit)? = null,
     onEdit: () -> Unit,
     onViewBurst: ((String) -> Unit)? = null,
+    onOpenRenderQueue: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val photos by viewModel.currentPhotos.collectAsState()
@@ -745,6 +746,16 @@ fun GalleryDetailScreen(
                         }
                     }
                 }
+            }
+            // Queued RAW renders exist only for app photos. Top: the processing preview labels the bottom.
+            if (currentPhoto != null && viewModel.selectedTab == GalleryTab.PHOTON) {
+                RenderQueuePhotoChip(
+                    photoId = currentPhoto.id,
+                    onClick = onOpenRenderQueue,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 12.dp)
+                )
             }
             if (
                 !isCurrentPhotoProcessing &&
