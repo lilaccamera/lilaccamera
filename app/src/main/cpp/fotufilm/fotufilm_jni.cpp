@@ -19,6 +19,7 @@
 #include <vector>
 
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "core/FilmGrainAsset.h"
 #include "core/FilmStockPack.h"
@@ -119,7 +120,8 @@ std::optional<std::string> readFile(const std::string& path) {
 
 /// Writes through a temporary file renamed into place, so a reader never sees a partial bank.
 bool writeFileAtomically(const std::string& path, const std::string& data) {
-    const std::string temporary = path + ".tmp";
+    // Per-process name: the main and :render processes may write the same bank at once.
+    const std::string temporary = path + "." + std::to_string(getpid()) + ".tmp";
     FILE* file = std::fopen(temporary.c_str(), "wb");
     if (!file) return false;
     const bool written = std::fwrite(data.data(), 1, data.size(), file) == data.size();
