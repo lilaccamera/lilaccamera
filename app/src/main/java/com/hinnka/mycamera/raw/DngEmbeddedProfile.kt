@@ -1,6 +1,7 @@
 package com.hinnka.mycamera.raw
 
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.utils.SuperResolutionDngWriter
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
@@ -12,6 +13,8 @@ internal data class DngEmbeddedProfileEntry(
     val profileName: String,
     val profile: DcpProfile?,
     val profileGainTableMap: DngProfileGainTableMap?,
+    /** Primary profile of a DNG whose Software tag says SuperResolutionDngWriter wrote it. */
+    val writtenByPhotonCamera: Boolean = false,
 ) {
     val hasProfileGainTableMap: Boolean
         get() = profileGainTableMap?.isValid == true
@@ -39,6 +42,7 @@ internal object DngEmbeddedProfile {
     private const val TIFF_TYPE_FLOAT = 11
     private const val TIFF_TYPE_DOUBLE = 12
 
+    private const val TAG_SOFTWARE = 305
     private const val TAG_COLOR_MATRIX1 = 50721
     private const val TAG_COLOR_MATRIX2 = 50722
     private const val TAG_CAMERA_CALIBRATION1 = 50723
@@ -122,6 +126,9 @@ internal object DngEmbeddedProfile {
                         ifd = ifd0,
                         byteOrder = byteOrder,
                         fallbackProfileGainTableMap = DngProfileGainTableMap.readFrom(file),
+                    )?.copy(
+                        writtenByPhotonCamera = readAscii(raf, ifd0[TAG_SOFTWARE], byteOrder) ==
+                            SuperResolutionDngWriter.SOFTWARE,
                     )?.let(::add)
 
                     val extraProfileOffsets = readIntegerValues(

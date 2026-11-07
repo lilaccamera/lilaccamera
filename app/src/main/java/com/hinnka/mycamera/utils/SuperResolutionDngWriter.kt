@@ -196,6 +196,8 @@ object SuperResolutionDngWriter {
     private const val TAG_STRIP_BYTE_COUNTS = 279
     private const val TAG_PLANAR_CONFIGURATION = 284
     private const val TAG_SOFTWARE = 305
+    /** Software tag value; DngEmbeddedProfile reads it to recognise this writer's DNGs. */
+    internal const val SOFTWARE = "PhotonCamera"
     private const val TAG_DATETIME = 306
     private const val TAG_SUB_IFDS = 330
     private const val TAG_XMP = DngCameraRawProfileXmp.TAG_XMP
@@ -679,7 +681,7 @@ object SuperResolutionDngWriter {
             add(long(TAG_STRIP_BYTE_COUNTS, imageByteCount))
             add(short(TAG_PLANAR_CONFIGURATION, 1))
             cameraRawProfileXmp?.let { add(byteArray(TAG_XMP, it)) }
-            add(ascii(TAG_SOFTWARE, "PhotonCamera"))
+            add(ascii(TAG_SOFTWARE, SOFTWARE))
             add(ascii(TAG_DATETIME, dateTime))
             if (exifEntries.isNotEmpty()) {
                 add(long(TAG_EXIF_IFD_POINTER, 0))

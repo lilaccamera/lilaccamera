@@ -2600,6 +2600,14 @@ class RawDemosaicProcessor {
                 metadata = actualMetadata,
                 embeddedDngRenderPlan = embeddedDngRenderPlan
                     ?.takeIf { embeddedProfileDecision.applyEmbeddedProfile }
+                    ?.let { plan ->
+                        // Our writer gives a profile DefaultBlackRender=None once it carries a
+                        // PGTM (SuperResolutionDngWriter.buildEmbeddedProfile); a plain Photon
+                        // DNG gets that PGTM only here, so resolve its black render the same way.
+                        if (regeneratePhotonPgtm &&
+                            selectedEmbeddedDngProfile?.writtenByPhotonCamera == true
+                        ) plan.copy(defaultBlackRender = DcpDefaultBlackRender.None) else plan
+                    }
             )
         } else {
             null
