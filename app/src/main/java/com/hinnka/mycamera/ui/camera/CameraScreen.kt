@@ -2410,7 +2410,8 @@ fun CaptureButton(
     var wasRawBusy by remember { mutableStateOf(false) }
     LaunchedEffect(showRawBusy) {
         if (wasRawBusy && !showRawBusy) {
-            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            // VirtualKey (a short click): the XZ1 Compact's vibrator ignores TextHandleMove's texture tick.
+            haptics.performHapticFeedback(HapticFeedbackType.VirtualKey)
             readyPop.animateTo(1.15f, tween(120))
             readyPop.animateTo(1f, spring(dampingRatio = 0.4f))
         }
