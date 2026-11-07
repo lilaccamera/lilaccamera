@@ -552,6 +552,13 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    /** A shutter press that takes no photo says so, so the user does not press again and get a late extra shot. */
+    private fun showCaptureBusyMessage() {
+        Handler(Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(context, com.hinnka.mycamera.R.string.capture_busy, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun markRawHalPoisoned(reader: ImageReader?, why: String) {
         if (!IS_LILAC || !isRawCaptureReader(reader) || isRawHalPoisoned()) return
         lilacQuirkPrefs.edit().putInt(KEY_RAW_HAL_POISONED_BOOT, bootCount()).apply()
@@ -568,6 +575,7 @@ class Camera2Controller(private val context: Context) {
         val occupied = openImagesCount.get() + reservedImageCount()
         if (occupied + frameCount > CAPTURE_READER_MAX_IMAGES) {
             PLog.w(TAG, "Capture rejected: occupied=$occupied requested=$frameCount capacity=$CAPTURE_READER_MAX_IMAGES")
+            showCaptureBusyMessage()
             return null
         }
         // The raw19 shim fails a RAW still started while a previous RAW image is still open, and RAW stays broken until reboot.
@@ -7784,6 +7792,7 @@ class Camera2Controller(private val context: Context) {
         if (_state.value.captureMode != CaptureMode.PHOTO) return
         if (_state.value.isCapturing) {
             PLog.d(TAG, "Ignoring capture request while a capture is already active")
+            showCaptureBusyMessage()
             return
         }
         val device = cameraDevice ?: return

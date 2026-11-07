@@ -3,6 +3,7 @@
     <string name="app_name">Photon Camera</string>
     <string name="raw_hal_restart_required">Pro mode failed. Restart the phone.</string>
     <string name="raw_capture_busy">Still saving the last photo.</string>
+    <string name="capture_busy">Not ready: still taking the last photo. No photo was taken.</string>
 
     <!-- Camera Controls -->
     <string name="switch_camera">Switch Camera</string>
