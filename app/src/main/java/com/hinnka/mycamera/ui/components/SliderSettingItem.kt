@@ -40,6 +40,7 @@ fun SliderSettingItem(
     toggleValue: Boolean? = null,
     onToggleChange: (Boolean) -> Unit = {},
     enabled: Boolean = toggleValue ?: true,
+    valueColor: Color? = null,
     modifier: Modifier = Modifier
 ) {
     val shouldShowSlider = enabled || toggleValue == null
@@ -80,7 +81,7 @@ fun SliderSettingItem(
             if (shouldShowSlider) {
                 Text(
                     text = valueTextFormatter(value),
-                    color = Color.White.copy(alpha = if (enabled) 0.8f else 0.35f),
+                    color = valueColor ?: Color.White.copy(alpha = if (enabled) 0.8f else 0.35f),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )

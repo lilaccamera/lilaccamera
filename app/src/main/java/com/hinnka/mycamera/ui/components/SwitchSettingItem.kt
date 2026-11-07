@@ -21,6 +21,7 @@ fun SwitchSettingItem(
     description: String? = null,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    titleColor: Color = Color.White,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -36,7 +37,7 @@ fun SwitchSettingItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    color = Color.White,
+                    color = titleColor,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Normal
                 )

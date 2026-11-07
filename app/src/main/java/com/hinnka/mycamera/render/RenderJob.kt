@@ -48,6 +48,8 @@ data class RenderJob(
     val jpegDone: Boolean = false,
     /** Set by the render once its [RawRenderCheckpoint] is complete. */
     val rawRendered: Boolean = false,
+    /** Set by the render once the auto-save export is done, so a retry does not save a second copy. */
+    val exported: Boolean = false,
 ) {
     /** SKIPPED: taken out of the queue by the user; the DNG stays and the queue never renders it. */
     enum class State { QUEUED, DONE, FAILED, SKIPPED }

@@ -65,6 +65,7 @@ import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.ui.theme.OnAccentColor
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -110,9 +111,9 @@ import com.hinnka.mycamera.ui.icons.AppIcons
 import kotlin.math.max
 
 private val GalleryToolbarSurface = Color(0xFF0E0E0E)
-private val GalleryToolbarButton = Color(0xFF242424)
-private val GalleryToolbarContent = Color(0xFFF2F2F2)
-private val GallerySheetSurface = Color(0xFF171717)
+internal val GalleryToolbarButton = Color(0xFF242424)
+internal val GalleryToolbarContent = Color(0xFFF2F2F2)
+internal val GallerySheetSurface = Color(0xFF171717)
 
 private class VideoPreviewHandle {
     private var activeLease: Lease? = null
@@ -206,6 +207,9 @@ fun GalleryDetailScreen(
     val isPurchased by viewModel.isPurchased.collectAsState()
     var showAiScoreSheet by remember { mutableStateOf(false) }
     var showMoreSheet by remember { mutableStateOf(false) }
+    var showRenderAgainSheet by remember { mutableStateOf(false) }
+    var isRenderingAgain by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     var showHdrStrengthPanel by remember { mutableStateOf(false) }
     val videoPreviewHandle = remember { VideoPreviewHandle() }
 
@@ -344,9 +348,16 @@ fun GalleryDetailScreen(
             showExportDialog = false
             showVideoExportConfirmDialog = false
             showMoreSheet = false
+            showRenderAgainSheet = false
             showAiScoreSheet = false
             showHdrStrengthPanel = false
         }
+    }
+    var renderAgainSource by remember(currentPhoto?.id) { mutableStateOf<RenderAgainSource?>(null) }
+    // Also re-checked when the More sheet opens: a queued Pro photo becomes eligible once rendered.
+    LaunchedEffect(currentPhoto?.id, showMoreSheet) {
+        val photo = currentPhoto?.takeIf { it.isImage } ?: return@LaunchedEffect
+        renderAgainSource = loadRenderAgainSource(context, photo.id)
     }
 
     LaunchedEffect(showVideoExportConfirmDialog, currentPhoto?.id) {
@@ -1299,8 +1310,85 @@ fun GalleryDetailScreen(
                         }
                     }
                 }
+
+                if (renderAgainSource != null) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    PhysicalButton(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .shadow(
+                                elevation = 4.dp,
+                                shape = CircleShape,
+                                ambientColor = Color.Black.copy(alpha = 0.15f),
+                                spotColor = Color.Black.copy(alpha = 0.15f)
+                            ),
+                        onClick = {
+                            showMoreSheet = false
+                            showRenderAgainSheet = true
+                        },
+                        shape = CircleShape,
+                        backgroundColor = GalleryToolbarButton
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(start = 16.dp, end = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = AppIcons.Tune,
+                                contentDescription = null,
+                                tint = GalleryToolbarContent,
+                                modifier = Modifier.size(19.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = stringResource(R.string.render_again),
+                                color = GalleryToolbarContent,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(
+                                imageVector = AppIcons.ChevronRight,
+                                contentDescription = null,
+                                tint = GalleryToolbarContent.copy(alpha = 0.6f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
+    }
+
+    val renderAgainPhoto = currentPhoto
+    val renderAgainFrom = renderAgainSource
+    if (showRenderAgainSheet && renderAgainPhoto != null && renderAgainFrom != null) {
+        RenderAgainSheet(
+            title = stringResource(R.string.render_again),
+            confirmText = stringResource(R.string.render_again_render),
+            source = renderAgainFrom,
+            appLook = remember(renderAgainFrom) { appRenderLook(context, renderAgainFrom.metadata.cameraId) },
+            isBusy = isRenderingAgain,
+            onRender = { look ->
+                isRenderingAgain = true
+                scope.launch {
+                    val message = when (RenderQueue.renderAgain(context, renderAgainPhoto.id, look)) {
+                        is RenderQueue.RenderAgainResult.Queued -> {
+                            showRenderAgainSheet = false
+                            R.string.render_again_queued
+                        }
+                        RenderQueue.RenderAgainResult.SameLook -> R.string.render_again_same
+                        RenderQueue.RenderAgainResult.NotEligible -> R.string.render_again_not_eligible
+                        RenderQueue.RenderAgainResult.Failed -> R.string.render_again_failed
+                    }
+                    isRenderingAgain = false
+                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismissRequest = { showRenderAgainSheet = false }
+        )
     }
 }
 

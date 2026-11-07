@@ -134,7 +134,7 @@ class RawRenderService : Service() {
                 noiseReductionValue = job.noiseReductionValue,
                 chromaNoiseReductionValue = job.chromaNoiseReductionValue,
                 photoQuality = job.photoQuality,
-                shouldAutoSave = job.shouldAutoSave,
+                shouldAutoSave = job.shouldAutoSave && !job.exported,
                 captureExposureInputs = job.exposureInputs(viewfinder),
                 rawNoiseProfileId = job.rawNoiseProfileId,
                 onJpegSaved = {
@@ -143,6 +143,9 @@ class RawRenderService : Service() {
                         PLog.i(TAG, "JPEG and render result of $photoId saved; a retry keeps them")
                         pauseIfRequested(photoId, "JPEG")
                     }
+                },
+                onExported = {
+                    if (RenderJob.write(this, current.copy(exported = true))) current = current.copy(exported = true)
                 },
                 onStage = { broadcast(photoId, it) },
                 onRawRendered = { result, rendered ->
@@ -221,14 +224,13 @@ class RawRenderService : Service() {
                 GalleryManager.generateBokehPhoto(this, photoId, metadata, jpeg)
             }
             GalleryManager.updateThumbnail(this, photoId, photoProcessor, metadata, jpeg)
-            if (job.shouldAutoSave) {
+            if (job.shouldAutoSave && !job.exported) {
                 broadcast(photoId, Stage.SAVING)
-                // shortcut: a kill between this export and DONE exports again on the next attempt;
-                // add an exported marker if duplicates show up.
-                GalleryManager.exportPhoto(
+                val exported = GalleryManager.exportPhoto(
                     this, photoId, jpeg, photoProcessor, metadata.copy(manualHdrEffectEnabled = false),
                     job.sharpeningValue, job.noiseReductionValue, job.chromaNoiseReductionValue, job.photoQuality,
                 )
+                if (exported) RenderJob.write(this, job.copy(exported = true))
             }
         } finally {
             jpeg.recycle()

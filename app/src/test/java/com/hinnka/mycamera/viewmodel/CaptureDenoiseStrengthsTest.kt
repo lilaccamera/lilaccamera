@@ -2,6 +2,7 @@ package com.hinnka.mycamera.viewmodel
 
 import com.hinnka.mycamera.data.UserPreferences
 import com.hinnka.mycamera.raw.RawDenoiseDefaults
+import com.hinnka.mycamera.render.resolveCaptureDenoiseStrengths
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test

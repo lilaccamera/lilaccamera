@@ -31,6 +31,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.RandomAccessFile
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -421,6 +422,93 @@ object RenderQueue {
         }
         start(context)
     }
+
+    sealed interface RenderAgainResult {
+        /** The copy [photoId] is in the gallery and waits in the queue. */
+        data class Queued(val photoId: String) : RenderAgainResult
+        /** The look equals the photo's own; nothing was made. */
+        data object SameLook : RenderAgainResult
+        /** Not a finished single-frame Pro photo with its DNG (multi-frame shots bake their denoise in). */
+        data object NotEligible : RenderAgainResult
+        /** Copying the files failed; nothing is left behind. */
+        data object Failed : RenderAgainResult
+    }
+
+    data class RenderAgainBatchResult(val queued: Int, val skippedSame: Int, val skippedIneligible: Int, val failed: Int)
+
+    /**
+     * Main process: renders the DNG of [sourcePhotoId] again with [look] as a new gallery photo next to
+     * it, labelled with the look; the original stays untouched. Capture facts are kept from the source.
+     */
+    suspend fun renderAgain(context: Context, sourcePhotoId: String, look: RenderLook): RenderAgainResult =
+        copyForRenderAgain(context.applicationContext, sourcePhotoId, look)
+            .also { if (it is RenderAgainResult.Queued) queueCopies(context.applicationContext) }
+
+    /** [renderAgain] for each of [photoIds], skipping the ones it refuses. */
+    suspend fun renderAgainBatch(context: Context, photoIds: Collection<String>, look: RenderLook): RenderAgainBatchResult {
+        val results = photoIds.map { copyForRenderAgain(context.applicationContext, it, look) }
+        val queued = results.count { it is RenderAgainResult.Queued }
+        if (queued > 0) queueCopies(context.applicationContext)
+        return RenderAgainBatchResult(
+            queued = queued,
+            skippedSame = results.count { it == RenderAgainResult.SameLook },
+            skippedIneligible = results.count { it == RenderAgainResult.NotEligible },
+            failed = results.count { it == RenderAgainResult.Failed },
+        )
+    }
+
+    private fun queueCopies(context: Context) {
+        start(context)
+        GalleryManager.notifyPhotoLibraryChanged()
+    }
+
+    private suspend fun copyForRenderAgain(context: Context, sourcePhotoId: String, look: RenderLook): RenderAgainResult =
+        withContext(Dispatchers.IO) {
+            val job = RenderJob.read(context, sourcePhotoId)?.takeIf { it.state == RenderJob.State.DONE }
+            val source = GalleryMediaStore.getPhotoData(context, sourcePhotoId)
+            val metadata = source?.metadata
+            val sourceDng = GalleryManager.getDngFile(context, sourcePhotoId)
+            if (job == null || metadata == null || !sourceDng.isFile) return@withContext RenderAgainResult.NotEligible
+            if (RenderLook.fromPhoto(metadata, job) == look) return@withContext RenderAgainResult.SameLook
+            val photoId = UUID.randomUUID().toString()
+            val dir = RenderJob.photoDir(context, photoId)
+            val label = look.label(context)
+            try {
+                dir.mkdirs()
+                // Hard links fail with EPERM on sdcardfs, so the DNG is copied.
+                RenderJob.writeAtomically(GalleryManager.getDngFile(context, photoId)) { sourceDng.copyTo(it, overwrite = true) }
+                RenderJob.viewfinderFile(context, sourcePhotoId).takeIf { it.isFile }
+                    ?.copyTo(RenderJob.viewfinderFile(context, photoId), overwrite = true)
+                // The gallery shows the thumbnail until the copy's JPEG is rendered.
+                GalleryManager.getThumbnailFile(context, sourcePhotoId).takeIf { it.isFile }
+                    ?.copyTo(GalleryManager.getThumbnailFile(context, photoId), overwrite = true)
+                val copyMetadata = look.applyTo(metadata).copy(
+                    exportedUris = emptyList(),
+                    hasAiDenoisedBase = false,
+                    customProperties = metadata.customProperties + (RenderLook.LABEL_PROPERTY to label),
+                )
+                // The gallery sorts by dateAdded, newest first, so the copy sits right above its original.
+                check(GalleryManager.saveMetadata(context, photoId, copyMetadata, dateAdded = source.dateAdded + 1)) {
+                    "Cannot save the metadata"
+                }
+                val copyJob = look.applyTo(job).copy(
+                    photoId = photoId,
+                    state = RenderJob.State.QUEUED,
+                    attempts = 0,
+                    jpegDone = false,
+                    rawRendered = false,
+                    exported = false,
+                )
+                check(RenderJob.write(context, copyJob)) { "Cannot write the render job" }
+                PLog.i(TAG, "Rendering $sourcePhotoId again as $photoId: $label")
+                RenderAgainResult.Queued(photoId)
+            } catch (e: Exception) {
+                PLog.e(TAG, "Cannot render $sourcePhotoId again", e)
+                GalleryMediaStore.deleteMedia(context, photoId)
+                dir.deleteRecursively()
+                RenderAgainResult.Failed
+            }
+        }
 
     /** The `:render` process's pid, or null when none runs. */
     internal fun renderProcessPid(context: Context): Int? = processPid(context, RenderProcess.PROCESS_SUFFIX)

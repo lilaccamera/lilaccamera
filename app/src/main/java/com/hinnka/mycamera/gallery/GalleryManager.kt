@@ -73,6 +73,7 @@ import com.hinnka.mycamera.raw.RawSceneExposureDeviceLimits
 import com.hinnka.mycamera.raw.RawColorCalibrationPolicy
 import com.hinnka.mycamera.render.RawRenderService
 import com.hinnka.mycamera.render.RenderJob
+import com.hinnka.mycamera.render.RenderLook
 import com.hinnka.mycamera.render.RenderQueue
 import com.hinnka.mycamera.raw.RawAppliedLensShading
 import com.hinnka.mycamera.raw.RawAppliedLensShadingMetadata
@@ -1414,6 +1415,8 @@ object GalleryManager {
     ): Boolean {
         return withContext(Dispatchers.IO) {
             val tempExportFile = File(context.cacheDir, "temp_export_${System.nanoTime()}.jpg")
+            // A re-render's look tells its exports apart from the original's.
+            val fileSuffix = suffix ?: metadata.customProperties[RenderLook.LABEL_PROPERTY]?.let(RenderLook::fileSuffixOf)
             try {
                 val hasEncodingOverride =
                     preferHeicExport != null || preferJpeg444Export != null
@@ -1453,7 +1456,7 @@ object GalleryManager {
                             bitmap = embeddedBitmap,
                             metadata = metadata,
                             photoQuality = photoQuality,
-                            suffix = suffix,
+                            suffix = fileSuffix,
                             destination = exportDestination
                         )
                     }
@@ -1544,7 +1547,7 @@ object GalleryManager {
 
                 val lutName =
                     metadata.lutId?.let { ContentRepository.getInstance(context).lutManager.getLutInfo(it)?.getName() }
-                var withSuffix = suffix?.let { "_$it" } ?: ""
+                var withSuffix = fileSuffix?.let { "_$it" } ?: ""
                 lutName?.let {
                     withSuffix += ".$lutName"
                 }
@@ -4251,6 +4254,8 @@ object GalleryManager {
         rawNoiseProfileId: String? = null,
         /** Called once the final JPEG and its metadata are both saved, before the HDR outputs. */
         onJpegSaved: (suspend () -> Unit)? = null,
+        /** Called once the auto-save export succeeded. */
+        onExported: (suspend () -> Unit)? = null,
         /** Called as the outputs reach [RawRenderService.Stage.JPEG], HDR and SAVING, for progress. */
         onStage: ((RawRenderService.Stage) -> Unit)? = null,
         /** Called right after the RAW render with its result and the metadata the later steps read. */
@@ -4403,7 +4408,7 @@ object GalleryManager {
 
         if (shouldAutoSave) {
             onStage?.invoke(RawRenderService.Stage.SAVING)
-            exportPhoto(
+            val exported = exportPhoto(
                 context,
                 photoId,
                 // Recycled when a RAW HDR source exists; exportPhoto then encodes the source instead.
@@ -4417,6 +4422,7 @@ object GalleryManager {
                 preparedUltraHdrSource = preparedUltraHdrSource,
                 preparedGainmapResult = preparedGainmapResult
             )
+            if (exported) onExported?.invoke()
         }
         preparedUltraHdrSource?.hdrReference?.bitmap?.let {
             if (!it.isRecycled) {
@@ -5310,17 +5316,22 @@ object GalleryManager {
     /**
      * 保存元数据
      */
-    suspend fun saveMetadata(context: Context, photoId: String, metadata: MediaMetadata): Boolean {
+    suspend fun saveMetadata(context: Context, photoId: String, metadata: MediaMetadata, dateAdded: Long? = null): Boolean {
         return metadataMutex.withLock {
-            saveMetadataInternal(context, photoId, metadata).also { saved ->
+            saveMetadataInternal(context, photoId, metadata, dateAdded).also { saved ->
                 if (saved) notifyPhotoMetadataUpdated(photoId, metadata)
             }
         }
     }
 
-    private suspend fun saveMetadataInternal(context: Context, photoId: String, metadata: MediaMetadata): Boolean {
+    private suspend fun saveMetadataInternal(
+        context: Context,
+        photoId: String,
+        metadata: MediaMetadata,
+        dateAdded: Long? = null,
+    ): Boolean {
         getPhotoDir(context, photoId, true)
-        return GalleryMediaStore.saveMetadata(context, photoId, metadata)
+        return GalleryMediaStore.saveMetadata(context, photoId, metadata, dateAdded)
     }
 
     /**

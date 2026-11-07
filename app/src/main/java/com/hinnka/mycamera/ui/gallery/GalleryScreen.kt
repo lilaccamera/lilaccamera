@@ -49,6 +49,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -67,6 +68,7 @@ import com.hinnka.mycamera.R
 import com.hinnka.mycamera.gallery.MediaData
 import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.gallery.ProcessingPhoto
+import com.hinnka.mycamera.render.RenderLook
 import com.hinnka.mycamera.render.RenderQueue
 import com.hinnka.mycamera.ui.components.ProcessingPhotoShimmerView
 import coil.load
@@ -199,6 +201,8 @@ fun GalleryScreen(
     }
 
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var batchRenderAgain by remember { mutableStateOf<BatchRenderAgain?>(null) }
+    var isBatchRenderingAgain by remember { mutableStateOf(false) }
 
     // 首次进入时先让导航过渡完成，再挂载重型网格，避免首屏动画和列表构建抢主线程。
     LaunchedEffect(Unit) {
@@ -274,6 +278,36 @@ fun GalleryScreen(
                         }
                     },
                     actions = {
+                        if (isSelectionMode && selectedPhotos.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    val ids = selectedPhotos.map { it.id }
+                                    scope.launch {
+                                        val sources = ids.mapNotNull { loadRenderAgainSource(context, it) }
+                                        if (sources.isEmpty()) {
+                                            Toast.makeText(context, R.string.render_again_not_eligible, Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            batchRenderAgain = BatchRenderAgain(
+                                                photoIds = ids,
+                                                eligibleCount = sources.size,
+                                                appLook = appRenderLook(context, sources.first().metadata.cameraId),
+                                            )
+                                        }
+                                    }
+                                },
+                                enabled = !isBatchOperationRunning
+                            ) {
+                                Icon(
+                                    imageVector = AppIcons.Tune,
+                                    contentDescription = stringResource(R.string.render_again),
+                                    tint = if (isBatchOperationRunning) {
+                                        Color.White.copy(alpha = 0.38f)
+                                    } else {
+                                        Color.White
+                                    }
+                                )
+                            }
+                        }
                         if (isSelectionMode) {
                             IconButton(
                                 onClick = {
@@ -737,7 +771,36 @@ fun GalleryScreen(
             textContentColor = Color.White
         )
     }
+
+    batchRenderAgain?.let { batch ->
+        RenderAgainSheet(
+            title = pluralStringResource(R.plurals.render_again_batch_title, batch.eligibleCount, batch.eligibleCount),
+            confirmText = pluralStringResource(R.plurals.render_again_batch_render, batch.eligibleCount, batch.eligibleCount),
+            source = null,
+            appLook = batch.appLook,
+            isBusy = isBatchRenderingAgain,
+            onRender = { look ->
+                isBatchRenderingAgain = true
+                scope.launch {
+                    val result = RenderQueue.renderAgainBatch(context, batch.photoIds, look)
+                    isBatchRenderingAgain = false
+                    batchRenderAgain = null
+                    viewModel.exitSelectionMode()
+                    val message = listOf(
+                        R.string.render_again_batch_queued to result.queued,
+                        R.string.render_again_batch_skipped to result.skippedSame + result.skippedIneligible,
+                        R.string.render_again_batch_failed to result.failed,
+                    ).filter { it.second > 0 }.joinToString(" · ") { (text, count) -> context.getString(text, count) }
+                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismissRequest = { batchRenderAgain = null }
+        )
+    }
 }
+
+/** The selection a batch re-render applies to; ineligible photos stay in [photoIds] to be counted as skipped. */
+private data class BatchRenderAgain(val photoIds: List<String>, val eligibleCount: Int, val appLook: RenderLook)
 
 @Composable
 private fun GalleryTabRow(

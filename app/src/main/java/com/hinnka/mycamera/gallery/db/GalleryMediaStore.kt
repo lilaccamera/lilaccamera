@@ -99,13 +99,14 @@ object GalleryMediaStore {
         }
     }
 
-    suspend fun saveMetadata(context: Context, photoId: String, metadata: MediaMetadata): Boolean {
+    /** [dateAdded] sets the gallery order of a new photo; an existing photo keeps its own. */
+    suspend fun saveMetadata(context: Context, photoId: String, metadata: MediaMetadata, dateAdded: Long? = null): Boolean {
         if (RenderProcess.isCurrent) return saveRenderResult(context, photoId, metadata)
         ensureMigrated(context)
         return withContext(Dispatchers.IO) {
             try {
                 val dao = GalleryDatabase.getInstance(context.applicationContext).galleryMediaDao()
-                val existingDateAdded = dao.getById(photoId)?.dateAdded?.takeIf { it > 0L }
+                val existingDateAdded = dao.getById(photoId)?.dateAdded?.takeIf { it > 0L } ?: dateAdded
                 dao.upsert(
                     buildEntity(
                         context.applicationContext,

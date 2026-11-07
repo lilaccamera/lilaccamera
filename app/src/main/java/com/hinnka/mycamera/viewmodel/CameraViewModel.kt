@@ -23,6 +23,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.hinnka.mycamera.camera.*
 import com.hinnka.mycamera.render.RenderQueue
+import com.hinnka.mycamera.render.defaultHdrEffectEnabled
+import com.hinnka.mycamera.render.resolveCaptureDenoiseStrengths
+import com.hinnka.mycamera.render.resolveCaptureRawRenderingEngine
+import com.hinnka.mycamera.render.resolveCaptureSharpening
 import com.hinnka.mycamera.data.ContentRepository
 import com.hinnka.mycamera.data.CaptureButtonStyle
 import com.hinnka.mycamera.data.CaptureSoundRepository
@@ -205,47 +209,6 @@ private fun rawProcessingMetadataProperties(
     userPrefs: UserPreferences?,
 ): Map<String, String> =
     RawDigitalZoomResampling.captureProperties(userPrefs?.rawDigitalZoomResamplingEnabled == true)
-
-private fun resolveCaptureSharpening(
-    isRawCapture: Boolean,
-    userPrefs: UserPreferences?,
-): Float = if (isRawCapture) {
-    userPrefs?.rawMaxSharpening ?: RawSharpeningDefaults.DEFAULT_STRENGTH
-} else {
-    0f
-}.let(RawSharpeningDefaults::normalize)
-
-internal data class CaptureDenoiseStrengths(
-    val editableLuma: Float,
-    val editableChroma: Float,
-    val bakedLuma: Float?,
-    val bakedChroma: Float?,
-)
-
-/**
- * RAW captures take the RAWmax luma / chroma strengths from the settings. A merge bakes them into
- * its default denoise before the DNG is written, so its editable strengths start at 0; a single
- * frame has no default denoise, so the same strengths become its editable initial values and the
- * user-adjustment denoise applies them (docs/photon-multiscale-denoise.md §10.3).
- */
-internal fun resolveCaptureDenoiseStrengths(
-    isRawCapture: Boolean,
-    isMergedCapture: Boolean,
-    userPrefs: UserPreferences?,
-): CaptureDenoiseStrengths {
-    if (!isRawCapture) return CaptureDenoiseStrengths(0f, 0f, null, null)
-    val luma = RawDenoiseDefaults.normalize(
-        userPrefs?.rawMaxNoiseReduction ?: RawDenoiseDefaults.RAW_MAX_LUMA_STRENGTH
-    )
-    val chroma = RawDenoiseDefaults.normalize(
-        userPrefs?.rawMaxChromaNoiseReduction ?: RawDenoiseDefaults.RAW_MAX_CHROMA_STRENGTH
-    )
-    return if (isMergedCapture) {
-        CaptureDenoiseStrengths(editableLuma = 0f, editableChroma = 0f, bakedLuma = luma, bakedChroma = chroma)
-    } else {
-        CaptureDenoiseStrengths(editableLuma = luma, editableChroma = chroma, bakedLuma = null, bakedChroma = null)
-    }
-}
 
 private fun ColorRecipeParams.withoutIndependentEffects(): ColorRecipeParams {
     return EffectParams.DEFAULT.applyTo(this)
@@ -1212,10 +1175,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (reconfigureCameraIfNeeded && needsCameraReopen && !captureModeWillChange) {
             reopenCamera()
         }
-    }
-
-    private fun resolveCaptureRawRenderingEngine(userPrefs: UserPreferences?): RawRenderingEngine {
-        return userPrefs?.rawRenderingEngine ?: RawRenderingEngine.AdobeCurve
     }
 
     private fun resolveCaptureRawToneMappingParameters(
@@ -2883,14 +2842,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val cameraInfo = state.value.getCurrentCameraInfo() ?: return RawBlackBorderCrop()
         return cameraInfo.rawBlackBorderCrop.takeIf { cameraInfo.isVirtualIszLens }
             ?: RawBlackBorderCrop()
-    }
-
-    private fun defaultHdrEffectEnabled(
-        hasEmbeddedGainmap: Boolean,
-        userPrefs: UserPreferences?,
-    ): Boolean {
-        if (hasEmbeddedGainmap) return true
-        return userPrefs?.ultraHdrGainMapEnabled ?: false
     }
 
     fun setUseMultipleExposure(enabled: Boolean) {
