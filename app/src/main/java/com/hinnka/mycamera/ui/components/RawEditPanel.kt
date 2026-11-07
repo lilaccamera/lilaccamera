@@ -1845,6 +1845,8 @@ fun RawNoiseProfileSelector(
         val isSelectingTarget = selectingUnifiedProfile || selectedLens != null
         AppModalBottomSheet(
             onDismissRequest = { showSheet = false },
+            // Opaque: over the Settings list the frosted sheet read as see-through.
+            containerColor = AppPanelMaterial.Tint,
             dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.2f)) },
         ) {
             Column(
