@@ -272,6 +272,7 @@ class RenderQueueService : Service() {
             }
         }
         ended?.let { state ->
+            lowMemoryRetries.remove(photoId)
             // Scanned first, so no status sent after this still lists the photo as pending.
             RenderQueue.scan(this)
             RenderQueue.publishPhotoEnded(this, photoId, state)
@@ -431,6 +432,7 @@ class RenderQueueService : Service() {
             leftMs = ((total - done - photoProgress) * photoAvgMs).toLong().coerceAtLeast(0L),
             finishedPhotoIds = finishedIds.toList(),
             pausingText = pausingText(photoProgress),
+            memoryKills = lowMemoryRetries.values.maxOrNull() ?: 0,
         )
     }
 
@@ -493,6 +495,7 @@ class RenderQueueService : Service() {
     private fun buildProgress(status: RenderQueue.Status = currentStatus()): Notification {
         val paused = RenderQueue.isPaused(this)
         val stageText = getString(status.stageText)
+        val struggling = !paused && status.memoryKills >= RenderQueue.MEMORY_HINT_KILLS
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(
@@ -506,11 +509,14 @@ class RenderQueueService : Service() {
             )
             // What happens now (or where a pause will stop) in the text; memory, kept as an indicator, in the header.
             .setContentText(
-                status.pausingText?.takeIf { paused }
+                if (struggling) getString(R.string.render_memory_struggle_short)
+                else status.pausingText?.takeIf { paused }
                     ?: if (status.resumed && stage != RawRenderService.Stage.RESUMED) {
                         getString(R.string.render_queue_joined, stageText, getString(R.string.render_queue_stage_resumed))
                     } else stageText
             )
+            // Expanded, the notification says how to get a photo Android keeps stopping through.
+            .setStyle(if (struggling) NotificationCompat.BigTextStyle().bigText(getString(R.string.render_memory_struggle)) else null)
             .setSubText(memoryText())
             .setContentIntent(openAppIntent(this))
             .setProgress(PROGRESS_MAX, (status.progress * PROGRESS_MAX).toInt(), total == 0)

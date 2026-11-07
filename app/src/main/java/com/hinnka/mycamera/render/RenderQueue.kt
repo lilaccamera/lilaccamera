@@ -46,6 +46,8 @@ object RenderQueue {
     private const val JOB_LOCK_FILE = "render_queue.lock"
     /** With no status for this long, the main process checks whether `:queue` still lives. */
     private const val STATUS_SILENCE_MS = 5_000L
+    /** From this many low-memory kills of one photo, the app tells the user how to let it finish. */
+    const val MEMORY_HINT_KILLS = 2
     /** Holds back new renders while Pro shots are taken; a render and a RAW capture together got renders killed. */
     private const val CAMERA_HOLD_FILE = "render_camera_hold"
     /** New renders start this long after the last Pro shot was saved. */
@@ -97,6 +99,8 @@ object RenderQueue {
         val finishedPhotoIds: List<String> = emptyList(),
         /** Shown while pause is requested: where the current photo's render will stop, or null with none rendering. */
         val pausingText: String? = null,
+        /** Low-memory kills of the photo that has been stopped most, among those still waiting. */
+        val memoryKills: Int = 0,
     ) : java.io.Serializable {
         /** Photos done plus the current photo's share, over all photos, 0..1. */
         val progress: Float get() = if (total == 0) 0f else ((done + photoProgress) / total).coerceIn(0f, 1f)

@@ -254,6 +254,11 @@ private fun StatusCard(
             headline = stringResource(R.string.render_queue_pausing_title)
             supporting = status.pausingText ?: stringResource(R.string.render_queue_pausing)
         }
+        // Killed again and again: tell the user what frees enough memory.
+        status.running && status.memoryKills >= RenderQueue.MEMORY_HINT_KILLS -> {
+            headline = stringResource(R.string.render_memory_struggle_title)
+            supporting = stringResource(R.string.render_memory_struggle)
+        }
         // Memory is awaited before a photo starts, so no photo row shows a step meanwhile.
         status.running && status.waitingForMemory -> {
             headline = stringResource(R.string.render_queue_stage_waiting_memory)
@@ -461,6 +466,9 @@ fun RenderQueuePhotoChip(
     }
     val failed = !processing && job?.state == RenderJob.State.FAILED
     val state = when {
+        // Opens the queue screen, which says how to let it finish.
+        status.running && status.memoryKills >= RenderQueue.MEMORY_HINT_KILLS &&
+            (processing || job?.state == RenderJob.State.QUEUED) -> stringResource(R.string.render_chip_struggle)
         processing -> stringResource(R.string.render_chip_processing, (status.photoProgress * 100).roundToInt())
         failed -> stringResource(R.string.render_chip_failed)
         job?.state == RenderJob.State.SKIPPED -> stringResource(R.string.render_chip_skipped)
