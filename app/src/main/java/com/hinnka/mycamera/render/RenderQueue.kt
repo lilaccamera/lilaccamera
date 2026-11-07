@@ -202,9 +202,15 @@ object RenderQueue {
                 while (true) {
                     delay(STATUS_SILENCE_MS)
                     if (processPid(context, RenderProcess.QUEUE_PROCESS_SUFFIX) == null) {
-                        PLog.w(TAG, "Render queue process is gone; showing the queue as stopped")
+                        PLog.w(TAG, "Render queue process is gone; restarting it once the camera is idle")
                         _status.value = Status()
-                        scan(context)
+                        // Killed for low memory, `:queue` is not restarted by the system; waiting jobs sat until the next app start.
+                        // Restarting while the camera still shoots or stacks would get it killed again, so wait for the camera hold.
+                        scope.launch {
+                            awaitCameraHold(context)
+                            PLog.i(TAG, "Camera idle; restarting the render queue")
+                            start(context)
+                        }
                         return@collectLatest
                     }
                 }
