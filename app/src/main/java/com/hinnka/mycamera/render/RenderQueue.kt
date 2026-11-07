@@ -60,6 +60,8 @@ object RenderQueue {
         val leftMs: Long = 0L,
         /** Photos rendered in this run, in order; empty once the queue stops. */
         val finishedPhotoIds: List<String> = emptyList(),
+        /** Shown while pause is requested: where the current photo's render will stop, or null with none rendering. */
+        val pausingText: String? = null,
     ) {
         /** Photos done plus the current photo's share, over all photos, 0..1. */
         val progress: Float get() = if (total == 0) 0f else ((done + photoProgress) / total).coerceIn(0f, 1f)

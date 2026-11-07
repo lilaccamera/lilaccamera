@@ -32,6 +32,7 @@ class RawRenderService : Service() {
     /**
      * Steps in order, with the share of one photo's render each covers ([start] to [end]), from a
      * measured 5056x3792 render (35 s). RESUMED replaces RENDERING when a retry uses a checkpoint.
+     * PAUSED ends a render at a checkpoint while pause is requested; the job stays QUEUED with its progress.
      */
     enum class Stage(val start: Float, val end: Float) {
         STARTED(0f, 0.05f),
@@ -43,6 +44,7 @@ class RawRenderService : Service() {
         SAVING(0.97f, 1f),
         DONE(1f, 1f),
         FAILED(0f, 0f),
+        PAUSED(0f, 0f),
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -72,18 +74,19 @@ class RawRenderService : Service() {
                 broadcast(photoId, currentStage)
             }
         }
-        val rendered = render(photoId)
+        val result = render(photoId)
         memoryTicker.cancel()
-        broadcast(photoId, if (rendered) Stage.DONE else Stage.FAILED)
-        PLog.i(TAG, "Render of $photoId ${if (rendered) "done" else "failed"}; ending the render process")
+        broadcast(photoId, result)
+        PLog.i(TAG, "Render of $photoId ${result.name.lowercase()}; ending the render process")
         stopSelf()
         Process.killProcess(Process.myPid())
     }
 
-    private suspend fun render(photoId: String): Boolean {
+    /** DONE, FAILED, or PAUSED when pause was requested at a completed checkpoint. */
+    private suspend fun render(photoId: String): Stage {
         var viewfinder: Bitmap? = null
         return try {
-            val job = RenderJob.read(this, photoId) ?: return false
+            val job = RenderJob.read(this, photoId) ?: return Stage.FAILED
             check(job.state == RenderJob.State.QUEUED) { "Render job for $photoId is ${job.state}" }
             RawColorCalibrationPolicy.mode = job.rawColorCalibrationMode
             val photoDir = RenderJob.photoDir(this, photoId)
@@ -91,7 +94,7 @@ class RawRenderService : Service() {
             val checkpoint = if (job.rawRendered) RawRenderCheckpoint.read(this, photoId) else null
             if (checkpoint == null && job.jpegDone && finishFromSavedJpeg(job, photoDir)) {
                 markDone(job)
-                return true
+                return Stage.DONE
             }
             val resultFile = File(photoDir, GalleryMediaStore.RENDER_RESULT_FILE)
             val photoFile = GalleryManager.getPhotoFile(this, photoId)
@@ -138,6 +141,7 @@ class RawRenderService : Service() {
                     if (RenderJob.write(this, current.copy(jpegDone = true))) {
                         current = current.copy(jpegDone = true)
                         PLog.i(TAG, "JPEG and render result of $photoId saved; a retry keeps them")
+                        pauseIfRequested(photoId, "JPEG")
                     }
                 },
                 onStage = { broadcast(photoId, it) },
@@ -148,6 +152,7 @@ class RawRenderService : Service() {
                     ) {
                         current = current.copy(rawRendered = true)
                         PLog.i(TAG, "RAW render of $photoId checkpointed; a retry skips it")
+                        pauseIfRequested(photoId, "RAW render")
                     }
                 },
                 resumeFrom = checkpoint?.rawResult,
@@ -157,15 +162,27 @@ class RawRenderService : Service() {
             check(photoFile.isFile) { "Render produced no JPEG for $photoId" }
             check(resultFile.isFile) { "Render saved no result for $photoId" }
             markDone(current)
-            true
+            Stage.DONE
+        } catch (_: PausedAtCheckpoint) {
+            Stage.PAUSED
         } catch (e: Exception) {
             // The job stays QUEUED; the main-process queue counts the attempt.
             PLog.e(TAG, "Render of $photoId failed", e)
-            false
+            Stage.FAILED
         } finally {
             viewfinder?.recycle()
         }
     }
+
+    /** Only right after a checkpoint is complete: a stop anywhere else would lose work. */
+    private fun pauseIfRequested(photoId: String, checkpoint: String) {
+        if (!RenderQueue.isPaused(this)) return
+        PLog.i(TAG, "Pause requested; stopping $photoId after its $checkpoint checkpoint")
+        throw PausedAtCheckpoint()
+    }
+
+    /** Unwinds the render from a checkpoint callback; the process ends right after. */
+    private class PausedAtCheckpoint : Exception()
 
     private fun markDone(job: RenderJob) {
         check(RenderJob.write(this, job.copy(state = RenderJob.State.DONE))) { "Cannot mark ${job.photoId} done" }

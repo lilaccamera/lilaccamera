@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.gallery.GalleryManager
+import com.hinnka.mycamera.render.RawRenderService
 import com.hinnka.mycamera.render.RenderJob
 import com.hinnka.mycamera.render.RenderQueue
 import com.hinnka.mycamera.ui.theme.AccentColor
@@ -122,7 +123,7 @@ fun RenderQueueScreen(
                 fontWeight = FontWeight.Bold
             )
             if (status.running) {
-                if (paused) Notice(stringResource(R.string.render_queue_pausing))
+                if (paused) status.pausingText?.let { Notice(it) }
                 RenderProgressBar(status.progress)
                 // Memory is awaited before a photo starts, so this never shows beside a current photo's row.
                 if (status.waitingForMemory) Notice(stringResource(status.stageText))
@@ -134,6 +135,11 @@ fun RenderQueueScreen(
             )
             Text(
                 text = stringResource(R.string.render_queue_hint),
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 12.sp
+            )
+            Text(
+                text = stringResource(R.string.render_queue_pause_hint),
                 color = Color.White.copy(alpha = 0.6f),
                 fontSize = 12.sp
             )
@@ -190,6 +196,15 @@ fun RenderQueueScreen(
                             ),
                             detail = stringResource(R.string.render_queue_stage_resumed)
                                 .takeIf { status.resumed && status.stageText != R.string.render_queue_stage_resumed }
+                        )
+                        // Stopped at a checkpoint (or killed after one); a resume continues from it.
+                        paused && (job.jpegDone || job.rawRendered) -> RenderJobRow(
+                            job.photoId,
+                            progress = if (job.jpegDone) RawRenderService.Stage.HDR.start else RawRenderService.Stage.CHECKPOINT.end,
+                            label = stringResource(
+                                if (job.jpegDone) R.string.render_queue_paused_after_jpeg else R.string.render_queue_paused_after_raw
+                            ),
+                            detail = stringResource(R.string.render_queue_attempts, job.attempts).takeIf { job.attempts > 0 }
                         )
                         else -> RenderJobRow(
                             job.photoId,

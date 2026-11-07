@@ -39,7 +39,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Main-process foreground service that renders the [RenderQueue] one photo at a time, each in a
- * fresh `:render` process ([RawRenderService]). Pause takes effect between photos.
+ * fresh `:render` process ([RawRenderService]). Pause takes effect between photos, or at the
+ * current photo's next checkpoint, which the render stops at.
  */
 class RenderQueueService : Service() {
     // Main thread: start commands, stage broadcasts and the loop's stop decision never interleave.
@@ -61,13 +62,20 @@ class RenderQueueService : Service() {
     private var photoStartedAt = 0L
     private var resumed = false
     private var rawRenderRan = false
+    /** The current photo's job as it was before its render started. */
+    private var startedJob: RenderJob? = null
+    /** The photo whose render reported PAUSED. */
+    private var pausedPhotoId: String? = null
 
     private val stageReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.getStringExtra(RawRenderService.EXTRA_PHOTO_ID) != currentPhotoId) return
+            val photoId = intent.getStringExtra(RawRenderService.EXTRA_PHOTO_ID)
             val received = RawRenderService.Stage.entries
                 .firstOrNull { it.name == intent.getStringExtra(RawRenderService.EXTRA_STAGE) } ?: return
-            // Only the notification follows stages: after DONE or FAILED the render ends its process,
+            // Booked before the check: it may arrive once the photo is no longer current.
+            if (received == RawRenderService.Stage.PAUSED) pausedPhotoId = photoId
+            if (photoId != currentPhotoId) return
+            // Only the notification follows stages: after DONE, FAILED or PAUSED the render ends its process,
             // which the connection reports.
             if (received != stage) {
                 val now = SystemClock.elapsedRealtime()
@@ -182,6 +190,8 @@ class RenderQueueService : Service() {
             return stopQueue()
         }
         val startedAt = System.currentTimeMillis()
+        startedJob = job
+        pausedPhotoId = null
         val finished = renderOnce(photoId)
         // A hung render is killed at once and counts as a failed attempt.
         awaitRenderProcessGone(if (finished) RENDER_EXIT_TIMEOUT_MS else 0L)
@@ -194,6 +204,11 @@ class RenderQueueService : Service() {
                 if (rawRenderRan) photoAvgMs += (SystemClock.elapsedRealtime() - photoStartedAt - photoAvgMs) / ++photoCount
                 done++
                 finishedIds += photoId
+            }
+            // Not a failure: the render stopped at a checkpoint and kept its progress; the loop then stops paused.
+            pausedPhotoId == photoId -> {
+                PLog.i(TAG, "Render of $photoId paused (rawRendered=${after.rawRendered}, jpegDone=${after.jpegDone}); not counting it")
+                withContext(Dispatchers.IO) { RenderJob.write(this@RenderQueueService, after.copy(attempts = job.attempts)) }
             }
             // Capped, so a phone that always kills the render does not retry (and heat up) forever.
             wasLowMemoryKill(startedAt) &&
@@ -339,7 +354,34 @@ class RenderQueueService : Service() {
             resumed = resumed,
             leftMs = ((total - done - photoProgress) * photoAvgMs).toLong().coerceAtLeast(0L),
             finishedPhotoIds = finishedIds.toList(),
+            pausingText = pausingText(photoProgress),
         )
+    }
+
+    /** What a pause would wait for now: the render stops only at its next checkpoint, if one is left. */
+    private fun pausingText(photoProgress: Float): String? {
+        val job = startedJob?.takeIf { currentPhotoId != null } ?: return null
+        val next = when (stage) {
+            RawRenderService.Stage.RENDERING, RawRenderService.Stage.CHECKPOINT -> RawRenderService.Stage.CHECKPOINT
+            RawRenderService.Stage.JPEG -> RawRenderService.Stage.JPEG
+            RawRenderService.Stage.HDR, RawRenderService.Stage.SAVING, RawRenderService.Stage.DONE -> null
+            // Before the render takes its path, the job's saved progress says which checkpoints are left.
+            else -> when {
+                job.jpegDone -> null
+                job.rawRendered -> RawRenderService.Stage.JPEG
+                else -> RawRenderService.Stage.CHECKPOINT
+            }
+        }
+        return when (next) {
+            RawRenderService.Stage.CHECKPOINT -> getString(
+                R.string.render_queue_pausing_after_raw,
+                DateUtils.formatElapsedTime(
+                    ((RawRenderService.Stage.CHECKPOINT.end - photoProgress) * photoAvgMs / 1000).toLong().coerceAtLeast(0L)
+                ),
+            )
+            RawRenderService.Stage.JPEG -> getString(R.string.render_queue_pausing_after_jpeg)
+            else -> getString(R.string.render_queue_pausing)
+        }
     }
 
     /** The current photo's share done: its stage's start, advanced by time inside the RAW render. */
@@ -369,6 +411,7 @@ class RenderQueueService : Service() {
         RawRenderService.Stage.SAVING -> R.string.render_queue_stage_done
         RawRenderService.Stage.DONE -> R.string.render_queue_stage_finished
         RawRenderService.Stage.FAILED -> R.string.render_queue_stage_failed
+        RawRenderService.Stage.PAUSED -> R.string.render_queue_stage_paused
     }
 
     private fun buildProgress(status: RenderQueue.Status = currentStatus()): Notification {
@@ -385,8 +428,8 @@ class RenderQueueService : Service() {
                     DateUtils.formatElapsedTime(status.leftMs / 1000),
                 )
             )
-            // Memory first: it is what the user watches; the stage goes in the header.
-            .setContentText(memoryText())
+            // Memory first: it is what the user watches, unless a pause waits; the stage goes in the header.
+            .setContentText(status.pausingText?.takeIf { paused } ?: memoryText())
             .setSubText(
                 if (status.resumed && stage != RawRenderService.Stage.RESUMED) {
                     getString(R.string.render_queue_joined, stageText, getString(R.string.render_queue_stage_resumed))
