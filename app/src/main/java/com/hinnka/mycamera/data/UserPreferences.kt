@@ -134,7 +134,7 @@ class UserPreferences internal constructor(
     var rawDigitalZoomResamplingEnabled by bool("raw_digital_zoom_resampling_enabled", false)
     var useLivePhoto by bool("use_live_photo", false)  // 是否启用 Live Photo (Motion Photo)
     var developAnimationStyle by enum("develop_animation_style", DevelopAnimationStyle.FILM)
-    var backgroundImage by string("background_image", "camera_bg")  // 背景图资源名或文件路径
+    var backgroundImage by string("background_image", "camera_bg_black")  // 背景图资源名或文件路径
     var captureButtonColor by int("capture_button_color", 0xFFFFFFFF.toInt())
     var colorSpace by enum("color_space", ColorSpace.SRGB)
     var videoAspectRatio by enum("video_aspect_ratio", VideoAspectRatio.RATIO_16_9)

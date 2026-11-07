@@ -47,10 +47,10 @@ fun rememberBackgroundPainter(viewModel: CameraViewModel): Painter {
             if (resId != 0) {
                 painterResource(resId)
             } else {
-                painterResource(R.drawable.camera_bg)
+                painterResource(R.drawable.camera_bg_black)
             }
         } else {
-            painterResource(R.drawable.camera_bg)
+            painterResource(R.drawable.camera_bg_black)
         }
     }
 }
