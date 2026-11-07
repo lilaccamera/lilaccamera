@@ -85,6 +85,9 @@ import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.model.LutSelectorMode
 import com.hinnka.mycamera.raw.SpectralFilmSelection
 import com.hinnka.mycamera.render.RenderQueue
+import com.hinnka.mycamera.gallery.GalleryManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import com.hinnka.mycamera.ui.components.*
 import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.viewmodel.CameraViewModel
@@ -2115,17 +2118,27 @@ private fun Controls(
                         onCapturedThumbnailLoaded = viewModel::acknowledgeCapturedThumbnail,
                         onClick = onGalleryClick
                     )
+                    val queueStatus by RenderQueue.status.collectAsState()
+                    val queuePending by RenderQueue.pendingPhotoIds.collectAsState()
+                    val unfinishedPhotos by GalleryManager.processingPhotos.collectAsState()
+                    val appContext = LocalContext.current.applicationContext
+                    val queuePaused = remember(queueStatus, queuePending) { RenderQueue.isPaused(appContext) }
+                    // Photos in the camera (Photo mode stacking, a Pro shot until its DNG) and in the RAW queue, each
+                    // once; the capture count also covers a shot whose frames are still arriving, before it registers.
+                    val unfinishedCount = maxOf(unfinishedPhotos.size, captureProcessingState.pendingCount)
+                    val rawRendering = queueStatus.running && queueStatus.currentPhotoId != null && !queueStatus.waitingForMemory
+                    val thumbnailProcessing = when {
+                        captureProcessingState.pendingCount > 0 || rawRendering -> ThumbnailProcessing.RUNNING
+                        unfinishedCount == 0 -> null
+                        queuePaused -> ThumbnailProcessing.PAUSED
+                        else -> ThumbnailProcessing.WAITING
+                    }
                     key(capturedThumbnail?.captureId) {
                         GalleryProcessingOverlay(
-                            pendingCount = if (capturedThumbnail == null || capturedThumbnail?.bitmap != null ||
-                                capturedThumbnail?.finalThumbnailLoaded == true
-                            ) {
-                                captureProcessingState.pendingCount
-                            } else {
-                                0
-                            },
+                            processing = thumbnailProcessing,
+                            unfinishedCount = unfinishedCount,
+                            struggling = queueStatus.memoryKills >= RenderQueue.MEMORY_HINT_KILLS,
                             completedCount = captureProcessingState.completedCount,
-                            shutterWaiting = captureBusy && state.captureMode == CaptureMode.PHOTO && !state.isCapturing,
                             modifier = Modifier.matchParentSize()
                         )
                     }
@@ -2250,22 +2263,33 @@ private fun rememberRawBusyPulse(): Float =
         label = "rawBusyPulse"
     ).value
 
+/**
+ * What the camera thumbnail's edge says about unfinished photos, the same in every mode: something is
+ * processing now (Photo mode at once, Pro after its hold), photos wait their turn, or the RAW queue is paused.
+ */
+private enum class ThumbnailProcessing { RUNNING, WAITING, PAUSED }
+
 /** Keeps render progress independent of the shutter and the optional photo fly-in animation. */
 @Composable
 private fun GalleryProcessingOverlay(
-    pendingCount: Int,
+    processing: ThumbnailProcessing?,
+    unfinishedCount: Int,
+    struggling: Boolean,
     completedCount: Long,
-    shutterWaiting: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val completionAlpha = remember { Animatable(0f) }
     var lastAcknowledgedCompletion by remember { mutableLongStateOf(completedCount) }
+    var hadUnfinished by remember { mutableStateOf(unfinishedCount > 0) }
     val thumbnailShape = RoundedCornerShape(10.dp)
 
-    LaunchedEffect(pendingCount, completedCount) {
-        if (pendingCount > 0) {
+    LaunchedEffect(unfinishedCount, completedCount) {
+        if (unfinishedCount > 0) {
+            hadUnfinished = true
             completionAlpha.snapTo(0f)
-        } else if (completedCount != lastAcknowledgedCompletion) {
+        } else if (hadUnfinished || completedCount != lastAcknowledgedCompletion) {
+            // The last unfinished photo, Photo mode or RAW, is done.
+            hadUnfinished = false
             lastAcknowledgedCompletion = completedCount
             // A neutral highlight acknowledges completion without implying success on failure.
             completionAlpha.snapTo(0f)
@@ -2274,78 +2298,153 @@ private fun GalleryProcessingOverlay(
         }
     }
 
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        AnimatedVisibility(
-            visible = pendingCount > 0,
-            enter = fadeIn(tween(durationMillis = 180)),
-            exit = fadeOut(tween(durationMillis = 220)),
-            modifier = Modifier.matchParentSize()
-        ) {
-            // Keep the photo visible beneath a soft diagonal reflection. The transition is
-            // disposed after fade-out, so an idle thumbnail does not keep requesting frames.
-            val transition = rememberInfiniteTransition(label = "thumbnailProcessing")
-            val sweep = transition.animateFloat(
-                initialValue = -1f,
-                targetValue = 2f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(durationMillis = 1800, delayMillis = 200, easing = LinearEasing),
-                    repeatMode = RepeatMode.Restart
-                ),
-                label = "thumbnailLightSweep"
+    // Amber once Android keeps stopping a RAW render; the gallery's chip and queue screen say what to do.
+    val tint = if (struggling) Color(0xFFFFB300) else Color.White
+    val description = processing?.let {
+        stringResource(
+            when (it) {
+                ThumbnailProcessing.RUNNING -> R.string.thumbnail_processing_running
+                ThumbnailProcessing.WAITING -> R.string.thumbnail_processing_waiting
+                ThumbnailProcessing.PAUSED -> R.string.thumbnail_processing_paused
+            },
+            unfinishedCount.coerceAtLeast(1),
+        )
+    }
+    Box(
+        modifier = modifier.then(
+            if (description != null) Modifier.semantics { contentDescription = description } else Modifier
+        ),
+        contentAlignment = Alignment.Center
+    ) {
+        if (processing == ThumbnailProcessing.PAUSED) {
+            // The one state that needs the user (Resume), so the only one that covers the photo.
+            Box(Modifier.matchParentSize().clip(thumbnailShape).background(Color.Black.copy(alpha = 0.35f)))
+            Canvas(Modifier.size(16.dp)) {
+                val bar = size.width * 0.3f
+                val corner = CornerRadius(bar / 2)
+                drawRoundRect(Color.White, topLeft = Offset(size.width * 0.12f, 0f), size = androidx.compose.ui.geometry.Size(bar, size.height), cornerRadius = corner)
+                drawRoundRect(Color.White, topLeft = Offset(size.width * 0.88f - bar, 0f), size = androidx.compose.ui.geometry.Size(bar, size.height), cornerRadius = corner)
+            }
+        }
+        if (processing != null) {
+            ThumbnailEdgeRing(
+                style = if (processing == ThumbnailProcessing.RUNNING) EdgeRingStyle.RUNNING else EdgeRingStyle.DOTTED,
+                color = tint,
+                modifier = Modifier.matchParentSize()
             )
-            Canvas(
+        }
+        // One count for all unfinished photos, Photo mode and RAW together; a single one shows by the edge alone.
+        if (unfinishedCount >= 2) {
+            Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .clip(thumbnailShape)
-                    .border(1.dp, Color.White.copy(alpha = 0.14f), thumbnailShape)
+                    .align(Alignment.TopEnd)
+                    .offset(x = 6.dp, y = (-6).dp)
+                    // At least as wide as tall: a round badge for one digit, a pill beyond.
+                    .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
+                    .background(Color.White, CircleShape)
+                    .padding(horizontal = 4.dp),
+                contentAlignment = Alignment.Center
             ) {
-                drawRect(Color.Black.copy(alpha = 0.08f))
-                val centerX = size.width * sweep.value
-                val bandWidth = size.width * 0.65f
-                drawRect(
-                    brush = Brush.linearGradient(
-                        0f to Color.Transparent,
-                        0.3f to Color.White.copy(alpha = 0.03f),
-                        0.5f to Color.White.copy(alpha = 0.24f),
-                        0.7f to Color.White.copy(alpha = 0.03f),
-                        1f to Color.Transparent,
-                        start = Offset(centerX - bandWidth, 0f),
-                        end = Offset(centerX + bandWidth, size.height * 0.7f)
-                    )
+                Text(
+                    text = unfinishedCount.toString(),
+                    color = Color(0xFF2C2C2A),
+                    fontSize = 10.sp,
+                    lineHeight = 10.sp,
+                    style = TextStyle(platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)),
                 )
             }
         }
-        if (shutterWaiting) {
-            // Breathes with the shutter ring: the button is waiting for this photo to be saved.
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .border(1.5.dp, Color.White.copy(alpha = rememberRawBusyPulse()), thumbnailShape)
-            )
-        }
-        if (pendingCount >= 2) {
-            Text(
-                text = pendingCount.toString(),
-                color = Color.White,
-                fontSize = 10.sp,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(3.dp)
-                    .background(Color.Black.copy(alpha = 0.55f), CircleShape)
-                    .padding(horizontal = 5.dp, vertical = 1.dp)
-            )
-        }
+        // Done: the same edge line flashes once and fades, so finishing reads as the end of the running arc.
         if (completionAlpha.value > 0f) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .clip(thumbnailShape)
-                    .background(Color.White.copy(alpha = completionAlpha.value * 0.08f))
-                    .border(
-                        width = 1.dp,
-                        color = Color.White.copy(alpha = completionAlpha.value),
-                        shape = thumbnailShape
+            ThumbnailEdgeRing(
+                style = EdgeRingStyle.SOLID,
+                color = Color.White,
+                alpha = { completionAlpha.value },
+                modifier = Modifier.matchParentSize()
+            )
+        }
+    }
+}
+
+private enum class EdgeRingStyle { RUNNING, DOTTED, SOLID }
+
+/**
+ * The thumbnail's edge line, one weight and rounded ends in every style: a bright arc running round it
+ * (processing), evenly spaced round dots (waiting), or the whole edge (done, fading by [alpha]).
+ */
+@Composable
+private fun ThumbnailEdgeRing(
+    style: EdgeRingStyle,
+    color: Color,
+    modifier: Modifier,
+    alpha: () -> Float = { 1f },
+) {
+    val density = LocalDensity.current
+    val strokePx = with(density) { 2.5.dp.toPx() }
+    val cornerPx = with(density) { 10.dp.toPx() }
+    val periodTargetPx = with(density) { 8.dp.toPx() }
+    val gapPx = with(density) { 3.5.dp.toPx() }
+    // Only animates while running, so a waiting or paused thumbnail asks for no frames.
+    val phase = if (style == EdgeRingStyle.RUNNING) {
+        rememberInfiniteTransition(label = "thumbnailRing").animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(durationMillis = 1600, easing = LinearEasing)),
+            label = "thumbnailRingPhase"
+        )
+    } else null
+    val edge = remember { Path() }
+    val measure = remember { androidx.compose.ui.graphics.PathMeasure() }
+    val round = androidx.compose.ui.graphics.StrokeCap.Round
+    Canvas(modifier) {
+        val inset = strokePx / 2
+        edge.reset()
+        edge.addRoundRect(
+            RoundRect(inset, inset, size.width - inset, size.height - inset, CornerRadius(cornerPx - inset))
+        )
+        measure.setPath(edge, false)
+        val length = measure.length
+        when (style) {
+            EdgeRingStyle.RUNNING -> {
+                drawPath(edge, color.copy(alpha = 0.25f), style = androidx.compose.ui.graphics.drawscope.Stroke(strokePx))
+                // Read here, in the draw phase: a frame only redraws, it does not recompose, so the lap stays smooth.
+                val arcLength = length * 0.25f
+                val start = (phase?.value ?: 0f) * length
+                // One dash as long as the arc, one period per lap, shifted by the phase. On a closed edge the
+                // dash continues across the edge's start point, so no seam: two pieces joined there left a stray stub.
+                drawPath(
+                    edge,
+                    color,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        strokePx,
+                        cap = round,
+                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                            floatArrayOf(arcLength, length - arcLength),
+                            (length - start) % length
+                        )
                     )
+                )
+            }
+            EdgeRingStyle.DOTTED -> {
+                // A whole number of dash periods round the edge, so the spacing is even where the line closes.
+                val count = (length / periodTargetPx).roundToInt().coerceAtLeast(4)
+                val period = length / count
+                // Round caps add half the stroke at each end, so the drawn dash is on + stroke long.
+                val on = (period - gapPx - strokePx).coerceAtLeast(0.01f)
+                drawPath(
+                    edge,
+                    color.copy(alpha = 0.6f),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        strokePx,
+                        cap = round,
+                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(on, period - on))
+                    )
+                )
+            }
+            EdgeRingStyle.SOLID -> drawPath(
+                edge,
+                color.copy(alpha = alpha().coerceIn(0f, 1f)),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(strokePx)
             )
         }
     }

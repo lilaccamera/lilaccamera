@@ -1607,6 +1607,9 @@
     <string name="render_chip_description">%1$s. Opens Processing photos.</string>
     <string name="render_chip_queue">RAW queue · %1$s</string>
     <string name="render_chip_struggle">Short of memory · How to finish</string>
+    <string name="thumbnail_processing_running">Processing photos. Not finished: %1$d</string>
+    <string name="thumbnail_processing_waiting">Photos waiting to be processed: %1$d</string>
+    <string name="thumbnail_processing_paused">Processing paused. Photos waiting: %1$d</string>
     <string name="render_memory_struggle_title">Short of memory</string>
     <string name="render_memory_struggle_short">Android keeps stopping it for memory. Swipe the app away to let it finish.</string>
     <string name="render_memory_struggle">Android has stopped this photo several times because the phone is short of memory. Swipe Photon Camera away from Recents: processing carries on in the background and usually finishes then, because closing the app frees its graphics memory. If it still stops, restart the phone, which frees memory the camera and graphics drivers keep.</string>
