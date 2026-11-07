@@ -85,7 +85,17 @@ class RenderQueueService : Service() {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             else -> 0
         }
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, buildProgress(), type)
+        try {
+            // Not ServiceCompat: on Android 16 it dropped mediaProcessing and passed type none, which is refused.
+            if (type != 0) startForeground(NOTIFICATION_ID, buildProgress(), type)
+            else startForeground(NOTIFICATION_ID, buildProgress())
+        } catch (e: Exception) {
+            // E.g. ForegroundServiceStartNotAllowedException once the app is in the background. A crash here
+            // would repeat on every app start while a job waits; the job stays queued for the next start.
+            PLog.e(TAG, "Cannot run the render queue in the foreground; trying again on the next app start", e)
+            if (loop?.isActive != true) stopSelf(startId)
+            return START_NOT_STICKY
+        }
         getSystemService(NotificationManager::class.java).cancel(PAUSED_NOTIFICATION_ID)
         lastStartId = startId
         rescanRequested = true
