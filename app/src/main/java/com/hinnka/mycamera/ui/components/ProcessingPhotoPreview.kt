@@ -14,12 +14,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -30,10 +26,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.hinnka.mycamera.R
 import com.hinnka.mycamera.gallery.ProcessingPhoto
 import com.hinnka.mycamera.ui.camera.autoRotate
 
@@ -77,14 +70,7 @@ fun ProcessingPhotoPreview(photo: ProcessingPhoto, modifier: Modifier = Modifier
                 modifier = imageModifier
             )
         }
-        Text(
-            text = stringResource(R.string.gallery_photo_processing),
-            color = Color.White.copy(alpha = 0.86f),
-            modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp)
-                .autoRotate()
-                .background(Color.Black.copy(alpha = 0.58f), RoundedCornerShape(50))
-                .padding(horizontal = 16.dp, vertical = 9.dp)
-        )
+        // Labelled by the viewer's processing chip (RenderQueuePhotoChip), so one label says in camera or RAW queue.
     }
 }
 

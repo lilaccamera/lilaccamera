@@ -1604,6 +1604,8 @@
     <string name="render_chip_failed">Couldn’t finish · Try again</string>
     <string name="render_chip_skipped">Skipped</string>
     <string name="render_chip_description">%1$s. Opens Processing photos.</string>
+    <string name="render_chip_queue">RAW queue · %1$s</string>
+    <string name="processing_chip_in_camera">Processing in camera…</string>
     <string name="render_memory_info_title">About memory</string>
     <string name="render_memory_info_free_now">Free memory now: %1$d MB</string>
     <string name="render_memory_info_why_title">Why processing needs memory</string>

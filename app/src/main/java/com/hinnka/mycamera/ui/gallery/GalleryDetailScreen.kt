@@ -750,11 +750,12 @@ fun GalleryDetailScreen(
                     }
                 }
             }
-            // Queued RAW renders exist only for app photos. Top: the processing preview labels the bottom.
+            // The viewer's one processing label: RAW queue state, or "in camera" for a photo still finishing here.
             if (currentPhoto != null && viewModel.selectedTab == GalleryTab.PHOTON) {
                 RenderQueuePhotoChip(
                     photoId = currentPhoto.id,
                     onClick = onOpenRenderQueue,
+                    processingInCamera = isCurrentPhotoProcessing,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = 12.dp)

@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -432,11 +433,17 @@ private fun MemoryInfoRow(icon: ImageVector, title: Int?, text: Int) {
 }
 
 /**
- * The queue state of [photoId] as a chip that opens [RenderQueueScreen], for the photo viewer.
- * Draws nothing for a photo that is not waiting, processing, failed or skipped.
+ * The photo viewer's one processing label. A queued RAW photo gets its queue state as a chip that opens
+ * [RenderQueueScreen]; a photo still finishing in the camera ([processingInCamera]) gets the same chip,
+ * not tappable. Draws nothing otherwise.
  */
 @Composable
-fun RenderQueuePhotoChip(photoId: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun RenderQueuePhotoChip(
+    photoId: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    processingInCamera: Boolean = false,
+) {
     val context = LocalContext.current
     val status by RenderQueue.status.collectAsState()
     val pendingIds by RenderQueue.pendingPhotoIds.collectAsState()
@@ -448,9 +455,12 @@ fun RenderQueuePhotoChip(photoId: String, onClick: () -> Unit, modifier: Modifie
     val paused = remember(jobs, status.pausingText) { RenderQueue.isPaused(context) }
     val processing = status.running && photoId == status.currentPhotoId
     val job = jobs.firstOrNull { it.photoId == photoId }
-    if (!processing && job == null) return
+    if (!processing && job == null) {
+        if (processingInCamera) InCameraProcessingChip(modifier)
+        return
+    }
     val failed = !processing && job?.state == RenderJob.State.FAILED
-    val label = when {
+    val state = when {
         processing -> stringResource(R.string.render_chip_processing, (status.photoProgress * 100).roundToInt())
         failed -> stringResource(R.string.render_chip_failed)
         job?.state == RenderJob.State.SKIPPED -> stringResource(R.string.render_chip_skipped)
@@ -467,6 +477,7 @@ fun RenderQueuePhotoChip(photoId: String, onClick: () -> Unit, modifier: Modifie
             }
         }
     }
+    val label = stringResource(R.string.render_chip_queue, state)
     val description = stringResource(R.string.render_chip_description, label)
     AssistChip(
         onClick = onClick,
@@ -474,11 +485,33 @@ fun RenderQueuePhotoChip(photoId: String, onClick: () -> Unit, modifier: Modifie
         leadingIcon = if (processing) {
             { CircularProgressIndicator(progress = { status.photoProgress }, modifier = Modifier.size(AssistChipDefaults.IconSize), strokeWidth = 2.dp) }
         } else null,
+        // The arrow says this chip opens the queue; the in-camera chip has none.
+        trailingIcon = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) },
         colors = AssistChipDefaults.assistChipColors(
             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
             labelColor = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
         ),
         border = null,
         modifier = modifier.semantics { contentDescription = description }
+    )
+}
+
+/** Same look as the queue chip, but not tappable: Photo mode shots finish in the camera, not in the queue. */
+@Composable
+private fun InCameraProcessingChip(modifier: Modifier) {
+    val surface = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    AssistChip(
+        onClick = {},
+        enabled = false,
+        label = { Text(stringResource(R.string.processing_chip_in_camera)) },
+        leadingIcon = { CircularProgressIndicator(modifier = Modifier.size(AssistChipDefaults.IconSize), strokeWidth = 2.dp, color = onSurface) },
+        colors = AssistChipDefaults.assistChipColors(
+            disabledContainerColor = surface,
+            disabledLabelColor = onSurface,
+            disabledLeadingIconContentColor = onSurface,
+        ),
+        border = null,
+        modifier = modifier
     )
 }
