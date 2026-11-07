@@ -133,6 +133,13 @@ object GalleryMediaStore {
         return if (saveMetadata(context, photoId, updated)) updated else null
     }
 
+    /** [metadata] in the [RENDER_RESULT_FILE] form, for a `:render` checkpoint. */
+    internal fun encodeRenderMetadata(context: Context, photoId: String, metadata: MediaMetadata): String =
+        renderResultGson.toJson(buildEntity(context.applicationContext, photoId, metadata))
+
+    internal fun decodeRenderMetadata(json: String): MediaMetadata =
+        checkNotNull(renderResultGson.fromJson(json, GalleryMediaEntity::class.java)) { "empty metadata" }.toMetadata()
+
     private suspend fun saveRenderResult(context: Context, photoId: String, metadata: MediaMetadata): Boolean =
         withContext(Dispatchers.IO) {
             val file = File(getPhotoDir(context, photoId), RENDER_RESULT_FILE)

@@ -180,7 +180,10 @@ class RenderQueueService : Service() {
     private suspend fun markFailed(job: RenderJob) {
         // The DNG stays; only the job leaves the queue.
         PLog.e(TAG, "Render of ${job.photoId} failed $MAX_ATTEMPTS times; giving up")
-        withContext(Dispatchers.IO) { RenderJob.write(this@RenderQueueService, job.copy(state = RenderJob.State.FAILED)) }
+        withContext(Dispatchers.IO) {
+            RenderJob.write(this@RenderQueueService, job.copy(state = RenderJob.State.FAILED))
+            RawRenderCheckpoint.delete(this@RenderQueueService, job.photoId)
+        }
         done++
         failedThisRun++
         notifyFailed(this, failedThisRun)

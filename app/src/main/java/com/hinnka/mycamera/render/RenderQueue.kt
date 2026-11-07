@@ -96,10 +96,13 @@ object RenderQueue {
                 PLog.w(TAG, "DNG of $photoId is gone; dropping its render job")
                 File(dir, RenderJob.JOB_FILE).delete()
                 RenderJob.viewfinderFile(context, photoId).delete()
+                RawRenderCheckpoint.delete(context, photoId)
                 dir.delete() // only when nothing else is left
                 return@mapNotNull null
             }
             val job = RenderJob.read(context, photoId) ?: return@mapNotNull null
+            // A finished job's checkpoint is left over from a render killed before it deleted it.
+            if (job.state != RenderJob.State.QUEUED) RawRenderCheckpoint.delete(context, photoId)
             when (job.state) {
                 RenderJob.State.QUEUED -> job to dng.lastModified()
                 RenderJob.State.DONE -> {
@@ -127,12 +130,12 @@ object RenderQueue {
 
     /**
      * Puts the FAILED ones of [jobs] back in the queue with a fresh attempt count (a saved JPEG
-     * stays marked), then starts the queue, which also picks up jobs an interrupted run left QUEUED.
+     * stays marked; the checkpoint went with FAILED), then starts the queue, which also picks up jobs an interrupted run left QUEUED.
      */
     suspend fun retry(context: Context, jobs: List<RenderJob>) {
         withContext(Dispatchers.IO) {
             jobs.filter { it.state == RenderJob.State.FAILED }
-                .forEach { RenderJob.write(context, it.copy(state = RenderJob.State.QUEUED, attempts = 0)) }
+                .forEach { RenderJob.write(context, it.copy(state = RenderJob.State.QUEUED, attempts = 0, rawRendered = false)) }
         }
         start(context)
     }

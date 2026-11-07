@@ -34,12 +34,13 @@
 }
 
 
-# render_job.json and render_result.json are Gson-encoded and may be read by a later app version:
+# render_job.json, render_result.json and checkpoint.json are Gson-encoded and may be read by a later app version:
 # keep field and enum names.
 -keepclassmembers class com.hinnka.mycamera.render.RenderJob,
     com.hinnka.mycamera.gallery.db.GalleryMediaEntity,
     com.hinnka.mycamera.model.ColorRecipeParams,
     com.hinnka.mycamera.render.RenderJob$*,
+    com.hinnka.mycamera.render.RawRenderCheckpoint$*,
     com.hinnka.mycamera.raw.RawSceneExposureDeviceLimits,
     com.hinnka.mycamera.raw.RawColorCalibrationMode {
     <fields>;

@@ -54,6 +54,7 @@ import com.hinnka.mycamera.raw.GpuDemosaicedRawSource
 import com.hinnka.mycamera.raw.MgcSpatialGpuDenoiseMode
 import com.hinnka.mycamera.raw.RawCfaCorrection
 import com.hinnka.mycamera.raw.RawDefaultCropOverride
+import com.hinnka.mycamera.raw.RawHdrRenderResult
 import com.hinnka.mycamera.raw.RawDngProfilePreparation
 import com.hinnka.mycamera.raw.RawDngProfilePreparationOptions
 import com.hinnka.mycamera.raw.RawDngCaptureProfilePreparer
@@ -4247,6 +4248,14 @@ object GalleryManager {
         rawNoiseProfileId: String? = null,
         /** Called once the final JPEG and its metadata are both saved, before the HDR outputs. */
         onJpegSaved: (suspend () -> Unit)? = null,
+        /** Called right after the RAW render with its result and the metadata the later steps read. */
+        onRawRendered: (suspend (RawHdrRenderResult, MediaMetadata) -> Unit)? = null,
+        /**
+         * A RAW render restored from a checkpoint, with [metadata] as [onRawRendered] got it: the
+         * RAW render is skipped. With [jpegSaved] the JPEG and its metadata are kept as well.
+         */
+        resumeFrom: RawHdrRenderResult? = null,
+        jpegSaved: Boolean = false,
     ) {
         val photoDir = getPhotoDir(context, photoId, true)
         val photoFile = File(photoDir, PHOTO_FILE)
@@ -4257,7 +4266,7 @@ object GalleryManager {
         val rawNoiseReduction = resolveNoiseReduction(updatedMetadata, noiseReductionValue)
         val rawChromaNoiseReduction = updatedMetadata.chromaNoiseReduction
             ?: ChromaDenoiseDefaults.forRawCapture(chromaNoiseReductionValue)
-        val rawResult = RawDemosaicProcessor.getInstance().processForHdrSources(
+        val rawResult = resumeFrom ?: RawDemosaicProcessor.getInstance().processForHdrSources(
             context,
             dngFile.absolutePath,
             includeHdrReference = updatedMetadata.manualHdrEffectEnabled,
@@ -4309,26 +4318,30 @@ object GalleryManager {
         // :render renders one photo and exits, so the RAW renderer's cached full-size textures are
         // dead weight through the HDR outputs; the main process keeps them for the next capture.
         if (RenderProcess.isCurrent) RawDemosaicProcessor.getInstance().releaseOnGlThread()
+        // The mirror flip keeps the size, so the metadata is final before it.
+        updatedMetadata = updatedMetadata.copy(
+            width = rawResult.sdrBitmap.width,
+            height = rawResult.sdrBitmap.height,
+            sharpening = rawSharpening,
+            chromaNoiseReduction = rawChromaNoiseReduction
+        )
+        if (resumeFrom == null) onRawRendered?.invoke(rawResult, updatedMetadata)
         var bitmap = rawResult.sdrBitmap
 
         if (updatedMetadata.isMirrored) {
             bitmap = BitmapUtils.flipHorizontal(bitmap)
         }
-        updatedMetadata = updatedMetadata.copy(
-            width = bitmap.width,
-            height = bitmap.height,
-            sharpening = rawSharpening,
-            chromaNoiseReduction = rawChromaNoiseReduction
-        )
 
-        val jpegWritten = FileOutputStream(tempFile).use { outputStream ->
-            writeFinalJpeg(bitmap, outputStream, photoQuality)
+        if (!jpegSaved) {
+            val jpegWritten = FileOutputStream(tempFile).use { outputStream ->
+                writeFinalJpeg(bitmap, outputStream, photoQuality)
+            }
+            if (!jpegWritten || !tempFile.renameTo(photoFile)) {
+                tempFile.delete()
+                throw IOException("Failed to publish final RAW JPEG for $photoId")
+            }
+            if (saveMetadata(context, photoId, updatedMetadata)) onJpegSaved?.invoke()
         }
-        if (!jpegWritten || !tempFile.renameTo(photoFile)) {
-            tempFile.delete()
-            throw IOException("Failed to publish final RAW JPEG for $photoId")
-        }
-        if (saveMetadata(context, photoId, updatedMetadata)) onJpegSaved?.invoke()
         markProcessingPhotoDisplayReady(photoId, photoFile, updatedMetadata, isRawSource = true)
         val bokehBitmap = renderAndSaveBokehPhoto(context, photoId, updatedMetadata, bitmap)
         // Before the HDR outputs, so the SDR bitmap can be freed while they run.

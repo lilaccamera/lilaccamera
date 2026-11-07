@@ -73,19 +73,36 @@ class RawRenderService : Service() {
             check(job.state == RenderJob.State.QUEUED) { "Render job for $photoId is ${job.state}" }
             RawColorCalibrationPolicy.mode = job.rawColorCalibrationMode
             val photoDir = RenderJob.photoDir(this, photoId)
-            if (job.jpegDone && finishFromSavedJpeg(job, photoDir)) {
-                check(RenderJob.write(this, job.copy(state = RenderJob.State.DONE))) { "Cannot mark $photoId done" }
+            // Tried before the saved JPEG: the checkpoint also keeps the HDR outputs.
+            val checkpoint = if (job.rawRendered) RawRenderCheckpoint.read(this, photoId) else null
+            if (checkpoint == null && job.jpegDone && finishFromSavedJpeg(job, photoDir)) {
+                markDone(job)
                 return true
             }
-            // Outputs of an attempt that never reached DONE: loadMetadata would build on the stale
-            // result, and a stale JPEG would hide a render that produced none.
-            File(photoDir, GalleryMediaStore.RENDER_RESULT_FILE).delete()
-            val photoFile = GalleryManager.getPhotoFile(this, photoId).apply { delete() }
+            val resultFile = File(photoDir, GalleryMediaStore.RENDER_RESULT_FILE)
+            val photoFile = GalleryManager.getPhotoFile(this, photoId)
+            // Published by temp file and rename each, so present means complete.
+            val jpegSaved = checkpoint != null && job.jpegDone && photoFile.isFile && resultFile.isFile
+            if (!jpegSaved) {
+                // Outputs of an attempt that never reached DONE: loadMetadata would build on the stale
+                // result, and a stale JPEG would hide a render that produced none.
+                resultFile.delete()
+                photoFile.delete()
+            }
+            // Leftovers of an attempt killed while writing a checkpoint.
+            if (checkpoint == null) RawRenderCheckpoint.delete(this, photoId)
             val dngFile = GalleryManager.getDngFile(this, photoId)
             check(dngFile.isFile) { "No DNG for $photoId" }
-            val metadata = checkNotNull(GalleryManager.loadMetadata(this, photoId)) { "No metadata for $photoId" }
-            viewfinder = RenderJob.viewfinderFile(this, photoId).takeIf { it.isFile }
-                ?.let { BitmapFactory.decodeFile(it.absolutePath) }
+            val metadata = checkpoint?.metadata
+                ?: checkNotNull(GalleryManager.loadMetadata(this, photoId)) { "No metadata for $photoId" }
+            if (checkpoint != null) {
+                PLog.w(TAG, "Resuming $photoId from its RAW render checkpoint; RAW render skipped, JPEG kept=$jpegSaved")
+            } else {
+                viewfinder = RenderJob.viewfinderFile(this, photoId).takeIf { it.isFile }
+                    ?.let { BitmapFactory.decodeFile(it.absolutePath) }
+            }
+            // The callbacks below add to what is on disk, so each write keeps the other's flag.
+            var current = job.copy(rawRendered = checkpoint != null)
             broadcast(photoId, Stage.RENDERING)
             GalleryManager.renderRawDngPhotoOutputs(
                 context = this,
@@ -104,15 +121,26 @@ class RawRenderService : Service() {
                 captureExposureInputs = job.exposureInputs(viewfinder),
                 rawNoiseProfileId = job.rawNoiseProfileId,
                 onJpegSaved = {
-                    if (RenderJob.write(this, job.copy(jpegDone = true))) {
+                    if (RenderJob.write(this, current.copy(jpegDone = true))) {
+                        current = current.copy(jpegDone = true)
                         PLog.i(TAG, "JPEG and render result of $photoId saved; a retry keeps them")
                     }
                 },
+                onRawRendered = { result, rendered ->
+                    if (RawRenderCheckpoint.write(this, photoId, result, rendered) &&
+                        RenderJob.write(this, current.copy(rawRendered = true))
+                    ) {
+                        current = current.copy(rawRendered = true)
+                        PLog.i(TAG, "RAW render of $photoId checkpointed; a retry skips it")
+                    }
+                },
+                resumeFrom = checkpoint?.rawResult,
+                jpegSaved = jpegSaved,
             )
             // The render returns without output when the DNG decode fails.
             check(photoFile.isFile) { "Render produced no JPEG for $photoId" }
-            check(File(photoDir, GalleryMediaStore.RENDER_RESULT_FILE).isFile) { "Render saved no result for $photoId" }
-            check(RenderJob.write(this, job.copy(state = RenderJob.State.DONE))) { "Cannot mark $photoId done" }
+            check(resultFile.isFile) { "Render saved no result for $photoId" }
+            markDone(current)
             true
         } catch (e: Exception) {
             // The job stays QUEUED; the main-process queue counts the attempt.
@@ -123,11 +151,16 @@ class RawRenderService : Service() {
         }
     }
 
+    private fun markDone(job: RenderJob) {
+        check(RenderJob.write(this, job.copy(state = RenderJob.State.DONE))) { "Cannot mark ${job.photoId} done" }
+        RawRenderCheckpoint.delete(this, job.photoId)
+    }
+
     /**
      * Finishes a job whose earlier attempt was killed after saving the JPEG and its render result,
-     * without the RAW render. Detail HDR and an HDR export need the RAW render's linear HDR
-     * reference, which is never saved, so rebuilding them would repeat the render that was killed:
-     * they are skipped, and an auto-save exports the SDR JPEG. Returns false, so the caller renders
+     * without the RAW render or a [RawRenderCheckpoint]. Detail HDR and an HDR export need the RAW
+     * render's linear HDR reference, which only the checkpoint keeps, so rebuilding them would repeat
+     * the render that was killed: they are skipped, and an auto-save exports the SDR JPEG. Returns false, so the caller renders
      * again from the DNG, when the saved files are unusable.
      */
     private suspend fun finishFromSavedJpeg(job: RenderJob, photoDir: File): Boolean {

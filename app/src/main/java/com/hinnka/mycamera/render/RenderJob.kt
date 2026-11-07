@@ -46,6 +46,8 @@ data class RenderJob(
     val attempts: Int = 0,
     /** Set by the render once `original.jpg` and its render result are both saved. */
     val jpegDone: Boolean = false,
+    /** Set by the render once its [RawRenderCheckpoint] is complete. */
+    val rawRendered: Boolean = false,
 ) {
     enum class State { QUEUED, DONE, FAILED }
 
@@ -158,7 +160,7 @@ data class RenderJob(
             return job
         }
 
-        private fun writeAtomically(target: File, write: (File) -> Unit) {
+        internal fun writeAtomically(target: File, write: (File) -> Unit) {
             val temp = File(target.parentFile, "${target.name}.tmp")
             try {
                 write(temp)
