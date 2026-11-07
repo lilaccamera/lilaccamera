@@ -538,10 +538,11 @@ class RenderQueueService : Service() {
         private const val STATUS_INTERVAL_MS = 1_000L
         private const val MAX_ATTEMPTS = 3
         private const val MAX_LOW_MEMORY_RETRIES = 5
-        // Measured on a 4 GB phone: renders that started with 690-940 MB free finished, those that
-        // started with 200-330 MB free were killed (the render peaks near 1.4 GB, reclaiming caches).
-        private const val MIN_FREE_MB_TO_START = 600
-        private const val MEMORY_WAIT_MAX_MS = 120_000L
+        // Measured on a 4 GB phone: renders that started with 200-330 MB free were killed, ones that
+        // started with 517 and 690-940 MB free finished. GPU and camera driver pools hold memory that
+        // availMem does not count but a render can still get. shortcut: few data points; retune with more.
+        private const val MIN_FREE_MB_TO_START = 450
+        private const val MEMORY_WAIT_MAX_MS = 60_000L
         private const val MEMORY_POLL_MS = 3_000L
         private const val LOW_MEMORY_RETRY_DELAY_MS = 5_000L
         // A full-size render takes about 25 s on a 2017 phone.
