@@ -34,6 +34,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -177,17 +178,25 @@ class RenderQueueService : Service() {
     }
 
     /** Renders [job] once and books the outcome. */
-    private suspend fun attempt(job: RenderJob) {
-        val photoId = job.photoId
-        if (job.attempts >= MAX_ATTEMPTS) return markFailed(job)
+    private suspend fun attempt(queued: RenderJob) {
+        val photoId = queued.photoId
+        if (queued.attempts >= MAX_ATTEMPTS) return markFailed(queued)
         awaitRenderProcessGone()
         awaitFreeMemory()
         // Pause applies between photos, including while waiting for memory; nothing is counted.
         if (RenderQueue.isPaused(this)) return
-        // Counted before binding, so a render that takes the main process down still counts.
-        if (!withContext(Dispatchers.IO) { RenderJob.write(this@RenderQueueService, job.copy(attempts = job.attempts + 1)) }) {
-            PLog.e(TAG, "Cannot count the attempt for $photoId; stopping the queue")
-            return stopQueue()
+        // Under the lock, a skip lands either before this (the job is no longer QUEUED) or on this render.
+        val job = RenderQueue.jobLock.withLock {
+            val current = withContext(Dispatchers.IO) { RenderJob.read(this@RenderQueueService, photoId) }
+                ?.takeIf { it.state == RenderJob.State.QUEUED } ?: return // skipped while it waited
+            // Counted before binding, so a render that takes the main process down still counts.
+            if (!withContext(Dispatchers.IO) { RenderJob.write(this@RenderQueueService, current.copy(attempts = current.attempts + 1)) }) {
+                PLog.e(TAG, "Cannot count the attempt for $photoId; stopping the queue")
+                return stopQueue()
+            }
+            RenderQueue.renderingPhotoId = photoId
+            RenderQueue.renderSkipped = false
+            current
         }
         val startedAt = System.currentTimeMillis()
         startedJob = job
@@ -195,31 +204,47 @@ class RenderQueueService : Service() {
         val finished = renderOnce(photoId)
         // A hung render is killed at once and counts as a failed attempt.
         awaitRenderProcessGone(if (finished) RENDER_EXIT_TIMEOUT_MS else 0L)
-        val after = withContext(Dispatchers.IO) { RenderJob.read(this@RenderQueueService, photoId) }
-        when {
-            after == null -> PLog.w(TAG, "Render job for $photoId disappeared")
-            after.state == RenderJob.State.DONE -> {
-                GalleryManager.applyRenderResult(this, photoId)
-                // Full renders only: a resumed one would pull the estimate down.
-                if (rawRenderRan) photoAvgMs += (SystemClock.elapsedRealtime() - photoStartedAt - photoAvgMs) / ++photoCount
-                done++
-                finishedIds += photoId
+        var retryAfterLowMemory = false
+        RenderQueue.jobLock.withLock<Unit> {
+            val after = withContext(Dispatchers.IO) { RenderJob.read(this@RenderQueueService, photoId) }
+            // The flag too: the render may have written its job (still QUEUED) after the skip did.
+            val skipped = RenderQueue.renderSkipped || after?.state == RenderJob.State.SKIPPED
+            RenderQueue.renderingPhotoId = null
+            when {
+                after == null -> PLog.w(TAG, "Render job for $photoId disappeared")
+                after.state == RenderJob.State.DONE -> {
+                    GalleryManager.applyRenderResult(this, photoId)
+                    // Full renders only: a resumed one would pull the estimate down.
+                    if (rawRenderRan) photoAvgMs += (SystemClock.elapsedRealtime() - photoStartedAt - photoAvgMs) / ++photoCount
+                    done++
+                    finishedIds += photoId
+                }
+                // The user ended it: neither a failure nor a low-memory kill; the loop goes on with the next photo.
+                skipped -> {
+                    PLog.i(TAG, "Render of $photoId skipped; not counting it")
+                    withContext(Dispatchers.IO) {
+                        RenderJob.write(this@RenderQueueService, after.copy(state = RenderJob.State.SKIPPED, attempts = job.attempts))
+                        RawRenderCheckpoint.delete(this@RenderQueueService, photoId)
+                    }
+                }
+                // Not a failure: the render stopped at a checkpoint and kept its progress; the loop then stops paused.
+                pausedPhotoId == photoId -> {
+                    PLog.i(TAG, "Render of $photoId paused (rawRendered=${after.rawRendered}, jpegDone=${after.jpegDone}); not counting it")
+                    withContext(Dispatchers.IO) { RenderJob.write(this@RenderQueueService, after.copy(attempts = job.attempts)) }
+                }
+                // Capped, so a phone that always kills the render does not retry (and heat up) forever.
+                wasLowMemoryKill(startedAt) &&
+                    lowMemoryRetries.merge(photoId, 1, Int::plus)!! <= MAX_LOW_MEMORY_RETRIES -> {
+                    PLog.w(TAG, "Render of $photoId was killed for low memory; retrying without counting it")
+                    withContext(Dispatchers.IO) { RenderJob.write(this@RenderQueueService, after.copy(attempts = job.attempts)) }
+                    retryAfterLowMemory = true
+                }
+                after.attempts >= MAX_ATTEMPTS -> markFailed(after)
+                else -> PLog.w(TAG, "Render of $photoId failed (attempt ${after.attempts} of $MAX_ATTEMPTS)")
             }
-            // Not a failure: the render stopped at a checkpoint and kept its progress; the loop then stops paused.
-            pausedPhotoId == photoId -> {
-                PLog.i(TAG, "Render of $photoId paused (rawRendered=${after.rawRendered}, jpegDone=${after.jpegDone}); not counting it")
-                withContext(Dispatchers.IO) { RenderJob.write(this@RenderQueueService, after.copy(attempts = job.attempts)) }
-            }
-            // Capped, so a phone that always kills the render does not retry (and heat up) forever.
-            wasLowMemoryKill(startedAt) &&
-                lowMemoryRetries.merge(photoId, 1, Int::plus)!! <= MAX_LOW_MEMORY_RETRIES -> {
-                PLog.w(TAG, "Render of $photoId was killed for low memory; retrying without counting it")
-                withContext(Dispatchers.IO) { RenderJob.write(this@RenderQueueService, after.copy(attempts = job.attempts)) }
-                delay(LOW_MEMORY_RETRY_DELAY_MS)
-            }
-            after.attempts >= MAX_ATTEMPTS -> markFailed(after)
-            else -> PLog.w(TAG, "Render of $photoId failed (attempt ${after.attempts} of $MAX_ATTEMPTS)")
         }
+        // Outside the lock, so a skip meanwhile does not wait for it.
+        if (retryAfterLowMemory) delay(LOW_MEMORY_RETRY_DELAY_MS)
     }
 
     private suspend fun markFailed(job: RenderJob) {
@@ -276,15 +301,13 @@ class RenderQueueService : Service() {
      * (left from an earlier app run, or stuck) is killed.
      */
     private suspend fun awaitRenderProcessGone(killAfterMs: Long = RENDER_EXIT_TIMEOUT_MS) {
-        val processName = packageName + RenderProcess.PROCESS_SUFFIX
-        val activityManager = getSystemService(ActivityManager::class.java)
         val deadline = SystemClock.elapsedRealtime() + killAfterMs
         var killed = false
         while (true) {
-            val process = activityManager.runningAppProcesses?.firstOrNull { it.processName == processName } ?: return
+            val pid = RenderQueue.renderProcessPid(this) ?: return
             if (!killed && SystemClock.elapsedRealtime() > deadline) {
-                PLog.w(TAG, "Render process ${process.pid} still running; killing it")
-                Process.killProcess(process.pid)
+                PLog.w(TAG, "Render process $pid still running; killing it")
+                Process.killProcess(pid)
                 killed = true
             }
             delay(PROCESS_POLL_MS)

@@ -1567,6 +1567,10 @@
         <item quantity="one">Failed after %1$d try</item>
         <item quantity="other">Failed after %1$d tries</item>
     </plurals>
+    <string name="render_queue_skip">Skip</string>
+    <string name="render_queue_skipped">Skipped</string>
+    <string name="render_queue_render">Render</string>
+    <string name="render_queue_skip_confirm">Stop rendering this photo? Its RAW file is kept.</string>
     <string name="render_queue_empty">No photos waiting</string>
     <string name="render_queue_hint">A render needs lots of free memory. This screen has let go of the gallery\'s cached images; closing other apps frees more.</string>
 </resources>

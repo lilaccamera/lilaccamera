@@ -38,7 +38,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Queued and failed RAW renders with the queue's live state. Draws only small CPU-decoded
+ * Queued, failed and skipped RAW renders with the queue's live state. Draws only small CPU-decoded
  * thumbnails and drops the gallery's bitmap caches, so the render gets as much memory as possible.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -56,6 +56,9 @@ fun RenderQueueScreen(
     var paused by remember { mutableStateOf(RenderQueue.isPaused(context)) }
     var jobs by remember { mutableStateOf(emptyList<RenderJob>()) }
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    var confirmSkipId by remember { mutableStateOf<String?>(null) }
+    val skipText = stringResource(R.string.render_queue_skip)
+    val skip: (String) -> Unit = { photoId -> scope.launch { RenderQueue.skip(context, photoId) } }
 
     LaunchedEffect(Unit) { viewModel.dropBitmapCaches() }
     LaunchedEffect(Unit) {
@@ -184,7 +187,15 @@ fun RenderQueueScreen(
                             progress = 1f,
                             label = pluralStringResource(R.plurals.render_queue_failed_after, job.attempts, job.attempts),
                             failed = true,
-                            onRetry = { scope.launch { RenderQueue.retry(context, listOf(job)) } }
+                            action = stringResource(R.string.render_queue_retry),
+                            onAction = { scope.launch { RenderQueue.retry(context, listOf(job)) } }
+                        )
+                        job.state == RenderJob.State.SKIPPED -> RenderJobRow(
+                            job.photoId,
+                            progress = 0f,
+                            label = stringResource(R.string.render_queue_skipped),
+                            action = stringResource(R.string.render_queue_render),
+                            onAction = { scope.launch { RenderQueue.unskip(context, job.photoId) } }
                         )
                         status.running && job.photoId == status.currentPhotoId -> RenderJobRow(
                             job.photoId,
@@ -195,7 +206,9 @@ fun RenderQueueScreen(
                                 DateUtils.formatElapsedTime(((now - status.photoStartedAt) / 1000).coerceAtLeast(0L))
                             ),
                             detail = stringResource(R.string.render_queue_stage_resumed)
-                                .takeIf { status.resumed && status.stageText != R.string.render_queue_stage_resumed }
+                                .takeIf { status.resumed && status.stageText != R.string.render_queue_stage_resumed },
+                            action = skipText,
+                            onAction = { confirmSkipId = job.photoId }
                         )
                         // Stopped at a checkpoint (or killed after one); a resume continues from it.
                         paused && (job.jpegDone || job.rawRendered) -> RenderJobRow(
@@ -204,18 +217,44 @@ fun RenderQueueScreen(
                             label = stringResource(
                                 if (job.jpegDone) R.string.render_queue_paused_after_jpeg else R.string.render_queue_paused_after_raw
                             ),
-                            detail = stringResource(R.string.render_queue_attempts, job.attempts).takeIf { job.attempts > 0 }
+                            detail = stringResource(R.string.render_queue_attempts, job.attempts).takeIf { job.attempts > 0 },
+                            action = skipText,
+                            onAction = { skip(job.photoId) }
                         )
                         else -> RenderJobRow(
                             job.photoId,
                             progress = 0f,
                             label = stringResource(R.string.render_queue_job_waiting),
-                            detail = stringResource(R.string.render_queue_attempts, job.attempts).takeIf { job.attempts > 0 }
+                            detail = stringResource(R.string.render_queue_attempts, job.attempts).takeIf { job.attempts > 0 },
+                            action = skipText,
+                            onAction = { skip(job.photoId) }
                         )
                     }
                 }
             }
         }
+    }
+    // Only the photo being rendered asks: skipping it throws away the render's progress.
+    confirmSkipId?.let { photoId ->
+        AlertDialog(
+            onDismissRequest = { confirmSkipId = null },
+            text = { Text(stringResource(R.string.render_queue_skip_confirm)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmSkipId = null
+                    skip(photoId)
+                }) {
+                    Text(skipText, color = AccentColor)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmSkipId = null }) {
+                    Text(stringResource(R.string.cancel), color = Color.White)
+                }
+            },
+            containerColor = Color(0xFF2D2D2D),
+            textContentColor = Color.White
+        )
     }
 }
 
@@ -248,7 +287,8 @@ private fun RenderJobRow(
     label: String,
     detail: String? = null,
     failed: Boolean = false,
-    onRetry: () -> Unit = {},
+    action: String? = null,
+    onAction: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val thumbnail by produceState<ImageBitmap?>(null, photoId) {
@@ -280,9 +320,9 @@ private fun RenderJobRow(
             detail?.let { Text(text = it, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp) }
             RenderProgressBar(progress, if (failed) MaterialTheme.colorScheme.error else AccentColor)
         }
-        if (failed) {
-            TextButton(onClick = onRetry) {
-                Text(stringResource(R.string.render_queue_retry), color = AccentColor)
+        action?.let {
+            TextButton(onClick = onAction) {
+                Text(it, color = AccentColor)
             }
         }
     }

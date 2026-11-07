@@ -49,7 +49,8 @@ data class RenderJob(
     /** Set by the render once its [RawRenderCheckpoint] is complete. */
     val rawRendered: Boolean = false,
 ) {
-    enum class State { QUEUED, DONE, FAILED }
+    /** SKIPPED: taken out of the queue by the user; the DNG stays and the queue never renders it. */
+    enum class State { QUEUED, DONE, FAILED, SKIPPED }
 
     /** [PortraitMaskSnapshot] with its confidence as base64 little-endian float32. */
     data class PortraitMask(

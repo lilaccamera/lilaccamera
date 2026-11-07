@@ -5,10 +5,13 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Process
 import androidx.annotation.StringRes
 import androidx.core.content.ContextCompat
 import com.hinnka.mycamera.gallery.GalleryManager
+import com.hinnka.mycamera.gallery.db.GalleryMediaStore
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.utils.RenderProcess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,6 +19,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -66,6 +71,15 @@ object RenderQueue {
         /** Photos done plus the current photo's share, over all photos, 0..1. */
         val progress: Float get() = if (total == 0) 0f else ((done + photoProgress) / total).coerceIn(0f, 1f)
     }
+
+    /** Orders a skip against [RenderQueueService] starting or booking that job's render. */
+    internal val jobLock = Mutex()
+
+    /** Under [jobLock]: the photo [RenderQueueService] is rendering, from the attempt count until the outcome is booked. */
+    internal var renderingPhotoId: String? = null
+
+    /** Under [jobLock]: [renderingPhotoId] was skipped, so its render's end is booked as a skip. */
+    internal var renderSkipped = false
 
     private val _status = MutableStateFlow(Status())
 
@@ -128,6 +142,7 @@ object RenderQueue {
                     failed += photoId
                     null
                 }
+                RenderJob.State.SKIPPED -> null
             }
         }.sortedBy { it.second }.map { it.first }
         _pendingPhotoIds.value = queued.mapTo(HashSet()) { it.photoId }
@@ -135,7 +150,7 @@ object RenderQueue {
         queued
     }
 
-    /** QUEUED and FAILED jobs, oldest DNG first. Read-only (unlike [scan]), so a screen may call it any time. */
+    /** QUEUED, FAILED and SKIPPED jobs, oldest DNG first. Read-only (unlike [scan]), so a screen may call it any time. */
     suspend fun jobs(context: Context): List<RenderJob> = withContext(Dispatchers.IO) {
         GalleryManager.getPhotosBaseDir(context)
             .listFiles { dir -> File(dir, RenderJob.JOB_FILE).isFile }.orEmpty()
@@ -153,6 +168,55 @@ object RenderQueue {
                 .forEach { RenderJob.write(context, it.copy(state = RenderJob.State.QUEUED, attempts = 0, rawRendered = false)) }
         }
         start(context)
+    }
+
+    /**
+     * Takes a QUEUED job out of the queue, keeping its DNG (the next scan deletes its checkpoint). A
+     * render of it running now is ended at once; [RenderQueueService] books that end as a skip.
+     */
+    suspend fun skip(context: Context, photoId: String) {
+        withContext(Dispatchers.IO) {
+            jobLock.withLock<Unit> {
+                val job = RenderJob.read(context, photoId)?.takeIf { it.state == RenderJob.State.QUEUED } ?: return@withLock
+                if (!RenderJob.write(context, job.copy(state = RenderJob.State.SKIPPED))) return@withLock
+                PLog.i(TAG, "Skipped $photoId")
+                if (renderingPhotoId == photoId) {
+                    renderSkipped = true
+                    // Same uid, so this process may end it; a render not started yet refuses the SKIPPED job.
+                    renderProcessPid(context)?.let {
+                        PLog.i(TAG, "Ending render process $it of skipped $photoId")
+                        Process.killProcess(it)
+                    }
+                }
+            }
+            scan(context)
+        }
+    }
+
+    /**
+     * Puts a SKIPPED job back in the queue with a fresh attempt count, then starts the queue. The
+     * skip deleted the checkpoint; a saved JPEG stays marked only while it and its render result exist.
+     */
+    suspend fun unskip(context: Context, photoId: String) {
+        withContext(Dispatchers.IO) {
+            jobLock.withLock<Unit> {
+                val job = RenderJob.read(context, photoId)?.takeIf { it.state == RenderJob.State.SKIPPED } ?: return@withLock
+                val jpegSaved = job.jpegDone && GalleryManager.getPhotoFile(context, photoId).isFile &&
+                    File(RenderJob.photoDir(context, photoId), GalleryMediaStore.RENDER_RESULT_FILE).isFile
+                RenderJob.write(
+                    context,
+                    job.copy(state = RenderJob.State.QUEUED, attempts = 0, rawRendered = false, jpegDone = jpegSaved),
+                )
+            }
+        }
+        start(context)
+    }
+
+    /** The `:render` process's pid, or null when none runs. */
+    internal fun renderProcessPid(context: Context): Int? {
+        val processName = context.packageName + RenderProcess.PROCESS_SUFFIX
+        return context.getSystemService(ActivityManager::class.java).runningAppProcesses
+            ?.firstOrNull { it.processName == processName }?.pid
     }
 
     fun isPaused(context: Context): Boolean = pausedFile(context).exists()
