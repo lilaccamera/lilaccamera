@@ -29,7 +29,21 @@ import java.util.concurrent.atomic.AtomicBoolean
  * it once per job, follows [ACTION_STAGE] broadcasts and decides retries.
  */
 class RawRenderService : Service() {
-    enum class Stage { STARTED, RENDERING, DONE, FAILED }
+    /**
+     * Steps in order, with the share of one photo's render each covers ([start] to [end]), from a
+     * measured 5056x3792 render (35 s). RESUMED replaces RENDERING when a retry uses a checkpoint.
+     */
+    enum class Stage(val start: Float, val end: Float) {
+        STARTED(0f, 0.05f),
+        RENDERING(0.05f, 0.75f),
+        CHECKPOINT(0.75f, 0.82f),
+        RESUMED(0.82f, 0.82f),
+        JPEG(0.82f, 0.86f),
+        HDR(0.86f, 0.97f),
+        SAVING(0.97f, 1f),
+        DONE(1f, 1f),
+        FAILED(0f, 0f),
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var currentStage = Stage.STARTED
@@ -103,7 +117,7 @@ class RawRenderService : Service() {
             }
             // The callbacks below add to what is on disk, so each write keeps the other's flag.
             var current = job.copy(rawRendered = checkpoint != null)
-            broadcast(photoId, Stage.RENDERING)
+            broadcast(photoId, if (checkpoint != null) Stage.RESUMED else Stage.RENDERING)
             GalleryManager.renderRawDngPhotoOutputs(
                 context = this,
                 photoId = photoId,
@@ -126,7 +140,9 @@ class RawRenderService : Service() {
                         PLog.i(TAG, "JPEG and render result of $photoId saved; a retry keeps them")
                     }
                 },
+                onStage = { broadcast(photoId, it) },
                 onRawRendered = { result, rendered ->
+                    broadcast(photoId, Stage.CHECKPOINT)
                     if (RawRenderCheckpoint.write(this, photoId, result, rendered) &&
                         RenderJob.write(this, current.copy(rawRendered = true))
                     ) {
@@ -179,15 +195,17 @@ class RawRenderService : Service() {
             "Keeping the JPEG of $photoId from an attempt killed after saving it; RAW render skipped, " +
                 "detail HDR skipped (hdr=${metadata.manualHdrEffectEnabled}), SDR export=${job.shouldAutoSave}",
         )
-        broadcast(photoId, Stage.RENDERING)
+        broadcast(photoId, Stage.RESUMED)
         val photoProcessor = ContentRepository.getInstance(this).photoProcessor
         try {
             // The same post-JPEG steps renderRawDngPhotoOutputs runs, from the saved JPEG.
+            broadcast(photoId, Stage.HDR)
             if ((metadata.computationalAperture ?: 0f) > 0f && !GalleryManager.getBokehFile(this, photoId).isFile) {
                 GalleryManager.generateBokehPhoto(this, photoId, metadata, jpeg)
             }
             GalleryManager.updateThumbnail(this, photoId, photoProcessor, metadata, jpeg)
             if (job.shouldAutoSave) {
+                broadcast(photoId, Stage.SAVING)
                 // shortcut: a kill between this export and DONE exports again on the next attempt;
                 // add an exported marker if duplicates show up.
                 GalleryManager.exportPhoto(

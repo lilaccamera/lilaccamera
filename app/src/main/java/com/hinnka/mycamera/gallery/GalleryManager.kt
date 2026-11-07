@@ -71,6 +71,7 @@ import com.hinnka.mycamera.raw.RawCaptureProfileCoordinator
 import com.hinnka.mycamera.raw.RawSceneExposureMath
 import com.hinnka.mycamera.raw.RawSceneExposureDeviceLimits
 import com.hinnka.mycamera.raw.RawColorCalibrationPolicy
+import com.hinnka.mycamera.render.RawRenderService
 import com.hinnka.mycamera.render.RenderJob
 import com.hinnka.mycamera.render.RenderQueue
 import com.hinnka.mycamera.raw.RawAppliedLensShading
@@ -4248,6 +4249,8 @@ object GalleryManager {
         rawNoiseProfileId: String? = null,
         /** Called once the final JPEG and its metadata are both saved, before the HDR outputs. */
         onJpegSaved: (suspend () -> Unit)? = null,
+        /** Called as the outputs reach [RawRenderService.Stage.JPEG], HDR and SAVING, for progress. */
+        onStage: ((RawRenderService.Stage) -> Unit)? = null,
         /** Called right after the RAW render with its result and the metadata the later steps read. */
         onRawRendered: (suspend (RawHdrRenderResult, MediaMetadata) -> Unit)? = null,
         /**
@@ -4333,6 +4336,7 @@ object GalleryManager {
         }
 
         if (!jpegSaved) {
+            onStage?.invoke(RawRenderService.Stage.JPEG)
             val jpegWritten = FileOutputStream(tempFile).use { outputStream ->
                 writeFinalJpeg(bitmap, outputStream, photoQuality)
             }
@@ -4343,6 +4347,7 @@ object GalleryManager {
             if (saveMetadata(context, photoId, updatedMetadata)) onJpegSaved?.invoke()
         }
         markProcessingPhotoDisplayReady(photoId, photoFile, updatedMetadata, isRawSource = true)
+        onStage?.invoke(RawRenderService.Stage.HDR)
         val bokehBitmap = renderAndSaveBokehPhoto(context, photoId, updatedMetadata, bitmap)
         // Before the HDR outputs, so the SDR bitmap can be freed while they run.
         updateThumbnail(context, photoId, photoProcessor, updatedMetadata, bitmap)
@@ -4395,6 +4400,7 @@ object GalleryManager {
         }
 
         if (shouldAutoSave) {
+            onStage?.invoke(RawRenderService.Stage.SAVING)
             exportPhoto(
                 context,
                 photoId,

@@ -1525,7 +1525,7 @@
     <string name="fotufilm_value_years">%1$s yr</string>
     <!-- /Fotufilm controls -->
     <string name="render_queue_channel">RAW rendering</string>
-    <string name="render_queue_title">Rendering %1$d of %2$d</string>
+    <string name="render_queue_title_left">Rendering %1$d of %2$d · about %3$s left</string>
     <string name="render_queue_paused">Rendering paused, %1$d waiting</string>
     <string name="render_queue_pause">Pause</string>
     <string name="render_queue_resume">Resume</string>
@@ -1535,6 +1535,12 @@
     <string name="render_queue_stage_done">Saving to the gallery</string>
     <string name="render_queue_stage_failed">Render failed</string>
     <string name="render_queue_stage_waiting_memory">Waiting for free memory</string>
+    <string name="render_queue_stage_checkpoint">Saving a checkpoint</string>
+    <string name="render_queue_stage_resumed">Resumed from checkpoint</string>
+    <string name="render_queue_stage_jpeg">Writing the JPEG</string>
+    <string name="render_queue_stage_hdr">Building HDR and previews</string>
+    <string name="render_queue_stage_finished">Done</string>
+    <string name="render_queue_joined">%1$s · %2$s</string>
     <string name="render_queue_memory">Render %1$d MB · Free %2$d MB</string>
     <string name="render_queue_memory_free">Free %1$d MB</string>
     <string name="render_failed_channel">RAW rendering problems</string>

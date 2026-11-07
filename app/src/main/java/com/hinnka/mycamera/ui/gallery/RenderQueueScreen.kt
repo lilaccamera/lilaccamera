@@ -1,6 +1,8 @@
 package com.hinnka.mycamera.ui.gallery
 
 import android.graphics.BitmapFactory
+import android.os.SystemClock
+import android.text.format.DateUtils
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -51,6 +53,7 @@ fun RenderQueueScreen(
     var freeMb by remember { mutableIntStateOf(RenderQueue.freeMemoryMb(context)) }
     var paused by remember { mutableStateOf(RenderQueue.isPaused(context)) }
     var jobs by remember { mutableStateOf(emptyList<RenderJob>()) }
+    var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
 
     LaunchedEffect(Unit) { viewModel.dropBitmapCaches() }
     LaunchedEffect(Unit) {
@@ -58,7 +61,8 @@ fun RenderQueueScreen(
             freeMb = RenderQueue.freeMemoryMb(context)
             // The notification's Pause / Resume changes it too.
             paused = RenderQueue.isPaused(context)
-            delay(2_000L)
+            now = SystemClock.elapsedRealtime()
+            delay(1_000L)
         }
     }
     // Every scan of the queue updates these sets, so the list follows renders and retries.
@@ -104,29 +108,37 @@ fun RenderQueueScreen(
             Text(
                 text = when {
                     status.running -> stringResource(
-                        R.string.render_queue_title,
+                        R.string.render_queue_title_left,
                         (status.done + 1).coerceAtMost(status.total),
-                        status.total
+                        status.total,
+                        DateUtils.formatElapsedTime(status.leftMs / 1000)
                     )
                     paused -> stringResource(R.string.render_queue_paused, pendingIds.size)
                     else -> stringResource(R.string.render_queue_idle, pendingIds.size)
                 },
-                color = Color.White,
+                color = if (paused && !status.running) AccentColor else Color.White,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
             )
             if (status.running) {
-                if (paused) StatusLine(stringResource(R.string.render_queue_pausing))
-                StatusLine(stringResource(status.stageText))
-                status.currentPhotoId?.let { StatusLine(stringResource(R.string.render_queue_photo, it)) }
-                LinearProgressIndicator(
-                    progress = { status.done.toFloat() / status.total.coerceAtLeast(1).toFloat() },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp),
-                    color = AccentColor,
-                    trackColor = Color.White.copy(alpha = 0.15f)
-                )
+                if (paused) Notice(stringResource(R.string.render_queue_pausing))
+                RenderProgressBar(status.progress)
+                // Memory is awaited before a photo starts, so this and the photo's own lines never show together.
+                if (status.waitingForMemory) Notice(stringResource(status.stageText))
+                status.currentPhotoId?.let { photoId ->
+                    StatusLine(stringResource(R.string.render_queue_photo, photoId))
+                    StatusLine(
+                        stringResource(
+                            R.string.render_queue_joined,
+                            stringResource(status.stageText),
+                            DateUtils.formatElapsedTime(((now - status.photoStartedAt) / 1000).coerceAtLeast(0L))
+                        )
+                    )
+                    if (status.resumed && status.stageText != R.string.render_queue_stage_resumed) {
+                        StatusLine(stringResource(R.string.render_queue_stage_resumed))
+                    }
+                    RenderProgressBar(status.photoProgress)
+                }
             }
             StatusLine(
                 status.renderPssKb?.takeIf { status.running }
@@ -184,6 +196,23 @@ fun RenderQueueScreen(
 @Composable
 private fun StatusLine(text: String) {
     Text(text = text, color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp)
+}
+
+@Composable
+private fun Notice(text: String) {
+    Text(text = text, color = AccentColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+}
+
+@Composable
+private fun RenderProgressBar(progress: Float) {
+    LinearProgressIndicator(
+        progress = { progress },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(4.dp),
+        color = AccentColor,
+        trackColor = Color.White.copy(alpha = 0.15f)
+    )
 }
 
 @Composable

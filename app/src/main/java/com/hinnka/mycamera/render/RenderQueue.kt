@@ -50,7 +50,18 @@ object RenderQueue {
         val currentPhotoId: String? = null,
         @StringRes val stageText: Int = 0,
         val renderPssKb: Int? = null,
-    )
+        /** The current photo's share done, 0..1. */
+        val photoProgress: Float = 0f,
+        /** [android.os.SystemClock.elapsedRealtime] when the current photo's render was started, 0 if none. */
+        val photoStartedAt: Long = 0L,
+        /** True once the current photo's render resumed from a checkpoint. */
+        val resumed: Boolean = false,
+        /** Estimated time until the queue is through. */
+        val leftMs: Long = 0L,
+    ) {
+        /** Photos done plus the current photo's share, over all photos, 0..1. */
+        val progress: Float get() = if (total == 0) 0f else ((done + photoProgress) / total).coerceIn(0f, 1f)
+    }
 
     private val _status = MutableStateFlow(Status())
 

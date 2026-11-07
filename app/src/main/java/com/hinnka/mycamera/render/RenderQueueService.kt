@@ -18,6 +18,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.Process
 import android.os.SystemClock
+import android.text.format.DateUtils
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -54,6 +55,10 @@ class RenderQueueService : Service() {
     private var renderPssKb: Int? = null
     private var failedThisRun = 0
     private var waitingForMemory = false
+    private var stageStartedAt = 0L
+    private var photoStartedAt = 0L
+    private var resumed = false
+    private var rawRenderRan = false
 
     private val stageReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -62,6 +67,15 @@ class RenderQueueService : Service() {
                 .firstOrNull { it.name == intent.getStringExtra(RawRenderService.EXTRA_STAGE) } ?: return
             // Only the notification follows stages: after DONE or FAILED the render ends its process,
             // which the connection reports.
+            if (received != stage) {
+                val now = SystemClock.elapsedRealtime()
+                if (stage == RawRenderService.Stage.RENDERING && received == RawRenderService.Stage.CHECKPOINT) {
+                    rawRenderAvgMs += (now - stageStartedAt - rawRenderAvgMs) / ++rawRenderCount
+                    rawRenderRan = true
+                }
+                if (received == RawRenderService.Stage.RESUMED) resumed = true
+                stageStartedAt = now
+            }
             stage = received
             renderPssKb = intent.getIntExtra(RawRenderService.EXTRA_PSS_KB, 0).takeIf { it > 0 }
             updateNotification()
@@ -163,6 +177,8 @@ class RenderQueueService : Service() {
             after == null -> PLog.w(TAG, "Render job for $photoId disappeared")
             after.state == RenderJob.State.DONE -> {
                 GalleryManager.applyRenderResult(this, photoId)
+                // Full renders only: a resumed one would pull the estimate down.
+                if (rawRenderRan) photoAvgMs += (SystemClock.elapsedRealtime() - photoStartedAt - photoAvgMs) / ++photoCount
                 done++
             }
             // Capped, so a phone that always kills the render does not retry (and heat up) forever.
@@ -201,6 +217,9 @@ class RenderQueueService : Service() {
         currentPhotoId = photoId
         stage = null
         renderPssKb = null
+        resumed = false
+        rawRenderRan = false
+        photoStartedAt = SystemClock.elapsedRealtime()
         updateNotification()
         return try {
             val intent = Intent(this, RawRenderService::class.java).putExtra(RawRenderService.EXTRA_PHOTO_ID, photoId)
@@ -285,11 +304,36 @@ class RenderQueueService : Service() {
 
     private fun updateNotification() {
         if (loop?.isActive == true) {
-            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildProgress())
-            RenderQueue.publishStatus(
-                RenderQueue.Status(true, waitingForMemory, done, total, currentPhotoId, stageText(), renderPssKb)
-            )
+            val status = currentStatus()
+            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildProgress(status))
+            RenderQueue.publishStatus(status)
         }
+    }
+
+    private fun currentStatus(): RenderQueue.Status {
+        val photoProgress = photoProgress()
+        return RenderQueue.Status(
+            running = true,
+            waitingForMemory = waitingForMemory,
+            done = done,
+            total = total,
+            currentPhotoId = currentPhotoId,
+            stageText = stageText(),
+            renderPssKb = renderPssKb,
+            photoProgress = photoProgress,
+            photoStartedAt = photoStartedAt,
+            resumed = resumed,
+            leftMs = ((total - done - photoProgress) * photoAvgMs).toLong().coerceAtLeast(0L),
+        )
+    }
+
+    /** The current photo's share done: its stage's start, advanced by time inside the RAW render. */
+    private fun photoProgress(): Float {
+        val current = stage?.takeIf { currentPhotoId != null } ?: return 0f
+        if (current != RawRenderService.Stage.RENDERING) return current.start
+        // The renderer reports no progress of its own; capped so it never looks done early.
+        val ratio = (SystemClock.elapsedRealtime() - stageStartedAt) / rawRenderAvgMs
+        return current.start + (current.end - current.start) * ratio.coerceAtMost(RAW_RENDER_PROGRESS_CAP)
     }
 
     /** The render process's memory and what the phone has left, to see how close a render is to a kill. */
@@ -303,23 +347,37 @@ class RenderQueueService : Service() {
         null -> R.string.render_queue_stage_waiting
         RawRenderService.Stage.STARTED -> R.string.render_queue_stage_started
         RawRenderService.Stage.RENDERING -> R.string.render_queue_stage_rendering
-        RawRenderService.Stage.DONE -> R.string.render_queue_stage_done
+        RawRenderService.Stage.CHECKPOINT -> R.string.render_queue_stage_checkpoint
+        RawRenderService.Stage.RESUMED -> R.string.render_queue_stage_resumed
+        RawRenderService.Stage.JPEG -> R.string.render_queue_stage_jpeg
+        RawRenderService.Stage.HDR -> R.string.render_queue_stage_hdr
+        RawRenderService.Stage.SAVING -> R.string.render_queue_stage_done
+        RawRenderService.Stage.DONE -> R.string.render_queue_stage_finished
         RawRenderService.Stage.FAILED -> R.string.render_queue_stage_failed
     }
 
-    private fun buildProgress(): Notification {
+    private fun buildProgress(status: RenderQueue.Status = currentStatus()): Notification {
         val paused = RenderQueue.isPaused(this)
-        val stageText = stageText()
+        val stageText = getString(status.stageText)
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(
                 if (total == 0) getString(R.string.render_queue_channel)
-                else getString(R.string.render_queue_title, (done + 1).coerceAtMost(total), total)
+                else getString(
+                    R.string.render_queue_title_left,
+                    (done + 1).coerceAtMost(total),
+                    total,
+                    DateUtils.formatElapsedTime(status.leftMs / 1000),
+                )
             )
             // Memory first: it is what the user watches; the stage goes in the header.
             .setContentText(memoryText())
-            .setSubText(getString(stageText))
-            .setProgress(total, done, total == 0)
+            .setSubText(
+                if (status.resumed && stage != RawRenderService.Stage.RESUMED) {
+                    getString(R.string.render_queue_joined, stageText, getString(R.string.render_queue_stage_resumed))
+                } else stageText
+            )
+            .setProgress(PROGRESS_MAX, (status.progress * PROGRESS_MAX).toInt(), total == 0)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
@@ -355,6 +413,15 @@ class RenderQueueService : Service() {
         private const val PROCESS_POLL_MS = 200L
         private const val EXIT_REASONS_TO_READ = 4
         private const val EXIT_RECORD_WAIT_MS = 1_000L
+        private const val PROGRESS_MAX = 1000
+        private const val RAW_RENDER_PROGRESS_CAP = 0.97f
+
+        // Running means over this process's renders (main thread only), so estimates follow the
+        // phone. First guesses from a 5056x3792 render on a 2017 phone: RAW render 24 s of 35 s.
+        private var rawRenderAvgMs = 24_000f
+        private var rawRenderCount = 0
+        private var photoAvgMs = 35_000f
+        private var photoCount = 0
 
         private fun createChannel(context: Context) {
             context.getSystemService(NotificationManager::class.java).createNotificationChannel(
