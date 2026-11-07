@@ -4244,6 +4244,8 @@ object GalleryManager {
         captureExposureInputs: RawCaptureExposureInputs? = null,
         /** Capture-time profile for a queued render; null reads the current preference. */
         rawNoiseProfileId: String? = null,
+        /** Called once the final JPEG and its metadata are both saved, before the HDR outputs. */
+        onJpegSaved: (suspend () -> Unit)? = null,
     ) {
         val photoDir = getPhotoDir(context, photoId, true)
         val photoFile = File(photoDir, PHOTO_FILE)
@@ -4322,7 +4324,7 @@ object GalleryManager {
             tempFile.delete()
             throw IOException("Failed to publish final RAW JPEG for $photoId")
         }
-        saveMetadata(context, photoId, updatedMetadata)
+        if (saveMetadata(context, photoId, updatedMetadata)) onJpegSaved?.invoke()
         markProcessingPhotoDisplayReady(photoId, photoFile, updatedMetadata, isRawSource = true)
         val bokehBitmap = renderAndSaveBokehPhoto(context, photoId, updatedMetadata, bitmap)
 

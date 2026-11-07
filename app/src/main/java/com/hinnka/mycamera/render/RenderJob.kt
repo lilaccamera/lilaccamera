@@ -44,6 +44,8 @@ data class RenderJob(
     val state: State = State.QUEUED,
     /** Counted by the main-process queue, never by the render. */
     val attempts: Int = 0,
+    /** Set by the render once `original.jpg` and its render result are both saved. */
+    val jpegDone: Boolean = false,
 ) {
     enum class State { QUEUED, DONE, FAILED }
 

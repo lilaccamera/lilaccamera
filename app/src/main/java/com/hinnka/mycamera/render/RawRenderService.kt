@@ -73,6 +73,10 @@ class RawRenderService : Service() {
             check(job.state == RenderJob.State.QUEUED) { "Render job for $photoId is ${job.state}" }
             RawColorCalibrationPolicy.mode = job.rawColorCalibrationMode
             val photoDir = RenderJob.photoDir(this, photoId)
+            if (job.jpegDone && finishFromSavedJpeg(job, photoDir)) {
+                check(RenderJob.write(this, job.copy(state = RenderJob.State.DONE))) { "Cannot mark $photoId done" }
+                return true
+            }
             // Outputs of an attempt that never reached DONE: loadMetadata would build on the stale
             // result, and a stale JPEG would hide a render that produced none.
             File(photoDir, GalleryMediaStore.RENDER_RESULT_FILE).delete()
@@ -99,9 +103,15 @@ class RawRenderService : Service() {
                 shouldAutoSave = job.shouldAutoSave,
                 captureExposureInputs = job.exposureInputs(viewfinder),
                 rawNoiseProfileId = job.rawNoiseProfileId,
+                onJpegSaved = {
+                    if (RenderJob.write(this, job.copy(jpegDone = true))) {
+                        PLog.i(TAG, "JPEG and render result of $photoId saved; a retry keeps them")
+                    }
+                },
             )
             // The render returns without output when the DNG decode fails.
             check(photoFile.isFile) { "Render produced no JPEG for $photoId" }
+            check(File(photoDir, GalleryMediaStore.RENDER_RESULT_FILE).isFile) { "Render saved no result for $photoId" }
             check(RenderJob.write(this, job.copy(state = RenderJob.State.DONE))) { "Cannot mark $photoId done" }
             true
         } catch (e: Exception) {
@@ -111,6 +121,51 @@ class RawRenderService : Service() {
         } finally {
             viewfinder?.recycle()
         }
+    }
+
+    /**
+     * Finishes a job whose earlier attempt was killed after saving the JPEG and its render result,
+     * without the RAW render. Detail HDR and an HDR export need the RAW render's linear HDR
+     * reference, which is never saved, so rebuilding them would repeat the render that was killed:
+     * they are skipped, and an auto-save exports the SDR JPEG. Returns false, so the caller renders
+     * again from the DNG, when the saved files are unusable.
+     */
+    private suspend fun finishFromSavedJpeg(job: RenderJob, photoDir: File): Boolean {
+        val photoId = job.photoId
+        // loadMetadata falls back to the gallery row, so the result file itself must exist.
+        val metadata = File(photoDir, GalleryMediaStore.RENDER_RESULT_FILE).takeIf { it.isFile }
+            ?.let { runCatching { GalleryManager.loadMetadata(this, photoId) }.getOrNull() }
+        // Published by temp file and rename, so a decodable file is the complete JPEG.
+        val jpeg = metadata?.let { GalleryManager.loadOriginalBitmap(this, photoId) }
+        if (metadata == null || jpeg == null) {
+            PLog.w(TAG, "Saved JPEG or render result of $photoId unusable; rendering again from the DNG")
+            return false
+        }
+        PLog.w(
+            TAG,
+            "Keeping the JPEG of $photoId from an attempt killed after saving it; RAW render skipped, " +
+                "detail HDR skipped (hdr=${metadata.manualHdrEffectEnabled}), SDR export=${job.shouldAutoSave}",
+        )
+        broadcast(photoId, Stage.RENDERING)
+        val photoProcessor = ContentRepository.getInstance(this).photoProcessor
+        try {
+            // The same post-JPEG steps renderRawDngPhotoOutputs runs, from the saved JPEG.
+            if ((metadata.computationalAperture ?: 0f) > 0f && !GalleryManager.getBokehFile(this, photoId).isFile) {
+                GalleryManager.generateBokehPhoto(this, photoId, metadata, jpeg)
+            }
+            GalleryManager.updateThumbnail(this, photoId, photoProcessor, metadata, jpeg)
+            if (job.shouldAutoSave) {
+                // shortcut: a kill between this export and DONE exports again on the next attempt;
+                // add an exported marker if duplicates show up.
+                GalleryManager.exportPhoto(
+                    this, photoId, jpeg, photoProcessor, metadata.copy(manualHdrEffectEnabled = false),
+                    job.sharpeningValue, job.noiseReductionValue, job.chromaNoiseReductionValue, job.photoQuality,
+                )
+            }
+        } finally {
+            jpeg.recycle()
+        }
+        return true
     }
 
     private fun broadcast(photoId: String, stage: Stage) {
