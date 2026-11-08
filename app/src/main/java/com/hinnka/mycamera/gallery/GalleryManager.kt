@@ -1965,6 +1965,12 @@ object GalleryManager {
     ) = withContext(Dispatchers.IO) {
         try {
             val photoId = photoId ?: UUID.randomUUID().toString()
+            // The placeholder shown while the shot processes takes the final metadata now (stack frame count,
+            // capture mode), so the photo view labels it right before processing ends.
+            _processingPhotos.update { current ->
+                val pending = current[photoId] ?: return@update current
+                current + (photoId to pending.copy(photo = pending.photo.copy(metadata = metadata)))
+            }
             val photoDir = getPhotoDir(context, photoId, true)
             val photoFile = File(photoDir, PHOTO_FILE)
             val videoFile = File(photoDir, VIDEO_FILE)
