@@ -372,7 +372,7 @@ fun GalleryScreen(
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color(0xFF151515)
+                        containerColor = galleryBackgroundColor()
                     )
                 )
                 if (!isSelectionMode) {
@@ -596,7 +596,7 @@ fun GalleryScreen(
                 }
             }
         },
-        containerColor = Color(0xFF151515),
+        containerColor = galleryBackgroundColor(),
         modifier = modifier
     ) { paddingValues ->
         PullToRefreshBox(
@@ -828,7 +828,7 @@ private fun GalleryTabRow(
     val selectedTabIndex = selectedTab.ordinal
     TabRow(
         selectedTabIndex = selectedTabIndex,
-        containerColor = Color(0xFF151515),
+        containerColor = galleryBackgroundColor(),
         contentColor = Color.White,
         indicator = { tabPositions ->
             TabRowDefaults.SecondaryIndicator(
@@ -1726,5 +1726,14 @@ private fun MediaData.galleryAspectRatio(isLandscape: Boolean): Float {
         }
     } else {
         1f
+    }
+}
+
+/** The system's Material You dark background (tinted from the wallpaper), or the old near-black before Android 12. */
+@Composable
+private fun galleryBackgroundColor(): Color {
+    val context = LocalContext.current
+    return remember(context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dynamicDarkColorScheme(context).background else Color(0xFF151515)
     }
 }
