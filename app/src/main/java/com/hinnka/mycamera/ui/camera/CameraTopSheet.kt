@@ -217,6 +217,8 @@ fun CameraTopSheet(
                             QuickSettingValue(
                                 title = stringResource(R.string.settings_use_raw_max),
                                 value = pluralStringResource(R.plurals.quick_frame_count, hdrPlusFrameCount, hdrPlusFrameCount),
+                                // One frame is a plain single shot, so HDR+ merging is off.
+                                highlighted = hdrPlusFrameCount > 1,
                                 onClick = {
                                     onHdrPlusFrameCountChange(
                                         HDR_PLUS_FRAME_PRESETS.firstOrNull { it > hdrPlusFrameCount } ?: HDR_PLUS_FRAME_PRESETS.first()
@@ -233,6 +235,7 @@ fun CameraTopSheet(
                                 } else {
                                     stringResource(R.string.quick_frames_off)
                                 },
+                                highlighted = useJpgMax,
                                 onClick = {
                                     val next = if (useJpgMax) {
                                         MULTI_FRAME_PRESETS.firstOrNull { it > multiFrameCount }
@@ -918,13 +921,20 @@ fun QuickSettingValue(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     // A disabled tile is greyed but still takes taps, so the caller can say why.
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    // An active feature gets the accent fill, like a checked QuickSettingToggle.
+    highlighted: Boolean = false,
 ) {
     Box(
         modifier = modifier
             .height(48.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = if (enabled) 0.15f else 0.06f))
+            .background(
+                when {
+                    highlighted -> AccentColor
+                    else -> Color.White.copy(alpha = if (enabled) 0.15f else 0.06f)
+                }
+            )
             .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         contentAlignment = Alignment.CenterStart
@@ -932,7 +942,7 @@ fun QuickSettingValue(
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 text = title,
-                color = Color.White.copy(alpha = if (enabled) 0.6f else 0.3f),
+                color = if (highlighted) OnAccentColor.copy(alpha = 0.7f) else Color.White.copy(alpha = if (enabled) 0.6f else 0.3f),
                 fontSize = 8.sp,
                 lineHeight = 10.sp,
                 fontWeight = FontWeight.Normal,
@@ -940,8 +950,8 @@ fun QuickSettingValue(
             )
             QuickSettingLabel(
                 text = value,
-                color = Color.White.copy(alpha = if (enabled) 1f else 0.38f),
-                fontWeight = FontWeight.Medium
+                color = if (highlighted) OnAccentColor else Color.White.copy(alpha = if (enabled) 1f else 0.38f),
+                fontWeight = if (highlighted) FontWeight.Bold else FontWeight.Medium
             )
         }
     }
