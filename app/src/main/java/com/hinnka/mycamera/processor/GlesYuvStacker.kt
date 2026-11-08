@@ -16,6 +16,7 @@ import com.hinnka.mycamera.camera.MultiFrameConfig
 import com.hinnka.mycamera.model.SafeImage
 import com.hinnka.mycamera.utils.LargeDirectBuffer
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.utils.SystemPropertiesUtil
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.ceil
@@ -257,6 +258,17 @@ class GlesYuvStacker(
     private val chromaWidth = (width + 1) / 2
     private val chromaHeight = (height + 1) / 2
 
+    // Debug builds only: `adb shell setprop debug.photon.yuv_stack.weights log` logs each frame's
+    // merge weight; `off` also merges every frame at full weight, to test whether motion rejection
+    // is what limits the noise gain. Unset (the default) changes nothing.
+    private val weightDiagnostics = if (RawStackRuntimeDebug.enabled) {
+        SystemPropertiesUtil.get("debug.photon.yuv_stack.weights")?.trim()?.lowercase()
+    } else {
+        null
+    }
+    private val logFrameWeights = weightDiagnostics == "log" || weightDiagnostics == "off"
+    private val rejectionDisabled = weightDiagnostics == "off"
+
     fun process(images: List<SafeImage>): Bitmap? {
         if (images.isEmpty() || width <= 0 || height <= 0 || outputWidth <= 0 || outputHeight <= 0) {
             return null
@@ -317,6 +329,7 @@ class GlesYuvStacker(
                     referenceAlignmentProducts = referenceAlignmentProducts,
                     currentToReferenceScale = 1.0f,
                 )
+                if (logFrameWeights) logFrameWeight("frame $index")
                 accumulateFrame(curY, curCbCr, isReference = false, currentToReferenceScale = 1.0f)
                 timing.cpu("scheduler.yield") { GlesGpuScheduler.yieldToUiRenderer() }
             }
@@ -403,6 +416,7 @@ class GlesYuvStacker(
                             referenceAlignmentProducts = referenceAlignmentProducts,
                             currentToReferenceScale = currentToReferenceScale,
                         )
+                        if (logFrameWeights) logFrameWeight("HDR frame $index")
                         accumulateFrame(
                             curY,
                             curCbCr,
@@ -1987,7 +2001,7 @@ class GlesYuvStacker(
             accumulateProgram,
             "uFrameWeight",
             3,
-            if (isReference) identityWeightTexture else frameWeightTexture,
+            if (isReference || rejectionDisabled) identityWeightTexture else frameWeightTexture,
         )
         GLES31.glUniform2i(GLES31.glGetUniformLocation(accumulateProgram, "uImageSize"), width, height)
         GLES31.glUniform1f(
@@ -2398,6 +2412,43 @@ class GlesYuvStacker(
         checkFramebuffer(label)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         return ids[0]
+    }
+
+    /** Debug only: reads back this frame's merge weights (a GPU sync point) and logs their spread. */
+    private fun logFrameWeight(label: String) {
+        val w = mergeWeightWidth
+        val h = mergeWeightHeight
+        val pixelCount = w * h
+        if (pixelCount <= 0) return
+        val buffer = LargeDirectBuffer.allocate(pixelCount.toLong() * 4L, "GLES YUV weight readback") ?: return
+        try {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, readbackFbo)
+            GLES30.glFramebufferTexture2D(
+                GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, frameWeightTexture, 0,
+            )
+            GLES30.glReadBuffer(GLES30.GL_COLOR_ATTACHMENT0)
+            checkFramebuffer("logFrameWeight")
+            GLES30.glPixelStorei(GLES30.GL_PACK_ALIGNMENT, 1)
+            // R8 reads back as RGBA8; the weight is in the red byte.
+            GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buffer)
+            checkGlError("logFrameWeight pixels")
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+            var sum = 0L
+            var below = 0
+            for (i in 0 until pixelCount) {
+                val value = buffer.get(i * 4).toInt() and 0xFF
+                sum += value
+                if (value < 128) below++
+            }
+            PLog.i(
+                TAG,
+                "YUV stack weight $label: mean=${"%.3f".format(sum / (255.0 * pixelCount))} " +
+                    "belowHalf=${"%.1f".format(100.0 * below / pixelCount)}% " +
+                    "size=${w}x$h rejection=${if (rejectionDisabled) "off" else "on"}",
+            )
+        } finally {
+            LargeDirectBuffer.free(buffer)
+        }
     }
 
     private fun readOutputBitmap(): Bitmap? {
