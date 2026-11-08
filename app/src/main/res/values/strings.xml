@@ -298,7 +298,7 @@
     <string name="settings_raw_color_calibration_mode_built_in">Built-in fix</string>
     <string name="settings_raw_max_output_scale_description_raisr">RAISR magnifies only at 2×, so the output scale is fixed while it is selected.</string>
     <string name="settings_multi_frame_denoise_frame_count">Multi-frame denoise frames</string>
-    <string name="settings_multi_frame_denoise_frame_count_description">Number of frames used for multi-frame denoising in Photo mode. More frames reduce noise further but take longer to process.</string>
+    <string name="settings_multi_frame_denoise_frame_count_description">Number of frames used for multi-frame denoising in Photo mode. Setting it turns multi-frame denoise on. More frames reduce noise further but take longer to process.</string>
     <string name="settings_jpg_multi_frame_denoise_output_scale">Multi-frame denoise output scale</string>
     <string name="settings_jpg_multi_frame_denoise_output_scale_description">1x keeps the original dimensions. Up to 2x width and height. Applies only to multi-frame denoising.</string>
     <string name="settings_jpg_multi_frame_denoise_output_scale_value">%1$.2f×</string>

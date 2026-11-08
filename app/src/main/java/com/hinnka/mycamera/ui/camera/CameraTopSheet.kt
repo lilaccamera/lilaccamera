@@ -227,7 +227,8 @@ fun CameraTopSheet(
                                 modifier = itemModifier
                             )
                         } else {
-                            // Each tap steps Off, then the presets, then back to Off.
+                            // From Off a tap resumes the saved count (also set by the Settings slider);
+                            // then each tap steps to the next preset above it, and past the last one to Off.
                             QuickSettingValue(
                                 title = stringResource(R.string.settings_use_jpg_max),
                                 value = if (useJpgMax) {
@@ -237,16 +238,11 @@ fun CameraTopSheet(
                                 },
                                 highlighted = useJpgMax,
                                 onClick = {
-                                    val next = if (useJpgMax) {
-                                        MULTI_FRAME_PRESETS.firstOrNull { it > multiFrameCount }
+                                    if (!useJpgMax) {
+                                        onJpgMaxToggle(true)
                                     } else {
-                                        MULTI_FRAME_PRESETS.first()
-                                    }
-                                    if (next == null) {
-                                        onJpgMaxToggle(false)
-                                    } else {
-                                        onMultiFrameCountChange(next)
-                                        if (!useJpgMax) onJpgMaxToggle(true)
+                                        val next = MULTI_FRAME_PRESETS.firstOrNull { it > multiFrameCount }
+                                        if (next == null) onJpgMaxToggle(false) else onMultiFrameCountChange(next)
                                     }
                                 },
                                 modifier = itemModifier

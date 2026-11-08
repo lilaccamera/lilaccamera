@@ -4618,6 +4618,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** Settings slider: choosing a count also switches multi-frame on; in Pro it is kept for Photo mode. */
+    fun setJpgMultiFrameDenoiseFrameCountAndEnable(count: Int) {
+        setJpgMultiFrameDenoiseFrameCount(count)
+        viewModelScope.launch {
+            val prefs = userPreferencesRepository.userPreferences.first()
+            when {
+                prefs.useJpgMax -> Unit
+                // setUseJpgMax would leave Pro; the saved preference applies on return to Photo mode
+                prefs.useRaw -> userPreferencesRepository.update { useJpgMax = true }
+                else -> setUseJpgMax(true)
+            }
+        }
+    }
+
     fun setJpgMultiFrameDenoiseOutputScale(scale: Float) {
         viewModelScope.launch {
             userPreferencesRepository.update { jpgMultiFrameDenoiseOutputScale = MultiFrameConfig.normalizeOutputScale(scale) }

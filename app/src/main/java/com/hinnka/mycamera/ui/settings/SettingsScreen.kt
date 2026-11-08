@@ -1931,7 +1931,7 @@ fun SettingsScreen(
                             },
                             resetValue = MultiFrameConfig.DEFAULT_DENOISE_FRAME_COUNT.toFloat(),
                             onValueChangeFinished = {
-                                viewModel.setJpgMultiFrameDenoiseFrameCount(
+                                viewModel.setJpgMultiFrameDenoiseFrameCountAndEnable(
                                     jpgMultiFrameDenoiseCountSliderValue.roundToInt()
                                 )
                             },
