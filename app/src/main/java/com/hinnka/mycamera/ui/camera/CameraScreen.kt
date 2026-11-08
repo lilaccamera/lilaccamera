@@ -1759,7 +1759,8 @@ fun CameraScreen(
 
         if (activePanel != ActivePanel.NONE) {
             PanelDismissPreviewOverlay(
-                bounds = panelDismissBounds,
+                // Quick settings shade the whole app; a tap anywhere on it closes them.
+                bounds = if (activePanel == ActivePanel.SETTINGS) cameraScreenBounds else panelDismissBounds,
                 parentBounds = cameraScreenBounds,
                 dimBackground = activePanel == ActivePanel.SETTINGS,
                 onDismiss = { activePanel = ActivePanel.NONE }
