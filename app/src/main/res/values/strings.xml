@@ -1693,6 +1693,11 @@
     <string name="delete_shown_versions">Delete shown versions</string>
     <string name="delete_all_versions_selected">Delete all versions</string>
     <string name="camera_jpeg">Camera JPEG</string>
+    <string name="quick_frames_off">Off</string>
+    <plurals name="quick_frame_count">
+        <item quantity="one">%1$d frame</item>
+        <item quantity="other">%1$d frames</item>
+    </plurals>
     <string name="camera_jpeg_on">On</string>
     <string name="camera_jpeg_off">Off</string>
     <string name="camera_jpeg_turned_on">Pro and stacked shots also keep the camera’s JPEG</string>

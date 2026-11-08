@@ -263,6 +263,8 @@ fun CameraScreen(
     val categoryOrder by preferenceValue { it.categoryOrder }
     val useRaw by preferenceValue { it.useRaw }
     val useJpgMax by preferenceValue { it.useJpgMax }
+    val jpgMultiFrameCount by preferenceValue { it.jpgMultiFrameDenoiseFrameCount }
+    val hdrPlusFrameCount by preferenceValue { it.hdrPlusFrameCount }
     val useMultipleExposure by preferenceValue { it.useMultipleExposure }
     val useRawMax by preferenceValue { it.useRawMax }
     val ultraHdrEnabled by preferenceValue { it.ultraHdrGainMapEnabled }
@@ -1810,6 +1812,10 @@ fun CameraScreen(
             onPhotoResolutionCapChange = viewModel::setPhotoResolutionCapMp,
             saveCameraJpeg = saveCameraJpeg,
             onSaveCameraJpegChange = { saveCameraJpeg = it },
+            multiFrameCount = jpgMultiFrameCount,
+            onMultiFrameCountChange = { viewModel.setJpgMultiFrameDenoiseFrameCount(it) },
+            hdrPlusFrameCount = hdrPlusFrameCount,
+            onHdrPlusFrameCountChange = { viewModel.setHdrPlusFrameCount(it) },
             onRawDcpChange = { viewModel.setRawDcpId(it) },
             onRawDcpIdsByLensChange = { viewModel.setRawDcpIdsByLens(it) },
             onRawHncsFilmCurveModeChange = { viewModel.setRawHncsFilmCurveMode(it) },

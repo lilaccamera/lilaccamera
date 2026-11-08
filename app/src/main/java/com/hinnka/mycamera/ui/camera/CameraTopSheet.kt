@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -100,6 +101,10 @@ fun CameraTopSheet(
     onPhotoResolutionCapChange: (Int) -> Unit,
     saveCameraJpeg: Boolean,
     onSaveCameraJpegChange: (Boolean) -> Unit,
+    multiFrameCount: Int,
+    onMultiFrameCountChange: (Int) -> Unit,
+    hdrPlusFrameCount: Int,
+    onHdrPlusFrameCountChange: (Int) -> Unit,
     onRawDcpChange: (String?) -> Unit,
     onRawDcpIdsByLensChange: ((Map<String, String?>) -> Unit)? = null,
     onRawHncsFilmCurveModeChange: (HncsFilmCurveMode) -> Unit,
@@ -208,11 +213,39 @@ fun CameraTopSheet(
                                 onClick = { showRenderingEngineSheet = true },
                                 modifier = itemModifier
                             )
+                            // Each tap steps to the next preset, wrapping to a single frame.
+                            QuickSettingValue(
+                                title = stringResource(R.string.settings_use_raw_max),
+                                value = pluralStringResource(R.plurals.quick_frame_count, hdrPlusFrameCount, hdrPlusFrameCount),
+                                onClick = {
+                                    onHdrPlusFrameCountChange(
+                                        HDR_PLUS_FRAME_PRESETS.firstOrNull { it > hdrPlusFrameCount } ?: HDR_PLUS_FRAME_PRESETS.first()
+                                    )
+                                },
+                                modifier = itemModifier
+                            )
                         } else {
-                            QuickSettingToggle(
+                            // Each tap steps Off, then the presets, then back to Off.
+                            QuickSettingValue(
                                 title = stringResource(R.string.settings_use_jpg_max),
-                                checked = useJpgMax,
-                                onCheckedChange = onJpgMaxToggle,
+                                value = if (useJpgMax) {
+                                    pluralStringResource(R.plurals.quick_frame_count, multiFrameCount, multiFrameCount)
+                                } else {
+                                    stringResource(R.string.quick_frames_off)
+                                },
+                                onClick = {
+                                    val next = if (useJpgMax) {
+                                        MULTI_FRAME_PRESETS.firstOrNull { it > multiFrameCount }
+                                    } else {
+                                        MULTI_FRAME_PRESETS.first()
+                                    }
+                                    if (next == null) {
+                                        onJpgMaxToggle(false)
+                                    } else {
+                                        onMultiFrameCountChange(next)
+                                        if (!useJpgMax) onJpgMaxToggle(true)
+                                    }
+                                },
                                 modifier = itemModifier
                             )
                             QuickSettingToggle(
@@ -1048,3 +1081,6 @@ fun QuickSettingToggle(
         }
     }
 }
+
+private val MULTI_FRAME_PRESETS = listOf(3, 6, 10, 20)
+private val HDR_PLUS_FRAME_PRESETS = listOf(1, 2, 3)
