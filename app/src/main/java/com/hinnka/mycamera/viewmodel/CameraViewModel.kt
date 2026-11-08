@@ -3834,6 +3834,43 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.unlockFocus()
     }
 
+    // Camera key half press, like a camera's shutter button: focus once and hold it until the key is let go.
+    private var shutterKeyFocusHeld = false
+    private var shutterKeyOwnsFocusLock = false
+
+    fun onShutterKeyHalfPress() {
+        val s = state.value
+        if (shutterKeyFocusHeld || !s.isPreviewActive || !s.isAutoFocus || s.isCapturing) return
+        shutterKeyFocusHeld = true
+        val point = s.focusPoint
+        when {
+            // A point the user tapped is already locked; keep it.
+            point != null && s.focusPointSource == FocusPointSource.MANUAL && s.isFocusLocked ->
+                shutterKeyOwnsFocusLock = false
+            point != null && s.focusPointSource == FocusPointSource.EYE -> {
+                cameraController.focusOnNormalizedPoint(point.first, point.second, FocusPointSource.EYE, lockFocus = true)
+                shutterKeyOwnsFocusLock = true
+            }
+            else -> {
+                cameraController.focusOnNormalizedPoint(0.5f, 0.5f, FocusPointSource.MANUAL, lockFocus = true)
+                shutterKeyOwnsFocusLock = true
+            }
+        }
+    }
+
+    fun onShutterKeyHalfRelease() {
+        if (!shutterKeyFocusHeld) return
+        shutterKeyFocusHeld = false
+        if (shutterKeyOwnsFocusLock) {
+            shutterKeyOwnsFocusLock = false
+            unlockFocus()
+        }
+    }
+
+    fun onShutterKeyFullPress() {
+        if (state.value.isPreviewActive) capture()
+    }
+
     fun toggleFlash() {
         cameraController.setFlashMode(
             when (state.value.flashMode) {
@@ -4463,7 +4500,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             cameraState.focusSuccess == false && elapsed >= EYE_FOCUS_RETRY_INTERVAL_MS
         val periodicRefresh = previousPoint != null && elapsed >= EYE_FOCUS_REFRESH_INTERVAL_MS
         val shouldTrigger = previousPoint == null || moved || retryAfterFailure || periodicRefresh
-        if (shouldTrigger && !cameraState.isFocusing && elapsed >= EYE_FOCUS_MIN_TRIGGER_INTERVAL_MS) {
+        // While the camera key holds focus half pressed, the eye target does not refocus.
+        if (shouldTrigger && !shutterKeyFocusHeld && !cameraState.isFocusing && elapsed >= EYE_FOCUS_MIN_TRIGGER_INTERVAL_MS) {
             lastEyeFocusTriggerPoint = Pair(target.x, target.y)
             lastEyeFocusTriggerElapsedMs = now
             cameraController.focusOnNormalizedPoint(

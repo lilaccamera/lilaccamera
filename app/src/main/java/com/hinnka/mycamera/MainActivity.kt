@@ -394,6 +394,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        // Two-stage camera key: half press (FOCUS) focuses and holds, full press (CAMERA) shoots.
+        if (keyCode == KeyEvent.KEYCODE_FOCUS) {
+            if (event?.repeatCount == 0) cameraViewModel.onShutterKeyHalfPress()
+            return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_CAMERA) {
+            if (event?.repeatCount == 0) cameraViewModel.onShutterKeyFullPress()
+            return true
+        }
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == 767 || keyCode == 781) {
             if (cameraViewModel.handleVolumeKey(keyCode == KeyEvent.KEYCODE_VOLUME_UP)) {
                 return true
@@ -401,6 +410,15 @@ class MainActivity : AppCompatActivity() {
         }
         PLog.d("MainAct", "onKeyDown: $keyCode")
         return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_FOCUS) {
+            cameraViewModel.onShutterKeyHalfRelease()
+            return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_CAMERA) return true
+        return super.onKeyUp(keyCode, event)
     }
 
     override fun onNewIntent(intent: Intent) {
