@@ -540,6 +540,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     companion object {
         private const val TAG = "CameraViewModel"
+
+        /** YUV stacks pick their reference among the first frames only: later ones see more scene motion. */
+        private const val GYRO_REFERENCE_CANDIDATES = 4
+        private const val GYRO_REFERENCE_MIN_COVERAGE = 0.8f
+
+        /** Another frame must have less than half the first frame's motion score to become the reference. */
+        private const val GYRO_REFERENCE_MIN_GAIN = 0.5f
         private const val HDR_BRACKET_FRAME_COUNT = 3
         private const val HDR_BRACKET_ZERO_INDEX = 0
         private const val HDR_BRACKET_LOW_INDEX = 2
@@ -3241,12 +3248,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             // Geometry is planned by the Radiance stacker's coarse temporal-flow graph.
             // Running a second exhaustive RAW proxy registration here blocks the
             // post-capture path on CPU and duplicates the GLES registration work.
-            val orderedNormalFrames = normalFrames
-            val orderedFrames = orderedNormalFrames + auxiliaryFrames
-            val referencePlanLog = if (isRawStack) {
-                "deferred_mgc_gles, reference=pending, "
+            // YUV stacks merge onto their first frame, so move the steadiest one there.
+            val gyroReferenceIndex = if (isRawStack) 0 else steadiestGyroReferenceIndex(normalFrames)
+            val orderedNormalFrames = if (gyroReferenceIndex > 0) {
+                listOf(normalFrames[gyroReferenceIndex]) +
+                    normalFrames.filterIndexed { index, _ -> index != gyroReferenceIndex }
             } else {
-                "chronological, reference=0, "
+                normalFrames
+            }
+            val orderedFrames = orderedNormalFrames + auxiliaryFrames
+            val referencePlanLog = when {
+                isRawStack -> "deferred_mgc_gles, reference=pending, "
+                gyroReferenceIndex > 0 -> "gyro, reference=$gyroReferenceIndex, "
+                else -> "chronological, reference=0, "
             }
             PLog.i(
                 TAG,
@@ -5599,6 +5613,32 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             VideoAspectRatio.RATIO_16_9 -> AspectRatio.RATIO_16_9
             else -> null
         }
+    }
+
+    /**
+     * Index of the steadiest of the first [GYRO_REFERENCE_CANDIDATES] frames, scored by gyro
+     * angular energy times exposure time (an upper bound on the squared angle swept during the
+     * exposure). Returns 0, the first frame as before, when any candidate lacks gyro coverage or
+     * no other frame is clearly steadier.
+     */
+    private fun steadiestGyroReferenceIndex(frames: List<PendingRawStackFrame>): Int {
+        val windows = frames.take(GYRO_REFERENCE_CANDIDATES).map { it.frame.gyroWindow }
+        val scores = windows.map { window ->
+            if (window == null || window.sampleCount < 2 || window.coverageRatio < GYRO_REFERENCE_MIN_COVERAGE) {
+                null
+            } else {
+                window.angularEnergy * (window.endTimestampNs - window.startTimestampNs) / 1e9f
+            }
+        }
+        PLog.i(
+            TAG,
+            "YUV burst gyro: coverage=${windows.joinToString { "%.2f".format(it?.coverageRatio ?: 0f) }} " +
+                "score=${scores.joinToString { it?.let { s -> "%.2e".format(s) } ?: "-" }}",
+        )
+        if (scores.size < 2 || scores.any { it == null }) return 0
+        val validScores = scores.map { it!! }
+        val best = validScores.indices.minBy { validScores[it] }
+        return if (validScores[best] < validScores[0] * GYRO_REFERENCE_MIN_GAIN) best else 0
     }
 
     private fun rawStackFrame(
