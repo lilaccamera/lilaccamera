@@ -474,6 +474,8 @@ object RenderQueue {
     /** The gallery record and finished render job of [photoId] when it can be rendered again: a single-frame Pro photo with its DNG. */
     internal suspend fun renderAgainSource(context: Context, photoId: String): Pair<MediaData, RenderJob>? =
         withContext(Dispatchers.IO) {
+            // Photo mode shots and merged bursts have no job; RenderJob.read would log that as an error.
+            if (!File(RenderJob.photoDir(context, photoId), RenderJob.JOB_FILE).isFile) return@withContext null
             val job = RenderJob.read(context, photoId)?.takeIf { it.state == RenderJob.State.DONE } ?: return@withContext null
             val source = GalleryMediaStore.getPhotoData(context, photoId)?.takeIf { it.metadata != null } ?: return@withContext null
             if (!GalleryManager.getDngFile(context, photoId).isFile) return@withContext null

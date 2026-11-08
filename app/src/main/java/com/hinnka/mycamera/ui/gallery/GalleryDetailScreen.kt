@@ -1198,7 +1198,11 @@ fun GalleryDetailScreen(
                 PhotoStacks.isCameraJpeg(metadata) -> context.getString(R.string.photo_info_version_camera_jpeg)
                 metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY) != null ->
                     metadata.customProperties[RenderLook.LABEL_PROPERTY]
-                metadata != null -> withContext(Dispatchers.IO) { RenderJob.read(context, currentPhoto.id) }
+                metadata != null -> withContext(Dispatchers.IO) {
+                    // Only Pro photos rendered in the queue have a job; reading a missing one logs an error.
+                    val jobFile = java.io.File(RenderJob.photoDir(context, currentPhoto.id), RenderJob.JOB_FILE)
+                    if (jobFile.isFile) RenderJob.read(context, currentPhoto.id) else null
+                }
                     ?.let { job -> withContext(Dispatchers.IO) { context.getString(R.string.photo_info_version_original, RenderLook.fromPhoto(metadata, job).label(context)) } }
                 else -> null
             }
