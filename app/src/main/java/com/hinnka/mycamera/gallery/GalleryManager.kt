@@ -548,6 +548,10 @@ object GalleryManager {
         return File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), PHOTOS_DIR)
     }
 
+    /** The files in an app photo's folder (empty for a system photo), for the info panel. */
+    fun savedPhotoFiles(context: Context, photoId: String): List<File> =
+        getPhotoDir(context, photoId, false).listFiles()?.filter { it.isFile }.orEmpty()
+
     private fun getPhotoDir(context: Context, photoId: String, create: Boolean = false): File {
         val dir = File(getPhotosBaseDir(context), photoId)
         if (create && !dir.exists()) {

@@ -1203,6 +1203,11 @@ fun GalleryDetailScreen(
                 else -> null
             }
         }
+        // What this version's folder really holds, so the panel never names data that was not kept.
+        val savedFiles by produceState<List<java.io.File>>(emptyList(), currentPhoto.id) {
+            value = withContext(Dispatchers.IO) { GalleryManager.savedPhotoFiles(context, currentPhoto.id) }
+        }
+        var savedExpanded by remember(currentPhoto.id) { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { showInfoDialog = false },
             title = { Text(stringResource(if (currentPhoto.isVideo) R.string.video_info else R.string.photo_info)) },
@@ -1215,6 +1220,70 @@ fun GalleryDetailScreen(
                     InfoRow(stringResource(R.string.photo_info_resolution), currentPhoto.getResolution())
                     InfoRow(stringResource(R.string.photo_info_size), currentPhoto.copy(size = displayPhotoSize).getFormattedSize())
                     versionInfo?.let { InfoRow(stringResource(R.string.photo_info_version), it) }
+                    if (!currentPhoto.isVideo) {
+                        val names = savedFiles.map { it.name }
+                        val mainType = when {
+                            "original.heic" in names -> "HEIC"
+                            "original.jxl" in names -> "JPEG XL"
+                            "original.jpg" in names -> "JPEG"
+                            else -> currentPhoto.mimeType?.substringAfter('/')?.uppercase()
+                        }
+                        mainType?.let { type ->
+                            InfoRow(
+                                stringResource(R.string.photo_info_file_type),
+                                if ("original.dng" in names) stringResource(R.string.photo_info_file_type_from_raw, type) else type,
+                            )
+                        }
+                        val frameMetadata = currentPhoto.metadata
+                        frameMetadata?.multipleExposureFrameCount?.takeIf { it > 1 }?.let { count ->
+                            InfoRow(
+                                stringResource(R.string.photo_info_frames),
+                                stringResource(
+                                    if (frameMetadata.captureMode == "multiple_exposure") {
+                                        R.string.photo_info_frames_multiple_exposure
+                                    } else {
+                                        R.string.photo_info_frames_stacked
+                                    },
+                                    count,
+                                ),
+                            )
+                        }
+                        val extras = savedFiles
+                            .filter { it.name !in MAIN_PHOTO_FILES && !it.name.endsWith(".tmp") }
+                            .sortedBy { it.name }
+                        if (extras.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { savedExpanded = !savedExpanded }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.photo_info_saved_with),
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Icon(
+                                    if (savedExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                    contentDescription = null,
+                                    tint = Color.White.copy(alpha = 0.7f),
+                                )
+                            }
+                            if (savedExpanded) {
+                                extras.forEach { file ->
+                                    Text(
+                                        text = "${savedFileLabel(context, file.name)} · " +
+                                            android.text.format.Formatter.formatShortFileSize(context, file.length()),
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        modifier = Modifier.padding(start = 12.dp, top = 2.dp, bottom = 2.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
                     infoMetadata?.let {
                         if (currentPhoto.isVideo) {
                             InfoRow(stringResource(R.string.video_info_duration), currentPhoto.getFormattedDuration())
@@ -2312,6 +2381,23 @@ private fun GalleryMoreActionCard(
             modifier = Modifier.fillMaxWidth()
         )
     }
+}
+
+private val MAIN_PHOTO_FILES = setOf("original.jpg", "original.heic", "original.jxl")
+
+/** A plain name for a file kept in a photo's folder; unknown files show their file name. */
+private fun savedFileLabel(context: android.content.Context, name: String): String = when (name) {
+    "original.dng" -> context.getString(R.string.photo_info_saved_dng)
+    "viewfinder.jpg" -> context.getString(R.string.photo_info_saved_viewfinder)
+    "render_job.json" -> context.getString(R.string.photo_info_saved_render_job)
+    "thumbnail.jpg" -> context.getString(R.string.photo_info_saved_thumbnail)
+    "detail_hdr.jpg" -> context.getString(R.string.photo_info_saved_detail_hdr)
+    "original_hdr.bin" -> context.getString(R.string.photo_info_saved_hdr)
+    "video.mp4" -> context.getString(R.string.photo_info_saved_video)
+    "bokeh.jpg" -> context.getString(R.string.photo_info_saved_bokeh)
+    "ai_denoise.jpg" -> context.getString(R.string.photo_info_saved_ai_denoise)
+    "preview.jpg" -> context.getString(R.string.photo_info_saved_preview)
+    else -> name
 }
 
 @Composable

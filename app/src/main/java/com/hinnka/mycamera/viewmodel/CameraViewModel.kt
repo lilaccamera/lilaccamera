@@ -5920,6 +5920,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 focusPointY = settings.state.focusPoint?.second,
                 manualHdrEffectEnabled = defaultHdrEffectEnabled,
                 captureMode = if (isRawStack) null else "jpg_max",
+                multipleExposureFrameCount = frames.size,
             )
 
             val livePhotoVideoDeferred = settings.livePhotoVideo
