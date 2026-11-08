@@ -108,6 +108,9 @@ import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.*
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.hinnka.mycamera.ui.components.EdgeRingStyle
+import com.hinnka.mycamera.ui.components.ThumbnailCorner
+import com.hinnka.mycamera.ui.components.ThumbnailEdgeRing
 
 /**
  * 主相机界面
@@ -2300,7 +2303,7 @@ private fun GalleryProcessingOverlay(
     val completionAlpha = remember { Animatable(0f) }
     var lastAcknowledgedCompletion by remember { mutableLongStateOf(completedCount) }
     var hadUnfinished by remember { mutableStateOf(unfinishedCount > 0) }
-    val thumbnailShape = RoundedCornerShape(10.dp)
+    val thumbnailShape = RoundedCornerShape(ThumbnailCorner)
 
     LaunchedEffect(unfinishedCount, completedCount) {
         if (unfinishedCount > 0) {
@@ -2380,90 +2383,6 @@ private fun GalleryProcessingOverlay(
                 color = Color.White,
                 alpha = { completionAlpha.value },
                 modifier = Modifier.matchParentSize()
-            )
-        }
-    }
-}
-
-private enum class EdgeRingStyle { RUNNING, DOTTED, SOLID }
-
-/**
- * The thumbnail's edge line, one weight and rounded ends in every style: a bright arc running round it
- * (processing), evenly spaced round dots (waiting), or the whole edge (done, fading by [alpha]).
- */
-@Composable
-private fun ThumbnailEdgeRing(
-    style: EdgeRingStyle,
-    color: Color,
-    modifier: Modifier,
-    alpha: () -> Float = { 1f },
-) {
-    val density = LocalDensity.current
-    val strokePx = with(density) { 2.5.dp.toPx() }
-    val cornerPx = with(density) { 10.dp.toPx() }
-    val periodTargetPx = with(density) { 8.dp.toPx() }
-    val gapPx = with(density) { 3.5.dp.toPx() }
-    // Only animates while running, so a waiting or paused thumbnail asks for no frames.
-    val phase = if (style == EdgeRingStyle.RUNNING) {
-        rememberInfiniteTransition(label = "thumbnailRing").animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(durationMillis = 1600, easing = LinearEasing)),
-            label = "thumbnailRingPhase"
-        )
-    } else null
-    val edge = remember { Path() }
-    val measure = remember { androidx.compose.ui.graphics.PathMeasure() }
-    val round = androidx.compose.ui.graphics.StrokeCap.Round
-    Canvas(modifier) {
-        val inset = strokePx / 2
-        edge.reset()
-        edge.addRoundRect(
-            RoundRect(inset, inset, size.width - inset, size.height - inset, CornerRadius(cornerPx - inset))
-        )
-        measure.setPath(edge, false)
-        val length = measure.length
-        when (style) {
-            EdgeRingStyle.RUNNING -> {
-                drawPath(edge, color.copy(alpha = 0.25f), style = androidx.compose.ui.graphics.drawscope.Stroke(strokePx))
-                // Read here, in the draw phase: a frame only redraws, it does not recompose, so the lap stays smooth.
-                val arcLength = length * 0.25f
-                val start = (phase?.value ?: 0f) * length
-                // One dash as long as the arc, one period per lap, shifted by the phase. On a closed edge the
-                // dash continues across the edge's start point, so no seam: two pieces joined there left a stray stub.
-                drawPath(
-                    edge,
-                    color,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(
-                        strokePx,
-                        cap = round,
-                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
-                            floatArrayOf(arcLength, length - arcLength),
-                            (length - start) % length
-                        )
-                    )
-                )
-            }
-            EdgeRingStyle.DOTTED -> {
-                // A whole number of dash periods round the edge, so the spacing is even where the line closes.
-                val count = (length / periodTargetPx).roundToInt().coerceAtLeast(4)
-                val period = length / count
-                // Round caps add half the stroke at each end, so the drawn dash is on + stroke long.
-                val on = (period - gapPx - strokePx).coerceAtLeast(0.01f)
-                drawPath(
-                    edge,
-                    color.copy(alpha = 0.6f),
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(
-                        strokePx,
-                        cap = round,
-                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(on, period - on))
-                    )
-                )
-            }
-            EdgeRingStyle.SOLID -> drawPath(
-                edge,
-                color.copy(alpha = alpha().coerceIn(0f, 1f)),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(strokePx)
             )
         }
     }
