@@ -17,4 +17,6 @@ data class CapturedPhotoFrame(
     val characteristics: CameraCharacteristics?,
     val captureResult: CaptureResult?,
     val frameMetadata: CapturedFrameMetadata?,
+    /** Gyro motion during this frame's exposure; also kept for YUV frames, which have no [frameMetadata]. */
+    val gyroWindow: GyroExposureWindow? = frameMetadata?.gyroWindow,
 )

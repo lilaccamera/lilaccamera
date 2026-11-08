@@ -9184,7 +9184,14 @@ class Camera2Controller(private val context: Context) {
             } else {
                 shot.frames.put(
                     image.timestamp,
-                    CapturedPhotoFrame(image, captureInfo, effectiveCharacteristics, frameResult, frameMetadata),
+                    CapturedPhotoFrame(
+                        image,
+                        captureInfo,
+                        effectiveCharacteristics,
+                        frameResult,
+                        frameMetadata,
+                        gyroWindow = frameMetadata?.gyroWindow ?: frozenMetadata?.gyroWindow,
+                    ),
                 )?.image?.close()
             }
             deliverPhotoCaptureIfReady(shot)

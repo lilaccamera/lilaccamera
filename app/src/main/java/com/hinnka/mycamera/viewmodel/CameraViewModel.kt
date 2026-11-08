@@ -3214,7 +3214,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         } else if (photo.state.isMultiFrameEnabled) {
             val burstPlanningStartedAtMs = SystemClock.elapsedRealtime()
             val chronologicalFrames = photo.frames.map {
-                PendingRawStackFrame(rawStackFrame(it.image, it.captureResult, it.frameMetadata), it.captureInfo, it.captureResult)
+                PendingRawStackFrame(
+                    rawStackFrame(it.image, it.captureResult, it.frameMetadata, it.gyroWindow),
+                    it.captureInfo,
+                    it.captureResult,
+                )
             }.sortedBy { it.frame.sensorTimestampNs }
             val rawMaxMode = photo.state.hdrPlusMergeMode
             val rawMaxHdrFusionEnabled = photo.state.isHdrPlusBracketExposureEnabled
@@ -5601,6 +5605,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         image: SafeImage,
         captureResult: CaptureResult?,
         metadata: CapturedFrameMetadata?,
+        gyroWindow: GyroExposureWindow? = metadata?.gyroWindow,
     ): RawStackFrame {
         return RawStackFrame(
             image = image,
@@ -5630,7 +5635,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             lensState = metadata?.lensState ?: captureResult?.get(CaptureResult.LENS_STATE),
             rollingShutterSkewNs = metadata?.rollingShutterSkewNs
                 ?: captureResult?.get(CaptureResult.SENSOR_ROLLING_SHUTTER_SKEW),
-            gyroWindow = metadata?.gyroWindow,
+            gyroWindow = gyroWindow,
             channelNoiseProfile = metadata?.channelNoiseProfile,
             dynamicBlackLevelByCfaPosition = metadata
                 ?.dynamicBlackLevelByCfaPosition
