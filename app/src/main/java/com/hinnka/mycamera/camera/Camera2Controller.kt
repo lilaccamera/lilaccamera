@@ -103,9 +103,8 @@ class Camera2Controller(private val context: Context) {
         const val ERROR_CAMERA_SESSION_CONFIG_FAILED = 1003
 
         private const val CAPTURE_READER_MAX_IMAGES = 50
-        // lilac (XZ1 Compact) raw19 shim: one failed RAW capture breaks RAW for every app until reboot.
+        // lilac (XZ1 Compact) raw19 shim: a failed RAW capture breaks RAW for every app until the camera is reopened.
         private val IS_LILAC = DeviceQuirks.isLilac
-        private const val KEY_RAW_HAL_POISONED_BOOT = "raw_hal_poisoned_boot"
         private const val CAPTURE_IMAGE_DELIVERY_TIMEOUT_MS = 10_000L
         private const val BURST_CAPTURE_BATCH_SIZE = 8
 
@@ -545,18 +544,17 @@ class Camera2Controller(private val context: Context) {
 
     private fun reservedImageCount(): Int = photoCaptures.values.sumOf { it.reservedFrames }
 
-    private val lilacQuirkPrefs by lazy { context.getSharedPreferences("lilac_quirks", Context.MODE_PRIVATE) }
+    /** The failed RAW shot that made us reopen the camera; cleared by the next good RAW shot. */
+    @Volatile
+    private var rawFailureBeforeReopen: PhotoCaptureContext? = null
 
-    private fun bootCount(): Int =
-        android.provider.Settings.Global.getInt(context.contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
+    /** Set when RAW failed again after a reopen; only an app restart clears it. */
+    @Volatile
+    private var rawBlockedUntilAppRestart = false
 
-    /** True when a RAW capture failed earlier in this boot; the flag is kept per boot so an app restart does not clear it. */
-    private fun isRawHalPoisoned(): Boolean =
-        IS_LILAC && lilacQuirkPrefs.getInt(KEY_RAW_HAL_POISONED_BOOT, Int.MIN_VALUE) == bootCount()
-
-    private fun showRawHalPoisonedMessage() {
+    private fun showLongToast(resId: Int) {
         Handler(Looper.getMainLooper()).post {
-            android.widget.Toast.makeText(context, com.hinnka.mycamera.R.string.raw_hal_restart_required, android.widget.Toast.LENGTH_LONG).show()
+            android.widget.Toast.makeText(context, resId, android.widget.Toast.LENGTH_LONG).show()
         }
     }
 
@@ -567,11 +565,23 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
-    private fun markRawHalPoisoned(reader: ImageReader?, why: String) {
-        if (!IS_LILAC || !isRawCaptureReader(reader) || isRawHalPoisoned()) return
-        lilacQuirkPrefs.edit().putInt(KEY_RAW_HAL_POISONED_BOOT, bootCount()).apply()
-        PLog.e(TAG, "lilac RAW HAL poisoned ($why); RAW captures blocked until reboot")
-        showRawHalPoisonedMessage()
+    /** lilac: the first failed RAW shot reopens the camera (that clears the shim); a second one in a row blocks RAW. */
+    private fun markRawHalPoisoned(shot: PhotoCaptureContext, why: String) {
+        if (!IS_LILAC || !isRawCaptureReader(shot.reader) || rawBlockedUntilAppRestart) return
+        val earlier = rawFailureBeforeReopen
+        if (earlier === shot) return // one shot can report several failures
+        if (earlier != null) {
+            rawBlockedUntilAppRestart = true
+            PLog.e(TAG, "lilac RAW HAL poisoned again after a camera reopen ($why); RAW blocked until app restart")
+            showLongToast(com.hinnka.mycamera.R.string.raw_hal_restart_required)
+            return
+        }
+        rawFailureBeforeReopen = shot
+        PLog.e(TAG, "lilac RAW HAL poisoned ($why); reopening the camera")
+        showLongToast(com.hinnka.mycamera.R.string.raw_failed_camera_reopened)
+        // the error-4 path releases the preview texture, so keep it now and reopen after this callback returns
+        val surfaceTexture = previewSurfaceTexture ?: return
+        cameraHandler?.post { openCamera(surfaceTexture) }
     }
 
     private fun reservePhotoCapture(
@@ -586,7 +596,7 @@ class Camera2Controller(private val context: Context) {
             showCaptureBusyMessage()
             return null
         }
-        // The raw19 shim fails a RAW still started while a previous RAW image is still open, and RAW stays broken until reboot.
+        // The raw19 shim fails a RAW still started while a previous RAW image is still open, and RAW stays broken until the camera reopens.
         if (IS_LILAC && isRawCaptureReader(reader) && occupied > 0) {
             PLog.w(TAG, "lilac: RAW capture refused while a RAW image is still open: occupied=$occupied")
             Handler(Looper.getMainLooper()).post {
@@ -734,6 +744,7 @@ class Camera2Controller(private val context: Context) {
             resetPreviewAfterCapture(keepLivePhotoCapture = successful && !shot.failed)
         }
         if (!shot.failed) {
+            if (isRawCaptureReader(shot.reader)) rawFailureBeforeReopen = null
             if (!shot.continuousBurst) {
                 val captureInfo = rebuildCaptureInfo(
                     result = shot.animationCaptureResult,
@@ -947,7 +958,7 @@ class Camera2Controller(private val context: Context) {
                     timestamp?.let { shot.expectedImageTimestamps.remove(it) }
                 }
                 if (failure.reason == CaptureFailure.REASON_ERROR) {
-                    markRawHalPoisoned(shot.reader, "frame ${failure.frameNumber} failed")
+                    markRawHalPoisoned(shot, "frame ${failure.frameNumber} failed")
                 }
                 failPhotoCapture(shot, "frame ${failure.frameNumber} failed: ${failure.reason}")
             }
@@ -961,7 +972,7 @@ class Camera2Controller(private val context: Context) {
                 if (target == captureSurface) {
                     shot.lostImageFrameNumbers.add(frameNumber)
                     shot.timestampByFrameNumber[frameNumber]?.let { shot.expectedImageTimestamps.remove(it) }
-                    markRawHalPoisoned(shot.reader, "image buffer lost for frame $frameNumber")
+                    markRawHalPoisoned(shot, "image buffer lost for frame $frameNumber")
                     failPhotoCapture(shot, "image buffer lost for frame $frameNumber")
                 }
             }
@@ -3108,7 +3119,7 @@ class Camera2Controller(private val context: Context) {
                     PLog.e(TAG, "Camera error: ${camera.id}, error=$error - $errorMessage")
                     if (error == ERROR_CAMERA_DEVICE) {
                         // only while a RAW shot is in flight: preview-only error 4s (e.g. L1) leave the shim healthy
-                        activePhotoCapture?.let { markRawHalPoisoned(it.reader, "camera error 4 during capture") }
+                        activePhotoCapture?.let { markRawHalPoisoned(it, "camera error 4 during capture") }
                     }
                     handleCameraDeviceUnavailable(
                         camera = camera,
@@ -7849,9 +7860,9 @@ class Camera2Controller(private val context: Context) {
         val device = cameraDevice ?: return
         val reader = imageReader ?: return
         if (captureSession == null) return
-        if (isRawCaptureReader(reader) && isRawHalPoisoned()) {
-            PLog.w(TAG, "RAW capture blocked: lilac RAW HAL poisoned this boot")
-            showRawHalPoisonedMessage()
+        if (isRawCaptureReader(reader) && rawBlockedUntilAppRestart) {
+            PLog.w(TAG, "RAW capture blocked: lilac RAW failed again after a camera reopen")
+            showLongToast(com.hinnka.mycamera.R.string.raw_hal_restart_required)
             return
         }
         val shot = reservePhotoCapture(_state.value, reader) ?: return

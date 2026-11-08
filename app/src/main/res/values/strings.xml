@@ -1,7 +1,8 @@
 <resources>
     <string name="camera_video_fps_unavailable">Recording is unavailable because the camera did not provide valid frame rate ranges.</string>
     <string name="app_name">Photon Camera</string>
-    <string name="raw_hal_restart_required">Pro mode failed. Restart the phone.</string>
+    <string name="raw_failed_camera_reopened">Pro shot failed. Camera restarted, try again.</string>
+    <string name="raw_hal_restart_required">Pro failed again. Restart the app. Still failing? Restart the phone.</string>
     <string name="raw_capture_busy">Still saving the last photo.</string>
     <string name="capture_busy">Not ready: still taking the last photo. No photo was taken.</string>
     <string name="capture_cancel_timer">Cancel timer</string>
