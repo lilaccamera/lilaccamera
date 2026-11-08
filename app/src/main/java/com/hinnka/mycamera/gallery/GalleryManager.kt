@@ -5672,7 +5672,56 @@ object GalleryManager {
      * that the orientation tag is set from the shot's [rotation] when the camera left it unset; no
      * look, edit or auto-save applies. Returns the new photo's id, or null after logging why.
      */
-    suspend fun saveCameraJpeg(context: Context, jpeg: ByteArray, stackId: String, dateAdded: Long, rotation: Int): String? =
+    /**
+     * JPEG of one YUV_420_888 camera frame as the camera delivered it, cropped to [crop] (sensor
+     * coordinates) and, on Android 14 and later, tagged with [colorSpace]. Null for other formats.
+     */
+    fun encodeYuvFrameJpeg(image: SafeImage, crop: Rect, colorSpace: ColorSpace, quality: Int): ByteArray? {
+        val width = image.width
+        val height = image.height
+        if (image.format != ImageFormat.YUV_420_888 || width % 2 != 0 || height % 2 != 0) return null
+        val (yPlane, uPlane, vPlane) = image.planes
+        val nv21 = ByteArray(width * height * 3 / 2)
+        val y = yPlane.buffer.duplicate()
+        for (row in 0 until height) {
+            y.position(row * yPlane.rowStride)
+            y.get(nv21, row * width, width)
+        }
+        val u = uPlane.buffer.duplicate()
+        val v = vPlane.buffer.duplicate()
+        var out = width * height
+        for (row in 0 until height / 2) {
+            for (col in 0 until width / 2) {
+                nv21[out++] = v.get(row * vPlane.rowStride + col * vPlane.pixelStride)
+                nv21[out++] = u.get(row * uPlane.rowStride + col * uPlane.pixelStride)
+            }
+        }
+        val strides = intArrayOf(width, width)
+        val tagged = if (Build.VERSION.SDK_INT >= 34 && colorSpace != ColorSpace.get(ColorSpace.Named.SRGB)) {
+            try {
+                YuvImage(nv21, ImageFormat.NV21, width, height, strides, colorSpace)
+            } catch (e: IllegalArgumentException) {
+                PLog.w(TAG, "Camera frame JPEG cannot carry ${colorSpace.name}; saved untagged", e)
+                null
+            }
+        } else {
+            null
+        }
+        val yuv = tagged ?: YuvImage(nv21, ImageFormat.NV21, width, height, strides)
+        // NV21 chroma covers 2x2 pixels, so the crop starts on even coordinates.
+        val rect = Rect(crop.left and 1.inv(), crop.top and 1.inv(), crop.right.coerceAtMost(width), crop.bottom.coerceAtMost(height))
+        val stream = java.io.ByteArrayOutputStream()
+        return if (yuv.compressToJpeg(rect, quality.coerceIn(1, 100), stream)) stream.toByteArray() else null
+    }
+
+    suspend fun saveCameraJpeg(
+        context: Context,
+        jpeg: ByteArray,
+        stackId: String,
+        dateAdded: Long,
+        rotation: Int,
+        mirrored: Boolean = false,
+    ): String? =
         withContext(Dispatchers.IO) {
             val photoId = UUID.randomUUID().toString()
             val photoDir = getPhotoDir(context, photoId, true)
@@ -5700,6 +5749,7 @@ object GalleryManager {
                     width = if (turned) exifMetadata.height else exifMetadata.width,
                     height = if (turned) exifMetadata.width else exifMetadata.height,
                     rotation = 0,
+                    isMirrored = mirrored,
                     isImported = false,
                     mimeType = "image/jpeg",
                     customProperties = mapOf(

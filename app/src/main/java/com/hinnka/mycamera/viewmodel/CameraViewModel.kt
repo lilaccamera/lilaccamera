@@ -3151,7 +3151,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /** Saves a Pro shot's camera JPEG into the shot's photo stack; a failure is logged and never fails the shot. */
-    private suspend fun saveCameraJpeg(settings: CaptureSettingsSnapshot, jpeg: ByteArray) {
+    private suspend fun saveCameraJpeg(
+        settings: CaptureSettingsSnapshot,
+        jpeg: ByteArray,
+        rotation: Int? = null,
+        mirrored: Boolean = false,
+    ) {
         try {
             settings.galleryRegistration.await()
             val context = getApplication<Application>()
@@ -3159,10 +3164,52 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val shot = GalleryManager.processingPhotos.value[settings.photoId]?.photo
                 ?: GalleryMediaStore.getPhotoData(context, settings.photoId)
                 ?: error("the shot is not in the gallery")
-            GalleryManager.saveCameraJpeg(context, jpeg, settings.photoId, shot.dateAdded - 1, shot.metadata?.rotation ?: 0)
+            GalleryManager.saveCameraJpeg(
+                context,
+                jpeg,
+                settings.photoId,
+                shot.dateAdded - 1,
+                rotation ?: shot.metadata?.rotation ?: 0,
+                mirrored,
+            )
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             PLog.e(TAG, "Cannot save the camera JPEG of ${settings.photoId}", e)
+        }
+    }
+
+    /**
+     * Photo mode stacks: when "Camera JPEG" is on, keeps the stack's reference frame, as the camera
+     * delivered it, as the stack's "before" version, with the result's crop, rotation and mirroring.
+     * Runs before the stack consumes the frame; a failure is logged and never fails the shot.
+     */
+    private suspend fun saveCameraFrameJpeg(
+        settings: CaptureSettingsSnapshot,
+        frame: SafeImage,
+        rotation: Int,
+        aspectRatio: AspectRatio?,
+        mirrored: Boolean,
+        colorSpace: android.graphics.ColorSpace.Named,
+    ) {
+        if (!settings.preferences.saveCameraJpeg) return
+        try {
+            val jpeg = withContext(Dispatchers.Default) {
+                val crop = BitmapUtils.calculateProcessedRect(frame.width, frame.height, aspectRatio, null, 0)
+                GalleryManager.encodeYuvFrameJpeg(
+                    frame, crop, android.graphics.ColorSpace.get(colorSpace), settings.preferences.photoQuality,
+                )
+            }
+            if (jpeg == null) {
+                PLog.w(TAG, "No camera frame JPEG for ${settings.photoId}: format ${frame.format}")
+                return
+            }
+            viewModelScope.launch { saveCameraJpeg(settings, jpeg, rotation, mirrored) }
+        } catch (e: OutOfMemoryError) {
+            // The stack itself matters more than its "before" copy.
+            PLog.e(TAG, "No memory to encode the camera frame of ${settings.photoId}", e)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            PLog.e(TAG, "Cannot encode the camera frame of ${settings.photoId}", e)
         }
     }
 
@@ -5894,6 +5941,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 PLog.e(TAG, "Failed to save burst image")
                 return
             }
+            // A one-frame stack is the camera's frame already.
+            if (!isRawStack && images.size > 1) {
+                saveCameraFrameJpeg(settings, images.first(), rotation, aspectRatio, shouldMirror, captureInfo.colorSpace)
+            }
 
             withContext(Dispatchers.IO) {
                 GalleryManager.saveVideo(context, photoId, livePhotoVideoDeferred)
@@ -5985,6 +6036,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
             val aspectRatio = metadata.ratio ?: settings.state.aspectRatio
             val colorSpace = android.graphics.ColorSpace.get(metadataCaptureInfo.colorSpace)
+            saveCameraFrameJpeg(
+                settings,
+                orderedImages[HDR_BRACKET_ZERO_INDEX],
+                metadata.rotation,
+                aspectRatio,
+                metadata.isMirrored,
+                metadataCaptureInfo.colorSpace,
+            )
             imagesHandedToGallery = true
             withContext(Dispatchers.IO) {
                 var fusedBitmap: Bitmap? = null
