@@ -1661,9 +1661,10 @@
     <string name="render_again_batch_failed">%1$d failed</string>
     <string name="photo_info_version">Version</string>
     <string name="photo_info_version_original">Original · %1$s</string>
-    <string name="photo_info_version_camera_jpeg">The camera\'s own JPEG, with its built-in noise reduction. Not processed by PhotonCamera.</string>
+    <string name="photo_info_version_camera_jpeg">Built-in camera: the phone\'s own image, with its own processing</string>
     <string name="photo_info_brightness">Brightness</string>
-    <string name="photo_version_camera_jpeg_label">Camera JPEG · before PhotonCamera</string>
+    <string name="photo_version_camera_jpeg_label">Built-in camera</string>
+    <string name="photo_version_stacked">Stacked · %1$d frames</string>
     <string name="photo_info_file_type">File type</string>
     <string name="photo_info_file_type_from_raw">%1$s, from RAW</string>
     <string name="photo_info_frames">Frames</string>

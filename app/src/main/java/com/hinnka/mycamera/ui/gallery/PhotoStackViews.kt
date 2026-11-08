@@ -57,21 +57,32 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
+/** Frames merged into a Photo mode stack, when the shot saved it (shots before 2026-11-08 did not). */
+internal fun stackedFrameCount(version: MediaData): Int? = version.metadata
+    ?.takeIf { it.captureMode == "jpg_max" }
+    ?.multipleExposureFrameCount
+    ?.takeIf { it > 1 }
+
 /**
  * The top-left badge: "RAW", "RAW · NR 0.42" for a re-render (what sets it apart in its stack),
- * the camera JPEG's "before" label, or null for a photo that is none of these.
+ * the built-in camera's label, "Stacked · 9 frames" for a Photo mode stack, or null for a photo that is none of these.
  */
 internal fun photoBadgeLabel(context: Context, version: MediaData, versions: List<MediaData>, isRaw: Boolean): String? {
     if (PhotoStacks.isCameraJpeg(version.metadata)) return context.getString(R.string.photo_version_camera_jpeg_label)
     val raw = context.getString(R.string.gallery_raw_badge)
-    val label = version.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY) ?: return raw.takeIf { isRaw }
+    val label = version.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY)
+        ?: return if (isRaw) raw else stackedFrameCount(version)?.let { context.getString(R.string.photo_version_stacked, it) }
     val stackLabels = versions.mapNotNull { it.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY) }
     return "$raw · ${RenderLook.shortLabel(label, stackLabels)}"
 }
 
-/** The tag in a strip thumbnail's corner: JPG (camera JPEG), RAW (original), R1, R2… (re-renders by age). */
+/**
+ * The tag in a strip thumbnail's corner: CAM (built-in camera), ×9 (Photo mode stack, JPG if it saved no count),
+ * RAW (Pro original), R1, R2… (re-renders by age).
+ */
 private fun versionTag(version: MediaData, versions: List<MediaData>): String = when {
-    PhotoStacks.isCameraJpeg(version.metadata) -> "JPG"
+    PhotoStacks.isCameraJpeg(version.metadata) -> "CAM"
+    version.metadata?.captureMode == "jpg_max" -> stackedFrameCount(version)?.let { "×$it" } ?: "JPG"
     version.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY) == null -> "RAW"
     else -> "R" + (versions.takeWhile { it.id != version.id }
         .count { it.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY) != null } + 1)
