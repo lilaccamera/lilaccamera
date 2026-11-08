@@ -1701,6 +1701,9 @@
     </plurals>
     <string name="camera_jpeg_on">On</string>
     <string name="camera_jpeg_off">Off</string>
+    <string name="quick_explain_camera_jpeg">Camera JPEG: Pro and stacked shots also keep the camera’s own JPEG, as a version of the photo.</string>
+    <string name="quick_explain_resolution">Resolution: photo size in Photo mode. Pro is always full size.</string>
+    <string name="quick_explain_metering">Metering: which part of the frame sets the exposure.</string>
     <string name="camera_jpeg_turned_on">Pro and stacked shots also keep the camera’s JPEG</string>
     <string name="render_chip_description">%1$s. Opens Processing photos.</string>
     <string name="render_chip_queue">RAW queue · %1$s</string>

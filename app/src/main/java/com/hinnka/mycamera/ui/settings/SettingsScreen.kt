@@ -16,6 +16,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.Image
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -185,6 +190,43 @@ import java.util.UUID
 import kotlin.math.roundToInt
 import com.hinnka.mycamera.ui.icons.AppIcons
 
+/** A setting that a quick setting tile opens Settings at (long press on the tile). */
+enum class SettingsTarget { MULTI_FRAME, HDR_PLUS, RAW_DEVELOPMENT, ULTRA_HDR, MULTIPLE_EXPOSURE, PREVIEW_STABILIZATION }
+
+private val SettingsTarget.page: SettingsPage
+    get() = when (this) {
+        SettingsTarget.MULTI_FRAME -> SettingsPage.PHOTO_MODE
+        SettingsTarget.HDR_PLUS, SettingsTarget.RAW_DEVELOPMENT, SettingsTarget.ULTRA_HDR -> SettingsPage.PROFESSIONAL_MODE
+        SettingsTarget.MULTIPLE_EXPOSURE -> SettingsPage.CAPTURE_STORAGE
+        SettingsTarget.PREVIEW_STABILIZATION -> SettingsPage.ASSIST
+    }
+
+/** Wraps a setting a tile can open at: when opened that way, scrolls it into view and flashes it once. */
+@Composable
+private fun SettingsAnchor(
+    target: SettingsTarget,
+    pending: SettingsTarget?,
+    onShown: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val requester = remember { BringIntoViewRequester() }
+    val flash = remember { Animatable(0f) }
+    if (pending == target) {
+        LaunchedEffect(Unit) {
+            delay(300) // after the page's own scroll-to-top
+            requester.bringIntoView()
+            flash.snapTo(0.35f)
+            flash.animateTo(0f, tween(1500))
+            onShown()
+        }
+    }
+    Box(
+        Modifier
+            .bringIntoViewRequester(requester)
+            .background(AccentColor.copy(alpha = flash.value), RoundedCornerShape(8.dp))
+    ) { content() }
+}
+
 private enum class SettingsPage {
     ASSIST,
     FOCUS_LENS,
@@ -324,7 +366,8 @@ fun SettingsScreen(
     onFrameManagementClick: () -> Unit,
     onPhantomPipCropClick: () -> Unit,
     onPresetManagementClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    openedAt: SettingsTarget? = null,
 ) {
     val preferencesRepository = rememberUserPreferencesRepository()
     val state by viewModel.state.collectAsState()
@@ -445,7 +488,8 @@ fun SettingsScreen(
     val availableFrames = viewModel.availableFrameList
     val previewThumbnail = viewModel.previewThumbnail
 
-    var selectedPage by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
+    var selectedPage by rememberSaveable { mutableStateOf(openedAt?.page) }
+    var pendingTarget by rememberSaveable { mutableStateOf(openedAt) }
     var isRawSliderAdjusting by remember { mutableStateOf(false) }
     var mainCameraIdOptions by remember { mutableStateOf<List<String>>(emptyList()) }
     var macroCameraIdOptions by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -1164,18 +1208,20 @@ fun SettingsScreen(
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
 
-                        if (!com.hinnka.mycamera.camera.DeviceQuirks.isLilac) SwitchSettingItem(
-                            title = stringResource(
-                                R.string.settings_photo_preview_stabilization
-                            ),
-                            description = stringResource(
-                                R.string.settings_photo_preview_stabilization_description
-                            ),
-                            checked = state.photoPreviewStabilizationEnabled,
-                            onCheckedChange = viewModel::setPhotoPreviewStabilizationEnabled,
-                            enabled = viewModel.realtimeStabilizationCoordinator
-                                .isCurrentCameraSupported,
-                        )
+                        if (!com.hinnka.mycamera.camera.DeviceQuirks.isLilac) SettingsAnchor(SettingsTarget.PREVIEW_STABILIZATION, pendingTarget, onShown = { pendingTarget = null }) {
+    SwitchSettingItem(
+                                title = stringResource(
+                                    R.string.settings_photo_preview_stabilization
+                                ),
+                                description = stringResource(
+                                    R.string.settings_photo_preview_stabilization_description
+                                ),
+                                checked = state.photoPreviewStabilizationEnabled,
+                                onCheckedChange = viewModel::setPhotoPreviewStabilizationEnabled,
+                                enabled = viewModel.realtimeStabilizationCoordinator
+                                    .isCurrentCameraSupported,
+                            )
+                        }
                     }
                 }
 
@@ -1459,19 +1505,21 @@ fun SettingsScreen(
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
 
-                        QualityLevelSetting(
-                            title = stringResource(R.string.settings_multiple_exposure_count),
-                            description = stringResource(R.string.settings_multiple_exposure_count_description),
-                            levels = listOf(
-                                2 to "2",
-                                3 to "3",
-                                4 to "4",
-                                5 to "5",
-                                6 to "6"
-                            ),
-                            currentLevel = multipleExposureCount,
-                            onLevelSelected = { multipleExposureCount = it }
-                        )
+                        SettingsAnchor(SettingsTarget.MULTIPLE_EXPOSURE, pendingTarget, onShown = { pendingTarget = null }) {
+    QualityLevelSetting(
+                                title = stringResource(R.string.settings_multiple_exposure_count),
+                                description = stringResource(R.string.settings_multiple_exposure_count_description),
+                                levels = listOf(
+                                    2 to "2",
+                                    3 to "3",
+                                    4 to "4",
+                                    5 to "5",
+                                    6 to "6"
+                                ),
+                                currentLevel = multipleExposureCount,
+                                onLevelSelected = { multipleExposureCount = it }
+                            )
+                        }
 
                         HorizontalDivider(
                             color = Color.White.copy(alpha = 0.1f),
@@ -1918,25 +1966,27 @@ fun SettingsScreen(
                         title = stringResource(R.string.settings_section_photo_mode),
                         showTitle = false
                     ) {
-                        SliderSettingItem(
-                            title = stringResource(R.string.settings_multi_frame_denoise_frame_count),
-                            description = stringResource(
-                                R.string.settings_multi_frame_denoise_frame_count_description
-                            ),
-                            value = jpgMultiFrameDenoiseCountSliderValue,
-                            valueRange = MultiFrameConfig.MIN_DENOISE_FRAME_COUNT.toFloat()..
-                                MultiFrameConfig.MAX_FRAME_COUNT.toFloat(),
-                            onValueChange = {
-                                jpgMultiFrameDenoiseCountSliderValue = it.roundToInt().toFloat()
-                            },
-                            resetValue = MultiFrameConfig.DEFAULT_DENOISE_FRAME_COUNT.toFloat(),
-                            onValueChangeFinished = {
-                                viewModel.setJpgMultiFrameDenoiseFrameCountAndEnable(
-                                    jpgMultiFrameDenoiseCountSliderValue.roundToInt()
-                                )
-                            },
-                            valueTextFormatter = { it.roundToInt().toString() }
-                        )
+                        SettingsAnchor(SettingsTarget.MULTI_FRAME, pendingTarget, onShown = { pendingTarget = null }) {
+    SliderSettingItem(
+                                title = stringResource(R.string.settings_multi_frame_denoise_frame_count),
+                                description = stringResource(
+                                    R.string.settings_multi_frame_denoise_frame_count_description
+                                ),
+                                value = jpgMultiFrameDenoiseCountSliderValue,
+                                valueRange = MultiFrameConfig.MIN_DENOISE_FRAME_COUNT.toFloat()..
+                                    MultiFrameConfig.MAX_FRAME_COUNT.toFloat(),
+                                onValueChange = {
+                                    jpgMultiFrameDenoiseCountSliderValue = it.roundToInt().toFloat()
+                                },
+                                resetValue = MultiFrameConfig.DEFAULT_DENOISE_FRAME_COUNT.toFloat(),
+                                onValueChangeFinished = {
+                                    viewModel.setJpgMultiFrameDenoiseFrameCountAndEnable(
+                                        jpgMultiFrameDenoiseCountSliderValue.roundToInt()
+                                    )
+                                },
+                                valueTextFormatter = { it.roundToInt().toString() }
+                            )
+                        }
 
                         val jpgOutputScaleValueFormat = stringResource(R.string.settings_jpg_multi_frame_denoise_output_scale_value)
                         SliderSettingItem(
@@ -2049,29 +2099,31 @@ fun SettingsScreen(
                             modifier = Modifier.padding(vertical = 12.dp)
                         )
 
-                        SliderSettingItem(
-                            title = stringResource(R.string.settings_hdr_plus_frame_count),
-                            description = stringResource(
-                                R.string.settings_hdr_plus_frame_count_description
-                            ),
-                            value = hdrPlusFrameCountSliderValue,
-                            valueRange = (if (effectiveHdrPlusBracketExposure) {
-                                MultiFrameConfig.MIN_HDR_PLUS_BRACKET_FRAME_COUNT
-                            } else {
-                                MultiFrameConfig.MIN_HDR_PLUS_FRAME_COUNT
-                            }).toFloat()..
-                                MultiFrameConfig.MAX_FRAME_COUNT.toFloat(),
-                            onValueChange = {
-                                hdrPlusFrameCountSliderValue = it.roundToInt().toFloat()
-                            },
-                            resetValue = MultiFrameConfig.DEFAULT_HDR_PLUS_FRAME_COUNT.toFloat(),
-                            onValueChangeFinished = {
-                                viewModel.setHdrPlusFrameCount(
-                                    hdrPlusFrameCountSliderValue.roundToInt()
-                                )
-                            },
-                            valueTextFormatter = { it.roundToInt().toString() }
-                        )
+                        SettingsAnchor(SettingsTarget.HDR_PLUS, pendingTarget, onShown = { pendingTarget = null }) {
+    SliderSettingItem(
+                                title = stringResource(R.string.settings_hdr_plus_frame_count),
+                                description = stringResource(
+                                    R.string.settings_hdr_plus_frame_count_description
+                                ),
+                                value = hdrPlusFrameCountSliderValue,
+                                valueRange = (if (effectiveHdrPlusBracketExposure) {
+                                    MultiFrameConfig.MIN_HDR_PLUS_BRACKET_FRAME_COUNT
+                                } else {
+                                    MultiFrameConfig.MIN_HDR_PLUS_FRAME_COUNT
+                                }).toFloat()..
+                                    MultiFrameConfig.MAX_FRAME_COUNT.toFloat(),
+                                onValueChange = {
+                                    hdrPlusFrameCountSliderValue = it.roundToInt().toFloat()
+                                },
+                                resetValue = MultiFrameConfig.DEFAULT_HDR_PLUS_FRAME_COUNT.toFloat(),
+                                onValueChangeFinished = {
+                                    viewModel.setHdrPlusFrameCount(
+                                        hdrPlusFrameCountSliderValue.roundToInt()
+                                    )
+                                },
+                                valueTextFormatter = { it.roundToInt().toString() }
+                            )
+                        }
 
                         HorizontalDivider(
                             color = Color.White.copy(alpha = 0.1f),
@@ -2351,77 +2403,81 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    SettingsSection(
-                        title = stringResource(R.string.settings_raw_group_development)
-                    ) {
-                        RawEditPanel(
-                        selectedDcpId = rawDcpId,
-                        rawDcpIdsByLens = rawDcpIdsByLens,
-                        dcpLensOptions = rawDcpLensOptions(state.availableCameras),
-                        availableDcps = availableDcps,
-                        selectedBaselineLutId = rawBaselineLutId,
-                        onSelectBaselineLut = viewModel::setRawBaselineLutId,
-                        onEditBaselineRecipe = { showRawBaselineRecipeEditor = true },
-                        availableLuts = availableLuts,
-                        thumbnail = previewThumbnail,
-                        rawExposureCompensation = rawExposureCompensationUi,
-                        rawHighlightsAdjustment = rawHighlightsAdjustmentUi,
-                        rawShadowsAdjustment = rawShadowsAdjustmentUi,
-                        rawBlackPointCorrection = rawBlackPointCorrectionUi,
-                        rawWhitePointCorrection = rawWhitePointCorrectionUi,
-                        rawRenderingEngine = rawColorEngine,
-                        rawToneMappingParameters = rawToneMappingParametersUi,
-                        spectralFilmSelection = rawSpectralFilmSelection ?: SpectralFilmSelection(rawSpectralFilmStock ?: "kodak_portra_400"),
-                        spectralFilmPrint = rawSpectralFilmPrint ?: "kodak_portra_endura",
-                        onSelectDcp = { viewModel.setRawDcpId(it) },
-                        onRawDcpIdsByLensChange = { viewModel.setRawDcpIdsByLens(it) },
-                        onImportDcp = { importDcpLauncher.launch(arrayOf("*/*")) },
-                        onDeleteDcp = { dcp ->
-                            viewModel.deleteRawDcp(dcp.id) { success ->
-                                android.widget.Toast.makeText(
-                                    context,
-                                    if (success) R.string.raw_dcp_delete_success else R.string.raw_dcp_delete_failed,
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        },
-                        onRawExposureCompensationChange = {
-                            rawExposureCompensationUi = it
-                        },
-                        onRawHighlightsAdjustmentChange = {
-                            rawHighlightsAdjustmentUi = it
-                        },
-                        onRawShadowsAdjustmentChange = {
-                            rawShadowsAdjustmentUi = it
-                        },
-                        onRawBlackPointCorrectionChange = { rawBlackPointCorrectionUi = it },
-                        onRawWhitePointCorrectionChange = { rawWhitePointCorrectionUi = it },
-                        onRawColorEngineChange = { viewModel.setRawColorEngine(it) },
-                        onRawToneMappingParametersChange = { rawToneMappingParametersUi = it },
-                        onSpectralFilmSelectionChange = { viewModel.setRawSpectralFilmSelection(it) },
-                        onSpectralFilmPrintChange = { viewModel.setRawSpectralFilmPrint(it) },
-                        fotufilmDocument = rawFotufilmDocument,
-                        onFotufilmDocumentChange = { viewModel.setRawFotufilmDocument(it) },
-                        onAdjustmentStart = { isRawSliderAdjusting = true },
-                        onAdjustmentEnd = { commitRawSliderValues() },
-                        hncsFilmCurveMode = rawHncsFilmCurveMode,
-                        onHncsFilmCurveModeChange = viewModel::setRawHncsFilmCurveMode,
-                            contentMode = RawEditPanelContentMode.FULL
-                        )
+                    SettingsAnchor(SettingsTarget.RAW_DEVELOPMENT, pendingTarget, onShown = { pendingTarget = null }) {
+    SettingsSection(
+                            title = stringResource(R.string.settings_raw_group_development)
+                        ) {
+                            RawEditPanel(
+                            selectedDcpId = rawDcpId,
+                            rawDcpIdsByLens = rawDcpIdsByLens,
+                            dcpLensOptions = rawDcpLensOptions(state.availableCameras),
+                            availableDcps = availableDcps,
+                            selectedBaselineLutId = rawBaselineLutId,
+                            onSelectBaselineLut = viewModel::setRawBaselineLutId,
+                            onEditBaselineRecipe = { showRawBaselineRecipeEditor = true },
+                            availableLuts = availableLuts,
+                            thumbnail = previewThumbnail,
+                            rawExposureCompensation = rawExposureCompensationUi,
+                            rawHighlightsAdjustment = rawHighlightsAdjustmentUi,
+                            rawShadowsAdjustment = rawShadowsAdjustmentUi,
+                            rawBlackPointCorrection = rawBlackPointCorrectionUi,
+                            rawWhitePointCorrection = rawWhitePointCorrectionUi,
+                            rawRenderingEngine = rawColorEngine,
+                            rawToneMappingParameters = rawToneMappingParametersUi,
+                            spectralFilmSelection = rawSpectralFilmSelection ?: SpectralFilmSelection(rawSpectralFilmStock ?: "kodak_portra_400"),
+                            spectralFilmPrint = rawSpectralFilmPrint ?: "kodak_portra_endura",
+                            onSelectDcp = { viewModel.setRawDcpId(it) },
+                            onRawDcpIdsByLensChange = { viewModel.setRawDcpIdsByLens(it) },
+                            onImportDcp = { importDcpLauncher.launch(arrayOf("*/*")) },
+                            onDeleteDcp = { dcp ->
+                                viewModel.deleteRawDcp(dcp.id) { success ->
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        if (success) R.string.raw_dcp_delete_success else R.string.raw_dcp_delete_failed,
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            },
+                            onRawExposureCompensationChange = {
+                                rawExposureCompensationUi = it
+                            },
+                            onRawHighlightsAdjustmentChange = {
+                                rawHighlightsAdjustmentUi = it
+                            },
+                            onRawShadowsAdjustmentChange = {
+                                rawShadowsAdjustmentUi = it
+                            },
+                            onRawBlackPointCorrectionChange = { rawBlackPointCorrectionUi = it },
+                            onRawWhitePointCorrectionChange = { rawWhitePointCorrectionUi = it },
+                            onRawColorEngineChange = { viewModel.setRawColorEngine(it) },
+                            onRawToneMappingParametersChange = { rawToneMappingParametersUi = it },
+                            onSpectralFilmSelectionChange = { viewModel.setRawSpectralFilmSelection(it) },
+                            onSpectralFilmPrintChange = { viewModel.setRawSpectralFilmPrint(it) },
+                            fotufilmDocument = rawFotufilmDocument,
+                            onFotufilmDocumentChange = { viewModel.setRawFotufilmDocument(it) },
+                            onAdjustmentStart = { isRawSliderAdjusting = true },
+                            onAdjustmentEnd = { commitRawSliderValues() },
+                            hncsFilmCurveMode = rawHncsFilmCurveMode,
+                            onHncsFilmCurveModeChange = viewModel::setRawHncsFilmCurveMode,
+                                contentMode = RawEditPanelContentMode.FULL
+                            )
+                        }
                     }
 
                     SettingsSection(
                         title = stringResource(R.string.settings_raw_group_capture_output)
                     ) {
                         if (isHdrSettingsSupported) {
-                            SwitchSettingItem(
-                                title = stringResource(R.string.settings_ultra_hdr_gain_map),
-                                description = stringResource(
-                                    R.string.settings_ultra_hdr_gain_map_description
-                                ),
-                                checked = ultraHdrGainMapEnabled,
-                                onCheckedChange = { preferencesRepository.updateAsync { this.ultraHdrGainMapEnabled = it } },
-                            )
+                            SettingsAnchor(SettingsTarget.ULTRA_HDR, pendingTarget, onShown = { pendingTarget = null }) {
+    SwitchSettingItem(
+                                    title = stringResource(R.string.settings_ultra_hdr_gain_map),
+                                    description = stringResource(
+                                        R.string.settings_ultra_hdr_gain_map_description
+                                    ),
+                                    checked = ultraHdrGainMapEnabled,
+                                    onCheckedChange = { preferencesRepository.updateAsync { this.ultraHdrGainMapEnabled = it } },
+                                )
+                            }
 
                             HorizontalDivider(
                                 modifier = Modifier.padding(vertical = 8.dp),

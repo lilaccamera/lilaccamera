@@ -94,6 +94,7 @@ import com.hinnka.mycamera.ui.settings.FrameEditorScreen
 import com.hinnka.mycamera.ui.settings.FrameManagementScreen
 import com.hinnka.mycamera.ui.settings.PhantomPipCropScreen
 import com.hinnka.mycamera.ui.settings.SettingsScreen
+import com.hinnka.mycamera.ui.settings.SettingsTarget
 import com.hinnka.mycamera.ui.settings.PresetEditorScreen
 import com.hinnka.mycamera.ui.settings.PresetManagementScreen
 import com.hinnka.mycamera.ui.theme.PhotonCameraTheme
@@ -118,7 +119,7 @@ object Routes {
     const val PHOTO_DETAIL = "photo_detail/{tab}/{index}?photoId={photoId}"
     const val BURST_DETAIL = "burst_detail/{photoId}"
     const val PHOTO_EDIT = "photo_edit"
-    const val SETTINGS = "settings"
+    const val SETTINGS = "settings?target={target}"
     const val FILTER_MANAGEMENT = "filter_management?locateLutId={locateLutId}&videoLut={videoLut}"
     const val FRAME_MANAGEMENT = "frame_management"
     const val FRAME_EDITOR = "frame_editor?frameId={frameId}&imageFrame={imageFrame}"
@@ -142,6 +143,9 @@ object Routes {
 
     fun photoDetail(tab: GalleryTab = GalleryTab.PHOTON, index: Int = 0, photoId: String? = null) =
         "photo_detail/$tab/$index" + (if (photoId != null) "?photoId=$photoId" else "")
+
+    fun settings(target: SettingsTarget? = null): String =
+        if (target == null) "settings" else "settings?target=${target.name}"
 
     fun filterManagement(locateLutId: String? = null, videoLut: Boolean = false): String {
         val arguments = buildList {
@@ -743,8 +747,9 @@ fun NavigationHost(
                                 }
                             },
                             onSettingsClick = {
-                                navController.navigate(Routes.SETTINGS)
+                                navController.navigate(Routes.settings())
                             },
+                            onOpenSettingsAt = { navController.navigate(Routes.settings(it)) },
                             onFilterManagementClick = { lutId ->
                                 navController.navigate(
                                     Routes.filterManagement(
@@ -809,8 +814,9 @@ fun NavigationHost(
                             }
                         },
                         onSettingsClick = {
-                            navController.navigate(Routes.SETTINGS)
+                            navController.navigate(Routes.settings())
                         },
+                        onOpenSettingsAt = { navController.navigate(Routes.settings(it)) },
                         onFilterManagementClick = { lutId ->
                             navController.navigate(
                                 Routes.filterManagement(
@@ -939,9 +945,20 @@ fun NavigationHost(
                 )
             }
 
-            composable(Routes.SETTINGS) {
+            composable(
+                route = Routes.SETTINGS,
+                arguments = listOf(
+                    navArgument("target") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    }
+                )
+            ) { backStackEntry ->
                 SettingsScreen(
                     viewModel = cameraViewModel,
+                    openedAt = backStackEntry.arguments?.getString("target")
+                        ?.let { name -> SettingsTarget.entries.firstOrNull { it.name == name } },
                     onBack = {
                         navController.popBackStack()
                     },

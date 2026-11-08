@@ -111,6 +111,7 @@ import com.hinnka.mycamera.ui.icons.AppIcons
 import com.hinnka.mycamera.ui.components.EdgeRingStyle
 import com.hinnka.mycamera.ui.components.ThumbnailCorner
 import com.hinnka.mycamera.ui.components.ThumbnailEdgeRing
+import com.hinnka.mycamera.ui.settings.SettingsTarget
 
 /**
  * 主相机界面
@@ -235,6 +236,7 @@ fun CameraScreen(
     galleryViewModel: GalleryViewModel,
     onGalleryClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    onOpenSettingsAt: (SettingsTarget) -> Unit = {},
     onFilterManagementClick: (String?) -> Unit,
     onFrameManagementClick: () -> Unit,
     onToolboxClick: () -> Unit,
@@ -1812,6 +1814,7 @@ fun CameraScreen(
             onPhotoResolutionCapChange = viewModel::setPhotoResolutionCapMp,
             saveCameraJpeg = saveCameraJpeg,
             onSaveCameraJpegChange = { saveCameraJpeg = it },
+            onOpenSettingsAt = onOpenSettingsAt,
             multiFrameCount = jpgMultiFrameCount,
             onMultiFrameCountChange = { viewModel.setJpgMultiFrameDenoiseFrameCount(it) },
             hdrPlusFrameCount = hdrPlusFrameCount,

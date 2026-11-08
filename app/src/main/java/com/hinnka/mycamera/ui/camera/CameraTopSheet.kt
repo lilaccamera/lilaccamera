@@ -6,6 +6,7 @@ import android.os.Build
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,10 +33,16 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.ui.theme.OnAccentColor
+import android.content.Context
 import com.hinnka.mycamera.R
+import com.hinnka.mycamera.ui.settings.SettingsTarget
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.DeviceQuirks
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.ViewConfiguration
+import androidx.compose.ui.platform.LocalViewConfiguration
 import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.raw.HncsFilmCurveMode
@@ -101,6 +108,8 @@ fun CameraTopSheet(
     onPhotoResolutionCapChange: (Int) -> Unit,
     saveCameraJpeg: Boolean,
     onSaveCameraJpegChange: (Boolean) -> Unit,
+    // Long press on a tile opens Settings at that tile's setting.
+    onOpenSettingsAt: (SettingsTarget) -> Unit = {},
     multiFrameCount: Int,
     onMultiFrameCountChange: (Int) -> Unit,
     hdrPlusFrameCount: Int,
@@ -211,6 +220,7 @@ fun CameraTopSheet(
                                 title = stringResource(R.string.settings_raw_color_engine),
                                 checked = true,
                                 onClick = { showRenderingEngineSheet = true },
+                                onLongClick = { onOpenSettingsAt(SettingsTarget.RAW_DEVELOPMENT) },
                                 modifier = itemModifier
                             )
                             // Each tap steps to the next preset, wrapping to a single frame.
@@ -224,6 +234,7 @@ fun CameraTopSheet(
                                         HDR_PLUS_FRAME_PRESETS.firstOrNull { it > hdrPlusFrameCount } ?: HDR_PLUS_FRAME_PRESETS.first()
                                     )
                                 },
+                                onLongClick = { onOpenSettingsAt(SettingsTarget.HDR_PLUS) },
                                 modifier = itemModifier
                             )
                         } else {
@@ -245,12 +256,14 @@ fun CameraTopSheet(
                                         if (next == null) onJpgMaxToggle(false) else onMultiFrameCountChange(next)
                                     }
                                 },
+                                onLongClick = { onOpenSettingsAt(SettingsTarget.MULTI_FRAME) },
                                 modifier = itemModifier
                             )
                             QuickSettingToggle(
                                 title = stringResource(R.string.settings_use_multiple_exposure),
                                 checked = useMultipleExposure,
                                 onCheckedChange = onMultipleExposureToggle,
+                                onLongClick = { onOpenSettingsAt(SettingsTarget.MULTIPLE_EXPOSURE) },
                                 modifier = itemModifier
                             )
                         }
@@ -267,12 +280,14 @@ fun CameraTopSheet(
                                 }
                                 onSaveCameraJpegChange(!saveCameraJpeg)
                             },
+                            onLongClick = { showQuickSettingExplanation(cameraJpegContext, R.string.quick_explain_camera_jpeg) },
                             modifier = itemModifier
                         )
                         QuickSettingToggle(
                             title = stringResource(R.string.settings_ultra_hdr_gain_map),
                             checked = ultraHdrEnabled,
                             onCheckedChange = onUltraHdrToggle,
+                            onLongClick = { onOpenSettingsAt(SettingsTarget.ULTRA_HDR) },
                             modifier = itemModifier
                         )
                         if (!DeviceQuirks.isLilac) {
@@ -281,6 +296,7 @@ fun CameraTopSheet(
                                 checked = photoPreviewStabilizationEnabled,
                                 onCheckedChange = onPhotoPreviewStabilizationChange,
                                 enabled = photoPreviewStabilizationAvailable,
+                                onLongClick = { onOpenSettingsAt(SettingsTarget.PREVIEW_STABILIZATION) },
                                 modifier = itemModifier
                             )
                         }
@@ -309,6 +325,7 @@ fun CameraTopSheet(
                                     ).show()
                                 }
                             },
+                            onLongClick = { showQuickSettingExplanation(resolutionContext, R.string.quick_explain_resolution) },
                             modifier = itemModifier
                         )
                         MeteringModeQuickSetting(
@@ -789,6 +806,7 @@ private fun MeteringModeQuickSetting(
         MeteringMode.AVERAGE -> stringResource(R.string.metering_average)
         MeteringMode.HIGHLIGHT_PRIORITY -> stringResource(R.string.metering_highlight_priority)
     }
+    val meteringContext = LocalContext.current
     QuickSettingValue(
         title = stringResource(R.string.metering_mode),
         value = meteringLabel,
@@ -802,6 +820,7 @@ private fun MeteringModeQuickSetting(
             }
             onMeteringModeChange(next)
         },
+        onLongClick = { showQuickSettingExplanation(meteringContext, R.string.quick_explain_metering) },
         modifier = modifier
     )
 }
@@ -910,6 +929,23 @@ private fun ContentManagementOptionsPanel(
     }
 }
 
+/** Tiles wait 1.5x the system long press, so a slow tap still toggles instead of opening Settings. */
+@Composable
+private fun LongerLongPress(content: @Composable () -> Unit) {
+    val base = LocalViewConfiguration.current
+    val longer = remember(base) {
+        object : ViewConfiguration by base {
+            override val longPressTimeoutMillis: Long get() = base.longPressTimeoutMillis * 3 / 2
+        }
+    }
+    CompositionLocalProvider(LocalViewConfiguration provides longer, content = content)
+}
+
+/** Long press on a tile that has no Settings page: say what it does. */
+private fun showQuickSettingExplanation(context: Context, textRes: Int) {
+    android.widget.Toast.makeText(context, textRes, android.widget.Toast.LENGTH_LONG).show()
+}
+
 @Composable
 fun QuickSettingValue(
     title: String,
@@ -920,35 +956,38 @@ fun QuickSettingValue(
     enabled: Boolean = true,
     // An active feature gets the accent fill, like a checked QuickSettingToggle.
     highlighted: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
 ) {
-    Box(
-        modifier = modifier
-            .height(48.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                when {
-                    highlighted -> AccentColor
-                    else -> Color.White.copy(alpha = if (enabled) 0.15f else 0.06f)
-                }
-            )
-            .clickable { onClick() }
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        contentAlignment = Alignment.CenterStart
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                text = title,
-                color = if (highlighted) OnAccentColor.copy(alpha = 0.7f) else Color.White.copy(alpha = if (enabled) 0.6f else 0.3f),
-                fontSize = 8.sp,
-                lineHeight = 10.sp,
-                fontWeight = FontWeight.Normal,
-                maxLines = 1,
-            )
-            QuickSettingLabel(
-                text = value,
-                color = if (highlighted) OnAccentColor else Color.White.copy(alpha = if (enabled) 1f else 0.38f),
-                fontWeight = if (highlighted) FontWeight.Bold else FontWeight.Medium
-            )
+    LongerLongPress {
+        Box(
+            modifier = modifier
+                .height(48.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(
+                    when {
+                        highlighted -> AccentColor
+                        else -> Color.White.copy(alpha = if (enabled) 0.15f else 0.06f)
+                    }
+                )
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = title,
+                    color = if (highlighted) OnAccentColor.copy(alpha = 0.7f) else Color.White.copy(alpha = if (enabled) 0.6f else 0.3f),
+                    fontSize = 8.sp,
+                    lineHeight = 10.sp,
+                    fontWeight = FontWeight.Normal,
+                    maxLines = 1,
+                )
+                QuickSettingLabel(
+                    text = value,
+                    color = if (highlighted) OnAccentColor else Color.White.copy(alpha = if (enabled) 1f else 0.38f),
+                    fontWeight = if (highlighted) FontWeight.Bold else FontWeight.Medium
+                )
+            }
         }
     }
 }
@@ -997,38 +1036,41 @@ fun QuickSettingButton2(
     title: String,
     checked: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
 ) {
-    Box(
-        modifier = modifier
-            .height(48.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (checked) AccentColor else Color.White.copy(
-                    alpha = 0.15f
+    LongerLongPress {
+        Box(
+            modifier = modifier
+                .height(48.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(
+                    if (checked) AccentColor else Color.White.copy(
+                        alpha = 0.15f
+                    )
                 )
-            )
-            .clickable { onClick() }
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        contentAlignment = Alignment.CenterStart
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            contentAlignment = Alignment.CenterStart
         ) {
-            QuickSettingLabel(
-                text = title,
-                color = if (checked) OnAccentColor else Color.White.copy(alpha = 0.9f),
-                fontWeight = if (checked) FontWeight.Bold else FontWeight.Normal,
-                modifier = Modifier.weight(1f)
-            )
-            Icon(
-                imageVector = AppIcons.ChevronRight,
-                contentDescription = null,
-                tint = if (checked) OnAccentColor else Color.White.copy(alpha = 0.9f),
-                modifier = Modifier.size(14.dp)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                QuickSettingLabel(
+                    text = title,
+                    color = if (checked) OnAccentColor else Color.White.copy(alpha = 0.9f),
+                    fontWeight = if (checked) FontWeight.Bold else FontWeight.Normal,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    imageVector = AppIcons.ChevronRight,
+                    contentDescription = null,
+                    tint = if (checked) OnAccentColor else Color.White.copy(alpha = 0.9f),
+                    modifier = Modifier.size(14.dp)
+                )
+            }
         }
     }
 }
@@ -1039,51 +1081,54 @@ fun QuickSettingToggle(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     enabled: Boolean = true,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
 ) {
-    val contentAlpha = if (enabled) 1f else 0.38f
-    Box(
-        modifier = modifier
-            .height(48.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (checked) AccentColor.copy(alpha = contentAlpha) else Color.White.copy(
-                    alpha = 0.15f
-                )
-            )
-            .clickable(enabled = enabled) { onCheckedChange(!checked) }
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        contentAlignment = Alignment.CenterStart
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            QuickSettingLabel(
-                text = title,
-                color = if (checked) {
-                    OnAccentColor.copy(alpha = contentAlpha)
-                } else {
-                    Color.White.copy(alpha = 0.9f * contentAlpha)
-                },
-                fontWeight = if (checked) FontWeight.Bold else FontWeight.Normal,
-                modifier = Modifier.weight(1f)
-            )
-
-            // Simple indicator
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(androidx.compose.foundation.shape.CircleShape)
-                    .background(
-                        if (checked) {
-                            OnAccentColor.copy(alpha = contentAlpha)
-                        } else {
-                            Color.White.copy(alpha = 0.2f * contentAlpha)
-                        }
+    LongerLongPress {
+        val contentAlpha = if (enabled) 1f else 0.38f
+        Box(
+            modifier = modifier
+                .height(48.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(
+                    if (checked) AccentColor.copy(alpha = contentAlpha) else Color.White.copy(
+                        alpha = 0.15f
                     )
-            )
+                )
+                .combinedClickable(enabled = enabled, onClick = { onCheckedChange(!checked) }, onLongClick = onLongClick)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                QuickSettingLabel(
+                    text = title,
+                    color = if (checked) {
+                        OnAccentColor.copy(alpha = contentAlpha)
+                    } else {
+                        Color.White.copy(alpha = 0.9f * contentAlpha)
+                    },
+                    fontWeight = if (checked) FontWeight.Bold else FontWeight.Normal,
+                    modifier = Modifier.weight(1f)
+                )
+
+                // Simple indicator
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(
+                            if (checked) {
+                                OnAccentColor.copy(alpha = contentAlpha)
+                            } else {
+                                Color.White.copy(alpha = 0.2f * contentAlpha)
+                            }
+                        )
+                )
+            }
         }
     }
 }
