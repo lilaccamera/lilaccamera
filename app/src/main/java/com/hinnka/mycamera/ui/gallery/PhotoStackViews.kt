@@ -2,23 +2,17 @@ package com.hinnka.mycamera.ui.gallery
 
 import android.content.Context
 import android.graphics.Bitmap
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,10 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
@@ -45,6 +37,25 @@ import com.hinnka.mycamera.gallery.MediaData
 import com.hinnka.mycamera.gallery.PhotoStacks
 import com.hinnka.mycamera.render.RenderLook
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
+import com.hinnka.mycamera.ui.components.EdgeRingStyle
+import com.hinnka.mycamera.ui.components.ThumbnailEdgeRing
+import com.hinnka.mycamera.ui.components.ThumbnailGloss
+import com.hinnka.mycamera.ui.components.ThumbnailSize
+import com.hinnka.mycamera.ui.components.ThumbnailTile
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 /**
  * The top-left badge: "RAW", "RAW · NR 0.42" for a re-render (what sets it apart in its stack),
@@ -66,75 +77,67 @@ private fun versionTag(version: MediaData, versions: List<MediaData>): String = 
         .count { it.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY) != null } + 1)
 }
 
-/** Switches the shown version of a stack, oldest first; [processingIds] still render and show a spinner. */
+/**
+ * The versions of a stack, oldest first, as a row that scrolls under a fixed centre: the centred thumbnail is the
+ * shown version and carries the viewfinder thumbnail's edge line. Flicking switches versions live as each one
+ * reaches the centre; a tap centres that one. [runningIds] render now (running arc), [waitingIds] wait (dots).
+ */
 @Composable
 internal fun PhotoVersionStrip(
     versions: List<MediaData>,
     selectedId: String,
-    processingIds: Set<String>,
+    runningIds: Set<String>,
+    waitingIds: Set<String>,
     viewModel: GalleryViewModel,
     onSelect: (MediaData) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val currentVersions by rememberUpdatedState(versions)
     val currentOnSelect by rememberUpdatedState(onSelect)
-    val density = LocalDensity.current
-    // Scrubbing: a sideways drag selects the thumbnail under the finger; consumed, so the pager never pages.
-    fun selectAt(x: Float, thumb: Dp) {
-        val slot = with(density) { (thumb + StripGap).toPx() }
-        val start = with(density) { StripPadding.toPx() }
-        val index = ((x - start) / slot).toInt().coerceIn(0, currentVersions.lastIndex)
-        currentVersions.getOrNull(index)?.let(currentOnSelect)
+    // Live selection: the item nearest the centre of the row is the shown version.
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val centre = (info.viewportStartOffset + info.viewportEndOffset) / 2
+            info.visibleItemsInfo.minByOrNull { abs(it.offset + it.size / 2 - centre) }?.index
+        }.filterNotNull().distinctUntilChanged().collect { index ->
+            if (listState.isScrollInProgress) currentVersions.getOrNull(index)?.let(currentOnSelect)
+        }
     }
-    // More versions than fit at 48 dp shrink the thumbnails (to 24 dp at least), so every version stays reachable.
-    BoxWithConstraints(modifier) {
-    val thumb = ((maxWidth - StripPadding * 2 - StripGap * (versions.size - 1)) / versions.size).coerceIn(24.dp, StripThumb)
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color.Black.copy(alpha = 0.3f))
-            .pointerInput(thumb) {
-                detectHorizontalDragGestures(onDragStart = { selectAt(it.x, thumb) }) { change, _ ->
-                    change.consume()
-                    selectAt(change.position.x, thumb)
-                }
-            }
-            .padding(StripPadding),
-        horizontalArrangement = Arrangement.spacedBy(StripGap)
-    ) {
-        versions.forEach { version ->
-            val selected = version.id == selectedId
-            Column(
-                modifier = Modifier
-                    .width(thumb)
-                    .semantics { this.selected = selected }
-                    .clickable(role = Role.Tab) { onSelect(version) },
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
+    // A version chosen elsewhere (opening the photo, deleting one) is brought to the centre.
+    LaunchedEffect(selectedId, versions.size) {
+        val index = versions.indexOfFirst { it.id == selectedId }
+        if (index >= 0 && !listState.isScrollInProgress) listState.scrollToItem(index)
+    }
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        LazyRow(
+            state = listState,
+            flingBehavior = rememberSnapFlingBehavior(listState),
+            // Half the row on each side, so the first and last versions can reach the centre too.
+            contentPadding = PaddingValues(horizontal = (maxWidth - ThumbnailSize) / 2),
+            horizontalArrangement = Arrangement.spacedBy(StripGap),
+        ) {
+            itemsIndexed(versions, key = { _, version -> version.id }) { index, version ->
+                val selected = version.id == selectedId
                 val thumbnail by produceState<Bitmap?>(null, version.id, version.thumbnailUri) {
                     value = viewModel.getGridThumbnailBitmap(version)
                 }
-                Box(
-                    modifier = Modifier
-                        .size(thumb)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF1A1A1A))
-                        .border(
-                            BorderStroke(1.dp, Color.White.copy(alpha = if (selected) 0.6f else 0.15f)),
-                            RoundedCornerShape(6.dp)
-                        ),
-                    contentAlignment = Alignment.Center
+                // The edge line lies over the whole tile, as on the viewfinder thumbnail.
+                Box {
+                ThumbnailTile(
+                    onClick = { scope.launch { listState.animateScrollToItem(index) }; onSelect(version) },
+                    modifier = Modifier.semantics { this.selected = selected }
                 ) {
                     thumbnail?.takeUnless { it.isRecycled }?.let {
                         Image(
                             bitmap = it.asImageBitmap(),
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
-                            modifier = Modifier.size(thumb)
+                            modifier = Modifier.fillMaxSize()
                         )
-                    }
-                    if (version.id in processingIds) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                        ThumbnailGloss()
                     }
                     Text(
                         text = versionTag(version, versions),
@@ -144,20 +147,23 @@ internal fun PhotoVersionStrip(
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier
                             .align(Alignment.BottomStart)
-                            .padding(2.dp)
+                            .padding(4.dp)
                             .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(3.dp))
                             .padding(horizontal = 3.dp)
                     )
                 }
+                when {
+                    version.id in runningIds -> ThumbnailEdgeRing(EdgeRingStyle.RUNNING, Color.White, Modifier.matchParentSize())
+                    version.id in waitingIds -> ThumbnailEdgeRing(EdgeRingStyle.DOTTED, Color.White, Modifier.matchParentSize())
+                    selected -> ThumbnailEdgeRing(EdgeRingStyle.SOLID, Color.White, Modifier.matchParentSize())
+                }
+                }
             }
         }
     }
-    }
 }
 
-private val StripThumb = 48.dp
 private val StripGap = 8.dp
-private val StripPadding = 8.dp
 
 /** Stacked delete choices for a photo stack with more than one version, Cancel last. */
 @Composable

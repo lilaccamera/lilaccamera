@@ -859,17 +859,24 @@ fun GalleryDetailScreen(
                 if (overlaysHidden) ((footerHeight - VersionStripHeight) / 2).coerceAtLeast(4.dp) else footerHeight + 12.dp,
                 label = "stripBottom"
             )
+            // With the bars hidden the strip dims a little, thumbnails and edge line alike, so the photo leads.
+            val stripAlpha by animateFloatAsState(if (overlaysHidden) 0.6f else 1f, label = "stripAlpha")
             if (currentPhoto != null && currentVersions.size > 1) {
                 val renderPendingIds by RenderQueue.pendingPhotoIds.collectAsState()
+                val renderStatus by RenderQueue.status.collectAsState()
+                val runningIds = processingPhotos.keys +
+                    listOfNotNull(renderStatus.currentPhotoId.takeIf { renderStatus.running })
                 PhotoVersionStrip(
                     versions = currentVersions,
                     selectedId = currentPhoto.id,
-                    processingIds = processingPhotos.keys + renderPendingIds,
+                    runningIds = runningIds,
+                    waitingIds = renderPendingIds - runningIds,
                     viewModel = viewModel,
                     onSelect = ::showVersion,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(start = 16.dp, end = 16.dp, bottom = stripBottom)
+                        .padding(bottom = stripBottom)
+                        .alpha(stripAlpha)
                 )
             }
             if (
