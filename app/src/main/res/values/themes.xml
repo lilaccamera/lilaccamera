@@ -5,7 +5,8 @@
 
     <style name="Theme.MyCamera.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <!-- No icon: the black splash reads as the closed shutter that opens onto the viewfinder. -->
+        <item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>
         <item name="splashScreenIconSize">240dp</item>
         <item name="postSplashScreenTheme">@style/Theme.MyCamera</item>
     </style>
