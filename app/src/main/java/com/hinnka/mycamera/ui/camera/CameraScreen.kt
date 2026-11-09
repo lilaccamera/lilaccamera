@@ -309,6 +309,7 @@ fun CameraScreen(
     val rawFotufilmDocument by viewModel.rawFotufilmDocument.collectAsState()
     val multipleExposureState = viewModel.multipleExposureState
     val canStartShutterAnimation by viewModel.canStartShutterAnimation.collectAsState()
+    val previewFrameRendered by viewModel.previewFrameRendered.collectAsState()
     val currentCaptureModeForEffects by rememberUpdatedState(state.captureMode)
     var previewRecipeParamsOverride by remember(currentLutId, activePresetId) {
         mutableStateOf<ColorRecipeParams?>(null)
@@ -768,14 +769,14 @@ fun CameraScreen(
         }
     }
 
-    LaunchedEffect(state.previewFirstFrameTimestampNs) {
+    LaunchedEffect(previewFrameRendered) {
         // Deferred start-up work (gallery list, warm-ups) waits for the first camera frame.
-        if (state.previewFirstFrameTimestampNs != null) StartupGate.open()
+        if (previewFrameRendered) StartupGate.open()
     }
 
     LaunchedEffect(
         state.isPreviewActive,
-        state.previewFirstFrameTimestampNs,
+        previewFrameRendered,
         state.captureMode,
         hasPlayedInitialPreviewTransition,
         canStartShutterAnimation
@@ -785,7 +786,7 @@ fun CameraScreen(
                 state.captureMode == CaptureMode.VIDEO
         // Open on the camera's first frame: the black splash and this cover read as one closed shutter.
         if (hasPlayedInitialPreviewTransition || !state.isPreviewActive ||
-            state.previewFirstFrameTimestampNs == null || !canRevealInitialPreview
+            !previewFrameRendered || !canRevealInitialPreview
         ) return@LaunchedEffect
         previewTransitionActive = true
         previewTransitionRevealing = true

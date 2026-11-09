@@ -618,6 +618,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _canStartShutterAnimation = MutableStateFlow(false)
     val canStartShutterAnimation = _canStartShutterAnimation.asStateFlow()
 
+    // The preview has drawn a camera frame. The capture result timestamp arrives about 0.1 s later on lilac.
+    private val _previewFrameRendered = MutableStateFlow(false)
+    val previewFrameRendered = _previewFrameRendered.asStateFlow()
+
     // LUT 相关状态
     var currentLutConfig: LutConfig? by mutableStateOf(null)
         private set
@@ -2573,6 +2577,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun onFirstPreviewFrame() {
+        _previewFrameRendered.value = true
         if (startupPrewarmAttempted) return
         startupPrewarmAttempted = true
         startupPrewarmJob = viewModelScope.launch {
