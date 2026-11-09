@@ -59,7 +59,7 @@
         },
         {
             "type": "logo", "logoType": "BRAND", "overrideSource": "photon",
-            "alignment": "START", "width": 900, "light": true,
+            "alignment": "START", "width": 112, "light": true,
             "placement": { "x": 0.03, "y": 0.95, "anchorX": 0, "widthFraction": 0.88 }
         },
         {
