@@ -3,7 +3,6 @@
  * noise from Gr minus Gb in the centre 1024 px crop. Fit: variance = A*ISO*x + C*ISO^2 + D.
  * Same coefficients for all four planes (only green was measured). Floor D is constant:
  * the digital-gain divisor is set to the top ISO, 3200.
- * Source: vault Projects/Lilac, RAW Noise Findings and _scripts/makeprofile.py.
  */
 #include <stdio.h>
 double compute_noise_model_entry_S(int plane, int sens);

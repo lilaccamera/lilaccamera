@@ -3118,7 +3118,7 @@ class Camera2Controller(private val context: Context) {
 
                     PLog.e(TAG, "Camera error: ${camera.id}, error=$error - $errorMessage")
                     if (error == ERROR_CAMERA_DEVICE) {
-                        // only while a RAW shot is in flight: preview-only error 4s (e.g. L1) leave the shim healthy
+                        // only while a RAW shot is in flight: preview-only error 4s (e.g. turning on preview stabilization in Pro mode) leave the shim healthy
                         activePhotoCapture?.let { markRawHalPoisoned(it, "camera error 4 during capture") }
                     }
                     handleCameraDeviceUnavailable(
