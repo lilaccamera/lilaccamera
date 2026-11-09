@@ -244,7 +244,7 @@ internal fun LensSwitchTransitionOverlay(state: LensSwitchTransitionState, modif
     }
 }
 
-private suspend fun CameraGLSurfaceView.captureLastFrame(): Bitmap? {
+internal suspend fun CameraGLSurfaceView.captureLastFrame(): Bitmap? {
     if (width <= 0 || height <= 0 || !holder.surface.isValid) return null
     val scale = minOf(1f, SnapshotMaxLongEdge.toFloat() / maxOf(width, height))
     val bitmap = Bitmap.createBitmap(

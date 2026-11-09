@@ -46,6 +46,7 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
@@ -93,7 +94,6 @@ import com.hinnka.mycamera.ui.components.*
 import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.StartupGate
-import com.hinnka.mycamera.utils.SystemPropertiesUtil
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import com.hinnka.mycamera.video.CaptureMode
@@ -132,7 +132,7 @@ private enum class CameraShootingMode {
     VIDEO
 }
 
-private const val PreviewTransitionRevealDurationMillis = 250
+private const val PreviewTransitionRevealDurationMillis = 150
 private const val ControlsArrivalDurationMillis = 200
 private val ControlsArrivalEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
@@ -255,10 +255,6 @@ fun CameraScreen(
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
     val isCameraInitialized by viewModel.isInitialized.collectAsState()
-    // shortcut: test switch for comparing reveals on the phone (adb shell setprop debug.lilac.reveal cut|split);
-    // remove once one is chosen.
-    val revealCut = remember { SystemPropertiesUtil.get("debug.lilac.reveal") == "cut" }
-    var arrivalPopToken by remember { mutableIntStateOf(0) }
     val controlsArrival = remember { Animatable(if (controlsArrivalPlayed) 1f else 0f) }
     LaunchedEffect(isCameraInitialized) {
         if (!isCameraInitialized || controlsArrivalPlayed) return@LaunchedEffect
@@ -327,6 +323,10 @@ fun CameraScreen(
     var captureAnimationSnapshot by remember { mutableStateOf<CaptureAnimationSnapshot?>(null) }
     var previewTransitionActive by remember { mutableStateOf(true) }
     var previewTransitionRevealing by remember { mutableStateOf(false) }
+    // A switch that only changes the pipeline (Photo <-> Pro) shows no cover; the controls change over the viewfinder.
+    var previewTransitionCovered by remember { mutableStateOf(true) }
+    // The frame being left, kept (cropped to the new viewfinder) under the cover until the live view lands.
+    var previewTransitionFrame by remember { mutableStateOf<ImageBitmap?>(null) }
     var previewTransitionToken by remember { mutableIntStateOf(0) }
     var previewTransitionAwaitingResume by remember { mutableStateOf(false) }
     var previewTransitionSawPause by remember { mutableStateOf(false) }
@@ -534,23 +534,16 @@ fun CameraScreen(
 
     val previewSize = state.currentPreviewSize
     val previewAspectRatio = state.getPreviewAspectRatio()
-    val previewTransitionCoverFractionState = animateFloatAsState(
-        targetValue = when {
-            previewTransitionActive && !previewTransitionRevealing -> 1f
-            previewTransitionActive -> 0f
-            else -> 0f
-        },
-        animationSpec = if ((previewTransitionActive && !previewTransitionRevealing) || revealCut) {
-            snap()
+    // Black at start-up, the held frame at a switch; it fades out when the first live frame is drawn.
+    val previewTransitionCoverAlpha = animateFloatAsState(
+        targetValue = if (previewTransitionActive && previewTransitionCovered && !previewTransitionRevealing) 1f else 0f,
+        animationSpec = if (previewTransitionActive && previewTransitionRevealing) {
+            tween(durationMillis = PreviewTransitionRevealDurationMillis, easing = LinearEasing)
         } else {
-            tween(
-                durationMillis = PreviewTransitionRevealDurationMillis,
-                easing = FastOutSlowInEasing
-            )
+            snap()
         },
-        label = "previewTransitionCoverFraction"
+        label = "previewTransitionCoverAlpha"
     )
-    val previewTransitionCoverFraction = previewTransitionCoverFractionState.value
 
     fun cancelZoomStopAnimation() {
         zoomStopAnimationJob?.cancel()
@@ -585,15 +578,28 @@ fun CameraScreen(
         }
     }
 
-    fun runPreviewTransition(onSwitch: () -> Unit) {
+    LaunchedEffect(previewTransitionActive) {
+        if (!previewTransitionActive) previewTransitionFrame = null
+    }
+
+    fun runPreviewTransition(covered: Boolean = true, onSwitch: () -> Unit) {
         cancelZoomStopAnimation()
         lensSwitchTransition.cancel()
-        previewTransitionActive = true
-        previewTransitionRevealing = false
-        previewTransitionToken += 1
-        previewTransitionAwaitingResume = true
-        previewTransitionSawPause = false
+        fun closeCover() {
+            previewTransitionCovered = covered
+            previewTransitionActive = true
+            previewTransitionRevealing = false
+            previewTransitionToken += 1
+            previewTransitionAwaitingResume = true
+            previewTransitionSawPause = false
+        }
+        if (!covered) closeCover()
         scope.launch {
+            if (covered) {
+                // Copy the frame before the cover closes; without one the cover is black.
+                previewTransitionFrame = viewModel.glSurfaceView?.captureLastFrame()?.asImageBitmap()
+                closeCover()
+            }
             withFrameNanos { }
             onSwitch()
         }
@@ -702,7 +708,7 @@ fun CameraScreen(
             return
         }
 
-        runPreviewTransition {
+        runPreviewTransition(covered = targetCaptureMode != state.captureMode) {
             if (targetCaptureMode == CaptureMode.VIDEO && state.aspectRatio == AspectRatio.XPAN) {
                 viewModel.setAspectRatio(AspectRatio.RATIO_4_3)
             }
@@ -736,7 +742,7 @@ fun CameraScreen(
         if (previewTransitionSawPause) {
             // Reveal on the restarted camera's first frame, not a fixed 80 ms after it starts.
             previewTransitionRevealing = true
-            delay(if (revealCut) 0L else PreviewTransitionRevealDurationMillis.toLong())
+            delay(PreviewTransitionRevealDurationMillis.toLong())
             previewTransitionActive = false
             previewTransitionAwaitingResume = false
             previewTransitionSawPause = false
@@ -762,7 +768,7 @@ fun CameraScreen(
         delay(700)
         if (previewTransitionAwaitingResume) {
             previewTransitionRevealing = true
-            delay(if (revealCut) 0L else PreviewTransitionRevealDurationMillis.toLong())
+            delay(PreviewTransitionRevealDurationMillis.toLong())
             previewTransitionActive = false
             previewTransitionAwaitingResume = false
             previewTransitionSawPause = false
@@ -790,8 +796,7 @@ fun CameraScreen(
         ) return@LaunchedEffect
         previewTransitionActive = true
         previewTransitionRevealing = true
-        if (revealCut) arrivalPopToken++
-        delay(if (revealCut) 0L else PreviewTransitionRevealDurationMillis.toLong())
+        delay(PreviewTransitionRevealDurationMillis.toLong())
         previewTransitionActive = false
         hasPlayedInitialPreviewTransition = true
     }
@@ -1424,30 +1429,17 @@ fun CameraScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .graphicsLayer {
-                                alpha = if (previewTransitionActive || previewTransitionCoverFractionState.value > 0.001f) 1f else 0f
-                            }
+                            .graphicsLayer { alpha = previewTransitionCoverAlpha.value }
+                            .background(Color.Black)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .fillMaxHeight(0.5f)
-                                .align(Alignment.TopCenter)
-                                .graphicsLayer {
-                                    translationY = -size.height * (1f - previewTransitionCoverFractionState.value)
-                                }
-                                .background(Color.Black)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .fillMaxHeight(0.5f)
-                                .align(Alignment.BottomCenter)
-                                .graphicsLayer {
-                                    translationY = size.height * (1f - previewTransitionCoverFractionState.value)
-                                }
-                                .background(Color.Black)
-                        )
+                        previewTransitionFrame?.let { frame ->
+                            Image(
+                                bitmap = frame,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
                     }
 
                     LensSwitchTransitionOverlay(lensSwitchTransition, Modifier.fillMaxSize())
@@ -1673,7 +1665,8 @@ fun CameraScreen(
                 onSwitchCameraClick = ::switchCameraWithPreviewTransition,
                 onCaptureModeSelected = ::setShootingModeWithPreviewTransition,
                 modeSwitchEnabled = !previewTransitionActive && !lensSwitchTransition.isActive,
-                arrivalPopToken = arrivalPopToken,
+                previewPending = !previewTransitionRevealing &&
+                    (!hasPlayedInitialPreviewTransition || previewTransitionAwaitingResume),
                 onCaptureTap = {
                     val shouldDebounceRawCapture =
                         state.useRaw && state.captureMode == CaptureMode.PHOTO
@@ -2147,7 +2140,8 @@ private fun Controls(
     onSwitchCameraClick: () -> Unit,
     onCaptureModeSelected: (CameraShootingMode) -> Unit,
     modeSwitchEnabled: Boolean,
-    arrivalPopToken: Int,
+    // The camera is not showing live frames yet or again: the shutter shows its busy look, as when it cannot shoot.
+    previewPending: Boolean,
     onCaptureTap: () -> Unit,
     onGalleryClick: () -> Unit,
     sideControlInset: Dp?,
@@ -2236,7 +2230,7 @@ private fun Controls(
                     customStyle = captureButtonStyle,
                     customColor = captureButtonColor,
                     customImagePath = captureButtonImagePath,
-                    arrivalPopToken = arrivalPopToken,
+                    previewPending = previewPending,
                     onTap = onCaptureTap,
                     onLongPressStart = { viewModel.startContinuousCapture() },
                     onLongPressEnd = { viewModel.stopContinuousCapture() },
@@ -2462,7 +2456,7 @@ fun CaptureButton(
     customStyle: CaptureButtonStyle,
     customColor: Int,
     customImagePath: String?,
-    arrivalPopToken: Int = 0,
+    previewPending: Boolean = false,
     onTap: () -> Unit,
     onLongPressStart: () -> Unit,
     onLongPressEnd: () -> Unit,
@@ -2474,7 +2468,7 @@ fun CaptureButton(
     val showVideoProcessingProgress = captureMode == CaptureMode.VIDEO && isVideoProcessing
     // While a shot would be refused (Pro: RAW still saving; Photo: buffers full): grey centre and a breathing
     // white ring (capture uses a spinning accent ring); a pop and a light tick when it is usable again.
-    val showBusy = captureMode == CaptureMode.PHOTO && isCaptureBusy && !isCapturing
+    val showBusy = (captureMode == CaptureMode.PHOTO && isCaptureBusy && !isCapturing) || previewPending
     // During the self-timer a press cancels it, so the centre shows a cross instead of a second shot.
     val showCancelTimer = captureMode == CaptureMode.PHOTO && isCountdownActive && !isCapturing
     val showActivityProgress = showCaptureProgress || showVideoProcessingProgress
@@ -2510,12 +2504,6 @@ fun CaptureButton(
             readyPop.animateTo(1f, spring(dampingRatio = 0.4f))
         }
         wasBusy = showBusy
-    }
-    // The instant-cut reveal marks the camera's arrival with the same pop, without the tick.
-    LaunchedEffect(arrivalPopToken) {
-        if (arrivalPopToken == 0) return@LaunchedEffect
-        readyPop.animateTo(1.15f, tween(120))
-        readyPop.animateTo(1f, spring(dampingRatio = 0.4f))
     }
 
     val pulseAlpha by infiniteTransition.animateFloat(
