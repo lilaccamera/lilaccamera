@@ -4298,7 +4298,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun switchToNextLut(): LutInfo? {
         val nextLut = peekNextLut() ?: return null
         setLut(nextLut.id)
-        vibrationHelper.vibrate()
+        vibrationHelper.vibrate(VibrationHelper.LIGHT_TICK_MS)
         return nextLut
     }
 
@@ -4308,7 +4308,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun switchToPreviousLut(): LutInfo? {
         val previousLut = peekPreviousLut() ?: return null
         setLut(previousLut.id)
-        vibrationHelper.vibrate()
+        vibrationHelper.vibrate(VibrationHelper.LIGHT_TICK_MS)
         return previousLut
     }
 

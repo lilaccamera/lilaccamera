@@ -25,7 +25,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -34,7 +33,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -42,9 +40,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,8 +50,6 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.max
@@ -264,18 +258,8 @@ fun LutSwipeIndicator(
     state: LutSwipeState,
     modifier: Modifier = Modifier,
 ) {
-    val haptic = LocalHapticFeedback.current
-    LaunchedEffect(state) {
-        snapshotFlow { state.active to state.armed }
-            .distinctUntilChanged()
-            .drop(1)
-            .collect { (active, armed) ->
-                // 只在拖动中跨越阈值时反馈；提交后的反馈由切换本身负责。
-                if (active && armed) {
-                    haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                }
-            }
-    }
+    // No tick on arming: the LUT switch itself ticks once, and two pulses close together felt too
+    // strong on the XZ1 Compact.
 
     if (!state.active) return
 
