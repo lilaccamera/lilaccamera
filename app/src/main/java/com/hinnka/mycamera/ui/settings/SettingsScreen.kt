@@ -3004,7 +3004,7 @@ fun SettingsScreen(
                             )
                         }
 
-                        if (!isGoogleFlavor) {
+                        if (AppUpdateManager.updatesEnabled) {
                             HorizontalDivider(
                                 color = Color.White.copy(alpha = 0.1f),
                                 modifier = Modifier.padding(vertical = 8.dp)

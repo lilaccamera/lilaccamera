@@ -12,6 +12,8 @@ data class AppUpdateRelease(
 )
 
 object AppUpdateManager {
+    val updatesEnabled = false
+
     val readyApk: StateFlow<File?> = MutableStateFlow(null)
 
     suspend fun checkForUpdate(currentVersion: String = ""): AppUpdateRelease? = null
