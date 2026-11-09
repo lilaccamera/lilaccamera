@@ -361,6 +361,11 @@ fun CameraScreen(
     LaunchedEffect(isCameraInitialized) {
         isCameraPrepared = isCameraInitialized && viewModel.prepareCamera()
     }
+    // prepareCamera opens the camera ahead of the preview; don't leave it open if this screen
+    // goes away before the preview surface arrived.
+    DisposableEffect(viewModel) {
+        onDispose { viewModel.closeCameraWithoutPreview() }
+    }
 
     LaunchedEffect(
         isCameraInitialized,

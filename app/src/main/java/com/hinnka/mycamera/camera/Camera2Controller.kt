@@ -146,9 +146,20 @@ class Camera2Controller(private val context: Context) {
     )
 
     private data class CameraOpenRequest(
-        val surfaceTexture: SurfaceTexture,
+        /** Null opens the camera before the preview surface exists; [openCamera] attaches it later. */
+        val surfaceTexture: SurfaceTexture?,
         val preserveVideoRecording: Boolean,
     )
+
+    /** A photo session configured with a deferred preview output, waiting for the preview surface. */
+    private class DeferredPreview(
+        val output: OutputConfiguration,
+        val buildRequest: (Surface) -> CaptureRequest.Builder,
+        val openGeneration: Long,
+        val sessionGeneration: Long,
+    ) {
+        var session: CameraCaptureSession? = null
+    }
 
     private enum class CameraDeviceLifecycle {
         CLOSED,
@@ -278,6 +289,13 @@ class Camera2Controller(private val context: Context) {
 
     private var previewSurface: Surface? = null
     private var previewSurfaceTexture: SurfaceTexture? = null
+    // Camera opened before the preview surface existed: its generation, the settings it was
+    // configured with, and the preview buffer size the surface must get when it attaches.
+    private var surfacelessOpenGeneration = -1L
+    private var surfacelessOpenSettings: List<Any?>? = null
+    private var previewBufferSize = Size(0, 0)
+    private var deferredPreview: DeferredPreview? = null
+    private var deferredPreviewUnsupported = false
     private var imageReader: ImageReader? = null
     private var stabilizationImageReader: StabilizationImageReader? = null
     // lilac raw19 shim: serves full-res RAW only when the same request also targets a full-size JPEG; the JPEG is discarded
@@ -2275,6 +2293,7 @@ class Camera2Controller(private val context: Context) {
         pendingCaptureReader = null
         pendingCaptureBaseExposureResult = null
         clearCaptureFocusState("session cleared: $reason")
+        deferredPreview = null
         safeCloseCaptureSession(captureSession, reason)
         captureSession = null
         _enginePreviewSource.value = null
@@ -2591,6 +2610,15 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
+        if (
+            surfacelessOpenGeneration == cameraOpenGeneration &&
+            previewSurfaceTexture == null &&
+            pendingCameraOpenRequest == null &&
+            surfacelessOpenSettings == surfacelessOpenSettings()
+        ) {
+            attachPreviewSurface(surfaceTexture)
+            return
+        }
         pendingCameraOpenRequest = CameraOpenRequest(surfaceTexture, preserveVideoRecording)
         when (cameraDeviceLifecycle) {
             CameraDeviceLifecycle.CLOSED -> openPendingCameraRequest()
@@ -2602,6 +2630,65 @@ class Camera2Controller(private val context: Context) {
             CameraDeviceLifecycle.CLOSING -> {
                 PLog.d(TAG, "Camera open queued while previous device is closing")
             }
+        }
+    }
+
+    /**
+     * Opens the camera in Photo mode before the preview surface exists, so opening and session
+     * configuration overlap the UI start-up. [openCamera] later attaches the surface to this open.
+     */
+    fun openCameraWithoutPreview() {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { openCameraWithoutPreview() }
+            return
+        }
+        if (
+            _state.value.captureMode != CaptureMode.PHOTO ||
+            cameraDeviceLifecycle != CameraDeviceLifecycle.CLOSED ||
+            pendingCameraOpenRequest != null
+        ) {
+            return
+        }
+        pendingCameraOpenRequest = CameraOpenRequest(surfaceTexture = null, preserveVideoRecording = false)
+        openPendingCameraRequest()
+    }
+
+    /** Closes a camera opened by [openCameraWithoutPreview] whose preview surface never arrived. */
+    fun closeCameraWithoutPreview() {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { closeCameraWithoutPreview() }
+            return
+        }
+        if (surfacelessOpenGeneration == cameraOpenGeneration && previewSurfaceTexture == null) {
+            PLog.d(TAG, "Closing camera opened without a preview surface")
+            closeCameraInternal(preserveVideoRecording = false, clearPendingOpen = true)
+        }
+    }
+
+    // What the session of a camera opened without a surface was built from; if any of it changed
+    // before the surface arrived, the camera reopens instead of reusing that session.
+    private fun surfacelessOpenSettings(): List<Any?> = _state.value.let {
+        listOf(
+            it.currentCameraId, it.captureMode, it.aspectRatio, requestedRawCaptureEnabled,
+            it.useP010, it.useP3ColorSpace, it.photoResolutionCapMp, it.multiFrameOutputScale,
+            it.photoPreviewStabilizationEnabled, it.useLivePhoto,
+            it.vendorCaptureSettingsByLens, it.customVendorKeySettings,
+        )
+    }
+
+    private fun attachPreviewSurface(surfaceTexture: SurfaceTexture) {
+        surfaceTexture.setDefaultBufferSize(previewBufferSize.width, previewBufferSize.height)
+        previewSurfaceTexture = surfaceTexture
+        previewSurface = Surface(surfaceTexture)
+        PLog.d(TAG, "Preview surface attached to the open camera: deferredSession=${deferredPreview != null}")
+        // Still opening: onOpened creates the session with this surface.
+        if (cameraDevice == null) return
+        if (deferredPreview != null) {
+            finalizeDeferredPreview()
+        } else {
+            createPreviewSession()
         }
     }
 
@@ -2820,7 +2907,7 @@ class Camera2Controller(private val context: Context) {
                     CaptureMode.VIDEO -> resolvedVideoPreviewSize
                     CaptureMode.PHOTO -> CameraUtils.getFixedPreviewSize(openCharacteristics, _state.value.aspectRatio)
                 }
-                surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
+                surfaceTexture?.setDefaultBufferSize(previewSize.width, previewSize.height)
 
                 if (_state.value.useLivePhoto && captureMode == CaptureMode.PHOTO) {
                     livePhotoRecorder.startRecording()
@@ -2890,13 +2977,13 @@ class Camera2Controller(private val context: Context) {
                     message = "相机特性不可用",
                     error = e
                 )
-                surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
+                surfaceTexture?.setDefaultBufferSize(previewSize.width, previewSize.height)
                 return
             }
 
             // 配置 SurfaceTexture
             previewSurfaceTexture = surfaceTexture
-            previewSurface = Surface(surfaceTexture)
+            previewSurface = surfaceTexture?.let(::Surface)
 
             if (captureMode == CaptureMode.PHOTO) {
                 val aspectRatio = state.value.aspectRatio
@@ -2940,7 +3027,8 @@ class Camera2Controller(private val context: Context) {
                     captureFormat = ImageFormat.YUV_420_888
                 }
                 previewSize = CameraUtils.getFixedPreviewSize(outputCharacteristicsForStreams, aspectRatio)
-                surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
+                surfaceTexture?.setDefaultBufferSize(previewSize.width, previewSize.height)
+                previewBufferSize = previewSize
                 val highResolutionProfile = "$outputCameraIdForStreams:$captureFormat"
                 val captureSizeSelection = if (rawOutput != null) {
                     null
@@ -3052,7 +3140,11 @@ class Camera2Controller(private val context: Context) {
                 _state.value = _state.value.copy(isP3Supported = false)
             }
 
-            PLog.d(TAG, "Opening camera: open=$openCameraId, selected=$cameraId")
+            if (surfaceTexture == null) {
+                surfacelessOpenGeneration = openGeneration
+                surfacelessOpenSettings = surfacelessOpenSettings()
+            }
+            PLog.d(TAG, "Opening camera: open=$openCameraId, selected=$cameraId, previewSurface=${surfaceTexture != null}")
 
             cameraManager.openCamera(openCameraId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
@@ -3296,11 +3388,16 @@ class Camera2Controller(private val context: Context) {
             return
         }
         val device = cameraDevice ?: return
-        val surface = previewSurface ?: return
+        val surface = previewSurface
+        val captureMode = _state.value.captureMode
+        // Camera opened before the GL preview existed: configure the photo session now with a
+        // deferred preview output and add the surface when it arrives.
+        val deferPreview = surface == null && captureMode == CaptureMode.PHOTO && !deferredPreviewUnsupported
+        if (surface == null && !deferPreview) return
+        deferredPreview = null
         // createCaptureSession closes the previous session before onConfigured runs.
         // Stop exposing it while the replacement is being configured.
         invalidateCaptureSession(captureSession, "preview session replacement")
-        val captureMode = _state.value.captureMode
         val reader = imageReader
         val stabilizationReader = ensureStabilizationImageReader()
         val useEnhancedStabilization = shouldUseVideoEnhancedStabilization()
@@ -3331,15 +3428,19 @@ class Camera2Controller(private val context: Context) {
         )
         var vendorSessionParametersApplied = false
 
-        try {
-            previewRequestBuilder = device.createCaptureRequest(templateType).apply {
-                addTarget(surface)
+        val buildPreviewRequest = { target: Surface ->
+            device.createCaptureRequest(templateType).apply {
+                addTarget(target)
                 stabilizationReader?.surface?.let(::addTarget)
                 videoSurface?.let(::addTarget)
 
                 // 应用所有相机参数（曝光、白平衡、闪光灯、变焦）
                 applyBaseCameraSettings(this, isCapture = false)
             }
+        }
+
+        try {
+            previewRequestBuilder = surface?.let(buildPreviewRequest)
 
             val surfaces = mutableListOf(surface)
             stabilizationReader?.surface?.let(surfaces::add)
@@ -3423,8 +3524,9 @@ class Camera2Controller(private val context: Context) {
                 "Creating preview session: readerFormat=${imageFormatToString(readerFormat)}, " +
                         "isP010Supported=$isP010Supported"
             )
+            val previewOutput = createOutputConfiguration(surface)
             val outputConfigs = buildList {
-                add(createOutputConfiguration(surface))
+                add(previewOutput)
                 stabilizationReader?.surface?.let { eisSurface ->
                     add(createOutputConfiguration(eisSurface))
                 }
@@ -3449,6 +3551,17 @@ class Camera2Controller(private val context: Context) {
                             return
                         }
                         closeUnusedStabilizationImageReader(stabilizationReader)
+                        if (deferPreview) {
+                            val pending = deferredPreview
+                            if (pending == null) {
+                                safeCloseCaptureSession(session, "stale deferred preview session")
+                                return
+                            }
+                            PLog.d(TAG, "Deferred preview session configured: surfaceReady=${previewSurface != null}")
+                            pending.session = session
+                            finalizeDeferredPreview()
+                            return
+                        }
                         onSessionConfigured(session, openGeneration, sessionGeneration)
                     }
 
@@ -3463,6 +3576,10 @@ class Camera2Controller(private val context: Context) {
                                     "sessionColorSpace=${if (shouldUseP3ColorSpace()) "DISPLAY_P3" else "DEFAULT"}"
                         )
                         safeCloseCaptureSession(session, "photo configure failure")
+                        if (deferPreview) {
+                            fallBackFromDeferredPreview("configure failed", openGeneration)
+                            return
+                        }
                         if (vendorSessionParametersApplied &&
                             retryPreviewSessionWithoutVendorSessionParameters(
                                 reason = "photo configure failed",
@@ -3492,9 +3609,17 @@ class Camera2Controller(private val context: Context) {
                 templateType = templateType,
                 includeVendorSessionParameters = !forceWithoutVendorSessionParameters
             ).usedVendorParameters
+            if (deferPreview) {
+                deferredPreview = DeferredPreview(previewOutput, buildPreviewRequest, openGeneration, sessionGeneration)
+                PLog.d(TAG, "Creating photo session with a deferred preview output: ${previewBufferSize.width}x${previewBufferSize.height}")
+            }
             device.createCaptureSession(sessionConfig)
         } catch (e: IllegalStateException) {
             PLog.w(TAG, "Failed to create preview session", e)
+            if (deferPreview) {
+                fallBackFromDeferredPreview("create session illegal state: ${e.message}", openGeneration)
+                return
+            }
             if (vendorSessionParametersApplied &&
                 retryPreviewSessionWithoutVendorSessionParameters(
                     reason = "create session illegal state: ${e.message}",
@@ -3513,6 +3638,10 @@ class Camera2Controller(private val context: Context) {
             handlePreviewSessionFailure("create session illegal state", openGeneration, e)
         } catch (e: Exception) {
             PLog.w(TAG, "Failed to create preview session", e)
+            if (deferPreview) {
+                fallBackFromDeferredPreview("create session exception: ${e.message}", openGeneration)
+                return
+            }
             if (vendorSessionParametersApplied &&
                 retryPreviewSessionWithoutVendorSessionParameters(
                     reason = "create session exception: ${e.message}",
@@ -3785,8 +3914,11 @@ class Camera2Controller(private val context: Context) {
         return true
     }
 
-    private fun createOutputConfiguration(surface: Surface): OutputConfiguration {
-        return OutputConfiguration(surface).apply {
+    /** A null [surface] makes the deferred preview output that [finalizeDeferredPreview] completes. */
+    private fun createOutputConfiguration(surface: Surface?): OutputConfiguration {
+        val config = surface?.let(::OutputConfiguration)
+            ?: OutputConfiguration(previewBufferSize, SurfaceTexture::class.java)
+        return config.apply {
             activeOutputPhysicalCameraId?.let { physicalCameraId ->
                 setPhysicalCameraId(physicalCameraId)
                 PLog.i(
@@ -3974,6 +4106,34 @@ class Camera2Controller(private val context: Context) {
         physicalCameraId: String?,
     ): CameraUtils.RawCaptureOutput? = CameraUtils.getRawCaptureOutput(characteristics) { format ->
         physicalCameraId == null || !isPhysicalOutputProfileFailed(physicalCameraId, format)
+    }
+
+    /** Runs once both the deferred photo session and the preview surface are ready. */
+    private fun finalizeDeferredPreview() {
+        val pending = deferredPreview ?: return
+        val session = pending.session ?: return
+        val surface = previewSurface ?: return
+        deferredPreview = null
+        try {
+            pending.output.addSurface(surface)
+            session.finalizeOutputConfigurations(listOf(pending.output))
+            previewRequestBuilder = pending.buildRequest(surface)
+        } catch (e: Exception) {
+            PLog.w(TAG, "Deferred preview output could not be finalized", e)
+            safeCloseCaptureSession(session, "deferred preview finalize failure")
+            fallBackFromDeferredPreview("finalize failed: ${e.message}", pending.openGeneration)
+            return
+        }
+        onSessionConfigured(session, pending.openGeneration, pending.sessionGeneration)
+    }
+
+    // Deferred outputs are tried once per process; afterwards the session is created the regular
+    // way with the real surface, which has its own retries.
+    private fun fallBackFromDeferredPreview(reason: String, openGeneration: Long) {
+        PLog.w(TAG, "Deferred preview output unavailable ($reason); waiting for the preview surface")
+        deferredPreviewUnsupported = true
+        deferredPreview = null
+        if (previewSurface != null) createPreviewSession(openGeneration = openGeneration)
     }
 
     private fun onSessionConfigured(

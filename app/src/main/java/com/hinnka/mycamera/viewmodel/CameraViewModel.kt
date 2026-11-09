@@ -2490,8 +2490,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
             hasAppliedDefaultFocalLength = true
         }
-        return cameraController.preparePreviewSize()
+        if (!cameraController.preparePreviewSize()) return false
+        // Open now so the camera and its session start while the UI builds the preview surface.
+        syncVendorCaptureSettingsToController()
+        cameraController.openCameraWithoutPreview()
+        return true
     }
+
+    fun closeCameraWithoutPreview() = cameraController.closeCameraWithoutPreview()
 
     /**
      * 关闭相机
