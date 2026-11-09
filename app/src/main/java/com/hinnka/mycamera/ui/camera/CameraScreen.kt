@@ -35,8 +35,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.draw.paint
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
@@ -94,6 +92,7 @@ import com.hinnka.mycamera.ui.components.*
 import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.StartupGate
+import com.hinnka.mycamera.utils.VibrationHelper
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import com.hinnka.mycamera.video.CaptureMode
@@ -2498,13 +2497,15 @@ fun CaptureButton(
         animationSpec = tween(250),
         label = "captureBusyTint"
     )
-    val haptics = LocalHapticFeedback.current
+    val context = LocalContext.current
+    val vibration = remember(context) { VibrationHelper(context) }
     val readyPop = remember { Animatable(1f) }
     var wasBusy by remember { mutableStateOf(false) }
     LaunchedEffect(showBusy) {
         if (wasBusy && !showBusy) {
-            // VirtualKey (a short click): the XZ1 Compact's vibrator ignores TextHandleMove's texture tick.
-            haptics.performHapticFeedback(HapticFeedbackType.VirtualKey)
+            // A short pulse: the XZ1 Compact's vibrator has no strength control, plays VirtualKey as a
+            // 50 ms buzz (too strong for every mode switch) and gives no feelable tick for TICK effects.
+            vibration.vibrate(VibrationHelper.LIGHT_TICK_MS)
             readyPop.animateTo(1.15f, tween(120))
             readyPop.animateTo(1f, spring(dampingRatio = 0.4f))
         }

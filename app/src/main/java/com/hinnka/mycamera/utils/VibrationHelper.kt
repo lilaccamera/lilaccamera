@@ -17,6 +17,9 @@ class VibrationHelper(private val context: Context) {
     companion object {
         private const val TAG = "VibrationHelper"
         private const val VIBRATION_DURATION_MS = 50L // 震动持续时间（毫秒）
+        // A light indicator tick. The XZ1 Compact's vibrator has no strength control and plays the
+        // platform's tick effects too weakly to feel, so a light tick is a short plain pulse.
+        const val LIGHT_TICK_MS = 38L
     }
 
     private val vibrator: Vibrator? by lazy {
@@ -37,7 +40,7 @@ class VibrationHelper(private val context: Context) {
     /**
      * 执行震动反馈
      */
-    fun vibrate() {
+    fun vibrate(durationMs: Long = VIBRATION_DURATION_MS) {
         try {
             vibrator?.let { vib ->
                 if (!vib.hasVibrator()) {
@@ -48,14 +51,14 @@ class VibrationHelper(private val context: Context) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     // Android 8.0 及以上使用 VibrationEffect
                     val effect = VibrationEffect.createOneShot(
-                        VIBRATION_DURATION_MS,
+                        durationMs,
                         VibrationEffect.DEFAULT_AMPLITUDE
                     )
                     vib.vibrate(effect)
                 } else {
                     // Android 8.0 以下使用旧 API
                     @Suppress("DEPRECATION")
-                    vib.vibrate(VIBRATION_DURATION_MS)
+                    vib.vibrate(durationMs)
                 }
 
                 PLog.d(TAG, "Vibration triggered")
