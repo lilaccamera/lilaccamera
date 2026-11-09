@@ -1135,6 +1135,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             null
         }
 
+        // Reopen before saving: the camera reads the controller's state, not the saved settings, and
+        // waiting for the settings write held every Photo/Pro switch for 0.25 to 0.3 s on lilac.
+        if (reconfigureCameraIfNeeded && needsCameraReopen && !captureModeWillChange) {
+            reopenCamera()
+        }
+
         userPreferencesRepository.update {
             update.captureMode?.let { captureMode = it.value }
             if (!persistLutInVideoSlot) update.lutId?.let { lutId = it.value }
@@ -1175,10 +1181,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (persistLutInVideoSlot) {
             userPreferencesRepository.update { videoLutId = update.lutId.value ?: "none" }
-        }
-
-        if (reconfigureCameraIfNeeded && needsCameraReopen && !captureModeWillChange) {
-            reopenCamera()
         }
     }
 
