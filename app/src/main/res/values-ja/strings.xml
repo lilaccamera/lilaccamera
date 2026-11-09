@@ -544,7 +544,7 @@
     <string name="settings_storage_path_video_description_arg">動画</string>
     <string name="settings_storage_path_title">%1$s の保存先</string>
     <string name="settings_storage_path_description">%1$s の保存先を選択</string>
-    <string name="settings_storage_path_dcim">デフォルト（DCIM/PhotonCamera）</string>
+    <string name="settings_storage_path_dcim">デフォルト（DCIM/LilacCamera）</string>
     <string name="settings_storage_path_external_tree">フォルダ…</string>
     <string name="settings_storage_path_external_selected">フォルダ： %1$s</string>
     <string name="settings_save_location">位置情報を保存</string>

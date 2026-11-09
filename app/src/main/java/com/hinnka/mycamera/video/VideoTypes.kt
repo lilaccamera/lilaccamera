@@ -93,7 +93,7 @@ enum class VideoCodec(val displayName: String, val mimeType: String) {
 }
 
 enum class VideoRecordingPath(val relativePath: String?) {
-    DCIM_PHOTON(Environment.DIRECTORY_DCIM + "/PhotonCamera"),
+    DCIM_PHOTON(Environment.DIRECTORY_DCIM + "/LilacCamera"),
     EXTERNAL_TREE(null);
 
     companion object {

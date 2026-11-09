@@ -198,7 +198,9 @@ object SuperResolutionDngWriter {
     private const val TAG_PLANAR_CONFIGURATION = 284
     private const val TAG_SOFTWARE = 305
     /** Software tag value; DngEmbeddedProfile reads it to recognise this writer's DNGs. */
-    internal const val SOFTWARE = "PhotonCamera"
+    internal const val SOFTWARE = "Lilac Camera"
+    /** Software values that mark this writer's DNGs, including ones saved before the rebrand. */
+    internal val OWN_SOFTWARE = setOf(SOFTWARE, "PhotonCamera")
     private const val TAG_DATETIME = 306
     private const val TAG_SUB_IFDS = 330
     private const val TAG_XMP = DngCameraRawProfileXmp.TAG_XMP
@@ -1105,7 +1107,7 @@ object SuperResolutionDngWriter {
             Build.MANUFACTURER.takeIf { it.isNotBlank() },
             Build.MODEL.takeIf { it.isNotBlank() },
             hardwareLevel?.let { "Camera2-$it" }
-        ).joinToString(" ").ifBlank { "Photon Camera" }
+        ).joinToString(" ").ifBlank { "Lilac Camera" }
     }
 
     private fun apexAperture(fNumber: Float): Float {

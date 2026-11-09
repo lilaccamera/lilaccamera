@@ -127,8 +127,8 @@ internal object DngEmbeddedProfile {
                         byteOrder = byteOrder,
                         fallbackProfileGainTableMap = DngProfileGainTableMap.readFrom(file),
                     )?.copy(
-                        writtenByPhotonCamera = readAscii(raf, ifd0[TAG_SOFTWARE], byteOrder) ==
-                            SuperResolutionDngWriter.SOFTWARE,
+                        writtenByPhotonCamera = readAscii(raf, ifd0[TAG_SOFTWARE], byteOrder) in
+                            SuperResolutionDngWriter.OWN_SOFTWARE,
                     )?.let(::add)
 
                     val extraProfileOffsets = readIntegerValues(

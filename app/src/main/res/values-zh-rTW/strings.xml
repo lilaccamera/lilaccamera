@@ -351,7 +351,7 @@
     <string name="settings_storage_path_video_description_arg">影片</string>
     <string name="settings_storage_path_title">%1$s儲存路徑</string>
     <string name="settings_storage_path_description">選擇%1$s的儲存位置</string>
-    <string name="settings_storage_path_dcim">預設（DCIM/PhotonCamera）</string>
+    <string name="settings_storage_path_dcim">預設（DCIM/LilacCamera）</string>
     <string name="settings_storage_path_external_tree">資料夾...</string>
     <string name="settings_storage_path_external_selected">資料夾：%1$s</string>
     <string name="settings_storage_path_permission_failed">無法儲存資料夾權限</string>

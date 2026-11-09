@@ -372,7 +372,7 @@
     <string name="settings_storage_path_video_description_arg">视频</string>
     <string name="settings_storage_path_title">%1$s保存路径</string>
     <string name="settings_storage_path_description">选择%1$s的保存位置</string>
-    <string name="settings_storage_path_dcim">默认（DCIM/PhotonCamera）</string>
+    <string name="settings_storage_path_dcim">默认（DCIM/LilacCamera）</string>
     <string name="settings_storage_path_external_tree">文件夹...</string>
     <string name="settings_storage_path_external_selected">文件夹：%1$s</string>
     <string name="settings_storage_path_permission_failed">无法保存文件夹权限</string>

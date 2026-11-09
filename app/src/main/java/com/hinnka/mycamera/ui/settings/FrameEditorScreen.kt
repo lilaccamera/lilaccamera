@@ -2422,7 +2422,7 @@ private fun fontFamilyLabel(fontFamily: String?): String {
 private fun logoSourceOptions(): List<Pair<String?, String>> = listOf(
     null to stringResource(R.string.default_text),
     "none" to stringResource(R.string.none),
-    "photon" to "Photon Camera",
+    "photon" to "Lilac Camera",
     "apple" to "Apple",
     "samsung" to "Samsung",
     "xiaomi" to "Xiaomi",

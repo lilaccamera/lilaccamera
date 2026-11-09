@@ -137,7 +137,7 @@ class PhantomService(val context: Context) : LifecycleOwner, SavedStateRegistryO
         const val MIN_FINAL_RAW_SIZE = 8 * 1024 * 1024L
         const val RAW_JPEG_PAIR_WAIT_MS = 1200L
         const val RAW_JPEG_PAIR_WINDOW_MS = 3000L
-        const val PHANTOM_EXPORT_PREFIX = "PhotonCamera_"
+        const val PHANTOM_EXPORT_PREFIX = "LilacCamera_"
         val RAW_FILE_EXTENSIONS = setOf(
             ".dng",
             ".rw2",
@@ -260,7 +260,7 @@ class PhantomService(val context: Context) : LifecycleOwner, SavedStateRegistryO
                             ignoreCase = true
                         ) && !relativePath.contains("DCIM/100IMAGE", ignoreCase = true)
                     ) return
-                    if (name.startsWith("PhotonCamera")) return
+                    if (name.startsWith(PHANTOM_EXPORT_PREFIX)) return
 
                     val path = data.ifEmpty {
                         val dir = File(Environment.getExternalStorageDirectory(), relativePath)

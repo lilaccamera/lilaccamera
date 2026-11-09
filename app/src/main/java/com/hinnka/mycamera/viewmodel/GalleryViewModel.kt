@@ -4161,7 +4161,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     /**
      * 导出视频：使用 Media3 Transformer 将 LUT / 色彩配方效果烘焙到视频文件并保存到系统相册。
-     * 导出不修改原始视频，结果保存在 Movies/PhotonCamera/ 目录。
+     * 导出不修改原始视频，结果保存在 Movies/LilacCamera/ 目录。
      */
     suspend fun getVideoExportOptions(photo: MediaData): List<VideoExportOption> {
         if (!photo.isVideo) return emptyList()
@@ -4222,7 +4222,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 // 生成输出文件名（基于原始文件名加 _edit 后缀）
                 val baseName = photo.displayName
                     .substringBeforeLast(".")
-                    .ifBlank { "PhotonCamera_video" }
+                    .ifBlank { "LilacCamera_video" }
                 val lutSuffix = lutId?.let {
                     contentRepository.lutManager.getLutInfo(it)?.getName() ?: ""
                 }?.let { if (it.isNotEmpty()) ".$it" else "" } ?: ""

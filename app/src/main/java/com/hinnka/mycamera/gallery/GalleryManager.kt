@@ -1558,7 +1558,7 @@ object GalleryManager {
                 }
 
                 val baseFilename =
-                    "PhotonCamera_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(date))}$withSuffix"
+                    "LilacCamera_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(date))}$withSuffix"
 
                 if (shouldPreferHeic && !isLivePhoto) {
                     val heicExported = exportEncodedPhotoToMediaStore(
@@ -1774,7 +1774,7 @@ object GalleryManager {
             var withSuffix = suffix?.let { "_$it" } ?: ""
             lutName?.let { withSuffix += ".$it" }
             val filename =
-                "PhotonCamera_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(date))}$withSuffix.jpg"
+                "LilacCamera_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(date))}$withSuffix.jpg"
 
             FileOutputStream(tempExportFile).use { outputStream ->
                 writeFinalJpeg(bitmap, outputStream, photoQuality)
@@ -1880,7 +1880,7 @@ object GalleryManager {
                 val dateTaken = metadata.dateTaken ?: System.currentTimeMillis()
                 val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
                     .format(Date(dateTaken))
-                val dngFilename = "PhotonCamera_${timestamp}.dng"
+                val dngFilename = "LilacCamera_${timestamp}.dng"
                 val destination = resolvePhotoExportDestination(context)
                 val uri = exportBytesToConfiguredPhotoStorage(
                     context = context,
@@ -1923,7 +1923,7 @@ object GalleryManager {
                 val dateTaken = metadata.dateTaken ?: System.currentTimeMillis()
                 val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
                     .format(Date(dateTaken))
-                val dngFilename = "PhotonCamera_${timestamp}.dng"
+                val dngFilename = "LilacCamera_${timestamp}.dng"
                 val destination = resolvePhotoExportDestination(context)
                 val uri = exportFileToConfiguredPhotoStorage(
                     context = context,

@@ -406,7 +406,7 @@
     <string name="settings_storage_path_video_description_arg">videos</string>
     <string name="settings_storage_path_title">%1$s Save Path</string>
     <string name="settings_storage_path_description">Choose where to save %1$s</string>
-    <string name="settings_storage_path_dcim">Default (DCIM/PhotonCamera)</string>
+    <string name="settings_storage_path_dcim">Default (DCIM/LilacCamera)</string>
     <string name="settings_storage_path_external_tree">Folder...</string>
     <string name="settings_storage_path_external_selected">Folder: %1$s</string>
     <string name="settings_storage_path_permission_failed">Failed to save folder permission</string>

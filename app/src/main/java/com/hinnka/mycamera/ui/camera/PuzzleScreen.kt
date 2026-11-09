@@ -1093,11 +1093,11 @@ suspend fun saveCollage(
             
             // 3. 导出到系统 MediaStore
             val date = System.currentTimeMillis()
-            val filename = "PhotonCamera_Collage_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(date))}.jpg"
+            val filename = "LilacCamera_Collage_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(date))}.jpg"
             val contentValues = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
                 put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/PhotonCamera")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/LilacCamera")
             }
             
             val uri = context.contentResolver.insert(

@@ -732,7 +732,7 @@
     <string name="settings_storage_path_video_description_arg">les vidéos</string>
     <string name="settings_storage_path_title">Dossier d\'enregistrement : %1$s</string>
     <string name="settings_storage_path_description">Choisissez où enregistrer %1$s</string>
-    <string name="settings_storage_path_dcim">Par défaut (DCIM/PhotonCamera)</string>
+    <string name="settings_storage_path_dcim">Par défaut (DCIM/LilacCamera)</string>
     <string name="settings_storage_path_external_tree">Dossier…</string>
     <string name="settings_storage_path_external_selected">Dossier : %1$s</string>
     <string name="settings_storage_path_permission_failed">Impossible d\'enregistrer l\'autorisation du dossier</string>
