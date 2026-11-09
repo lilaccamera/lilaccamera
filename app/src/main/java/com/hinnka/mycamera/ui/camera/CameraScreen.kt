@@ -92,6 +92,7 @@ import androidx.compose.ui.semantics.semantics
 import com.hinnka.mycamera.ui.components.*
 import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.utils.StartupGate
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import com.hinnka.mycamera.video.CaptureMode
@@ -749,6 +750,11 @@ fun CameraScreen(
             previewTransitionAwaitingResume = false
             previewTransitionSawPause = false
         }
+    }
+
+    LaunchedEffect(state.previewFirstFrameTimestampNs) {
+        // Deferred start-up work (gallery list, warm-ups) waits for the first camera frame.
+        if (state.previewFirstFrameTimestampNs != null) StartupGate.open()
     }
 
     LaunchedEffect(

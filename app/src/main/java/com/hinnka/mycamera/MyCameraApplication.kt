@@ -16,6 +16,7 @@ import com.hinnka.mycamera.utils.BuglyHelper
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.RenderProcess
+import com.hinnka.mycamera.utils.StartupGate
 import com.hinnka.mycamera.utils.StartupTrace
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
@@ -45,6 +46,7 @@ class MyCameraApplication : Application() {
             return
         }
         applicationScope.launch(Dispatchers.Default) {
+            StartupGate.await()
             RawSceneExposureEstimator.warmUp(this@MyCameraApplication)
         }
         StartupTrace.measure("BuglyHelper.init") {
@@ -91,6 +93,7 @@ class MyCameraApplication : Application() {
 
     private fun recoverPrivateGalleryIndex() {
         applicationScope.launch {
+            StartupGate.await()
             try {
                 val result = GalleryManager.recoverPrivatePhotoDirectoryToDatabase(this@MyCameraApplication)
                 PLog.d(

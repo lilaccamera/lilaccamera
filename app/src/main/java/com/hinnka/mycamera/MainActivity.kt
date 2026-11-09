@@ -103,6 +103,7 @@ import com.hinnka.mycamera.utils.BuglyHelper
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.utils.StartupGate
 import com.hinnka.mycamera.utils.StartupTrace
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.viewmodel.CameraViewModel
@@ -318,11 +319,11 @@ class MainActivity : AppCompatActivity() {
             FilmData.init(this@MainActivity)
         }
 
-        splashScreen.setKeepOnScreenCondition {
-            val cameraInitialized = cameraViewModel.isInitialized.value
-            val galleryInitialized = galleryViewModel.isInitialized.value
-            !(cameraInitialized && galleryInitialized)
-        }
+        // Opening another screen or the permission screen: no viewfinder to wait for.
+        if (pendingRoute != null || !hasPermissions) StartupGate.open()
+
+        // The gallery loads in the background; only the camera settings must be ready.
+        splashScreen.setKeepOnScreenCondition { !cameraViewModel.isInitialized.value }
 
 
         StartupTrace.mark("MainActivity.setContent start")
@@ -343,10 +344,9 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
                         val cameraInitialized by cameraViewModel.isInitialized.collectAsState()
-                        val galleryInitialized by galleryViewModel.isInitialized.collectAsState()
 
-                        LaunchedEffect(cameraInitialized, galleryInitialized) {
-                            if (cameraInitialized && galleryInitialized) {
+                        LaunchedEffect(cameraInitialized) {
+                            if (cameraInitialized) {
                                 cameraViewModel.onShutterAnimationTriggered()
                             }
                         }

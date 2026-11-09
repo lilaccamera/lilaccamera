@@ -65,6 +65,7 @@ import com.hinnka.mycamera.raw.fotufilm.FotufilmDocumentStorage
 import com.hinnka.mycamera.ui.gallery.CropAspectOption
 import com.hinnka.mycamera.ui.gallery.calculateInitialCropRect
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.utils.StartupGate
 import com.hinnka.mycamera.utils.StartupTrace
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -845,6 +846,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             }
         }
         viewModelScope.launch {
+            StartupGate.await()
             loadPhotos()
         }
 
