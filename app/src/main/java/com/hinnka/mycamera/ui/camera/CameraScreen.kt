@@ -723,18 +723,19 @@ fun CameraScreen(
         return targetAspectRatio != state.aspectRatio
     }
 
-    LaunchedEffect(previewTransitionToken, state.isPreviewActive, previewTransitionAwaitingResume) {
+    val previewShowingFrames = state.isPreviewActive && state.previewFirstFrameTimestampNs != null
+    LaunchedEffect(previewTransitionToken, previewShowingFrames, previewTransitionAwaitingResume) {
         if (!previewTransitionAwaitingResume) return@LaunchedEffect
 
-        if (!state.isPreviewActive) {
+        if (!previewShowingFrames) {
             previewTransitionSawPause = true
             return@LaunchedEffect
         }
 
         if (previewTransitionSawPause) {
-            delay(80)
+            // Reveal on the restarted camera's first frame, not a fixed 80 ms after it starts.
             previewTransitionRevealing = true
-            delay(220)
+            delay(if (revealCut) 0L else PreviewTransitionRevealDurationMillis.toLong())
             previewTransitionActive = false
             previewTransitionAwaitingResume = false
             previewTransitionSawPause = false
@@ -760,7 +761,7 @@ fun CameraScreen(
         delay(700)
         if (previewTransitionAwaitingResume) {
             previewTransitionRevealing = true
-            delay(220)
+            delay(if (revealCut) 0L else PreviewTransitionRevealDurationMillis.toLong())
             previewTransitionActive = false
             previewTransitionAwaitingResume = false
             previewTransitionSawPause = false
