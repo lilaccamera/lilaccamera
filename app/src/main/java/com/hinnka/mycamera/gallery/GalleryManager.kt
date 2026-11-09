@@ -64,6 +64,8 @@ import com.hinnka.mycamera.raw.RawDemosaicProcessor
 import com.hinnka.mycamera.raw.RawMetadata
 import com.hinnka.mycamera.raw.RawRenderingEngine
 import com.hinnka.mycamera.raw.RawDenoiseDefaults
+import com.hinnka.mycamera.raw.DngNoiseProfile
+import com.hinnka.mycamera.raw.RawMgcTuningSnr
 import com.hinnka.mycamera.raw.RawSharpeningDefaults
 import com.hinnka.mycamera.raw.RawAdaptiveExposureMode
 import com.hinnka.mycamera.raw.RawCaptureExposureInputs
@@ -75,9 +77,6 @@ import com.hinnka.mycamera.render.RawRenderService
 import com.hinnka.mycamera.render.RenderJob
 import com.hinnka.mycamera.render.RenderLook
 import com.hinnka.mycamera.render.RenderQueue
-import com.hinnka.mycamera.raw.RawAppliedLensShading
-import com.hinnka.mycamera.raw.RawAppliedLensShadingMetadata
-import com.hinnka.mycamera.raw.RawDenoiseHistoryMetadata
 import com.hinnka.mycamera.raw.RawPhotonHdrMetadata
 import com.hinnka.mycamera.raw.RawProfileToneMapMode
 import com.hinnka.mycamera.raw.SpectralFilmTuning
@@ -671,13 +670,13 @@ object GalleryManager {
         return File(getPhotoDir(context, photoId), DNG_FILE)
     }
 
-    fun getAiDenoiseFile(context: Context, photoId: String): File {
-        return File(getPhotoDir(context, photoId), AI_DENOISE_FILE)
-    }
-
-    /** Photon 降噪基底条目所在目录（PhotoProcessor.updatePhotonDenoiseBase 管理条目）。 */
+    /** 非 RAW 照片降噪基底条目所在目录（PhotoProcessor.updatePhotonDenoiseBase 管理条目）。 */
     fun getPhotonDenoiseDir(context: Context, photoId: String): File {
         return getPhotoDir(context, photoId)
+    }
+
+    fun getAiDenoiseFile(context: Context, photoId: String): File {
+        return File(getPhotoDir(context, photoId), AI_DENOISE_FILE)
     }
 
     fun getDepthFile(context: Context, photoId: String): File {
@@ -2519,19 +2518,12 @@ object GalleryManager {
             ) ?: return@withContext
             preparedDemosaicSourceToRelease = preparedProfile.gpuDemosaicedRawSource
             updatedMetadata = updatedMetadata.copy(
-                // Single-frame CFA keeps its gain map in the DNG; nothing is pre-applied or denoised.
-                customProperties = RawDenoiseHistoryMetadata.write(
-                    RawAppliedLensShadingMetadata.write(
-                        RawPhotonHdrMetadata.write(
-                            updatedMetadata.customProperties,
-                            preparedProfile.hdrRatio,
-                            preparedProfile.finalShortGain,
-                            preparedProfile.hdrNetPostExposureEv,
-                            preparedProfile.hdrNetInputExposureEv,
-                        ),
-                        null,
-                    ),
-                    null,
+                customProperties = RawPhotonHdrMetadata.write(
+                    updatedMetadata.customProperties,
+                    preparedProfile.hdrRatio,
+                    preparedProfile.finalShortGain,
+                    preparedProfile.hdrNetPostExposureEv,
+                    preparedProfile.hdrNetInputExposureEv,
                 ),
             )
 
@@ -2549,6 +2541,7 @@ object GalleryManager {
                 rawBlackPointCorrection = updatedMetadata.rawBlackPointCorrection ?: 0f,
                 rawWhitePointCorrection = updatedMetadata.rawWhitePointCorrection ?: 0f,
                 applyLensShadingCorrection = resolveRawLensShadingCorrectionEnabled(context, updatedMetadata),
+                mgcTuningSnr = RawMgcTuningSnr.read(updatedMetadata.customProperties),
                 rawBlackLevelMode = updatedMetadata.rawBlackLevelMode,
                 rawCustomBlackLevel = updatedMetadata.rawCustomBlackLevel,
                 rawWhiteLevelMode = updatedMetadata.rawWhiteLevelMode,
@@ -2642,6 +2635,7 @@ object GalleryManager {
                     rawBlackPointCorrection = updatedMetadata.rawBlackPointCorrection ?: 0f,
                     rawWhitePointCorrection = updatedMetadata.rawWhitePointCorrection ?: 0f,
                     applyLensShadingCorrection = resolveRawLensShadingCorrectionEnabled(context, updatedMetadata),
+                    mgcTuningSnr = RawMgcTuningSnr.read(updatedMetadata.customProperties),
                     rawBlackLevelMode = updatedMetadata.rawBlackLevelMode,
                     rawCustomBlackLevel = updatedMetadata.rawCustomBlackLevel,
                     rawWhiteLevelMode = updatedMetadata.rawWhiteLevelMode,
@@ -3602,7 +3596,9 @@ object GalleryManager {
             val finalStackResult = rawStackResult ?: return@withContext
             DngCaptureDiagnostics.put("merge.mergedFrameCount", finalStackResult.mergedFrameCount)
             DngCaptureDiagnostics.put("merge.outputSize", "${finalStackResult.width}x${finalStackResult.height}")
-            DngCaptureDiagnostics.put("merge.denoiseHistory", finalStackResult.denoiseHistory?.toString())
+            DngCaptureDiagnostics.put("merge.tuningSnr", finalStackResult.mgcDenoiseTuningSnr)
+            DngCaptureDiagnostics.put("merge.readNoise", finalStackResult.mgcDenoiseReadNoise?.contentToString())
+            DngCaptureDiagnostics.put("merge.shotNoise", finalStackResult.mgcDenoiseShotNoise?.contentToString())
             gpuSourceToRelease = finalStackResult.gpuLinearRgbSource
             gpuBayerSourceToRelease = finalStackResult.gpuBayerSource
             fun releaseInitialFusedBuffer() {
@@ -3633,7 +3629,11 @@ object GalleryManager {
                     stackWhiteLevel.toFloat()
                 },
                 frameCount = finalStackResult.mergedFrameCount,
-                denoiseHistory = finalStackResult.denoiseHistory,
+                mgcDenoiseCorrelation = finalStackResult.mgcDenoiseCorrelation,
+                mgcDenoiseReadNoise = finalStackResult.mgcDenoiseReadNoise,
+                mgcDenoiseShotNoise = finalStackResult.mgcDenoiseShotNoise,
+                mgcSpatialStrengthMap = finalStackResult.mgcSpatialStrengthMap,
+                mgcDenoiseTuningSnr = finalStackResult.mgcDenoiseTuningSnr,
                 mgcSharpenTuningSnr = finalStackResult.mgcSharpenTuningSnr,
                 mgcSharpenAttenuationScale =
                     finalStackResult.mgcSharpenAttenuationScale,
@@ -3655,11 +3655,16 @@ object GalleryManager {
                 else -> MgcSpatialGpuDenoiseMode.SPATIAL_DEFAULT
             }
             val defaultDenoiseModelAvailable = when (defaultDenoiseMode) {
-                MgcSpatialGpuDenoiseMode.SABRE_DEFAULT -> finalStackResult.denoiseHistory != null
+                MgcSpatialGpuDenoiseMode.SABRE_DEFAULT ->
+                    finalStackResult.mgcDenoiseCorrelation?.size == 128 &&
+                        finalStackResult.mgcDenoiseReadNoise?.size == 3 &&
+                        finalStackResult.mgcDenoiseShotNoise?.size == 3
                 MgcSpatialGpuDenoiseMode.SPATIAL_DEFAULT ->
                     MultiFrameConfig.ENABLE_MGC_SPATIAL_DEFAULT_DENOISE &&
                         !finalStackResult.mgcSpatialReferenceOnlyDiagnostic &&
-                        finalStackResult.denoiseHistory != null
+                        finalStackResult.mgcDenoiseCorrelation?.size == 128 &&
+                        finalStackResult.mgcDenoiseReadNoise?.size == 3 &&
+                        finalStackResult.mgcDenoiseShotNoise?.size == 3
                 MgcSpatialGpuDenoiseMode.BYPASS_DEFAULT_DENOISE -> true
             }
             if (defaultDenoiseRequested && !defaultDenoiseModelAvailable) {
@@ -3724,6 +3729,11 @@ object GalleryManager {
                 blackLevel = FloatArray(4),
                 whiteLevel = 65535f,
                 frameCount = 1,
+                mgcDenoiseCorrelation = null,
+                mgcDenoiseReadNoise = null,
+                mgcDenoiseShotNoise = null,
+                mgcSpatialStrengthMap = null,
+                mgcDenoiseTuningSnr = null,
             )
 
             val stackedMetadata = metadata
@@ -3785,6 +3795,12 @@ object GalleryManager {
                     viewfinderPreviewToCaptureRotationDegrees =
                         viewfinderPreviewToCaptureRotationDegrees(rotation, characteristics),
                 )
+                // The written pixels are the merge output: their DNG NoiseProfile is the merge's
+                // output noise model, not the reference frame's single-frame Camera2 model.
+                val mergedNoiseProfile = DngNoiseProfile.fromMergedModel(
+                    read = mergeOutputMetadata.mgcDenoiseReadNoise,
+                    shot = mergeOutputMetadata.mgcDenoiseShotNoise,
+                )
                 val profileStartMs = System.currentTimeMillis()
                 val dngProfilePreparation = RawProcessor.prepareRawDngProfile(
                     rawBuffer = null,
@@ -3809,41 +3825,23 @@ object GalleryManager {
                     options = profileOptions,
                     defaultCrop = dngDefaultCrop,
                     physicalRawCrop = physicalRawCrop,
+                    noiseProfile = mergedNoiseProfile,
                 )
                 if (dngProfilePreparation == null) {
                     PLog.e(TAG, "Failed to prepare shared RAW render/DNG profile")
                     return@withContext
                 }
-                // The persisted LinearRaw carries LSC in its pixels while its DNG drops the gain
-                // map; the denoiser needs the applied gains to undo them (docs §3.2).
-                val appliedLensShading = if (defaultDenoised.pixelsIncludeLensShadingCorrection) {
-                    RawAppliedLensShading.fromCamera2(
-                        rawMetadata.lensShadingMap,
-                        rawMetadata.lensShadingMapWidth,
-                        rawMetadata.lensShadingMapHeight,
-                    )
-                } else {
-                    null
-                }
-                appliedLensShading?.let {
-                    PLog.i(TAG, "Applied LSC persisted ${it.width}x${it.height} hash=${it.hashCode()}")
-                }
-                // Merge ratios and residual ratios of the persisted pixels (docs §2.2, §2.4).
-                val denoiseHistory = defaultDenoised.denoiseHistory
-                PLog.i(TAG, "Denoise history persisted $denoiseHistory")
                 updatedMetadata = updatedMetadata.copy(
-                    customProperties = RawDenoiseHistoryMetadata.write(
-                        RawAppliedLensShadingMetadata.write(
-                            RawPhotonHdrMetadata.write(
-                                updatedMetadata.customProperties,
-                                dngProfilePreparation.hdrRatio,
-                                dngProfilePreparation.finalShortGain,
-                                dngProfilePreparation.hdrNetPostExposureEv,
-                                dngProfilePreparation.hdrNetInputExposureEv,
-                            ),
-                            appliedLensShading,
+                    customProperties = RawMgcTuningSnr.write(
+                        RawPhotonHdrMetadata.write(
+                            updatedMetadata.customProperties,
+                            dngProfilePreparation.hdrRatio,
+                            dngProfilePreparation.finalShortGain,
+                            dngProfilePreparation.hdrNetPostExposureEv,
+                            dngProfilePreparation.hdrNetInputExposureEv,
                         ),
-                        denoiseHistory,
+                        sharpen = finalStackResult.mgcSharpenTuningSnr,
+                        denoise = finalStackResult.mgcDenoiseTuningSnr,
                     ),
                 )
                 val profileElapsedMs = System.currentTimeMillis() - profileStartMs
@@ -3883,6 +3881,7 @@ object GalleryManager {
                             preparedDngProfile = dngProfilePreparation,
                             preparedProfileOptions = profileOptions,
                             defaultCrop = dngDefaultCrop,
+                            noiseProfile = mergedNoiseProfile,
                         )
                     } finally {
                         LargeDirectBuffer.free(dngBuffer)
@@ -3903,8 +3902,7 @@ object GalleryManager {
                     rawBlackPointCorrection = updatedMetadata.rawBlackPointCorrection ?: 0f,
                     rawWhitePointCorrection = updatedMetadata.rawWhitePointCorrection ?: 0f,
                     applyLensShadingCorrection = resolveRawLensShadingCorrectionEnabled(context, updatedMetadata),
-                    appliedLensShading = RawAppliedLensShadingMetadata.read(updatedMetadata.customProperties),
-                    denoiseHistory = RawDenoiseHistoryMetadata.read(updatedMetadata.customProperties),
+                    mgcTuningSnr = RawMgcTuningSnr.read(updatedMetadata.customProperties),
                     rawBlackLevelMode = updatedMetadata.rawBlackLevelMode,
                     rawCustomBlackLevel = updatedMetadata.rawCustomBlackLevel,
                     rawWhiteLevelMode = updatedMetadata.rawWhiteLevelMode,
@@ -3955,6 +3953,7 @@ object GalleryManager {
                         defaultCrop = dngDefaultCrop,
                         rotation = rotation,
                         profilePreparation = dngProfilePreparation,
+                        noiseProfile = mergedNoiseProfile,
                     )
                 } else {
                     null
@@ -3999,8 +3998,7 @@ object GalleryManager {
                         rawBlackPointCorrection = updatedMetadata.rawBlackPointCorrection ?: 0f,
                         rawWhitePointCorrection = updatedMetadata.rawWhitePointCorrection ?: 0f,
                         applyLensShadingCorrection = resolveRawLensShadingCorrectionEnabled(context, updatedMetadata),
-                        appliedLensShading = appliedLensShading,
-                        denoiseHistory = denoiseHistory,
+                        mgcTuningSnr = RawMgcTuningSnr.read(updatedMetadata.customProperties),
                         rawBlackLevelMode = updatedMetadata.rawBlackLevelMode,
                         rawCustomBlackLevel = updatedMetadata.rawCustomBlackLevel,
                         rawWhiteLevelMode = updatedMetadata.rawWhiteLevelMode,
@@ -4302,8 +4300,7 @@ object GalleryManager {
             rawBlackPointCorrection = updatedMetadata.rawBlackPointCorrection ?: 0f,
             rawWhitePointCorrection = updatedMetadata.rawWhitePointCorrection ?: 0f,
             applyLensShadingCorrection = resolveRawLensShadingCorrectionEnabled(context, updatedMetadata),
-            appliedLensShading = RawAppliedLensShadingMetadata.read(updatedMetadata.customProperties),
-            denoiseHistory = RawDenoiseHistoryMetadata.read(updatedMetadata.customProperties),
+            mgcTuningSnr = RawMgcTuningSnr.read(updatedMetadata.customProperties),
             rawBlackLevelMode = updatedMetadata.rawBlackLevelMode,
             rawCustomBlackLevel = updatedMetadata.rawCustomBlackLevel,
             rawWhiteLevelMode = updatedMetadata.rawWhiteLevelMode,
@@ -4502,6 +4499,7 @@ object GalleryManager {
         preparedDngProfile: RawDngProfilePreparation? = null,
         preparedProfileOptions: RawDngProfilePreparationOptions? = null,
         defaultCrop: Rect? = null,
+        noiseProfile: FloatArray? = null,
     ): Boolean {
         val tempDngFile = File(dngFile.parentFile, "temp_stacked.dng")
         val captureInfo = metadata.toCaptureInfo()
@@ -4554,6 +4552,7 @@ object GalleryManager {
                     inputColStepSamples = inputColStepSamples,
                     pixelsIncludeLensShadingCorrection =
                         pixelsIncludeLensShadingCorrection,
+                    noiseProfile = noiseProfile,
                     dngProfilePreparationOptions = preparedProfileOptions
                         ?: rawDngProfilePreparationOptions(
                             context = context,
@@ -5900,8 +5899,7 @@ object GalleryManager {
                             rawBlackPointCorrection = updatedMetadata.rawBlackPointCorrection ?: 0f,
                             rawWhitePointCorrection = updatedMetadata.rawWhitePointCorrection ?: 0f,
                             applyLensShadingCorrection = resolveRawLensShadingCorrectionEnabled(context, updatedMetadata),
-                            appliedLensShading = RawAppliedLensShadingMetadata.read(updatedMetadata.customProperties),
-                            denoiseHistory = RawDenoiseHistoryMetadata.read(updatedMetadata.customProperties),
+                            mgcTuningSnr = RawMgcTuningSnr.read(updatedMetadata.customProperties),
                             rawBlackLevelMode = updatedMetadata.rawBlackLevelMode,
                             rawCustomBlackLevel = updatedMetadata.rawCustomBlackLevel,
                             rawWhiteLevelMode = updatedMetadata.rawWhiteLevelMode,
@@ -6077,8 +6075,7 @@ object GalleryManager {
                     rawBlackPointCorrection = updatedMetadata?.rawBlackPointCorrection ?: 0f,
                     rawWhitePointCorrection = updatedMetadata?.rawWhitePointCorrection ?: 0f,
                     applyLensShadingCorrection = resolveRawLensShadingCorrectionEnabled(context, updatedMetadata),
-                    appliedLensShading = RawAppliedLensShadingMetadata.read(rawMetadata.customProperties),
-                    denoiseHistory = RawDenoiseHistoryMetadata.read(rawMetadata.customProperties),
+                    mgcTuningSnr = RawMgcTuningSnr.read(rawMetadata.customProperties),
                     rawBlackLevelMode = updatedMetadata?.rawBlackLevelMode,
                     rawCustomBlackLevel = updatedMetadata?.rawCustomBlackLevel,
                     rawWhiteLevelMode = updatedMetadata?.rawWhiteLevelMode,

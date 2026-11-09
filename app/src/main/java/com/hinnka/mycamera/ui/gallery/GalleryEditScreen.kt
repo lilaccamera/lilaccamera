@@ -72,6 +72,8 @@ import com.hinnka.mycamera.model.RecipeParam
 import com.hinnka.mycamera.model.toEffectParams
 import com.hinnka.mycamera.ml.DepthModelDownloadState
 import com.hinnka.mycamera.ml.DepthModelManager
+import com.hinnka.mycamera.ml.AiDenoiseModelManager
+import com.hinnka.mycamera.ml.AiDenoiseModelState
 import com.hinnka.mycamera.raw.SpectralFilmSelection
 import com.hinnka.mycamera.raw.SpectralFilmTuning
 import com.hinnka.mycamera.raw.DngEmbeddedProfile
@@ -192,6 +194,7 @@ fun GalleryEditScreen(
     onBack: () -> Unit,
     onOpenFrameEditor: (String) -> Unit,
     onFilterManagementClick: (String?) -> Unit,
+    onCreatePresetClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -241,6 +244,7 @@ fun GalleryEditScreen(
     var isSaving by remember { mutableStateOf(false) }
     var isLoadingPreview by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
+    val defaultPresetName = stringResource(R.string.preset_new_preset_default)
     var showImageHistogram by remember { mutableStateOf(false) }
     val frameScrollState = rememberLazyListState()
     var showBaselineLutEditSheet by remember { mutableStateOf(false) }
@@ -311,7 +315,7 @@ fun GalleryEditScreen(
     val editStraightenDegrees by viewModel.editStraightenDegrees.collectAsState()
     val editMirrorHorizontal by viewModel.editMirrorHorizontal.collectAsState()
 
-    val editAiDenoiseStrength by viewModel.editAiDenoiseStrength.collectAsState()
+    val editAiDenoiseEnabled by viewModel.editAiDenoiseEnabled.collectAsState()
 
     val isRaw = editSourcePhoto?.let { viewModel.isRaw(it.id) } ?: false
     val refreshKey = editSourcePhoto?.id?.let { viewModel.photoRefreshKeys[it] } ?: 0L
@@ -609,6 +613,28 @@ fun GalleryEditScreen(
     }
     val currentEditSourcePhoto = editSourcePhoto ?: currentPhoto
     val currentEditMetadata = currentEditSourcePhoto.metadata ?: viewModel.currentMediaMetadata
+    val aiDenoiseModelState by remember(context.applicationContext) {
+        AiDenoiseModelManager.observe(context)
+    }.collectAsState()
+    // AI denoise was switched on while its model is missing; applied once the model is installed.
+    var pendingAiDenoise by remember { mutableStateOf(false) }
+    val showAiDenoiseFailure = {
+        Toast.makeText(context, context.getString(R.string.ai_denoise_failed), Toast.LENGTH_SHORT).show()
+    }
+    val startAiDenoise = {
+        viewModel.applyAiDenoise(photo = currentEditSourcePhoto) { success ->
+            if (!success) {
+                viewModel.setAiDenoiseEnabled(false)
+                showAiDenoiseFailure()
+            }
+        }
+    }
+    LaunchedEffect(aiDenoiseModelState, pendingAiDenoise) {
+        if (aiDenoiseModelState is AiDenoiseModelState.Ready && pendingAiDenoise) {
+            pendingAiDenoise = false
+            startAiDenoise()
+        }
+    }
     val isImportedRaw = currentEditMetadata?.isImported == true && isRaw
 
     val previewSourceWidth = previewBitmap?.width?.takeIf { it > 0 }
@@ -1359,6 +1385,25 @@ fun GalleryEditScreen(
                                             )
                                         }
                                     )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.save_as_preset)) },
+                                        onClick = {
+                                            showMoreMenu = false
+                                            cameraViewModel.draftPreset =
+                                                viewModel.createPresetFromCurrentEdit(
+                                                    cameraViewModel.prepareCurrentSettingsPresetDraft(
+                                                        defaultPresetName
+                                                    )
+                                                )
+                                            onCreatePresetClick()
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = AppIcons.Bookmark,
+                                                contentDescription = null
+                                            )
+                                        }
+                                    )
                                 }
                             }
                         },
@@ -1693,47 +1738,32 @@ fun GalleryEditScreen(
                                 EDIT_TAB_DETAIL -> {
                                     Spacer(modifier = Modifier.height(16.dp))
                                     if (!currentPhoto.isVideo) {
-                                        val isDnCNNDenoising by viewModel.isAiDenoising.collectAsState()
-                                        val dnCNNProgress by viewModel.aiDenoiseProgress.collectAsState()
+                                        val isAiDenoising by viewModel.isAiDenoising.collectAsState()
+                                        val aiDenoiseProgress by viewModel.aiDenoiseProgress.collectAsState()
 
-                                        SliderSettingItem(
+                                        SwitchSettingItem(
                                             title = stringResource(R.string.ai_denoise_title),
-                                            description = if (isDnCNNDenoising) stringResource(
+                                            description = if (isAiDenoising) stringResource(
                                                 R.string.ai_denoise_processing,
-                                                dnCNNProgress * 100
+                                                aiDenoiseProgress * 100
                                             ) else stringResource(R.string.ai_denoise_description),
-                                            value = editAiDenoiseStrength,
-                                            valueRange = 0f..1f,
-                                            onValueChange = { viewModel.setAiDenoiseStrength(it) },
-                                            onValueChangeFinished = {
-                                                if (isDnCNNDenoising) return@SliderSettingItem
-                                                if (editAiDenoiseStrength > 0.01f) {
-                                                    viewModel.applyDnCNNDenoise(
-                                                        photo = currentEditSourcePhoto,
-                                                        strength = editAiDenoiseStrength,
-                                                        onComplete = { success ->
-                                                            if (!success) {
-                                                                Toast.makeText(
-                                                                    context,
-                                                                    context.getString(R.string.ai_denoise_failed),
-                                                                    Toast.LENGTH_SHORT
-                                                                ).show()
-                                                            }
-                                                        }
-                                                    )
+                                            checked = editAiDenoiseEnabled,
+                                            onCheckedChange = { enabled ->
+                                                if (isAiDenoising) return@SwitchSettingItem
+                                                viewModel.setAiDenoiseEnabled(enabled)
+                                                if (enabled) {
+                                                    if (AiDenoiseModelManager.isInstalled(context)) {
+                                                        startAiDenoise()
+                                                    } else {
+                                                        pendingAiDenoise = true
+                                                    }
                                                 } else {
-                                                    viewModel.resetDnCNNDenoise(
-                                                        photo = currentEditSourcePhoto,
-                                                        onComplete = { success ->
-                                                            if (!success) {
-                                                                Toast.makeText(
-                                                                    context,
-                                                                    context.getString(R.string.ai_denoise_failed),
-                                                                    Toast.LENGTH_SHORT
-                                                                ).show()
-                                                            }
+                                                    viewModel.resetAiDenoise(photo = currentEditSourcePhoto) { success ->
+                                                        if (!success) {
+                                                            viewModel.setAiDenoiseEnabled(true)
+                                                            showAiDenoiseFailure()
                                                         }
-                                                    )
+                                                    }
                                                 }
                                             }
                                         )
@@ -2080,6 +2110,17 @@ fun GalleryEditScreen(
                     viewModel.purchase(activity)
                 }
                 viewModel.showPaymentDialog = false
+            }
+        )
+    }
+
+    if (pendingAiDenoise) {
+        AiDenoiseModelDownloadDialog(
+            state = aiDenoiseModelState,
+            onDownload = { AiDenoiseModelManager.download(context) },
+            onDismiss = {
+                pendingAiDenoise = false
+                viewModel.setAiDenoiseEnabled(false)
             }
         )
     }

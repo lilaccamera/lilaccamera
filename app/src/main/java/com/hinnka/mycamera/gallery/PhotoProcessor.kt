@@ -30,9 +30,8 @@ import com.hinnka.mycamera.raw.RawDigitalZoomResampling
 import com.hinnka.mycamera.raw.RawDemosaicProcessor
 import com.hinnka.mycamera.raw.RawHdrRenderResult
 import com.hinnka.mycamera.raw.RawMetadata
-import com.hinnka.mycamera.raw.RawAppliedLensShadingMetadata
-import com.hinnka.mycamera.raw.RawDenoiseHistoryMetadata
 import com.hinnka.mycamera.raw.RawPhotonHdrMetadata
+import com.hinnka.mycamera.raw.RawMgcTuningSnr
 import com.hinnka.mycamera.raw.RawNoiseProfileManager
 import com.hinnka.mycamera.raw.SpectralFilmTuning
 import com.hinnka.mycamera.utils.BitmapUtils
@@ -40,6 +39,7 @@ import com.hinnka.mycamera.raw.fotufilm.FotufilmDocumentStorage
 import com.hinnka.mycamera.utils.PLog
 import android.net.Uri
 import com.hinnka.mycamera.processor.DenoiseStrength
+import com.hinnka.mycamera.raw.MgcBitmapNoiseModel
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -94,7 +94,7 @@ class PhotoProcessor(
 
     /**
      * 非 RAW 照片的降噪基底（对应 RAW 烘焙进 original.jpg 的降噪）：对 [source] 全分辨率跑一次
-     * Photon 降噪并持久化，预览/导出直接加载基底并以 0 强度走 LUT。
+     * Bitmap 降噪（LutImageProcessor.applyBitmapDenoise）并持久化，预览/导出直接加载基底并以 0 强度走 LUT。
      *
      * 每个条目以源文件内容与强度为 key，最多保留 [PHOTON_DENOISE_MAX_ENTRIES] 个、按最近使用淘汰：
      * 已保存的强度与编辑中（未保存）的强度各占一个条目，互不覆盖。真正开始重建前调用 [onBuild]。
@@ -106,6 +106,7 @@ class PhotoProcessor(
         source: File,
         noiseReduction: Float,
         chromaNoiseReduction: Float,
+        sensorIso: Int?,
         onBuild: () -> Unit = {},
     ): Boolean {
         val luma = DenoiseStrength.clamp(noiseReduction)
@@ -113,12 +114,12 @@ class PhotoProcessor(
         if (luma <= 0f && chroma <= 0f) return false
         val dir = GalleryManager.getPhotonDenoiseDir(context, photoId)
         photonDenoiseBaseMutex.withLock {
-            val key = withContext(Dispatchers.IO) { photonDenoiseKey(source, luma, chroma) }
+            val key = withContext(Dispatchers.IO) { photonDenoiseKey(source, luma, chroma, sensorIso) }
             if (withContext(Dispatchers.IO) { findPhotonDenoiseEntry(dir, key)?.touch() } != null) return false
             onBuild()
             val input = GalleryManager.loadBitmap(context, Uri.fromFile(source)) ?: return false
             val denoised = try {
-                lutImageProcessor.applyBitmapDenoise(input, luma, chroma)
+                lutImageProcessor.applyBitmapDenoise(input, luma, chroma, sensorIso)
             } catch (e: Throwable) {
                 input.recycle()
                 throw e
@@ -156,6 +157,7 @@ class PhotoProcessor(
         source: File,
         noiseReduction: Float,
         chromaNoiseReduction: Float,
+        sensorIso: Int?,
         maxEdge: Int? = null,
     ): Bitmap? {
         val luma = DenoiseStrength.clamp(noiseReduction)
@@ -164,7 +166,7 @@ class PhotoProcessor(
         val dir = GalleryManager.getPhotonDenoiseDir(context, photoId)
         return photonDenoiseBaseMutex.withLock {
             withContext(Dispatchers.IO) {
-                findPhotonDenoiseEntry(dir, photonDenoiseKey(source, luma, chroma))?.touch()?.let {
+                findPhotonDenoiseEntry(dir, photonDenoiseKey(source, luma, chroma, sensorIso))?.touch()?.let {
                     GalleryManager.loadBitmap(context, Uri.fromFile(it.image), maxEdge)
                 }
             }
@@ -203,7 +205,7 @@ class PhotoProcessor(
      * 源文件以内容 CRC32 标识（按路径、修改时间、大小缓存）：bokeh.jpg 等派生文件会被原样重写，
      * 只看修改时间会让内容未变的基底失效。
      */
-    private fun photonDenoiseKey(source: File, luma: Float, chroma: Float): String {
+    private fun photonDenoiseKey(source: File, luma: Float, chroma: Float, sensorIso: Int?): String {
         val stamp = "${source.absolutePath}|${source.lastModified()}|${source.length()}"
         val crc = photonDenoiseSourceCrc[stamp] ?: CRC32().run {
             source.inputStream().use { input ->
@@ -219,7 +221,9 @@ class PhotoProcessor(
             if (photonDenoiseSourceCrc.size > 64) photonDenoiseSourceCrc.clear()
             photonDenoiseSourceCrc[stamp] = it
         }
-        return "v2|${source.name}|${source.length()}|$crc|$luma|$chroma"
+        // The noise model signature retires bases built by another denoiser or calibration.
+        val model = MgcBitmapNoiseModel.cacheSignature(sensorIso)
+        return "v3|${source.name}|${source.length()}|$crc|$luma|$chroma|$model"
     }
 
     private fun resolveNoiseReduction(metadata: MediaMetadata, fallback: Float): Float {
@@ -440,8 +444,6 @@ class PhotoProcessor(
             sdrBitmap,
             colorCorrection.baselineLayer,
             colorCorrection.creativeLayer,
-            noiseReductionValue = 0f,
-            chromaNoiseReductionValue = 0f,
             luminanceGainDownsample = RawGainmapMath.DOWNSAMPLE,
         )
         sdrBitmap = lutStackResult.bitmap
@@ -689,6 +691,7 @@ class PhotoProcessor(
             source = if (bokehBaked) bokehFile else source,
             noiseReduction = resolveNoiseReduction(metadata, 0f),
             chromaNoiseReduction = resolveChromaNoiseReduction(metadata, 0f),
+            sensorIso = metadata.iso,
         )
         return processBitmap(
             context = context,
@@ -731,8 +734,7 @@ class PhotoProcessor(
             rawBlackPointCorrection = metadata.rawBlackPointCorrection ?: 0f,
             rawWhitePointCorrection = metadata.rawWhitePointCorrection ?: 0f,
             applyLensShadingCorrection = resolveRawLensShadingCorrectionEnabled(metadata),
-            appliedLensShading = RawAppliedLensShadingMetadata.read(metadata.customProperties),
-            denoiseHistory = RawDenoiseHistoryMetadata.read(metadata.customProperties),
+            mgcTuningSnr = RawMgcTuningSnr.read(metadata.customProperties),
             rawBlackLevelMode = metadata.rawBlackLevelMode,
             rawCustomBlackLevel = metadata.rawCustomBlackLevel,
             rawWhiteLevelMode = metadata.rawWhiteLevelMode,
@@ -817,8 +819,7 @@ class PhotoProcessor(
             rawBlackPointCorrection = metadata.rawBlackPointCorrection ?: 0f,
             rawWhitePointCorrection = metadata.rawWhitePointCorrection ?: 0f,
             applyLensShadingCorrection = resolveRawLensShadingCorrectionEnabled(metadata),
-            appliedLensShading = RawAppliedLensShadingMetadata.read(metadata.customProperties),
-            denoiseHistory = RawDenoiseHistoryMetadata.read(metadata.customProperties),
+            mgcTuningSnr = RawMgcTuningSnr.read(metadata.customProperties),
             rawBlackLevelMode = metadata.rawBlackLevelMode,
             rawCustomBlackLevel = metadata.rawCustomBlackLevel,
             rawWhiteLevelMode = metadata.rawWhiteLevelMode,
@@ -865,9 +866,7 @@ class PhotoProcessor(
             lutImageProcessor.applyLutStack(
                 b,
                 colorCorrection.baselineLayer,
-                colorCorrection.creativeLayer,
-                noiseReductionValue = 0f,
-                chromaNoiseReductionValue = 0f
+                colorCorrection.creativeLayer
             )
         }
 
@@ -920,8 +919,6 @@ class PhotoProcessor(
                 result,
                 colorCorrection.baselineLayer,
                 colorCorrection.creativeLayer,
-                noiseReductionValue = 0f,
-                chromaNoiseReductionValue = 0f,
                 luminanceGainDownsample = lutLuminanceGainDownsample,
             )
             result = lutStackResult.bitmap
@@ -930,9 +927,7 @@ class PhotoProcessor(
             result = lutImageProcessor.applyLutStack(
                 result,
                 colorCorrection.baselineLayer,
-                colorCorrection.creativeLayer,
-                noiseReductionValue = 0f,
-                chromaNoiseReductionValue = 0f
+                colorCorrection.creativeLayer
             )
         }
 

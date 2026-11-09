@@ -57,6 +57,7 @@ import com.hinnka.mycamera.model.LutSelectorMode
 import com.hinnka.mycamera.model.RecipeParam
 import com.hinnka.mycamera.model.SafeImage
 import com.hinnka.mycamera.model.toEffectParams
+import com.hinnka.mycamera.model.withoutIndependentEffects
 import com.hinnka.mycamera.ml.DepthModelManager
 import com.hinnka.mycamera.phantom.PhantomWidgetProvider
 import com.hinnka.mycamera.preview.EyeFocusPreviewFrame
@@ -210,10 +211,6 @@ private fun rawProcessingMetadataProperties(
     userPrefs: UserPreferences?,
 ): Map<String, String> =
     RawDigitalZoomResampling.captureProperties(userPrefs?.rawDigitalZoomResamplingEnabled == true)
-
-private fun ColorRecipeParams.withoutIndependentEffects(): ColorRecipeParams {
-    return EffectParams.DEFAULT.applyTo(this)
-}
 
 private data class PresetMatchSnapshot(
     val lutId: String?,

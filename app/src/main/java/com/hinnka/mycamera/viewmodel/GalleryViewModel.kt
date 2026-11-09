@@ -40,7 +40,11 @@ import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.lut.getVideoExportOptions as resolveVideoExportOptions
 import com.hinnka.mycamera.lut.isVideoTransformerExportSupported
 import com.hinnka.mycamera.lut.creator.OpenAIApiClient
+import com.hinnka.mycamera.camera.AspectRatio
+import com.hinnka.mycamera.model.CameraPreset
 import com.hinnka.mycamera.model.ColorRecipeParams
+import com.hinnka.mycamera.model.toEffectParams
+import com.hinnka.mycamera.model.withoutIndependentEffects
 import com.hinnka.mycamera.processor.DenoiseStrength
 import com.hinnka.mycamera.processor.BokehStyle
 import com.hinnka.mycamera.raw.DcpInfo
@@ -112,6 +116,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         private const val TAG = "GalleryViewModel"
         private const val FULL_QUALITY_PREVIEW_MAX_EDGE = 4096
         private const val HDR_DETAIL_MAX_BITMAP_BYTES = 80L * 1024L * 1024L
+        /** 画幅匹配的相对容差，吸收裁切取整与拉直带来的像素误差。 */
+        private const val ASPECT_RATIO_MATCH_TOLERANCE = 0.01f
     }
 
 
@@ -496,8 +502,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     var editMirrorHorizontal = MutableStateFlow(false)
         private set
 
-    private val _editAiDenoiseStrength = MutableStateFlow(1.0f)
-    val editAiDenoiseStrength = _editAiDenoiseStrength.asStateFlow()
+    private val _editAiDenoiseEnabled = MutableStateFlow(false)
+    val editAiDenoiseEnabled = _editAiDenoiseEnabled.asStateFlow()
 
     private val _isAiDenoising = MutableStateFlow(false)
     val isAiDenoising = _isAiDenoising.asStateFlow()
@@ -627,11 +633,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         job.start()
     }
 
-    fun setAiDenoiseStrength(value: Float) {
-        _editAiDenoiseStrength.value = value
+    fun setAiDenoiseEnabled(enabled: Boolean) {
+        _editAiDenoiseEnabled.value = enabled
     }
 
-    fun applyDnCNNDenoise(photo: MediaData, strength: Float = 1.0f, onComplete: (Boolean) -> Unit) {
+    fun applyAiDenoise(photo: MediaData, onComplete: (Boolean) -> Unit) {
         if (_isAiDenoising.value) return
         _isAiDenoising.value = true
         _aiDenoiseProgress.value = 0f
@@ -639,37 +645,22 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch(Dispatchers.IO) {
             val context = getApplication<Application>()
             try {
-                var bitmap = GalleryManager.loadOriginalBitmap(context, photo.id) ?: GalleryManager.loadBitmap(context, photo.uri)
+                val bitmap = GalleryManager.loadOriginalBitmap(context, photo.id) ?: GalleryManager.loadBitmap(context, photo.uri)
                 if (bitmap == null) {
                     _isAiDenoising.value = false
                     withContext(Dispatchers.Main) { onComplete(false) }
                     return@launch
                 }
-                
-                if (!isRawInGallery(photo.id)) {
-                    // 非 RAW 照片，先进行一次色度降噪
-                    val lutProcessor = com.hinnka.mycamera.lut.LutImageProcessor()
-                    val chromaDenoised = lutProcessor.applyChromaDenoise(bitmap, strength = 0.8f)
-                    lutProcessor.release()
-                    if (chromaDenoised !== bitmap) {
-                        bitmap.recycle()
-                        bitmap = chromaDenoised
+
+                // Runs on this IO thread without suspending: the GPU model is thread-bound.
+                val denoised = try {
+                    com.hinnka.mycamera.ml.AiDenoiser.denoise(context, bitmap) { p ->
+                        _aiDenoiseProgress.value = p
                     }
+                } finally {
+                    bitmap.recycle()
                 }
-                
-                val estimator = com.hinnka.mycamera.ml.DnCNNDenoiseEstimator(context)
-                val denoised = estimator.denoisePatchwise(bitmap, strength = strength) { p ->
-                    _aiDenoiseProgress.value = p
-                }
-                estimator.close()
-                bitmap.recycle()
-                
-                if (denoised == null) {
-                    _isAiDenoising.value = false
-                    withContext(Dispatchers.Main) { onComplete(false) }
-                    return@launch
-                }
-                
+
                 val file = GalleryManager.getAiDenoiseFile(context, photo.id)
                 file.parentFile?.mkdirs()
                 FileOutputStream(file).use { outputStream ->
@@ -697,7 +688,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 val updatedMetadata = GalleryManager.updateMetadata(context, photo.id) { current ->
                     current.copy(
                         hasAiDenoisedBase = true,
-                        aiDenoiseStrength = strength
+                        aiDenoiseStrength = 1.0f
                     )
                 } ?: run {
                     _isAiDenoising.value = false
@@ -737,14 +728,14 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 _isAiDenoising.value = false
                 withContext(Dispatchers.Main) { onComplete(true) }
             } catch (e: Exception) {
-                PLog.e(TAG, "Failed to apply DnCNN denoise", e)
+                PLog.e(TAG, "Failed to apply AI denoise", e)
                 _isAiDenoising.value = false
                 withContext(Dispatchers.Main) { onComplete(false) }
             }
         }
     }
 
-    fun resetDnCNNDenoise(photo: MediaData, onComplete: (Boolean) -> Unit = {}) {
+    fun resetAiDenoise(photo: MediaData, onComplete: (Boolean) -> Unit = {}) {
         if (_isAiDenoising.value) return
         _isAiDenoising.value = true
 
@@ -1516,7 +1507,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             editStraightenDegrees.value =
                 PostEditGeometry.normalizeStraightenDegrees(m.postStraightenDegrees)
             editMirrorHorizontal.value = m.postMirrorHorizontal
-            _editAiDenoiseStrength.value = if (m.hasAiDenoisedBase) m.aiDenoiseStrength ?: 1.0f else 0.0f
+            _editAiDenoiseEnabled.value = m.hasAiDenoisedBase
             restoreCropEditState(photo, m)
 
             // 加载 LUT 配置
@@ -1531,7 +1522,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             editRotationDegrees.value = 0
             editStraightenDegrees.value = 0f
             editMirrorHorizontal.value = false
-            _editAiDenoiseStrength.value = 0.0f
+            _editAiDenoiseEnabled.value = false
             restoreCropEditState(photo, null)
         }
     }
@@ -2586,6 +2577,88 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /**
+     * 以 [base] 为底，用当前编辑页实际生效的设置生成预设。
+     *
+     * 照片携带的 LUT、色彩配方、独立效果与边框总是覆盖底稿；照片裁切后的画幅
+     * 命中内置画幅时一并写入。RAW 开发参数仅在源照片为 RAW 时覆盖，非 RAW
+     * 照片没有这些参数，保留底稿值。
+     */
+    fun createPresetFromCurrentEdit(base: CameraPreset): CameraPreset {
+        val sourcePhoto = getCurrentPhoto()?.let { it.relatedPhoto ?: it }
+        val sourceIsRaw = sourcePhoto?.let(::isRawMedia) == true
+        val effectiveRecipe = editPhotoRecipeParams.value ?: editLutRecipeParams.value
+        val lookPreset = base.copy(
+            lutId = CameraPreset.normalizeLutId(editLutId.value),
+            colorRecipe = effectiveRecipe.withoutIndependentEffects(),
+            effects = effectiveRecipe.toEffectParams(),
+            frameId = editFrameId.value,
+            aspectRatio = sourcePhoto?.let(::resolveEditedAspectRatio)?.name ?: base.aspectRatio,
+        )
+        if (!sourceIsRaw) return lookPreset
+
+        val toneMapping = editRawToneMappingParameters.value
+        return lookPreset.copy(
+            rawDcpId = editRawDcpId.value,
+            rawDcpIdsByLens = emptyMap(),
+            rawHncsProfileId = editRawHncsProfileId.value,
+            rawHncsRenderIntent = editRawHncsRenderIntent.value.assetValue,
+            rawHncsFilmCurveMode = editRawHncsFilmCurveMode.value.persistedValue,
+            rawRenderingEngine = editRawRenderingEngine.value.name,
+            rawMaxSharpening = editSharpening.value,
+            rawMaxNoiseReduction = editNoiseReduction.value,
+            rawMaxChromaNoiseReduction = editChromaNoiseReduction.value,
+            rawExposureCompensation = editRawExposureCompensation.value,
+            rawHighlightsAdjustment = editRawHighlightsAdjustment.value,
+            rawShadowsAdjustment = editRawShadowsAdjustment.value,
+            rawBlackPointCorrection = editRawBlackPointCorrection.value,
+            rawWhitePointCorrection = editRawWhitePointCorrection.value,
+            rawOppoMasterToneMap = toneMapping.useOppoMasterToneMap,
+            rawLumixPhotoStyle = toneMapping.lumixPhotoStyle.assetName,
+            rawCanonPictureStyle = toneMapping.canonPictureStyle.persistedValue,
+            rawCanonExposureCompensationEv = toneMapping.canonExposureCompensationEv,
+            rawLumixColorMatchingEnabled = toneMapping.lumixColorMatchingEnabled,
+            rawHncsColorMatchingEnabled = toneMapping.hncsColorMatchingEnabled,
+            rawCanonUseR5ColorMatrix = toneMapping.canonUseR5ColorMatrix,
+            rawLeicaUseM9ColorMatrix = toneMapping.leicaUseM9ColorMatrix,
+            rawAgxBlackRelativeExposure = toneMapping.agxBlackRelativeExposure,
+            rawAgxWhiteRelativeExposure = toneMapping.agxWhiteRelativeExposure,
+            rawAgxToe = toneMapping.agxToe,
+            rawAgxShoulder = toneMapping.agxShoulder,
+            rawFilmicBlackRelativeExposure = toneMapping.filmicBlackRelativeExposure,
+            rawFilmicWhiteRelativeExposure = toneMapping.filmicWhiteRelativeExposure,
+            rawSpectralFilmStock = editRawSpectralFilmStock.value,
+            rawSpectralFilmPrint = editRawSpectralFilmPrint.value,
+            rawFotufilmDocument = FotufilmDocumentStorage.encode(editRawFotufilmDocument.value),
+            rawDROMode = editRawDROMode.value,
+            rawBaselineLutId = editRawBaselineLutId.value,
+        )
+    }
+
+    /** 按旋转、拉直与裁切后的成片长短边比匹配内置画幅，与方向无关；不命中时返回 null。 */
+    private fun resolveEditedAspectRatio(photo: MediaData): AspectRatio? {
+        val metadata = photo.metadata
+        val baseWidth = metadata?.width?.takeIf { it > 0 } ?: photo.width
+        val baseHeight = metadata?.height?.takeIf { it > 0 } ?: photo.height
+        val (editedWidth, editedHeight) = PostEditGeometry.editedDimensions(
+            baseWidth,
+            baseHeight,
+            editRotationDegrees.value,
+            editStraightenDegrees.value
+        )
+        if (editedWidth <= 0 || editedHeight <= 0) return null
+        val crop = editCropRect.value
+        val width = editedWidth * (crop?.width() ?: 1f)
+        val height = editedHeight * (crop?.height() ?: 1f)
+        if (width <= 0f || height <= 0f) return null
+        val ratio = maxOf(width, height) / minOf(width, height)
+        return AspectRatio.entries.firstOrNull { candidate ->
+            val candidateRatio = maxOf(candidate.widthRatio, candidate.heightRatio).toFloat() /
+                minOf(candidate.widthRatio, candidate.heightRatio)
+            kotlin.math.abs(ratio - candidateRatio) / candidateRatio < ASPECT_RATIO_MATCH_TOLERANCE
+        }
+    }
+
+    /**
      * 从详情页复制照片已经保存的后期设置。
      */
     fun copyPhotoSettings(
@@ -3390,6 +3463,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 val source = photonDenoiseSource(context, photo.id, metadata) ?: return@launch
                 val built = contentRepository.photoProcessor.updatePhotonDenoiseBase(
                     context, photo.id, source, noiseReduction, chromaNoiseReduction,
+                    sensorIso = metadata.iso,
                     onBuild = { _isPhotonDenoising.value = true },
                 )
                 val strengths = noiseReduction to chromaNoiseReduction
@@ -3601,7 +3675,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     val source = photonDenoiseSource(context, photo.id, finalMetadata)
                     if (strengths != null && source != null) {
                         contentRepository.photoProcessor.loadPhotonDenoiseBase(
-                            context, photo.id, source, strengths.first, strengths.second, maxEdge,
+                            context, photo.id, source, strengths.first, strengths.second,
+                            sensorIso = finalMetadata.iso,
+                            maxEdge = maxEdge,
                         )
                     } else {
                         null
