@@ -1557,6 +1557,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val VOLUME_KEY_DEBOUNCE_TIME = 200L // 毫秒
 
     private var hasAppliedDefaultFocalLength = false
+    private var earlyCameraStart: Deferred<Boolean?>? = null
+    private var earlyCameraStartUsed = false
 
     val captureProcessingState = CaptureProcessingQueue.state
     private val _capturedThumbnail = MutableStateFlow<CapturedThumbnail?>(null)
@@ -2481,7 +2483,59 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * Cold start into the camera: looks up and opens the camera as soon as the settings are loaded,
+     * while the first composition still holds the main thread. The first [prepareCamera] uses it.
+     */
+    fun startCameraEarly() {
+        if (earlyCameraStart != null) return
+        // Main.immediate runs this right away when the settings are already loaded.
+        earlyCameraStart = viewModelScope.async(Dispatchers.Main.immediate) {
+            val prefs = userPreferencesRepository.flow { it }.first()
+            // Video sizes its preview from settings applied later in init; it keeps the usual start.
+            if (prefs.captureMode != CaptureMode.PHOTO) return@async null
+            applyCameraSessionPreferences(prefs)
+            StartupTrace.mark("CameraViewModel.early camera start")
+            // On the camera thread so a close posted by a leaving camera screen is ordered after the open.
+            withContext(cameraController.cameraDispatcher) { prepareCameraNow() }
+        }
+    }
+
+    // Everything the first photo session is built from. Applied here as the settings collectors
+    // would, so the early session still matches when the preview surface arrives.
+    private fun applyCameraSessionPreferences(prefs: UserPreferences) {
+        runCatching { AspectRatio.valueOf(prefs.aspectRatio) }.getOrNull()
+            ?.let(cameraController::setAspectRatio)
+        cameraController.setCaptureMode(prefs.captureMode)
+        // Retained exposure settings are applied when the camera opens.
+        cameraController.setCaptureSettingsRetention(prefs.retainCaptureSettings, prefs.customCaptureSettings)
+        val useRaw = prefs.useRaw && !prefs.useMultipleExposure
+        cameraController.setUseRaw(useRaw, reconfigureCaptureOutputIfNeeded = false)
+        cameraController.setMultiFrameOutputScale(
+            resolveMultiFrameOutputScale(
+                useJpgMax = prefs.useJpgMax && !useRaw && !prefs.useMultipleExposure,
+                useRawMax = prefs.useRawMax && useRaw,
+                rawMaxOutputScale = prefs.rawMaxOutputScale,
+                jpgMultiFrameDenoiseOutputScale = prefs.jpgMultiFrameDenoiseOutputScale,
+            )
+        )
+        cameraController.setPhotoResolutionCapMp(prefs.photoResolutionCapMp)
+        cameraController.setUseP010(prefs.useP010)
+        cameraController.setUseP3ColorSpace(prefs.useP3ColorSpace)
+        cameraController.setPhotoPreviewStabilizationEnabled(prefs.photoPreviewStabilizationEnabled)
+        cameraController.setUseLivePhoto(shouldEnableLivePhoto(prefs))
+    }
+
     suspend fun prepareCamera(): Boolean {
+        val early = earlyCameraStart
+        if (early != null && !earlyCameraStartUsed) {
+            earlyCameraStartUsed = true
+            early.await()?.let { return it }
+        }
+        return prepareCameraNow()
+    }
+
+    private suspend fun prepareCameraNow(): Boolean {
         if (!cameraController.prepareCameras()) return false
         if (!hasAppliedDefaultFocalLength) {
             val defaultFocalLength = userPreferencesRepository.latest().defaultFocalLength
@@ -2497,7 +2551,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return true
     }
 
-    fun closeCameraWithoutPreview() = cameraController.closeCameraWithoutPreview()
+    fun closeCameraWithoutPreview() {
+        // An early start still looking up the camera must not open it after this close.
+        earlyCameraStart?.cancel()
+        earlyCameraStartUsed = true
+        cameraController.closeCameraWithoutPreview()
+    }
 
     /**
      * 关闭相机

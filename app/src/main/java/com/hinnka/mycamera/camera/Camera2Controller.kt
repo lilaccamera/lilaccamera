@@ -36,6 +36,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.android.asCoroutineDispatcher
 import kotlinx.coroutines.suspendCancellableCoroutine
 import com.hinnka.mycamera.livephoto.LivePhotoRecorder
 import com.hinnka.mycamera.lut.LutConfig
@@ -2028,6 +2030,10 @@ class Camera2Controller(private val context: Context) {
                 if (continuation.isActive) continuation.resume(result)
             }
         }
+
+    /** Runs coroutine code on the camera thread, in order with the controller's own camera work. */
+    val cameraDispatcher: CoroutineDispatcher
+        get() = checkNotNull(cameraHandler) { "Camera thread not started" }.asCoroutineDispatcher()
 
     /**
      * 在首次打开前完成相机发现，让调用方可以先确定最终镜头和倍率。

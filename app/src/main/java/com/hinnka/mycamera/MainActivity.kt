@@ -321,6 +321,11 @@ class MainActivity : AppCompatActivity() {
 
         // Opening another screen or the permission screen: no viewfinder to wait for.
         if (pendingRoute != null || !hasPermissions) StartupGate.open()
+        // Cold start into the camera: open it while the UI is still being built. A restored activity
+        // may come back to another screen, so it keeps the usual start from the camera screen.
+        if (pendingRoute == null && hasPermissions && savedInstanceState == null) {
+            cameraViewModel.startCameraEarly()
+        }
 
         // The gallery loads in the background; only the camera settings must be ready.
         splashScreen.setKeepOnScreenCondition { !cameraViewModel.isInitialized.value }
