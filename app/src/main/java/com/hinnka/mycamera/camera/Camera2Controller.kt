@@ -8339,8 +8339,21 @@ class Camera2Controller(private val context: Context) {
                         lockedIso != null && lockedIso > 0 &&
                         lockedExposure != null && lockedExposure > 0L
                 if (canUseManualExposure) {
+                    // Auto exposure can report ISO above the manual range (extra digital gain),
+                    // which the HAL refuses in a manual request. Above the analog limit the gain is
+                    // digital, so a lower ISO at the same shutter loses nothing the render cannot
+                    // restore, and the flicker-safe shutter auto exposure chose is kept.
+                    val isoRange = state.getIsoRange()
+                    val fittedIso = checkNotNull(lockedIso).coerceIn(isoRange.lower, isoRange.upper)
+                    if (fittedIso != lockedIso) {
+                        PLog.i(
+                            TAG,
+                            "Multi-frame locked ISO$lockedIso is outside " +
+                                "ISO${isoRange.lower}-${isoRange.upper}; using ISO$fittedIso",
+                        )
+                    }
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, lockedIso)
+                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, fittedIso)
                     builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, lockedExposure)
                 }
             }
