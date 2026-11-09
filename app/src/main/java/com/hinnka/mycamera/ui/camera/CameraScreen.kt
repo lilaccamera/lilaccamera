@@ -2501,11 +2501,18 @@ fun CaptureButton(
     val vibration = remember(context) { VibrationHelper(context) }
     val readyPop = remember { Animatable(1f) }
     var wasBusy by remember { mutableStateOf(false) }
+    // Tick only for someone who pressed while the shutter was busy: after every mode switch it would
+    // mostly point out how long the switch took. The pop still shows readiness.
+    var pressedWhileBusy by remember { mutableStateOf(false) }
+    val currentShowBusy by rememberUpdatedState(showBusy)
     LaunchedEffect(showBusy) {
         if (wasBusy && !showBusy) {
-            // A short pulse: the XZ1 Compact's vibrator has no strength control, plays VirtualKey as a
-            // 50 ms buzz (too strong for every mode switch) and gives no feelable tick for TICK effects.
-            vibration.vibrate(VibrationHelper.LIGHT_TICK_MS)
+            if (pressedWhileBusy) {
+                // A short pulse: the XZ1 Compact's vibrator has no strength control, plays VirtualKey as a
+                // 50 ms buzz and gives no feelable tick for TICK effects.
+                vibration.vibrate(VibrationHelper.LIGHT_TICK_MS)
+            }
+            pressedWhileBusy = false
             readyPop.animateTo(1.15f, tween(120))
             readyPop.animateTo(1f, spring(dampingRatio = 0.4f))
         }
@@ -2562,6 +2569,7 @@ fun CaptureButton(
                     onPress = {
                         isPressed = true
                         isLongPressStarted = false
+                        if (currentShowBusy) pressedWhileBusy = true
                         try {
                             tryAwaitRelease()
                         } finally {
