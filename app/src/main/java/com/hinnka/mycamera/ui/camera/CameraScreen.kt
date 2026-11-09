@@ -93,6 +93,7 @@ import com.hinnka.mycamera.ui.components.*
 import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.StartupGate
+import com.hinnka.mycamera.utils.SystemPropertiesUtil
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import com.hinnka.mycamera.video.CaptureMode
@@ -131,8 +132,12 @@ private enum class CameraShootingMode {
     VIDEO
 }
 
-private const val InitialPreviewTransitionDelayMillis = 150L
-private const val PreviewTransitionRevealDurationMillis = 800
+private const val PreviewTransitionRevealDurationMillis = 250
+private const val ControlsArrivalDurationMillis = 200
+private val ControlsArrivalEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+
+// The controls rise and fade in once per app start, not again after the gallery or a mode switch.
+private var controlsArrivalPlayed = false
 private const val ZoomStopAnimationCompletionThreshold = 0.001f
 private const val RawCaptureTapDebounceMillis = 1000L
 private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
@@ -250,6 +255,16 @@ fun CameraScreen(
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
     val isCameraInitialized by viewModel.isInitialized.collectAsState()
+    // shortcut: test switch for comparing reveals on the phone (adb shell setprop debug.lilac.reveal cut|split);
+    // remove once one is chosen.
+    val revealCut = remember { SystemPropertiesUtil.get("debug.lilac.reveal") == "cut" }
+    var arrivalPopToken by remember { mutableIntStateOf(0) }
+    val controlsArrival = remember { Animatable(if (controlsArrivalPlayed) 1f else 0f) }
+    LaunchedEffect(isCameraInitialized) {
+        if (!isCameraInitialized || controlsArrivalPlayed) return@LaunchedEffect
+        controlsArrivalPlayed = true
+        controlsArrival.animateTo(1f, tween(ControlsArrivalDurationMillis, easing = ControlsArrivalEasing))
+    }
     val latestPhoto by galleryViewModel.latestPhoto.collectAsState()
     val showLevelIndicator by preferenceValue { it.showLevelIndicator }
     val focusPeakingEnabled by preferenceValue { it.focusPeakingEnabled }
@@ -524,7 +539,7 @@ fun CameraScreen(
             previewTransitionActive -> 0f
             else -> 0f
         },
-        animationSpec = if (previewTransitionActive && !previewTransitionRevealing) {
+        animationSpec = if ((previewTransitionActive && !previewTransitionRevealing) || revealCut) {
             snap()
         } else {
             tween(
@@ -759,6 +774,7 @@ fun CameraScreen(
 
     LaunchedEffect(
         state.isPreviewActive,
+        state.previewFirstFrameTimestampNs,
         state.captureMode,
         hasPlayedInitialPreviewTransition,
         canStartShutterAnimation
@@ -766,11 +782,14 @@ fun CameraScreen(
         val canRevealInitialPreview =
             canStartShutterAnimation ||
                 state.captureMode == CaptureMode.VIDEO
-        if (hasPlayedInitialPreviewTransition || !state.isPreviewActive || !canRevealInitialPreview) return@LaunchedEffect
+        // Open on the camera's first frame: the black splash and this cover read as one closed shutter.
+        if (hasPlayedInitialPreviewTransition || !state.isPreviewActive ||
+            state.previewFirstFrameTimestampNs == null || !canRevealInitialPreview
+        ) return@LaunchedEffect
         previewTransitionActive = true
-        delay(InitialPreviewTransitionDelayMillis)
         previewTransitionRevealing = true
-        delay(PreviewTransitionRevealDurationMillis.toLong())
+        if (revealCut) arrivalPopToken++
+        delay(if (revealCut) 0L else PreviewTransitionRevealDurationMillis.toLong())
         previewTransitionActive = false
         hasPlayedInitialPreviewTransition = true
     }
@@ -1652,6 +1671,7 @@ fun CameraScreen(
                 onSwitchCameraClick = ::switchCameraWithPreviewTransition,
                 onCaptureModeSelected = ::setShootingModeWithPreviewTransition,
                 modeSwitchEnabled = !previewTransitionActive && !lensSwitchTransition.isActive,
+                arrivalPopToken = arrivalPopToken,
                 onCaptureTap = {
                     val shouldDebounceRawCapture =
                         state.useRaw && state.captureMode == CaptureMode.PHOTO
@@ -1714,11 +1734,23 @@ fun CameraScreen(
                 viewfinder()
             }
 
-            topBar()
+            Box(
+                modifier = Modifier.graphicsLayer {
+                    alpha = controlsArrival.value
+                    translationY = -(1f - controlsArrival.value) * 12.dp.toPx()
+                }
+            ) {
+                topBar()
+            }
 
             CameraBottomControlsLayout(
                 viewfinderBottom = viewfinderTop + cardHeight,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        alpha = controlsArrival.value
+                        translationY = (1f - controlsArrival.value) * 16.dp.toPx()
+                    },
                 zoomBar = {
                     // Panel visibility changes the zoom content, not the space used to
                     // position the parameter row beneath it. XPAN has no horizontal bar.
@@ -2113,6 +2145,7 @@ private fun Controls(
     onSwitchCameraClick: () -> Unit,
     onCaptureModeSelected: (CameraShootingMode) -> Unit,
     modeSwitchEnabled: Boolean,
+    arrivalPopToken: Int,
     onCaptureTap: () -> Unit,
     onGalleryClick: () -> Unit,
     sideControlInset: Dp?,
@@ -2201,6 +2234,7 @@ private fun Controls(
                     customStyle = captureButtonStyle,
                     customColor = captureButtonColor,
                     customImagePath = captureButtonImagePath,
+                    arrivalPopToken = arrivalPopToken,
                     onTap = onCaptureTap,
                     onLongPressStart = { viewModel.startContinuousCapture() },
                     onLongPressEnd = { viewModel.stopContinuousCapture() },
@@ -2426,6 +2460,7 @@ fun CaptureButton(
     customStyle: CaptureButtonStyle,
     customColor: Int,
     customImagePath: String?,
+    arrivalPopToken: Int = 0,
     onTap: () -> Unit,
     onLongPressStart: () -> Unit,
     onLongPressEnd: () -> Unit,
@@ -2473,6 +2508,12 @@ fun CaptureButton(
             readyPop.animateTo(1f, spring(dampingRatio = 0.4f))
         }
         wasBusy = showBusy
+    }
+    // The instant-cut reveal marks the camera's arrival with the same pop, without the tick.
+    LaunchedEffect(arrivalPopToken) {
+        if (arrivalPopToken == 0) return@LaunchedEffect
+        readyPop.animateTo(1.15f, tween(120))
+        readyPop.animateTo(1f, spring(dampingRatio = 0.4f))
     }
 
     val pulseAlpha by infiniteTransition.animateFloat(
