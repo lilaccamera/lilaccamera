@@ -7074,7 +7074,17 @@ class Camera2Controller(private val context: Context) {
             refreshVideoCapabilities()
         } else {
             stopVideoRecordingTicker()
-            _state.value = _state.value.copy(videoRecordingState = VideoRecordingState())
+            // Like Video above, Photo gets its preview size with the mode change. Otherwise the size only
+            // changes once the camera has reopened, the preview view is rebuilt a second time and the
+            // camera opens twice (about 0.4 s lost on every switch out of Video).
+            val photoCameraId = _state.value.getCurrentCameraInfo()?.getOpenCameraId()
+                ?: _state.value.currentCameraId
+            val photoPreviewSize = getCameraCharacteristicsOrNull(photoCameraId, "photo preview size")
+                ?.let { CameraUtils.getFixedPreviewSize(it, _state.value.aspectRatio) }
+            _state.value = _state.value.copy(
+                videoRecordingState = VideoRecordingState(),
+                currentPreviewSize = photoPreviewSize ?: _state.value.currentPreviewSize,
+            )
             if (_state.value.useLivePhoto) {
                 livePhotoRecorder.startRecording()
             }
