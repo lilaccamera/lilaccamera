@@ -176,6 +176,7 @@ object MultiFrameStacker {
         aspectRatio: AspectRatio?,
         outputScale: Float = MultiFrameConfig.DEFAULT_SUPER_RESOLUTION_SCALE,
         colorSpace: ColorSpace,
+        outputGain: Float = 1f,
     ): Bitmap? {
         if (images.isEmpty()) return null
 
@@ -215,6 +216,7 @@ object MultiFrameStacker {
                 outputScale = scale,
                 referenceOutputWidth = dimensions.width(),
                 referenceOutputHeight = dimensions.height(),
+                outputGain = outputGain,
             ).process(images).also { result ->
                 if (result == null) {
                     PLog.w(TAG, "GLES streaming stacker failed")

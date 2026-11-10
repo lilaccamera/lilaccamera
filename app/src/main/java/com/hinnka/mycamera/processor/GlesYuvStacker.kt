@@ -43,6 +43,8 @@ class GlesYuvStacker(
     outputScale: Float = MultiFrameConfig.DEFAULT_SUPER_RESOLUTION_SCALE,
     private val referenceOutputWidth: Int = outputWidth,
     private val referenceOutputHeight: Int = outputHeight,
+    /** Exposure lift for the merged photo; 1 leaves it as merged. */
+    private val outputGain: Float = 1f,
 ) {
     data class HdrInputFrame(
         val image: SafeImage,
@@ -2069,6 +2071,7 @@ class GlesYuvStacker(
         GLES31.glUniform1f(GLES31.glGetUniformLocation(program, "uNoiseBeta"), NOISE_BETA)
         GLES31.glUniform1i(GLES31.glGetUniformLocation(program, "uIsP010"), if (highPrecisionInput) 1 else 0)
         GLES31.glUniform1i(GLES31.glGetUniformLocation(program, "uApplyDenoise"), if (applyDenoise) 1 else 0)
+        GLES31.glUniform1f(GLES31.glGetUniformLocation(program, "uOutputGain"), outputGain)
         val directOffset = computeDirectSourceOffset()
         GLES31.glUniform1i(GLES31.glGetUniformLocation(program, "uDirectSource"), if (cpuRotateReadback) 1 else 0)
         GLES31.glUniform2i(GLES31.glGetUniformLocation(program, "uDirectOffset"), directOffset[0], directOffset[1])
@@ -3841,6 +3844,8 @@ class GlesYuvStacker(
             uniform int uApplyDenoise;
             out vec4 fragColor;
 
+            ${GlesYuvSpatialShaders.brightenOutput.prependIndent("            ")}
+
             bool valid(vec2 p) {
                 return p.x >= 0.0 && p.y >= 0.0 &&
                     p.x <= float(uInputSize.x - 1) &&
@@ -3930,7 +3935,7 @@ class GlesYuvStacker(
                     ycc.x = mix(ycc.x, mean + wienerGain * (ycc.x - mean), 0.55 * flatness);
                 }
 
-                vec3 rgb = clamp(yccToRgb(ycc), vec3(0.0), vec3(1.0));
+                vec3 rgb = brightenOutput(clamp(yccToRgb(ycc), vec3(0.0), vec3(1.0)));
                 fragColor = vec4(rgb, 1.0);
             }
         """.trimIndent()

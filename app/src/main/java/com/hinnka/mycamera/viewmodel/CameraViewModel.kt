@@ -6151,6 +6151,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     rawMaxHdrFusionEnabled = rawMaxHdrFusionEnabled,
                     rawMaxSpatialOutputMode = rawSpatialOutputMode,
                     rawMaxMergeMethod = rawMaxMergeMethod,
+                    brightenGain = settings.state.nightBrightenGain,
                 )
             }
             PLog.d(TAG, "Image saved: $photoId, LUT: $lutIdToSave, Frame: $frameIdToSave")

@@ -300,6 +300,24 @@ internal object GlesYuvSpatialShaders {
         }
     """.trimIndent())
 
+    /**
+     * Brightens a gamma-encoded colour by uOutputGain in linear light. The lift rolls off towards
+     * white (gain at black, 1 at white) and scales all channels alike, so hues and white stay put.
+     * An unset uniform reads 0 and leaves the colour unchanged.
+     */
+    val brightenOutput = """
+        uniform float uOutputGain;
+
+        vec3 brightenOutput(vec3 rgb) {
+            if (uOutputGain <= 1.0) return rgb;
+            vec3 linear = pow(max(rgb, vec3(0.0)), vec3(2.2));
+            float peak = max(max(linear.r, linear.g), linear.b);
+            if (peak <= 1.0e-6) return rgb;
+            float lifted = uOutputGain * peak / (1.0 + (uOutputGain - 1.0) * peak);
+            return pow(linear * (lifted / peak), vec3(1.0 / 2.2));
+        }
+    """.trimIndent()
+
     private fun buildLanczosOutput(source: String) = """
         #version 300 es
         precision highp float;
@@ -316,6 +334,7 @@ internal object GlesYuvSpatialShaders {
 
         ${source.prependIndent("        ")}
         ${GlesLanczosResampling.sampleRgb.prependIndent("        ")}
+        ${brightenOutput.prependIndent("        ")}
 
         void main() {
             vec2 p = gl_FragCoord.xy - vec2(0.5);
@@ -331,7 +350,7 @@ internal object GlesYuvSpatialShaders {
                 : vec3(ycc.x + 1.402 * cr,
                        ycc.x - 0.344136 * cb - 0.714136 * cr,
                        ycc.x + 1.772 * cb);
-            oColor = vec4(clamp(rgb, 0.0, 1.0), 1.0);
+            oColor = vec4(brightenOutput(clamp(rgb, 0.0, 1.0)), 1.0);
         }
     """.trimIndent()
 }

@@ -399,6 +399,8 @@ data class CameraState(
     val burstCapturing: Boolean = false,
     val hdrBracketCapturing: Boolean = false,
     val hdrBracketFrameCount: Int = 0,
+    /** Low-light burst: exposure lift for the merged photo, chosen at capture; 1 leaves it as merged. */
+    val nightBrightenGain: Float = 1f,
     val latitude: Double? = null,
     val longitude: Double? = null,
     val isP3Supported: Boolean = false,
