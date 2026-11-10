@@ -3428,6 +3428,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 normalFrames
             }
             val orderedFrames = orderedNormalFrames + auxiliaryFrames
+            if (!isRawStack) {
+                // Same order as the stacker's "YUV stack weight frame N" lines, so shake and lost weight line up.
+                PLog.i(
+                    TAG,
+                    "YUV stack shake in merge order: score=" +
+                        orderedFrames.joinToString { f ->
+                            gyroShakeScore(f.frame.gyroWindow)?.let { "%.2e".format(it) } ?: "-"
+                        },
+                )
+            }
             val referencePlanLog = when {
                 isRawStack -> "deferred_mgc_gles, reference=pending, "
                 gyroReferenceIndex > 0 -> "gyro, reference=$gyroReferenceIndex, "
@@ -5846,13 +5856,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     private fun steadiestGyroReferenceIndex(frames: List<PendingRawStackFrame>): Int {
         val windows = frames.take(GYRO_REFERENCE_CANDIDATES).map { it.frame.gyroWindow }
-        val scores = windows.map { window ->
-            if (window == null || window.sampleCount < 2 || window.coverageRatio < GYRO_REFERENCE_MIN_COVERAGE) {
-                null
-            } else {
-                window.angularEnergy * (window.endTimestampNs - window.startTimestampNs) / 1e9f
-            }
-        }
+        val scores = windows.map(::gyroShakeScore)
         PLog.i(
             TAG,
             "YUV burst gyro: coverage=${windows.joinToString { "%.2f".format(it?.coverageRatio ?: 0f) }} " +
@@ -5863,6 +5867,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val best = validScores.indices.minBy { validScores[it] }
         return if (validScores[best] < validScores[0] * GYRO_REFERENCE_MIN_GAIN) best else 0
     }
+
+    /** Gyro angular energy times exposure time: an upper bound on the squared angle swept while exposing. */
+    private fun gyroShakeScore(window: GyroExposureWindow?): Float? =
+        if (window == null || window.sampleCount < 2 || window.coverageRatio < GYRO_REFERENCE_MIN_COVERAGE) {
+            null
+        } else {
+            window.angularEnergy * (window.endTimestampNs - window.startTimestampNs) / 1e9f
+        }
 
     private fun rawStackFrame(
         image: SafeImage,

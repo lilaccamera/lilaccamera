@@ -270,6 +270,8 @@ class GlesYuvStacker(
     }
     private val logFrameWeights = weightDiagnostics == "log" || weightDiagnostics == "off"
     private val rejectionDisabled = weightDiagnostics == "off"
+    // The reference frame counts fully; each other frame adds its mean merge weight.
+    private var mergedWeightSum = 1.0
 
     fun process(images: List<SafeImage>): Bitmap? {
         if (images.isEmpty() || width <= 0 || height <= 0 || outputWidth <= 0 || outputHeight <= 0) {
@@ -336,6 +338,9 @@ class GlesYuvStacker(
                 timing.cpu("scheduler.yield") { GlesGpuScheduler.yieldToUiRenderer() }
             }
 
+            if (logFrameWeights) {
+                PLog.i(TAG, "YUV stack worth: ${"%.1f".format(mergedWeightSum)} of ${images.size} frames")
+            }
             timing.frame("output")
             normalizeOutput()
             timing.cpu("scheduler.yield") { GlesGpuScheduler.yieldToUiRenderer() }
@@ -2438,15 +2443,36 @@ class GlesYuvStacker(
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
             var sum = 0L
             var below = 0
+            var strong = 0
+            // Weight per block of an 8x8 grid: lost weight in a few blocks points to a moving subject,
+            // lost weight spread over most blocks to the whole frame (hand shake, or noise read as motion).
+            val blockSums = LongArray(WEIGHT_GRID * WEIGHT_GRID)
+            val blockCounts = IntArray(WEIGHT_GRID * WEIGHT_GRID)
             for (i in 0 until pixelCount) {
                 val value = buffer.get(i * 4).toInt() and 0xFF
                 sum += value
                 if (value < 128) below++
+                if (value < 64) strong++
+                val block = (i / w) * WEIGHT_GRID / h * WEIGHT_GRID + (i % w) * WEIGHT_GRID / w
+                blockSums[block] += value
+                blockCounts[block]++
+            }
+            val mean = sum / (255.0 * pixelCount)
+            val lowBlocks = blockSums.indices.count { blockCounts[it] > 0 && blockSums[it] < 128L * blockCounts[it] }
+            val lowBlockShare = lowBlocks.toDouble() / blockSums.size
+            mergedWeightSum += mean
+            // shortcut: thresholds are first guesses, to be checked on still, moving-subject and shaken shots.
+            val cause = when {
+                mean >= 0.85 -> "kept"
+                lowBlockShare <= 0.35 -> "local"
+                else -> "whole-frame"
             }
             PLog.i(
                 TAG,
-                "YUV stack weight $label: mean=${"%.3f".format(sum / (255.0 * pixelCount))} " +
+                "YUV stack weight $label: mean=${"%.3f".format(mean)} " +
                     "belowHalf=${"%.1f".format(100.0 * below / pixelCount)}% " +
+                    "belowQuarter=${"%.1f".format(100.0 * strong / pixelCount)}% " +
+                    "lowBlocks=$lowBlocks/${blockSums.size} cause=$cause " +
                     "size=${w}x$h rejection=${if (rejectionDisabled) "off" else "on"}",
             )
         } finally {
@@ -2837,6 +2863,7 @@ class GlesYuvStacker(
 
     companion object {
         private const val TAG = "GlesYuvStacker"
+        private const val WEIGHT_GRID = 8
 
         private const val EGL_OPENGL_ES3_BIT_KHR = 0x00000040
         private const val HDR_BRACKET_FRAME_COUNT = 3
