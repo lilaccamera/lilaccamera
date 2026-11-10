@@ -549,6 +549,8 @@ class Camera2Controller(private val context: Context) {
 
     // 场景变化检测：用于替代固定延迟恢复连续对焦
     private var isFocusLockedWaitingForSceneChange = false
+    // Results already in flight when a point-focus trigger is sent still report the previous lock.
+    private var pointAfTriggerPending = false
     private var focusLockedReferenceIso: Int = 0
     private var focusLockedReferenceExposureNs: Long = 0L
     private var focusLockedReferenceDistance: Float = 0f
@@ -1277,6 +1279,9 @@ class Camera2Controller(private val context: Context) {
             request: CaptureRequest,
             failure: CaptureFailure,
         ) {
+            if (request.get(CaptureRequest.CONTROL_AF_TRIGGER) == CaptureRequest.CONTROL_AF_TRIGGER_START) {
+                pointAfTriggerPending = false
+            }
             val flashTag = request.tag as? StillFlashRequestTag
             if (flashTag != null) {
                 val pending = stillFlashPrecapture ?: return
@@ -1330,7 +1335,14 @@ class Camera2Controller(private val context: Context) {
             if (afStateChanged) {
                 lastAfState = afState
             }
-            if (_state.value.isAutoFocus && _state.value.isFocusing) {
+            if (pointAfTriggerPending && (
+                    result.request.get(CaptureRequest.CONTROL_AF_TRIGGER) == CaptureRequest.CONTROL_AF_TRIGGER_START ||
+                        afState == CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN
+                    )
+            ) {
+                pointAfTriggerPending = false
+            }
+            if (_state.value.isAutoFocus && _state.value.isFocusing && !pointAfTriggerPending) {
                 when (afState) {
                     CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED -> {
                         logFocusTerminalResult(result, afState)
@@ -6989,6 +7001,7 @@ class Camera2Controller(private val context: Context) {
         focusLockedReferenceDistance = 0f
         focusLockSettleFrames = 0
         eyeTargetLastSeenElapsedMs = 0L
+        pointAfTriggerPending = false
         _state.value = _state.value.copy(
             focusPoint = null,
             meteringPoint = null,
@@ -8029,9 +8042,11 @@ class Camera2Controller(private val context: Context) {
         try {
             builder.set(CaptureRequest.CONTROL_AF_MODE, afMode)
             builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+            pointAfTriggerPending = true
             session.capture(builder.build(), previewCallback, cameraHandler)
             submitted = true
         } catch (e: Exception) {
+            pointAfTriggerPending = false
             PLog.e(TAG, "Failed to submit one-shot AF trigger for $reason", e)
         } finally {
             builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
