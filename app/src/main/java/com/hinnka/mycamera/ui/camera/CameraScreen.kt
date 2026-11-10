@@ -1,5 +1,6 @@
 package com.hinnka.mycamera.ui.camera
 
+import androidx.activity.compose.BackHandler
 import com.hinnka.mycamera.ui.prefs.rememberUserPreferencesRepository
 import com.hinnka.mycamera.data.UserPreferences
 import com.hinnka.mycamera.ui.prefs.rememberPreference
@@ -77,7 +78,9 @@ import com.hinnka.mycamera.processor.BokehStyle
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.CameraState
 import com.hinnka.mycamera.camera.DeviceQuirks
+import com.hinnka.mycamera.camera.MultiFrameConfig
 import com.hinnka.mycamera.camera.FocusPointSource
+import com.hinnka.mycamera.camera.LensType
 import com.hinnka.mycamera.camera.PhotoCaptureProgress
 import com.hinnka.mycamera.data.CaptureButtonStyle
 import com.hinnka.mycamera.data.DevelopAnimationStyle
@@ -1714,6 +1717,9 @@ fun CameraScreen(
                 onLooksBoundsChanged = { bounds ->
                     filterButtonBounds = bounds
                 },
+                onQuickSettingsClick = {
+                    activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
+                },
                 zoomCollar = if (!isXpan && activePanel == ActivePanel.NONE) {
                     { fold ->
                         ZoomCollar(
@@ -1739,6 +1745,11 @@ fun CameraScreen(
             )
         }
 
+        val quickSheetCover by animateFloatAsState(
+            targetValue = if (activePanel == ActivePanel.SETTINGS) 1f else 0f,
+            animationSpec = tween(160),
+            label = "quickSheetCover"
+        )
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1790,7 +1801,8 @@ fun CameraScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        alpha = controlsArrival.value
+                        // The footer gives way under the quick settings sheet so it doesn't show through.
+                        alpha = controlsArrival.value * (1f - quickSheetCover)
                         translationY = (1f - controlsArrival.value) * 16.dp.toPx()
                     },
                 parameterRuler = {
@@ -1832,21 +1844,37 @@ fun CameraScreen(
 
         if (activePanel != ActivePanel.NONE) {
             PanelDismissPreviewOverlay(
-                // Quick settings shade the whole app; a tap anywhere on it closes them.
-                bounds = if (activePanel == ActivePanel.SETTINGS) cameraScreenBounds else panelDismissBounds,
+                // A tap on the picture closes the open panel; quick settings leave the picture undimmed.
+                bounds = panelDismissBounds,
                 parentBounds = cameraScreenBounds,
-                dimBackground = activePanel == ActivePanel.SETTINGS,
+                dimBackground = false,
                 onDismiss = { activePanel = ActivePanel.NONE }
             )
         }
 
-        // TopSheet for settings
+        // Quick settings: a sheet from the bottom, opened by Q (and the top bar's gear).
+        // Back closes it instead of leaving the camera.
+        BackHandler(enabled = activePanel == ActivePanel.SETTINGS) { activePanel = ActivePanel.NONE }
         CameraTopSheet(
             visible = activePanel == ActivePanel.SETTINGS,
             captureMode = state.captureMode,
+            flashMode = state.flashMode,
+            onFlashToggle = { viewModel.toggleFlash() },
+            timerSeconds = state.timerSeconds,
+            onTimerToggle = { viewModel.toggleTimer() },
+            useLivePhoto = useLivePhoto,
+            onLivePhotoToggle = { viewModel.setUseLivePhoto(!state.useLivePhoto) },
             aspectRatio = state.aspectRatio,
             topSheetAspectRatios = topSheetAspectRatios,
             onAspectRatioChange = { runPreviewTransition { viewModel.setAspectRatio(it) } },
+            videoConfig = state.videoConfig,
+            videoCapabilities = state.videoCapabilities,
+            onVideoResolutionClick = { cycleVideoResolution(state)?.let(viewModel::setVideoResolution) },
+            onVideoFpsClick = { cycleVideoFps(state)?.let(viewModel::setVideoFps) },
+            onVideoTorchToggle = { videoTorchEnabled = !state.videoConfig.torchEnabled },
+            onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
+            showHistogram = showHistogram,
+            onHistogramChange = { showHistogram = it },
             videoAspectRatio = state.videoConfig.aspectRatio,
             onVideoAspectRatioChange = { runPreviewTransition { viewModel.setVideoAspectRatio(it) } },
             videoLogProfile = state.videoConfig.logProfile,
@@ -1872,15 +1900,12 @@ fun CameraScreen(
             rawSpectralFilmPrint = rawSpectralFilmPrint ?: "kodak_portra_endura",
             ultraHdrEnabled = ultraHdrEnabled,
             onUltraHdrToggle = { preferencesRepository.updateAsync { this.ultraHdrGainMapEnabled = it } },
-            photoPreviewStabilizationEnabled =
-                state.photoPreviewStabilizationEnabled,
-            photoPreviewStabilizationAvailable =
-                viewModel.realtimeStabilizationCoordinator.isCurrentCameraSupported,
-            onPhotoPreviewStabilizationChange =
-                viewModel::setPhotoPreviewStabilizationEnabled,
+            isFrontCamera = state.getCurrentCameraInfo()?.lensType == LensType.FRONT,
             photoResolutionCapMp = state.photoResolutionCapMp,
+            frontPhotoResolutionCapMp = state.frontPhotoResolutionCapMp,
             photoResolutionAdjustable = state.photoResolutionAdjustable,
             onPhotoResolutionCapChange = viewModel::setPhotoResolutionCapMp,
+            onFrontPhotoResolutionCapChange = viewModel::setFrontPhotoResolutionCapMp,
             saveCameraJpeg = saveCameraJpeg,
             onSaveCameraJpegChange = { saveCameraJpeg = it },
             isPortraitMode = state.isPortraitMode,
@@ -1891,8 +1916,10 @@ fun CameraScreen(
             onPortraitHelp = viewModel::showPortraitHelp,
             onOpenSettingsAt = onOpenSettingsAt,
             multiFrameCount = jpgMultiFrameCount,
-            onMultiFrameCountChange = { viewModel.setJpgMultiFrameDenoiseFrameCount(it) },
+            onMultiFrameCountChange = { viewModel.setJpgMultiFrameDenoiseFrameCountAndEnable(it) },
             hdrPlusFrameCount = hdrPlusFrameCount,
+            hdrPlusMinFrames = if (state.hdrPlusBracketExposureEnabled) MultiFrameConfig.MIN_HDR_PLUS_BRACKET_FRAME_COUNT
+            else MultiFrameConfig.MIN_HDR_PLUS_FRAME_COUNT,
             onHdrPlusFrameCountChange = { viewModel.setHdrPlusFrameCount(it) },
             onRawDcpChange = { viewModel.setRawDcpId(it) },
             onRawDcpIdsByLensChange = { viewModel.setRawDcpIdsByLens(it) },
@@ -1915,6 +1942,11 @@ fun CameraScreen(
             onRawFotufilmDocumentChange = { viewModel.setRawFotufilmDocument(it) },
             meteringMode = state.meteringMode,
             onMeteringModeChange = { viewModel.setMeteringMode(it) },
+            lensChoices = remember(state.availableCameras, state.getCurrentCameraInfo()?.lensType) {
+                quickLensChoices(state.availableCameras, state.getCurrentCameraInfo())
+            },
+            currentCameraId = state.getCurrentCameraInfo()?.cameraId,
+            onLensSelect = { switchToLensWithPreviewTransition(it) },
             onFilterManageClick = {
                 activePanel = ActivePanel.NONE
                 onFilterManagementClick(null)
@@ -1941,7 +1973,8 @@ fun CameraScreen(
             },
             useMultipleExposure = useMultipleExposure,
             onMultipleExposureToggle = { viewModel.setUseMultipleExposure(it) },
-            contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding
+            onDismiss = { activePanel = ActivePanel.NONE },
+            modifier = Modifier.align(Alignment.BottomCenter)
         )
 
         // During navigation measurement or window resizing, the viewport can be
@@ -2191,6 +2224,7 @@ private fun Controls(
     isXpan: Boolean,
     onLooksClick: () -> Unit,
     onLooksBoundsChanged: (Rect) -> Unit,
+    onQuickSettingsClick: () -> Unit,
     zoomCollar: (@Composable (fold: () -> Float) -> Unit)?,
     sideControlInset: Dp?,
     modifier: Modifier = Modifier.fillMaxSize()
@@ -2396,6 +2430,32 @@ private fun Controls(
                             modifier = Modifier
                                 .size(26.dp)
                                 .graphicsLayer { rotationZ = switchSpin.value }
+                        )
+                    }
+                }
+
+                // Quick settings mirror Looks on the left column; like the top bar's gear, not while recording.
+                if (!state.videoRecordingState.isRecording && !state.videoRecordingState.isProcessing) {
+                    PhysicalButton(
+                        onClick = onQuickSettingsClick,
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
+                            .offset(y = -LooksRise)
+                            .size(CameraControlsLayoutDefaults.SideButtonSize)
+                            .graphicsLayer {
+                                translationY = -10.dp.toPx() * line.side
+                                alpha = 1f - line.side
+                            }
+                            .autoRotate(),
+                        shape = RoundedCornerShape(ThumbnailCorner),
+                        backgroundColor = Color.Transparent
+                    ) {
+                        Icon(
+                            imageVector = AppIcons.Sliders,
+                            contentDescription = stringResource(R.string.quick_settings),
+                            tint = CameraControlsLayoutDefaults.LineColor,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }

@@ -158,7 +158,9 @@ object CameraUtils {
             val capped = if (maxMegapixels > 0) {
                 candidates.filter { it.width.toLong() * it.height <= maxPixels }.ifEmpty { candidates }
             } else candidates
-            val size = chooseCaptureSize(capped, aspectRatio.getValue(true)) ?: return fallback
+            val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+            val sensorRatio = activeArray?.takeIf { it.height() > 0 }?.let { it.width().toFloat() / it.height() }
+            val size = chooseCaptureSize(capped, aspectRatio.getValue(true), sensorRatio) ?: return fallback
             CaptureSizeSelection(
                 size = size,
                 isHighResolution = size in highResolutionSizes,
@@ -179,19 +181,20 @@ object CameraUtils {
         }
     }
 
-    private fun chooseCaptureSize(sizes: List<Size>, sensorRatio: Float): Size? {
+    private fun chooseCaptureSize(sizes: List<Size>, sensorRatio: Float, nativeRatio: Float? = null): Size? {
+        fun Size.hasRatio(target: Float) = abs(width.toFloat() / height - target) < 0.01
         // 寻找比例最匹配传感器原生比例
-        val matchingSizes = sizes.filter {
-            val ratio = it.width.toFloat() / it.height
-            abs(ratio - sensorRatio) < 0.01
-        }
+        val matchingSizes = sizes.filter { it.hasRatio(sensorRatio) }
 
         val bestMatching = matchingSizes.filter { it.height >= 2160 }.maxByOrNull { it.width.toLong() * it.height }
 
         if (bestMatching != null) return bestMatching
 
+        // Below 2160 lines (a megapixel cap), the largest size of another shape can be a crop with less view,
+        // e.g. 1920x1080 against a 4:3 sensor's 1600x1200: prefer the requested shape or the sensor's own.
+        val sameView = sizes.filter { it.hasRatio(sensorRatio) || (nativeRatio != null && it.hasRatio(nativeRatio)) }
         // 选择最大的尺寸
-        return sizes.maxByOrNull { it.width.toLong() * it.height }
+        return (sameView.ifEmpty { sizes }).maxByOrNull { it.width.toLong() * it.height }
     }
     
     /**

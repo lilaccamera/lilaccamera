@@ -86,7 +86,7 @@ private const val RESISTANCE = 0.3f      // past the first selectable mode and V
 // The work-in-progress note is shown this often per app run; after that the dim marks and the end bar say it.
 private var wipToastsLeft = 2
 
-private val ModeAmber = Color(0xFFEF9F27)
+internal val ModeAmber = Color(0xFFEF9F27)
 private val AutoGreen = Color(0xFF5DCAA5)
 private val VideoRed = Color(0xFFE24B4A)
 private val RidgeColor = Color(0xFF6B6A65)
