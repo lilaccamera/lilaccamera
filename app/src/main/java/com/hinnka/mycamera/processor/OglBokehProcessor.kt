@@ -55,6 +55,8 @@ class OglBokehProcessor {
         // The blur is computed at this size and composited onto the full picture. The 2560 px render took
         // 10 to 13 s on the XZ1 Compact and its GPU hung when anything else drew meanwhile.
         private val MAX_BOKEH_RENDER_EDGE = if (DeviceQuirks.isLilac) 1536 else 2560
+        /** The working-to-photo scale of a 19 MP photo at 1536 px. */
+        private const val LILAC_MAX_RENDER_SCALE = 1536f / 5056f
         private const val GUIDE_SHORT_EDGE = 512
         private const val STRIP_ROWS = 256
         /** Rows per full-resolution composite / readback submission. */
@@ -1263,13 +1265,20 @@ class OglBokehProcessor {
 
     private fun resolveBokehRenderSize(width: Int, height: Int): Pair<Int, Int> {
         val maxEdge = maxOf(width, height)
-        if (maxEdge <= MAX_BOKEH_RENDER_EDGE) return width to height
-        return if (width >= height) {
-            MAX_BOKEH_RENDER_EDGE to
-                (height.toLong() * MAX_BOKEH_RENDER_EDGE / width).toInt().coerceAtLeast(1)
+        // On the XZ1 Compact a picture under about 2000 px (the 2 MP front camera) was blurred in one
+        // full-size pass with radii up to 44 px; that pass outran the GPU's command timeout, the driver
+        // reset the GPU and every later GL call in the app failed. The blur is computed at most at the
+        // scale a 19 MP photo uses, which keeps each pass as short as for the back camera.
+        val limit = if (DeviceQuirks.isLilac) {
+            minOf(MAX_BOKEH_RENDER_EDGE, (maxEdge * LILAC_MAX_RENDER_SCALE).roundToInt().coerceAtLeast(1))
         } else {
-            (width.toLong() * MAX_BOKEH_RENDER_EDGE / height).toInt().coerceAtLeast(1) to
-                MAX_BOKEH_RENDER_EDGE
+            MAX_BOKEH_RENDER_EDGE
+        }
+        if (maxEdge <= limit) return width to height
+        return if (width >= height) {
+            limit to (height.toLong() * limit / width).toInt().coerceAtLeast(1)
+        } else {
+            (width.toLong() * limit / height).toInt().coerceAtLeast(1) to limit
         }
     }
 
