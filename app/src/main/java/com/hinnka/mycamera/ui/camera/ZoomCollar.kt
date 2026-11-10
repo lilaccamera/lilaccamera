@@ -115,6 +115,8 @@ internal fun ZoomCollar(
     enabled: Boolean,
     onZoom: (Float) -> Unit,
     onStop: (Float) -> Unit,
+    // 0 at rest, 1 folded into the shutter while the mode list is open.
+    fold: () -> Float = { 0f },
     modifier: Modifier = Modifier
 ) {
     val currentCamera = availableCameras.find { it.cameraId == currentCameraId }
@@ -187,7 +189,7 @@ internal fun ZoomCollar(
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val from = down.position - centre
-                    if (!onZoomCollar(from)) return@awaitEachGesture
+                    if (fold() > 0f || !onZoomCollar(from)) return@awaitEachGesture
                     down.consume()
                     springJob?.cancel()
                     // W end, knob, T end.
@@ -278,7 +280,10 @@ internal fun ZoomCollar(
             .graphicsLayer {
                 rotationZ = turn * MAX_TURN
                 transformOrigin = TransformOrigin(0.5f, BoxTop / (BoxTop - BoxBottom))
-                alpha = if (enabled) 1f else 0.4f
+                val f = fold()
+                scaleX = 1f - 0.18f * f
+                scaleY = scaleX
+                alpha = (1f - f) * (if (enabled) 1f else 0.4f)
             }
             .clearAndSetSemantics {
                 contentDescription = description

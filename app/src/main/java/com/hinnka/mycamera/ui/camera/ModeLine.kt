@@ -24,6 +24,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -135,6 +136,10 @@ internal class ModeLineState(initial: CameraShootingMode) {
     val shownMode: CameraShootingMode get() = shootingModeAt(shown)
     /** How far the side controls have made room; they move first, while the list opens. */
     val side: Float get() = smoothstep((lift.value / 0.7f).coerceAtMost(1f))
+    /** Set while the list closes, so the zoom collar can come back after the side controls. */
+    var closing by mutableStateOf(false)
+    /** How far the zoom collar has folded into the shutter: with the sides while opening, last while closing. */
+    val fold: Float get() = smoothstep(if (closing) (lift.value / 0.5f).coerceAtMost(1f) else lift.value)
 
     internal var posJob: Job? = null
     internal var closeJob: Job? = null
@@ -233,11 +238,13 @@ internal fun ModeLine(
 
     fun open() {
         state.closeJob?.cancel()
+        state.closing = false
         scope.launch { state.lift.animateTo(1f, tween(220, easing = EaseOutCubic)) }
     }
 
     fun close(afterMs: Long) {
         state.closeJob?.cancel()
+        state.closing = true
         state.closeJob = scope.launch {
             delay(afterMs)
             state.lift.animateTo(0f, tween(380, easing = EaseInOutCubic))
@@ -342,7 +349,7 @@ internal fun ModeLine(
                         val shutterHalf = CameraControlsLayoutDefaults.CaptureButtonSize.toPx() / 2
                         val onShutter = abs(fromCentre.x) < shutterHalf
                         // The shutter keeps its whole square, where the collar's inner corners overlap it.
-                        val onCollar = hasCollar && onZoomCollar(fromCentre) &&
+                        val onCollar = hasCollar && state.fold == 0f && onZoomCollar(fromCentre) &&
                             !(onShutter && abs(fromCentre.y) < shutterHalf)
                         val tracker = VelocityTracker().apply { addPosition(down.uptimeMillis, down.position) }
                         var swiping = false

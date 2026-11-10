@@ -1695,7 +1695,7 @@ fun CameraScreen(
                     filterButtonBounds = bounds
                 },
                 zoomCollar = if (!isXpan && activePanel == ActivePanel.NONE) {
-                    {
+                    { fold ->
                         ZoomCollar(
                             viewModel = viewModel,
                             zoomRatio = viewModel.zoomRatioByMain,
@@ -1703,7 +1703,8 @@ fun CameraScreen(
                             currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
                             enabled = state.getCurrentCameraInfo() != null,
                             onZoom = { setZoomWithPreviewTransition(it) },
-                            onStop = { animateZoomStopWithPreviewTransition(it) }
+                            onStop = { animateZoomStopWithPreviewTransition(it) },
+                            fold = fold
                         )
                     }
                 } else {
@@ -2164,7 +2165,7 @@ private fun Controls(
     isXpan: Boolean,
     onLooksClick: () -> Unit,
     onLooksBoundsChanged: (Rect) -> Unit,
-    zoomCollar: (@Composable () -> Unit)?,
+    zoomCollar: (@Composable (fold: () -> Float) -> Unit)?,
     sideControlInset: Dp?,
     modifier: Modifier = Modifier.fillMaxSize()
 ) {
@@ -2211,7 +2212,7 @@ private fun Controls(
                     videoProcessing = state.videoRecordingState.isProcessing,
                     onSelect = onCaptureModeSelected,
                     modifier = Modifier.matchParentSize(),
-                    collar = zoomCollar
+                    collar = zoomCollar?.let { collar -> @Composable { collar { line.fold } } }
                 ) { shutterModifier ->
                     // The face follows the mode under the shutter while the dial turns.
                     CaptureButton(
