@@ -73,6 +73,7 @@ import coil.compose.AsyncImage
 import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.MyCameraApplication
 import com.hinnka.mycamera.R
+import com.hinnka.mycamera.processor.BokehStyle
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.CameraState
 import com.hinnka.mycamera.camera.DeviceQuirks
@@ -126,6 +127,7 @@ enum class ActivePanel {
 }
 
 internal enum class CameraShootingMode {
+    PORTRAIT,
     PROFESSIONAL,
     PHOTO,
     VIDEO
@@ -263,6 +265,8 @@ fun CameraScreen(
     val latestPhoto by galleryViewModel.latestPhoto.collectAsState()
     val showLevelIndicator by preferenceValue { it.showLevelIndicator }
     val focusPeakingEnabled by preferenceValue { it.focusPeakingEnabled }
+    val portraitQuickBlur by preferenceValue { it.portraitQuickBlur }
+    val portraitBokehStyle by preferenceValue { BokehStyle.fromPersistedName(it.portraitBokehStyle) }
     val eyeFocusEnabled by preferenceValue { it.eyeFocusEnabled }
     val keepScreenOn by preferenceValue { it.keepScreenOn }
     val currentLutId by viewModel.currentLutId.collectAsState()
@@ -696,18 +700,23 @@ fun CameraScreen(
 
         val targetCaptureMode = when (mode) {
             CameraShootingMode.PROFESSIONAL,
+            CameraShootingMode.PORTRAIT,
             CameraShootingMode.PHOTO -> CaptureMode.PHOTO
             CameraShootingMode.VIDEO -> CaptureMode.VIDEO
         }
         val targetUseRaw = when (mode) {
             CameraShootingMode.PROFESSIONAL -> true
+            CameraShootingMode.PORTRAIT,
             CameraShootingMode.PHOTO -> false
             CameraShootingMode.VIDEO -> null
         }
+        val targetPortrait = mode == CameraShootingMode.PORTRAIT
         if (
             targetCaptureMode == state.captureMode &&
             (targetUseRaw == null || targetUseRaw == state.useRaw)
         ) {
+            // Photo and Portrait share the camera setup, so only the portrait flag changes.
+            viewModel.setPortraitMode(targetPortrait)
             return
         }
 
@@ -716,6 +725,7 @@ fun CameraScreen(
                 viewModel.setAspectRatio(AspectRatio.RATIO_4_3)
             }
             viewModel.setShootingMode(targetCaptureMode, targetUseRaw)
+            viewModel.setPortraitMode(targetPortrait)
         }
     }
 
@@ -854,6 +864,16 @@ fun CameraScreen(
             phoneNow = viewModel.videoHeatPhone,
             coolFromC = viewModel.videoHeatCoolFromC,
             onBackToCamera = viewModel::dismissVideoHeatStopDialog,
+        )
+    }
+
+    if (viewModel.showPortraitIntro) {
+        PortraitIntroDialog(
+            onDismiss = viewModel::dismissPortraitIntro,
+            onUseQuickBlur = {
+                viewModel.setPortraitQuickBlur(true)
+                viewModel.dismissPortraitIntro()
+            },
         )
     }
 
@@ -1370,7 +1390,7 @@ fun CameraScreen(
                                     hy
                                 )
                             },
-                            onEyeFocusInputAvailable = if (eyeFocusActive || portraitMaskActive) {
+                            onEyeFocusInputAvailable = if (eyeFocusActive || portraitMaskActive || state.isPortraitMode) {
                                 viewModel::handleEyeFocusInputUpdate
                             } else {
                                 null
@@ -1863,6 +1883,12 @@ fun CameraScreen(
             onPhotoResolutionCapChange = viewModel::setPhotoResolutionCapMp,
             saveCameraJpeg = saveCameraJpeg,
             onSaveCameraJpegChange = { saveCameraJpeg = it },
+            isPortraitMode = state.isPortraitMode,
+            portraitQuickBlur = portraitQuickBlur,
+            onPortraitQuickBlurChange = viewModel::setPortraitQuickBlur,
+            portraitBokehStyle = portraitBokehStyle,
+            onPortraitBokehStyleChange = viewModel::setPortraitBokehStyle,
+            onPortraitHelp = viewModel::showPortraitHelp,
             onOpenSettingsAt = onOpenSettingsAt,
             multiFrameCount = jpgMultiFrameCount,
             onMultiFrameCountChange = { viewModel.setJpgMultiFrameDenoiseFrameCount(it) },
@@ -2190,9 +2216,10 @@ private fun Controls(
             val shootingMode = when {
                 state.captureMode == CaptureMode.VIDEO -> CameraShootingMode.VIDEO
                 state.useRaw && state.isRawSupported -> CameraShootingMode.PROFESSIONAL
+                state.isPortraitMode -> CameraShootingMode.PORTRAIT
                 else -> CameraShootingMode.PHOTO
             }
-            val line = remember { ModeLineState(shootingMode) }
+            val line = remember { ModeLineState(shootingMode, state.isRawSupported) }
             if (!isXpan) Spacer(Modifier.height(CameraControlsLayoutDefaults.CollarRise))
             Box(
                 modifier = Modifier

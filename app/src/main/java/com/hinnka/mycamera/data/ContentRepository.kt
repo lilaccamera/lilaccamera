@@ -72,7 +72,9 @@ class ContentRepository private constructor(context: Context) {
     // 边框渲染器
     val frameRenderer = startupInit("FrameRenderer()") { FrameRenderer(appContext, lutManager) }
 
-    val depthBokehProcessor = startupInit("DepthBokehProcessor()") { DepthBokehProcessor(appContext) }
+    val depthBokehProcessor = startupInit("DepthBokehProcessor()") {
+        DepthBokehProcessor(appContext) { userPreferencesRepository.latest().portraitQuickBlur }
+    }
 
     // 用户偏好设置仓库
     val userPreferencesRepository = startupInit("UserPreferencesRepository()") {

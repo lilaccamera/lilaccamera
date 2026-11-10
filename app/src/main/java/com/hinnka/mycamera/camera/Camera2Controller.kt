@@ -5811,6 +5811,10 @@ class Camera2Controller(private val context: Context) {
         PLog.d(TAG, "设置虚拟光圈: $value")
     }
 
+    fun setPortraitMode(enabled: Boolean) {
+        _state.value = _state.value.copy(isPortraitMode = enabled)
+    }
+
     /**
      * 启用/禁用虚拟光圈控制
      */

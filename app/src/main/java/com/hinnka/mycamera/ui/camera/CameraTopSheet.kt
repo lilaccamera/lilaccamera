@@ -35,6 +35,7 @@ import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.ui.theme.OnAccentColor
 import android.content.Context
 import com.hinnka.mycamera.R
+import com.hinnka.mycamera.processor.BokehStyle
 import com.hinnka.mycamera.ui.settings.SettingsTarget
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.DeviceQuirks
@@ -108,6 +109,12 @@ fun CameraTopSheet(
     onPhotoResolutionCapChange: (Int) -> Unit,
     saveCameraJpeg: Boolean,
     onSaveCameraJpegChange: (Boolean) -> Unit,
+    isPortraitMode: Boolean = false,
+    portraitQuickBlur: Boolean = true,
+    onPortraitQuickBlurChange: (Boolean) -> Unit = {},
+    portraitBokehStyle: BokehStyle = BokehStyle.NATURAL,
+    onPortraitBokehStyleChange: (BokehStyle) -> Unit = {},
+    onPortraitHelp: () -> Unit = {},
     // Long press on a tile opens Settings at that tile's setting.
     onOpenSettingsAt: (SettingsTarget) -> Unit = {},
     multiFrameCount: Int,
@@ -238,6 +245,40 @@ fun CameraTopSheet(
                                 modifier = itemModifier
                             )
                         } else {
+                            if (isPortraitMode) {
+                                val portraitContext = LocalContext.current
+                                QuickSettingValue(
+                                    title = stringResource(R.string.portrait_blur),
+                                    value = stringResource(
+                                        if (portraitQuickBlur) R.string.portrait_blur_quick else R.string.portrait_blur_depth
+                                    ),
+                                    highlighted = !portraitQuickBlur,
+                                    onClick = { onPortraitQuickBlurChange(!portraitQuickBlur) },
+                                    onLongClick = onPortraitHelp,
+                                    modifier = itemModifier
+                                )
+                                QuickSettingValue(
+                                    title = stringResource(R.string.gallery_bokeh_style_title),
+                                    value = stringResource(
+                                        when (portraitBokehStyle) {
+                                            BokehStyle.NATURAL -> R.string.gallery_bokeh_style_natural
+                                            BokehStyle.DEFAULT -> R.string.gallery_bokeh_style_default
+                                            BokehStyle.BUBBLE -> R.string.gallery_bokeh_style_bubble
+                                        }
+                                    ),
+                                    onClick = {
+                                        onPortraitBokehStyleChange(
+                                            when (portraitBokehStyle) {
+                                                BokehStyle.NATURAL -> BokehStyle.DEFAULT
+                                                BokehStyle.DEFAULT -> BokehStyle.BUBBLE
+                                                BokehStyle.BUBBLE -> BokehStyle.NATURAL
+                                            }
+                                        )
+                                    },
+                                    onLongClick = { showQuickSettingExplanation(portraitContext, R.string.quick_explain_portrait_bokeh) },
+                                    modifier = itemModifier
+                                )
+                            }
                             // From Off a tap resumes the saved count (also set by the Settings slider);
                             // then each tap steps to the next preset above it, and past the last one to Off.
                             QuickSettingValue(

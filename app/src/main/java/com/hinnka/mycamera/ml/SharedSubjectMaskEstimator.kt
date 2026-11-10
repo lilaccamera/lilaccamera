@@ -74,13 +74,22 @@ object SharedSubjectMaskEstimator {
     private var model: LoadedModel? = null
     private var gpuDisabled = false
 
-    suspend fun estimateMask(context: Context, inputBitmap: Bitmap, depthMap: RelativeDepthMap): SubjectMask? {
+    /**
+     * [depthMap] only narrows the input to the subject's neighbourhood; without one (the quick blur has no
+     * depth model) the whole image is evaluated.
+     */
+    suspend fun estimateMask(context: Context, inputBitmap: Bitmap, depthMap: RelativeDepthMap?): SubjectMask? {
         return try {
             withContext(estimatorDispatcher) {
                 mutex.withLock {
                     ensureActive()
                     val appContext = context.applicationContext
                     ensureActive()
+                    val fullImage = DepthSubjectCropPlanner.Crop(0, 0, inputBitmap.width, inputBitmap.height)
+                    if (depthMap == null) {
+                        PLog.d(TAG, "U2NetP without depth: evaluating the full image")
+                        return@withLock infer(appContext, inputBitmap, fullImage)
+                    }
                     val planStartedAt = SystemClock.elapsedRealtime()
                     val plan = DepthSubjectCropPlanner.plan(depthMap, inputBitmap.width, inputBitmap.height)
                     PLog.d(TAG, "U2NetP depth crop: reason=${plan.reason} crop=${plan.crop} " +
@@ -92,8 +101,7 @@ object SharedSubjectMaskEstimator {
                         // The local prediction provides evidence that the proposed extent is
                         // incomplete. Re-estimate from the complete image; never clip or fill it.
                         PLog.d(TAG, "U2NetP crop rejected: foreground reaches crop boundary; evaluating full image")
-                        result = infer(appContext, inputBitmap,
-                            DepthSubjectCropPlanner.Crop(0, 0, inputBitmap.width, inputBitmap.height))
+                        result = infer(appContext, inputBitmap, fullImage)
                     }
                     ensureActive()
                     result

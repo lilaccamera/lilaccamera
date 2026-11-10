@@ -1,6 +1,7 @@
 package com.hinnka.mycamera.processor
 
 import android.graphics.Bitmap
+import com.hinnka.mycamera.camera.DeviceQuirks
 import android.graphics.ColorSpace
 import android.opengl.EGL14
 import android.opengl.GLES30
@@ -51,7 +52,9 @@ import kotlin.math.roundToInt
 class OglBokehProcessor {
     companion object {
         private const val TAG = "OglBokehProcessor"
-        private const val MAX_BOKEH_RENDER_EDGE = 2560
+        // The blur is computed at this size and composited onto the full picture. The 2560 px render took
+        // 10 to 13 s on the XZ1 Compact and its GPU hung when anything else drew meanwhile.
+        private val MAX_BOKEH_RENDER_EDGE = if (DeviceQuirks.isLilac) 1536 else 2560
         private const val GUIDE_SHORT_EDGE = 512
         private const val STRIP_ROWS = 256
         /** Rows per full-resolution composite / readback submission. */
@@ -1457,8 +1460,13 @@ class OglBokehProcessor {
         EGL14.eglChooseConfig(eglDisplay, configAttribs, 0, configs, 0, 1, numConfigs, 0)
         val config = configs[0]
 
-        // Low priority where supported: the UI renderer preempts the lens blur between submissions.
-        eglContext = GlesGpuScheduler.createBackgroundContext(eglDisplay, checkNotNull(config), TAG)
+        // Low priority where supported: the UI renderer preempts the lens blur between submissions. Not on
+        // the XZ1 Compact: its Adreno 540 driver corrupted preempted lens blur passes while the viewfinder
+        // drew, giving streaked rows, black bands and GPU page faults; at normal priority repeated renders
+        // of one picture came out identical.
+        eglContext = GlesGpuScheduler.createBackgroundContext(
+            eglDisplay, checkNotNull(config), TAG, lowPriority = !DeviceQuirks.isLilac,
+        )
         check(eglContext != EGL14.EGL_NO_CONTEXT) {
             "Bokeh eglCreateContext failed: 0x${EGL14.eglGetError().toString(16)}"
         }
