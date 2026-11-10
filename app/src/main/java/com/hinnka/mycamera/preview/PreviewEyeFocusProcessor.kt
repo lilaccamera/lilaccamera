@@ -102,6 +102,29 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
     /** The tracked face for the Portrait viewfinder; null once no face has been seen for a few frames. */
     var onPortraitFace: ((PortraitFace?) -> Unit)? = null
     var onTargetLost: (() -> Unit)? = null
+
+    /** Down for the person: across the eye line, on the side of the face centre (below the eyes). */
+    private fun portraitFaceOf(candidate: FaceCandidate, inputWidth: Int, inputHeight: Int): PortraitFace {
+        val eyeX = (candidate.rightEyeX - candidate.leftEyeX) * inputWidth
+        val eyeY = (candidate.rightEyeY - candidate.leftEyeY) * inputHeight
+        var downX = -eyeY
+        var downY = eyeX
+        val towardCenterX = (candidate.faceCenterX - (candidate.leftEyeX + candidate.rightEyeX) / 2f) * inputWidth
+        val towardCenterY = (candidate.faceCenterY - (candidate.leftEyeY + candidate.rightEyeY) / 2f) * inputHeight
+        if (downX * towardCenterX + downY * towardCenterY < 0f) {
+            downX = -downX
+            downY = -downY
+        }
+        val length = kotlin.math.hypot(downX, downY)
+        return PortraitFace(
+            centerX = candidate.faceCenterX,
+            centerY = candidate.faceCenterY,
+            width = candidate.boxWidth,
+            height = candidate.boxHeight,
+            downX = if (length > 1e-3f) downX / length else 0f,
+            downY = if (length > 1e-3f) downY / length else 1f,
+        )
+    }
     var onBusyStateChanged: ((Boolean) -> Unit)? = null
     var onFrameProcessed: ((EyeFocusProcessingTiming) -> Unit)? = null
     var onInitializationError: ((Throwable) -> Unit)? = null
@@ -240,12 +263,7 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
                 if (portraitFaceRequested) {
                     if (candidate != null) {
                         portraitFaceMisses = 0
-                        portraitFace = PortraitFace(
-                            centerX = candidate.faceCenterX,
-                            centerY = candidate.faceCenterY,
-                            width = candidate.boxWidth,
-                            height = candidate.boxHeight,
-                        )
+                        portraitFace = portraitFaceOf(candidate, inputWidth, inputHeight)
                         portraitFaceChanged = true
                     } else if (++portraitFaceMisses == PORTRAIT_FACE_LOST_FRAMES) {
                         portraitFaceChanged = true

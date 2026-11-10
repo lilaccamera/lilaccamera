@@ -35,10 +35,15 @@ data class PortraitMaskSnapshot(
     }
 }
 
-/** A detected face as a box in the viewfinder, normalized to its width and height (origin top left). */
+/**
+ * A detected face as a box in the viewfinder, normalized to its width and height (origin top left).
+ * [downX], [downY] is the unit direction from the eyes toward the chin, in viewfinder pixels.
+ */
 data class PortraitFace(
     val centerX: Float,
     val centerY: Float,
     val width: Float,
     val height: Float,
+    val downX: Float = 0f,
+    val downY: Float = 1f,
 )
