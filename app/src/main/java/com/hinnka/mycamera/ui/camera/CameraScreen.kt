@@ -73,6 +73,7 @@ import coil.compose.AsyncImage
 import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.MyCameraApplication
 import com.hinnka.mycamera.R
+import com.hinnka.mycamera.processor.BokehStyle
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.CameraState
 import com.hinnka.mycamera.camera.DeviceQuirks
@@ -265,6 +266,7 @@ fun CameraScreen(
     val showLevelIndicator by preferenceValue { it.showLevelIndicator }
     val focusPeakingEnabled by preferenceValue { it.focusPeakingEnabled }
     val portraitQuickBlur by preferenceValue { it.portraitQuickBlur }
+    val portraitBokehStyle by preferenceValue { BokehStyle.fromPersistedName(it.portraitBokehStyle) }
     val eyeFocusEnabled by preferenceValue { it.eyeFocusEnabled }
     val keepScreenOn by preferenceValue { it.keepScreenOn }
     val currentLutId by viewModel.currentLutId.collectAsState()
@@ -1897,6 +1899,9 @@ fun CameraScreen(
             isPortraitMode = state.isPortraitMode,
             portraitQuickBlur = portraitQuickBlur,
             onPortraitQuickBlurChange = viewModel::setPortraitQuickBlur,
+            portraitBokehStyle = portraitBokehStyle,
+            onPortraitBokehStyleChange = viewModel::setPortraitBokehStyle,
+            onPortraitHelp = viewModel::showPortraitHelp,
             onOpenSettingsAt = onOpenSettingsAt,
             multiFrameCount = jpgMultiFrameCount,
             onMultiFrameCountChange = { viewModel.setJpgMultiFrameDenoiseFrameCount(it) },

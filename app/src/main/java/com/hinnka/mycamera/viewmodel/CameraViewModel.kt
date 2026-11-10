@@ -64,6 +64,7 @@ import com.hinnka.mycamera.preview.EyeFocusPreviewFrame
 import com.hinnka.mycamera.preview.PortraitFace
 import com.hinnka.mycamera.preview.PortraitMaskSnapshot
 import com.hinnka.mycamera.preview.PreviewEyeFocusProcessor
+import com.hinnka.mycamera.processor.BokehStyle
 import com.hinnka.mycamera.processor.CaptureProcessingQueue
 import com.hinnka.mycamera.processor.RawBurstFrameRole
 import com.hinnka.mycamera.processor.MgcSpatialOutputMode
@@ -2934,6 +2935,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             isMirrored = shouldMirror,
             colorSpace = captureInfo.colorSpace,
             computationalAperture = aperture,
+            computationalBokehStyle = portraitBokehStyle(settings.state, settings.preferences),
             focusPointX = settings.state.focusPoint?.first,
             focusPointY = settings.state.focusPoint?.second,
             manualHdrEffectEnabled = defaultHdrEffectEnabled,
@@ -3261,6 +3263,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             return current
         }
         return current.copy(focusPoint = Pair(face.centerX, face.centerY))
+    }
+
+    /** Portrait shots record the Portrait lens effect; other shots keep the default style. */
+    private fun portraitBokehStyle(state: CameraState, preferences: UserPreferences): String =
+        if (state.isPortraitMode) preferences.portraitBokehStyle else BokehStyle.DEFAULT.persistedName
+
+    fun setPortraitBokehStyle(style: BokehStyle) {
+        userPreferencesRepository.updateAsync { portraitBokehStyle = style.persistedName }
+    }
+
+    /** Reopens the Portrait explanation. */
+    fun showPortraitHelp() {
+        showPortraitIntro = true
     }
 
     /** Switches Portrait on or off; Portrait takes the blur strength of the default virtual aperture. */
@@ -5708,6 +5723,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isMirrored = shouldMirror,
                 colorSpace = captureInfo.colorSpace,
                 computationalAperture = aperture,
+                computationalBokehStyle = portraitBokehStyle(settings.state, settings.preferences),
                 focusPointX = settings.state.focusPoint?.first,
                 focusPointY = settings.state.focusPoint?.second,
                 manualHdrEffectEnabled = defaultHdrEffectEnabled,
@@ -5868,6 +5884,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isMirrored = shouldMirror,
                 colorSpace = captureInfo.colorSpace,
                 computationalAperture = computationalAperture,
+                computationalBokehStyle = portraitBokehStyle(currentState, userPreferencesRepository.current),
                 focusPointX = currentState.focusPoint?.first,
                 focusPointY = currentState.focusPoint?.second,
                 captureMode = metadataCaptureMode
@@ -6168,6 +6185,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isMirrored = shouldMirror,
                 colorSpace = captureInfo.colorSpace,
                 computationalAperture = aperture,
+                computationalBokehStyle = portraitBokehStyle(settings.state, settings.preferences),
                 focusPointX = settings.state.focusPoint?.first,
                 focusPointY = settings.state.focusPoint?.second,
                 manualHdrEffectEnabled = defaultHdrEffectEnabled,
@@ -6501,6 +6519,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             isMirrored = shouldMirror,
             colorSpace = captureInfo.colorSpace,
             computationalAperture = aperture,
+            computationalBokehStyle = portraitBokehStyle(settings.state, settings.preferences),
             focusPointX = settings.state.focusPoint?.first,
             focusPointY = settings.state.focusPoint?.second,
             manualHdrEffectEnabled = defaultHdrEffectEnabled

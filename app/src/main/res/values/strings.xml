@@ -1162,11 +1162,13 @@
     <string name="portrait_blur">Portrait blur</string>
     <string name="portrait_blur_quick">Quick</string>
     <string name="portrait_blur_depth">Depth</string>
-    <string name="quick_explain_portrait_blur">Portrait blur: Quick blurs the whole background evenly and needs no model. Depth blurs by distance, takes much longer and needs the depth model.</string>
+    <string name="quick_explain_portrait_bokeh">Natural: round. Swirl: vintage lens. Bubble: bright rings. Change it later in the editor.</string>
     <string name="portrait_intro_title">Portrait</string>
-    <string name="portrait_intro_viewfinder">The viewfinder blurs the surroundings of a face, so you can frame the shot. It is only a guide.</string>
-    <string name="portrait_intro_blur">After you shoot, the photo gets a proper background blur. Quick blur works right away and blurs the whole background evenly. Depth blur is more natural, with the blur growing with distance, but needs a depth model of about 100 MB. It is used once installed.</string>
-    <string name="portrait_intro_ready">The depth model is installed. Photos will use depth blur.</string>
+    <string name="portrait_intro_viewfinder">Portrait recognises faces. The viewfinder outlines the face and lightly blurs around the head and shoulders. This is only a guide.</string>
+    <string name="portrait_intro_blur">Quick blur is even and works right away. Depth blur grows with distance and looks more natural, but needs a depth model of about 100 MB. Choose it on the Portrait blur tile.</string>
+    <string name="portrait_intro_subject">After you shoot, a subject recognition model cuts out the main subject and blurs the rest. It works best on people, and also on pets or objects that stand out.</string>
+    <string name="portrait_intro_edit">The original is kept: change the blur, its focus and the bokeh style later in the photo editor. Long-press the Portrait blur tile to read this again.</string>
+    <string name="portrait_intro_ready">The depth model is installed. Choose Depth on the Portrait blur tile to use it.</string>
     <string name="portrait_intro_download">Download depth model</string>
     <string name="portrait_intro_quick">Use quick blur</string>
     <string name="depth_model_download_title">Depth Model</string>

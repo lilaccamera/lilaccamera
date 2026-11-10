@@ -3,6 +3,8 @@ package com.hinnka.mycamera.ui.camera
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -19,8 +21,9 @@ import com.hinnka.mycamera.ml.DepthModelDownloadState
 import com.hinnka.mycamera.ml.DepthModelManager
 
 /**
- * Shown the first time Portrait is chosen: what the mode does, and the two ways the background is blurred
- * after the shot. The depth model can be downloaded right here.
+ * Shown the first time Portrait is chosen, and on a long press of the Portrait blur tile: how the mode
+ * finds faces and the subject, that the blur can be changed later, and the two blur kinds. The depth model
+ * can be downloaded right here.
  */
 @Composable
 internal fun PortraitIntroDialog(onDismiss: () -> Unit) {
@@ -32,8 +35,14 @@ internal fun PortraitIntroDialog(onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.portrait_intro_title), style = MaterialTheme.typography.titleLarge) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Scrolls on small screens; the text is longer than one 4.6-inch screen can show at large font sizes.
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 Text(stringResource(R.string.portrait_intro_viewfinder), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.portrait_intro_subject), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.portrait_intro_edit), style = MaterialTheme.typography.bodyMedium)
                 Text(stringResource(R.string.portrait_intro_blur), style = MaterialTheme.typography.bodyMedium)
                 when {
                     ready -> Text(stringResource(R.string.portrait_intro_ready), style = MaterialTheme.typography.bodyMedium)

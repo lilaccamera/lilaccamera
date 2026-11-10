@@ -35,6 +35,7 @@ import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.ui.theme.OnAccentColor
 import android.content.Context
 import com.hinnka.mycamera.R
+import com.hinnka.mycamera.processor.BokehStyle
 import com.hinnka.mycamera.ui.settings.SettingsTarget
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.DeviceQuirks
@@ -111,6 +112,9 @@ fun CameraTopSheet(
     isPortraitMode: Boolean = false,
     portraitQuickBlur: Boolean = true,
     onPortraitQuickBlurChange: (Boolean) -> Unit = {},
+    portraitBokehStyle: BokehStyle = BokehStyle.NATURAL,
+    onPortraitBokehStyleChange: (BokehStyle) -> Unit = {},
+    onPortraitHelp: () -> Unit = {},
     // Long press on a tile opens Settings at that tile's setting.
     onOpenSettingsAt: (SettingsTarget) -> Unit = {},
     multiFrameCount: Int,
@@ -250,7 +254,28 @@ fun CameraTopSheet(
                                     ),
                                     highlighted = !portraitQuickBlur,
                                     onClick = { onPortraitQuickBlurChange(!portraitQuickBlur) },
-                                    onLongClick = { showQuickSettingExplanation(portraitContext, R.string.quick_explain_portrait_blur) },
+                                    onLongClick = onPortraitHelp,
+                                    modifier = itemModifier
+                                )
+                                QuickSettingValue(
+                                    title = stringResource(R.string.gallery_bokeh_style_title),
+                                    value = stringResource(
+                                        when (portraitBokehStyle) {
+                                            BokehStyle.NATURAL -> R.string.gallery_bokeh_style_natural
+                                            BokehStyle.DEFAULT -> R.string.gallery_bokeh_style_default
+                                            BokehStyle.BUBBLE -> R.string.gallery_bokeh_style_bubble
+                                        }
+                                    ),
+                                    onClick = {
+                                        onPortraitBokehStyleChange(
+                                            when (portraitBokehStyle) {
+                                                BokehStyle.NATURAL -> BokehStyle.DEFAULT
+                                                BokehStyle.DEFAULT -> BokehStyle.BUBBLE
+                                                BokehStyle.BUBBLE -> BokehStyle.NATURAL
+                                            }
+                                        )
+                                    },
+                                    onLongClick = { showQuickSettingExplanation(portraitContext, R.string.quick_explain_portrait_bokeh) },
                                     modifier = itemModifier
                                 )
                             }
