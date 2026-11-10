@@ -2,6 +2,9 @@ package com.hinnka.mycamera.preview
 
 import android.content.Context
 import android.graphics.Bitmap
+import com.hinnka.mycamera.utils.OrientationObserver
+import android.graphics.RectF
+import android.graphics.Matrix
 import android.os.SystemClock
 import com.hinnka.mycamera.ml.BlazeFaceDetector
 import com.hinnka.mycamera.utils.PLog
@@ -181,6 +184,57 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
         }
     }
 
+    /**
+     * BlazeFace only finds upright faces, and the viewfinder frame is drawn for a phone held upright: with
+     * the phone sideways faces lie on their side in it. The frame is turned by the phone's rotation, then
+     * the other way if nothing is found (the turn the picture needs depends on the camera), and the
+     * detections are mapped back to the frame as drawn.
+     */
+    private fun detectUpright(detector: BlazeFaceDetector, bitmap: Bitmap): List<BlazeFaceDetector.Detection> {
+        uprightDetections = emptyMap()
+        val deviceRotation = Math.floorMod(OrientationObserver.captureRotationDegrees.toInt(), 360)
+        if (deviceRotation == 0) return detector.detect(bitmap)
+        for (rotation in listOf(deviceRotation, (360 - deviceRotation) % 360).distinct()) {
+            val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
+            val upright = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            try {
+                val found = detector.detect(upright)
+                if (found.isNotEmpty()) {
+                    val mapped = found.map { unrotate(it, rotation) }
+                    uprightDetections = mapped.zip(found).toMap()
+                    return mapped
+                }
+            } finally {
+                if (upright !== bitmap) upright.recycle()
+            }
+        }
+        return emptyList()
+    }
+
+    /** Each mapped-back detection of the current frame with the upright one it came from (detector thread). */
+    private var uprightDetections: Map<BlazeFaceDetector.Detection, BlazeFaceDetector.Detection> = emptyMap()
+
+    /** Maps a detection in a frame turned [rotation] degrees clockwise back to the unturned frame. */
+    private fun unrotate(detection: BlazeFaceDetector.Detection, rotation: Int): BlazeFaceDetector.Detection {
+        fun x(u: Float, v: Float) = when (rotation) { 90 -> v; 180 -> 1f - u; else -> 1f - v }
+        fun y(u: Float, v: Float) = when (rotation) { 90 -> 1f - u; 180 -> 1f - v; else -> u }
+        val box = detection.box
+        val x1 = x(box.left, box.top); val y1 = y(box.left, box.top)
+        val x2 = x(box.right, box.bottom); val y2 = y(box.right, box.bottom)
+        val keypoints = detection.keypoints.copyOf()
+        for (i in 0 until keypoints.size - 1 step 2) {
+            val u = detection.keypoints[i]
+            val v = detection.keypoints[i + 1]
+            keypoints[i] = x(u, v)
+            keypoints[i + 1] = y(u, v)
+        }
+        return BlazeFaceDetector.Detection(
+            box = RectF(minOf(x1, x2), minOf(y1, y2), maxOf(x1, x2), maxOf(y1, y2)),
+            score = detection.score,
+            keypoints = keypoints,
+        )
+    }
+
     fun resetTracking() {
         trackingGeneration.incrementAndGet()
         synchronized(stateLock) {
@@ -200,7 +254,7 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
             if (released.get()) return
             val detector = getOrCreateDetector() ?: return
             val detections = try {
-                detector.detect(bitmap)
+                detectUpright(detector, bitmap)
             } catch (error: RuntimeException) {
                 PLog.e(TAG, "BlazeFace eye focus inference failed", error)
                 onError?.invoke(error)
@@ -350,17 +404,19 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
             val boxWidth = box.width()
             val boxHeight = box.height()
             val confidence = detection.score
+            // The geometry checks assume an upright face: use the detection as found in the turned frame.
+            val upright = uprightDetections[detection] ?: detection
             if (
                 confidence < MIN_TARGET_CONFIDENCE ||
                 !isValidFaceGeometry(
-                    boxLeft = boxLeft,
-                    boxTop = boxTop,
-                    boxWidth = boxWidth,
-                    boxHeight = boxHeight,
-                    leftEyeX = eyeCoordinates[0],
-                    leftEyeY = eyeCoordinates[1],
-                    rightEyeX = eyeCoordinates[2],
-                    rightEyeY = eyeCoordinates[3],
+                    boxLeft = upright.box.left,
+                    boxTop = upright.box.top,
+                    boxWidth = upright.box.width(),
+                    boxHeight = upright.box.height(),
+                    leftEyeX = upright.keypoints[0],
+                    leftEyeY = upright.keypoints[1],
+                    rightEyeX = upright.keypoints[2],
+                    rightEyeY = upright.keypoints[3],
                 )
             ) {
                 return@mapNotNull null
