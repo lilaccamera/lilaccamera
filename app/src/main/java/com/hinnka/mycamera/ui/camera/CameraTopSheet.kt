@@ -722,19 +722,18 @@ private fun RowScope.PhotoEverydayItems(
 ) {
     val on = stringResource(R.string.quick_on)
     val off = stringResource(R.string.quick_off)
-    val live = painterResource(R.drawable.ic_live_photo)
     EverydayItem(
         label = "${stringResource(R.string.quick_live)} ${if (useLivePhoto) on else off}",
         active = useLivePhoto,
         onClick = onLivePhotoToggle,
         modifier = itemModifier
-    ) { color -> Icon(live, contentDescription = null, tint = color, modifier = Modifier.size(24.dp)) }
+    ) { color -> Icon(AppIcons.LivePhotoLine, contentDescription = null, tint = color, modifier = Modifier.size(24.dp)) }
     EverydayItem(
         label = "${stringResource(R.string.timer)} ${if (timerSeconds > 0) "${timerSeconds}s" else off}",
         active = timerSeconds > 0,
         onClick = onTimerToggle,
         modifier = itemModifier
-    ) { color -> Icon(AppIcons.Timer, contentDescription = null, tint = color, modifier = Modifier.size(24.dp)) }
+    ) { color -> Icon(AppIcons.StopwatchLine, contentDescription = null, tint = color, modifier = Modifier.size(24.dp)) }
     EverydayItem(
         label = aspectRatio.getDisplayName(),
         active = false,
@@ -756,9 +755,9 @@ private fun RowScope.PhotoEverydayItems(
     ) { color ->
         Icon(
             imageVector = when (flashMode) {
-                1 -> AppIcons.FlashOn
-                2 -> AppIcons.FlashlightOn
-                else -> AppIcons.FlashOff
+                1 -> AppIcons.BoltLine
+                2 -> AppIcons.BulbLine
+                else -> AppIcons.BoltOffLine
             },
             contentDescription = null,
             tint = color,
@@ -797,7 +796,7 @@ private fun RowScope.VideoEverydayItems(
         modifier = itemModifier
     ) { color ->
         Icon(
-            imageVector = if (torch) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
+            imageVector = if (torch) AppIcons.BulbLine else AppIcons.BulbOffLine,
             contentDescription = null,
             tint = color,
             modifier = Modifier.size(24.dp)
@@ -905,9 +904,9 @@ private fun SheetHeader(
                 .background(SheetGrey, RoundedCornerShape(2.dp))
         )
         Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            HeaderIcon(AppIcons.Palette, stringResource(R.string.toolbox_title), onToolboxClick)
-            HeaderIcon(AppIcons.Tune, stringResource(R.string.settings_section_management), onContentManagementClick)
-            HeaderIcon(Icons.Default.Settings, stringResource(R.string.settings_title), onSettingsClick)
+            HeaderIcon(AppIcons.ToolboxLine, stringResource(R.string.toolbox_title), onToolboxClick)
+            HeaderIcon(AppIcons.FoldersLine, stringResource(R.string.settings_section_management), onContentManagementClick)
+            HeaderIcon(AppIcons.SettingsLine, stringResource(R.string.settings_title), onSettingsClick)
         }
     }
 }
@@ -1077,7 +1076,7 @@ private fun QuickLink(value: String, open: Boolean, onClick: () -> Unit) {
     ) {
         Text(value, color = SheetText, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
         Icon(
-            imageVector = if (open) AppIcons.ExpandLess else AppIcons.ChevronRight,
+            imageVector = if (open) AppIcons.ChevronUpLine else AppIcons.ChevronRightLine,
             contentDescription = null,
             tint = SheetGrey,
             modifier = Modifier.size(16.dp)

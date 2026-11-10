@@ -213,21 +213,11 @@ fun ZoomControlBarVerticel(
             modifier = Modifier.align(Alignment.TopCenter)
         ) {
             // Display Mode Toggle (Top)
-            IconButton(
-                onClick = {
-                    viewModel.saveZoomDisplayMode(displayMode.next())
-                },
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    imageVector = AppIcons.SwapHoriz,
-                    contentDescription = stringResource(R.string.toggle_display_mode),
-                    modifier = Modifier.size(32.dp)
-                        .background(Color.Black.copy(alpha = 0.3f), CircleShape)
-                        .padding(8.dp),
-                    tint = Color.White
-                )
-            }
+            SideBarLineButton(
+                icon = AppIcons.SwapLine,
+                contentDescription = stringResource(R.string.toggle_display_mode),
+                onClick = { viewModel.saveZoomDisplayMode(displayMode.next()) }
+            )
         }
 
         AnimatedVisibility(
@@ -237,23 +227,15 @@ fun ZoomControlBarVerticel(
             modifier = Modifier.align(Alignment.BottomCenter)
         ) {
             // 底部滤镜按钮
-            IconButton(
+            // Looks, as on the footer: the film frame line icon.
+            SideBarLineButton(
+                icon = AppIcons.Film,
+                contentDescription = stringResource(R.string.filters_panel),
                 onClick = onFilterClick,
-                modifier = Modifier
-                    .size(32.dp)
-                    .onGloballyPositioned { coordinates ->
-                        onFilterButtonBoundsChanged(coordinates.boundsInRoot())
-                    }
-            ) {
-                Icon(
-                    imageVector = AppIcons.AutoAwesome,
-                    contentDescription = stringResource(R.string.filters_panel),
-                    modifier = Modifier.size(32.dp)
-                        .background(Color.Black.copy(alpha = 0.3f), CircleShape)
-                        .padding(8.dp),
-                    tint = AccentColor
-                )
-            }
+                modifier = Modifier.onGloballyPositioned { coordinates ->
+                    onFilterButtonBoundsChanged(coordinates.boundsInRoot())
+                }
+            )
         }
 
         // Zoom Ruler (Center)
@@ -632,4 +614,27 @@ private fun zoomRatioToFocalLengthV(zoomRatio: Float, mainCamera: CameraInfo?): 
         return (23f * zoomRatio).toInt().toString()
     }
     return (mainCamera.focalLength35mmEquivalent * zoomRatio).roundToInt().toString()
+}
+
+/**
+ * A footer-style button on the 32 dp side bar: a 48 dp touch target reaching past the bar's edges,
+ * with a line icon in the footer's line colour and no backing.
+ */
+@Composable
+private fun SideBarLineButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    com.hinnka.mycamera.ui.components.PhysicalButton(
+        onClick = onClick,
+        modifier = modifier
+            .requiredSize(CameraControlsLayoutDefaults.SideButtonSize)
+            .autoRotate(),
+        shape = RoundedCornerShape(com.hinnka.mycamera.ui.components.ThumbnailCorner),
+        backgroundColor = Color.Transparent
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = CameraControlsLayoutDefaults.LineColor, modifier = Modifier.size(24.dp))
+    }
 }

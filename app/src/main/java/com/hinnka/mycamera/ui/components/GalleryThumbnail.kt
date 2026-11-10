@@ -98,7 +98,7 @@ fun GalleryThumbnail(
         } else {
             // 没有照片时显示图标
             Icon(
-                imageVector = AppIcons.PhotoLibrary,
+                imageVector = AppIcons.PhotoLine,
                 contentDescription = "Gallery",
                 tint = Color.White.copy(alpha = 0.7f),
                 modifier = Modifier.size(24.dp)
