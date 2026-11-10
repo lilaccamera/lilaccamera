@@ -2189,12 +2189,15 @@ private fun Controls(
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.Center
             ) {
+                val thumbnailPhotoInset = CameraControlsLayoutDefaults.LineWidth + CameraControlsLayoutDefaults.LineGap
+                val thumbnailPhotoInsetPx = with(LocalDensity.current) { thumbnailPhotoInset.toPx() }
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterStart)
                         .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
                         .onGloballyPositioned { coordinates ->
-                            onGalleryThumbnailBoundsChanged(coordinates.boundsInRoot())
+                            // The capture fly-in lands on the photo, inside the frame.
+                            onGalleryThumbnailBoundsChanged(coordinates.boundsInRoot().deflate(thumbnailPhotoInsetPx))
                         }
                         .autoRotate()
                 ) {
@@ -2203,6 +2206,7 @@ private fun Controls(
                         viewModel = galleryViewModel,
                         capturedThumbnail = capturedThumbnail,
                         onCapturedThumbnailLoaded = viewModel::acknowledgeCapturedThumbnail,
+                        photoInset = thumbnailPhotoInset,
                         onClick = onGalleryClick
                     )
                     val queueStatus by RenderQueue.status.collectAsState()
@@ -2405,6 +2409,10 @@ private fun GalleryProcessingOverlay(
         ),
         contentAlignment = Alignment.Center
     ) {
+        // Idle frame line; the processing states below draw their edge in its place.
+        if (processing == null) {
+            Box(Modifier.matchParentSize().border(CameraControlsLayoutDefaults.LineWidth, CameraControlsLayoutDefaults.LineColor, thumbnailShape))
+        }
         if (processing == ThumbnailProcessing.PAUSED) {
             // The one state that needs the user (Resume), so the only one that covers the photo.
             Box(Modifier.matchParentSize().clip(thumbnailShape).background(Color.Black.copy(alpha = 0.35f)))
