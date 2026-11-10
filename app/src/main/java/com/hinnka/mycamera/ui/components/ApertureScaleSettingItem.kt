@@ -18,6 +18,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -58,7 +61,10 @@ fun ApertureScaleSettingItem(
     modifier: Modifier = Modifier
 ) {
     val shouldShowScale = enabled || toggleValue == null
-    val selectedIndex = closestApertureStopIndex(value)
+    // While a drag is under way only the marker moves; the value is applied when the finger lifts,
+    // because each new value starts a background blur render.
+    var dragIndex by remember { mutableStateOf<Int?>(null) }
+    val selectedIndex = dragIndex ?: closestApertureStopIndex(value)
     val selectedIndexState by rememberUpdatedState(selectedIndex)
     val enabledState by rememberUpdatedState(enabled)
     val onValueChangeState by rememberUpdatedState(onValueChange)
@@ -137,10 +143,21 @@ fun ApertureScaleSettingItem(
                         }
                     }
                     .pointerInput(Unit) {
-                        detectHorizontalDragGestures { change, _ ->
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                val index = dragIndex
+                                dragIndex = null
+                                if (index != null && enabledState) onValueChangeState(ApertureScaleStops[index])
+                            },
+                            onDragCancel = { dragIndex = null },
+                        ) { change, _ ->
                             change.consume()
                             val cellWidth = size.width.toFloat() / stopCount
-                            selectIndex((change.position.x / cellWidth).toInt().coerceIn(0, stopCount - 1))
+                            val index = (change.position.x / cellWidth).toInt().coerceIn(0, stopCount - 1)
+                            if (enabledState && index != selectedIndexState) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                dragIndex = index
+                            }
                         }
                     },
                 horizontalArrangement = Arrangement.SpaceBetween
