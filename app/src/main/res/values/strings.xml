@@ -1295,6 +1295,7 @@
     <string name="video_heat_back_to_camera">Back to camera</string>
     <string name="video_too_hot_to_start">%1$s at %2$d °C: too hot to record. Let the phone cool down.</string>
     <string name="heat_source_camera">Camera</string>
+    <string name="heat_source_phone">Phone</string>
     <string name="heat_source_battery">Battery</string>
     <string name="video_too_hot_to_start_no_temp">Phone too hot to record. Let it cool down.</string>
     <string name="eis_plus_unavailable_message">This device cannot disable its built-in camera stabilization. EIS+ has been turned off to avoid unstable video caused by double stabilization.</string>

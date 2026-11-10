@@ -18,6 +18,8 @@ import kotlin.math.roundToInt
  *   its own camera app to close at 60 °C and kills the camera at 70 °C; recording past that kill can
  *   lose the video. On a 10-minute stabilized recording on the charger (Xperia XZ1 Compact, room at
  *   23 °C) the main sensor went from 46 to 60 °C.
+ * - Phone (lilac only, board sensor `msm_therm` in tenths of °C): Sony's thermal service starts a
+ *   30-minute camera limit at 46.9 °C and sends its stronger camera notice and heavy CPU cuts at 52 °C.
  * - Battery (all phones): charging is cut from 45 °C; the phone shuts down at 67 °C.
  * - Android's thermal status, on phones whose thermal HAL reports it.
  */
@@ -28,6 +30,7 @@ object CameraHeat {
     enum class Level { OK, WARN, STOP }
     enum class Source(@StringRes val label: Int) {
         CAMERA(R.string.heat_source_camera),
+        PHONE(R.string.heat_source_phone),
         BATTERY(R.string.heat_source_battery),
     }
 
@@ -35,6 +38,7 @@ object CameraHeat {
 
     private val limits = mapOf(
         Source.CAMERA to Limits(WARN_C.toFloat(), STOP_C.toFloat()),
+        Source.PHONE to Limits(47f, 52f),
         Source.BATTERY to Limits(47f, 50f),
     )
 
@@ -75,10 +79,15 @@ object CameraHeat {
     private fun File.readIntOrNull(): Int? = runCatching { readText().trim().toInt() }.getOrNull()
 
     private val cameraFiles: List<File> by lazy { zoneTempFiles { it.startsWith("sony_camera_") } }
+    private val boardFile: File? by lazy {
+        if (DeviceQuirks.isLilac) zoneTempFiles { it == "msm_therm" }.firstOrNull() else null
+    }
 
     private fun cameraC(): Float? =
         cameraFiles.mapNotNull { file -> file.readIntOrNull()?.let { if (it > 1000) it / 1000 else it } }
             .maxOrNull()?.toFloat()
+
+    private fun boardC(): Float? = boardFile?.readIntOrNull()?.let { it / 10f }
 
     private fun batteryC(context: Context): Float? =
         context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -89,6 +98,7 @@ object CameraHeat {
     fun read(context: Context): Reading {
         val gauges = listOfNotNull(
             cameraC()?.let { gauge(Source.CAMERA, it) },
+            boardC()?.let { gauge(Source.PHONE, it) },
             batteryC(context)?.let { gauge(Source.BATTERY, it) },
         )
         val thermalStatus = (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.currentThermalStatus
@@ -96,6 +106,7 @@ object CameraHeat {
         return Reading(gauges, thermalStatus)
     }
 
-    /** A reading that works with the camera closed. */
-    fun readPhone(context: Context): Gauge? = batteryC(context)?.let { gauge(Source.BATTERY, it) }
+    /** A reading that works with the camera closed: the board sensor where there is one, else the battery. */
+    fun readPhone(context: Context): Gauge? =
+        boardC()?.let { gauge(Source.PHONE, it) } ?: batteryC(context)?.let { gauge(Source.BATTERY, it) }
 }
