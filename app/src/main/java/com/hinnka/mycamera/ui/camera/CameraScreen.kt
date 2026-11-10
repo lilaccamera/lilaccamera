@@ -7,6 +7,7 @@ import com.hinnka.mycamera.ui.prefs.rememberUserPreferencesRepository
 import com.hinnka.mycamera.data.UserPreferences
 import com.hinnka.mycamera.ui.prefs.rememberPreference
 import com.hinnka.mycamera.ui.prefs.preferenceValue
+import android.hardware.camera2.CaptureRequest
 import android.Manifest
 import android.app.Activity
 import android.content.Context
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -391,6 +393,15 @@ fun CameraScreen(
     var activePanel by remember { mutableStateOf(ActivePanel.NONE) }
     var selectedParameter by remember { mutableStateOf(CameraParameter.EXPOSURE_COMPENSATION) }
     var showParameterRuler by remember(state.captureMode, state.useRaw) { mutableStateOf(false) }
+    // Vertical swipes on the picture: up shows the manual values on its bottom edge, down drops the
+    // everyday quick settings onto its top edge. Each swipe first closes what the other one opened.
+    var manualControlsShown by rememberSaveable { mutableStateOf(false) }
+    var everydayRowShown by remember { mutableStateOf(false) }
+    // A value set by hand (EV, ISO, shutter, focus, white balance) keeps the row on screen, so a shot is never
+    // taken with a fixed value nobody can see.
+    val anyManualValue = state.exposureCompensation != 0 || !state.isIsoAuto || !state.isShutterSpeedAuto ||
+        !state.isAutoFocus || state.awbMode != CaptureRequest.CONTROL_AWB_MODE_AUTO
+    val manualValuesVisible = manualControlsShown || anyManualValue
     val isXpan = state.aspectRatio == AspectRatio.XPAN
     val burstCapturingCount = viewModel.burstImageCount
 
@@ -1015,6 +1026,21 @@ fun CameraScreen(
                 parameterRulerBounds = null
             }
         }
+        // The everyday row gives way to any panel and to a recording.
+        LaunchedEffect(activePanel, state.videoRecordingState.isRecording) {
+            if (activePanel != ActivePanel.NONE || state.videoRecordingState.isRecording) everydayRowShown = false
+        }
+        // XPAN keeps its manual values on the side bar, so there a swipe only moves the everyday row.
+        val onPictureSwipe by rememberUpdatedState<(Boolean) -> Unit> { up ->
+            if (up) {
+                if (everydayRowShown) everydayRowShown = false else if (!isXpan) manualControlsShown = true
+            } else if (manualControlsShown && !isXpan) {
+                manualControlsShown = false
+                showParameterRuler = false
+            } else {
+                everydayRowShown = true
+            }
+        }
 
         val density = LocalDensity.current
         val width = with(density) { constraints.maxWidth.toDp() }
@@ -1194,10 +1220,12 @@ fun CameraScreen(
                                 var swipeDownTime = 0L
                                 var swipeDecided = false
                                 var swipeTracking = false
+                                var verticalTracking = false
                                 val velocityTracker = VelocityTracker()
                                 fun cancelSwipe() {
                                     if (swipeTracking) lutSwipeState.cancel()
                                     swipeTracking = false
+                                    verticalTracking = false
                                     swipeDecided = true
                                 }
                                 while (true) {
@@ -1210,7 +1238,12 @@ fun CameraScreen(
                                             if (firstPressedChange != null && currentPreviewBounds != null) {
                                                 val positionInRoot =
                                                     currentPreviewBounds.topLeft + firstPressedChange.position
-                                                parameterRulerBounds?.contains(positionInRoot) == true
+                                                // The footer's top: the Looks and Q buttons, above the shutter.
+                                                val footerTop = captureButtonBounds?.let { it.top - 53.dp.toPx() }
+                                                parameterRulerBounds?.contains(positionInRoot) == true ||
+                                                    // Quick settings open: a tap still closes them and focuses.
+                                                    activePanel != ActivePanel.NONE ||
+                                                    (footerTop != null && positionInRoot.y > footerTop)
                                             } else {
                                                 false
                                             }
@@ -1276,13 +1309,30 @@ fun CameraScreen(
                                                         previousName = previousLut?.getName(),
                                                         nextName = nextLut.getName(),
                                                     )
+                                                } else if (
+                                                    abs(dy) > abs(dx) * 1.5f &&
+                                                    !afterLongPress &&
+                                                    !state.videoRecordingState.isRecording &&
+                                                    !viewModel.showPortraitIntro &&
+                                                    !viewModel.showProGuide
+                                                ) {
+                                                    verticalTracking = true
                                                 }
+                                            }
+                                            if (verticalTracking) {
+                                                // Taken by the swipe: no tap focus or long-press lock at its end.
+                                                change.consume()
                                             }
                                             if (swipeTracking) {
                                                 // 消费事件，使预览上的点按对焦 / 长按锁焦随之取消
                                                 change.consume()
                                                 lutSwipeState.drag(sign(dx) * max(abs(dx) - touchSlop, 0f))
                                             }
+                                        } else if (!change.pressed && verticalTracking) {
+                                            change.consume()
+                                            verticalTracking = false
+                                            val dy = change.position.y - (swipeStart?.y ?: change.position.y)
+                                            if (abs(dy) >= 40.dp.toPx()) onPictureSwipe(dy < 0)
                                         } else if (!change.pressed && swipeTracking) {
                                             change.consume()
                                             val direction = lutSwipeState.release(
@@ -1363,6 +1413,10 @@ fun CameraScreen(
                                 viewModel.closeCamera(surfaceTexture)
                             },
                             onTap = { x, y, w, h ->
+                                // Quick settings and the everyday row close and the tap still focuses;
+                                // other panels only close.
+                                everydayRowShown = false
+                                if (activePanel == ActivePanel.SETTINGS) activePanel = ActivePanel.NONE
                                 if (state.isFocusLocked) {
                                     viewModel.unlockFocus()
                                 } else if (activePanel != ActivePanel.NONE) {
@@ -1803,7 +1857,7 @@ fun CameraScreen(
             val topEdgeHistogram = state.histogram.takeIf { isPhotoStyleMode && showHistogram }
             AnimatedVisibility(
                 visible = activePanel != ActivePanel.SETTINGS && !state.videoRecordingState.isRecording &&
-                    (topEdgeMarks.isNotEmpty() || topEdgeHistogram != null),
+                    !everydayRowShown && (topEdgeMarks.isNotEmpty() || topEdgeHistogram != null),
                 enter = fadeIn(tween(150)),
                 exit = fadeOut(tween(150)),
                 modifier = Modifier
@@ -1813,7 +1867,7 @@ fun CameraScreen(
                 TopEdgeLine(
                     marks = topEdgeMarks,
                     histogram = topEdgeHistogram,
-                    onClick = { activePanel = ActivePanel.SETTINGS }
+                    onClick = { everydayRowShown = true }
                 )
             }
 
@@ -1848,7 +1902,7 @@ fun CameraScreen(
             // Guide pills sit 8 dp above the highest of the picture's bottom, the manual values and the shutter.
             val guidePillBottom = listOfNotNull(
                 previewBounds?.bottom,
-                parameterBarTop.takeIf { !isXpan },
+                parameterBarTop.takeIf { !isXpan && manualValuesVisible },
                 captureButtonBounds?.top,
             ).minOrNull()?.let { it - (cameraScreenBounds?.top ?: 0f) }
             val guidePillPlacement = Modifier
@@ -1927,8 +1981,14 @@ fun CameraScreen(
                 },
                 parameterBar = {
                     if (!isXpan) {
-                        Box(Modifier.onGloballyPositioned { parameterBarTop = it.boundsInRoot().top }) {
-                            parameterBar(selectedParameter.takeIf { showParameterRuler }, onParameterClick)
+                        AnimatedVisibility(
+                            visible = manualValuesVisible,
+                            enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 3 },
+                            exit = fadeOut(tween(150)) + slideOutVertically(tween(150)) { it / 3 }
+                        ) {
+                            Box(Modifier.onGloballyPositioned { parameterBarTop = it.boundsInRoot().top }) {
+                                parameterBar(selectedParameter.takeIf { showParameterRuler }, onParameterClick)
+                            }
                         }
                     }
                 },
@@ -1943,7 +2003,7 @@ fun CameraScreen(
             previewBounds
         }
 
-        if (activePanel != ActivePanel.NONE) {
+        if (activePanel != ActivePanel.NONE && activePanel != ActivePanel.SETTINGS) {
             PanelDismissPreviewOverlay(
                 // A tap on the picture closes the open panel; quick settings leave the picture undimmed.
                 bounds = panelDismissBounds,
@@ -2076,6 +2136,8 @@ fun CameraScreen(
             useMultipleExposure = useMultipleExposure,
             onMultipleExposureToggle = { viewModel.setUseMultipleExposure(it) },
             onDismiss = { activePanel = ActivePanel.NONE },
+            everydayRowOnTop = everydayRowShown && activePanel == ActivePanel.NONE,
+            everydayRowOnTopModifier = Modifier.align(Alignment.TopCenter).padding(top = viewfinderTop),
             modifier = Modifier.align(Alignment.BottomCenter)
         )
 

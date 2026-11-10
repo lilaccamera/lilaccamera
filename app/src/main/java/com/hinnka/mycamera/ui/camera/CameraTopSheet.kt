@@ -35,6 +35,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -221,6 +222,9 @@ internal fun CameraTopSheet(
     useMultipleExposure: Boolean,
     onMultipleExposureToggle: (Boolean) -> Unit,
     onDismiss: () -> Unit,
+    // The everyday row on its own on the picture's top edge, dropped there by a swipe down.
+    everydayRowOnTop: Boolean = false,
+    everydayRowOnTopModifier: Modifier = Modifier,
     modifier: Modifier = Modifier
 ) {
     var showRenderingEngineSheet by rememberSaveable { mutableStateOf(false) }
@@ -265,6 +269,59 @@ internal fun CameraTopSheet(
     val isProfessionalMode = captureMode == CaptureMode.PHOTO && useRaw && isRawSupported
     val isVideo = captureMode == CaptureMode.VIDEO
 
+    // The everyday settings: a tap steps to the next value. Shown in the sheet and on the top edge.
+    val everydayItems: @Composable RowScope.() -> Unit = {
+        val itemModifier = Modifier.weight(1f)
+        if (isVideo) {
+            VideoEverydayItems(
+                videoConfig = videoConfig,
+                videoCapabilities = videoCapabilities,
+                onResolutionClick = onVideoResolutionClick,
+                onFpsClick = onVideoFpsClick,
+                onTorchToggle = onVideoTorchToggle,
+                onStabilizationModeChange = onVideoStabilizationModeChange,
+                itemModifier = itemModifier
+            )
+        } else {
+            PhotoEverydayItems(
+                useLivePhoto = useLivePhoto,
+                onLivePhotoToggle = onLivePhotoToggle,
+                timerSeconds = timerSeconds,
+                onTimerToggle = onTimerToggle,
+                aspectRatio = shownAspect,
+                onAspectClick = {
+                    val ratios = AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios)
+                    pendingAspect = ratios[(ratios.indexOf(shownAspect) + 1).mod(ratios.size)]
+                },
+                flashMode = flashMode,
+                // Refreshed from the open camera's data in Photo mode too.
+                flashAvailable = videoCapabilities.supportsTorch,
+                onFlashToggle = onFlashToggle,
+                itemModifier = itemModifier
+            )
+        }
+    }
+
+    // Swipe down on the picture: the everyday row drops onto its top edge over a light scrim.
+    val dropOffset = with(androidx.compose.ui.platform.LocalDensity.current) { 14.dp.roundToPx() }
+    AnimatedVisibility(
+        visible = everydayRowOnTop,
+        enter = slideInVertically(tween(260, easing = SheetEasing)) { -dropOffset } + fadeIn(tween(180)),
+        exit = slideOutVertically(tween(180)) { -dropOffset } + fadeOut(tween(150)),
+        modifier = everydayRowOnTopModifier
+    ) {
+        CompositionLocalProvider(LocalEverydayTurns provides false) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(84.dp)
+                    .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.5f), Color.Transparent)))
+                    .padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 14.dp),
+                content = everydayItems
+            )
+        }
+    }
+
     AnimatedVisibility(
         visible = visible,
         enter = slideInVertically(tween(260, easing = SheetEasing)) { riseOffset } + fadeIn(tween(160)),
@@ -287,43 +344,14 @@ internal fun CameraTopSheet(
                     )
                 }
         ) {
-            // Everyday row: floats on the picture above the list; a tap steps to the next value.
+            // Everyday row: floats on the picture above the list.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(72.dp)
-                    .padding(horizontal = 6.dp)
-            ) {
-                val itemModifier = Modifier.weight(1f)
-                if (isVideo) {
-                    VideoEverydayItems(
-                        videoConfig = videoConfig,
-                        videoCapabilities = videoCapabilities,
-                        onResolutionClick = onVideoResolutionClick,
-                        onFpsClick = onVideoFpsClick,
-                        onTorchToggle = onVideoTorchToggle,
-                        onStabilizationModeChange = onVideoStabilizationModeChange,
-                        itemModifier = itemModifier
-                    )
-                } else {
-                    PhotoEverydayItems(
-                        useLivePhoto = useLivePhoto,
-                        onLivePhotoToggle = onLivePhotoToggle,
-                        timerSeconds = timerSeconds,
-                        onTimerToggle = onTimerToggle,
-                        aspectRatio = shownAspect,
-                        onAspectClick = {
-                            val ratios = AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios)
-                            pendingAspect = ratios[(ratios.indexOf(shownAspect) + 1).mod(ratios.size)]
-                        },
-                        flashMode = flashMode,
-                        // Refreshed from the open camera's data in Photo mode too.
-                        flashAvailable = videoCapabilities.supportsTorch,
-                        onFlashToggle = onFlashToggle,
-                        itemModifier = itemModifier
-                    )
-                }
-            }
+                    .padding(horizontal = 6.dp),
+                content = everydayItems
+            )
             Spacer(Modifier.height(6.dp))
 
             Column(
@@ -824,6 +852,9 @@ private fun RowScope.VideoEverydayItems(
     }
 }
 
+// Everyday items turn with the phone in the sheet; on the picture's top edge they stay upright.
+private val LocalEverydayTurns = staticCompositionLocalOf { true }
+
 /** An everyday setting: its icon or value, and its name with the value underneath. Turns with the phone. */
 @Composable
 private fun EverydayItem(
@@ -863,7 +894,7 @@ private fun EverydayItem(
                     scaleY = 1f - 0.12f * press
                     alpha = 1f - 0.4f * press
                 }
-                .autoRotate(),
+                .then(if (LocalEverydayTurns.current) Modifier.autoRotate() else Modifier),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
