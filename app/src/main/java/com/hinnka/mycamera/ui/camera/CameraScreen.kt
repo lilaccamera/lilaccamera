@@ -154,8 +154,6 @@ private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
 private const val DefaultIso = 100f
 private const val DefaultAwbTemperature = 5000f
 private const val DefaultFocusDistance = 0f
-// Room kept free on the picture's top edge for the line of active-setting marks.
-private val TopEdgeLineHeight = 38.dp
 private val XpanViewfinderInnerBorder = 4.dp
 private val XpanSideControlReservedWidth = 56.dp
 
@@ -1450,12 +1448,10 @@ fun CameraScreen(
                         Box(Modifier.fillMaxSize().background(Color.Black))
                     }
 
-                    val showLivePhotoIndicator =
-                        state.captureMode == CaptureMode.PHOTO && useLivePhoto
                     val showVirtualApertureIndicator =
                         state.captureMode != CaptureMode.VIDEO &&
                             state.isVirtualApertureEnabled
-                    if (showLivePhotoIndicator || showVirtualApertureIndicator) {
+                    if (showVirtualApertureIndicator) {
                         Column(
                             modifier = Modifier
                                 .padding(
@@ -1466,21 +1462,6 @@ fun CameraScreen(
                             horizontalAlignment = Alignment.End,
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            if (showLivePhotoIndicator) {
-                                Surface(
-                                    color = Color.Black.copy(alpha = 0.8f),
-                                    shape = CircleShape
-                                ) {
-                                    Icon(
-                                        painterResource(R.drawable.ic_live_photo),
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier
-                                            .padding(4.dp)
-                                            .size(18.dp)
-                                    )
-                                }
-                            }
                             if (showVirtualApertureIndicator) {
                                 Surface(
                                     color = Color.Black.copy(alpha = 0.2f),
@@ -1517,21 +1498,6 @@ fun CameraScreen(
                                     .autoRotate(matchParentSize = true),
                                 alpha = 0.45f,
                                 contentScale = ContentScale.Crop
-                            )
-                        }
-
-                        // 实时直方图 (Overlaid on preview if enabled)
-                        if (isPhotoStyleMode && state.histogram != null && showHistogram) {
-                            HistogramView(
-                                histogram = state.histogram,
-                                modifier = Modifier
-                                    .padding(
-                                        start = 8.dp,
-                                        top = TopEdgeLineHeight + 8.dp
-                                    )
-                                    .size(80.dp, 40.dp)
-                                    .align(Alignment.TopStart)
-                                    .autoRotate(dx = -20.dp, dy = 20.dp)
                             )
                         }
 
@@ -1817,6 +1783,41 @@ fun CameraScreen(
                         .background(
                             Brush.verticalGradient(0f to Color.Transparent, 0.45f to Color.Black.copy(alpha = 0.45f))
                         )
+                )
+            }
+
+            // Active settings and the histogram on the picture's top edge, while quick settings are closed and
+            // nothing records (the recording line takes their place). A tap opens quick settings.
+            val topEdgeMarks = buildList {
+                if (isVideoMode) {
+                    if (state.videoConfig.torchEnabled && state.videoCapabilities.supportsTorch) {
+                        add(TopEdgeMark(AppIcons.BulbLine))
+                    }
+                    if (state.videoConfig.logProfile != VideoLogProfile.OFF) add(TopEdgeMark(null, "LOG"))
+                } else {
+                    if (useLivePhoto) add(TopEdgeMark(AppIcons.LivePhotoLine))
+                    if (state.timerSeconds > 0) add(TopEdgeMark(AppIcons.StopwatchLine, "${state.timerSeconds}s"))
+                    // The front camera has no flash, whatever the stored flash mode says.
+                    if (state.flashMode != 0 && state.videoCapabilities.supportsTorch) {
+                        add(TopEdgeMark(if (state.flashMode == 2) AppIcons.BulbLine else AppIcons.BoltLine))
+                    }
+                    if (useMultipleExposure) add(TopEdgeMark(AppIcons.MultiExposureLine))
+                }
+            }
+            val topEdgeHistogram = state.histogram.takeIf { isPhotoStyleMode && showHistogram }
+            AnimatedVisibility(
+                visible = activePanel != ActivePanel.SETTINGS && !state.videoRecordingState.isRecording &&
+                    (topEdgeMarks.isNotEmpty() || topEdgeHistogram != null),
+                enter = fadeIn(tween(150)),
+                exit = fadeOut(tween(150)),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = viewfinderTop)
+            ) {
+                TopEdgeLine(
+                    marks = topEdgeMarks,
+                    histogram = topEdgeHistogram,
+                    onClick = { activePanel = ActivePanel.SETTINGS }
                 )
             }
 

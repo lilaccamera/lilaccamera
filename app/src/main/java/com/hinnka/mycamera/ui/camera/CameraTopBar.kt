@@ -3,6 +3,11 @@ package com.hinnka.mycamera.ui.camera
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
+import com.hinnka.mycamera.ui.components.HistogramView
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.CircleShape
@@ -221,3 +226,46 @@ private fun formatRecordingDuration(elapsedMs: Long): String {
     val seconds = totalSeconds % 60L
     return "%02d:%02d".format(minutes, seconds)
 }
+
+/** One active-setting mark on the top edge: a 20 dp line icon, with a short value after it if any. */
+internal data class TopEdgeMark(val icon: ImageVector?, val text: String? = null)
+
+/**
+ * The top edge of the picture while everything is closed: marks for settings that change how a shot is
+ * taken and differ from the default, then the histogram. White with a soft shadow; it never turns.
+ */
+@Composable
+internal fun TopEdgeLine(
+    marks: List<TopEdgeMark>,
+    histogram: IntArray?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val textStyle = TextStyle(shadow = ViewfinderTextShadow, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, color = Color.White)
+    Row(
+        modifier = modifier
+            .height(TopEdgeLineHeight)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
+        horizontalArrangement = Arrangement.spacedBy(20.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        marks.forEach { mark ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                mark.icon?.let { icon ->
+                    Box {
+                        // A dark copy one dp lower keeps the thin white line readable on a bright picture.
+                        Icon(icon, null, tint = Color.Black.copy(alpha = 0.5f), modifier = Modifier.offset(y = 1.dp).size(20.dp))
+                        Icon(icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                }
+                mark.text?.let { Text(it, style = textStyle, maxLines = 1) }
+            }
+        }
+        if (histogram != null) {
+            HistogramView(histogram = histogram, modifier = Modifier.size(width = 64.dp, height = 22.dp))
+        }
+    }
+}
+
+// Room kept free on the picture's top edge for the line of active-setting marks.
+internal val TopEdgeLineHeight = 38.dp

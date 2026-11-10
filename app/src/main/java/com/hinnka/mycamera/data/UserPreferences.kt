@@ -162,7 +162,7 @@ class UserPreferences internal constructor(
     var deletedBuiltInIds by string("deleted_built_in_ids", "")
     var showLevelIndicator by bool("show_level_indicator", false)  // 水平仪显示
     var focusPeakingEnabled by bool("focus_peaking_enabled", true)  // 手动对焦峰值显示
-    var showHistogram by bool("show_histogram", true)
+    var showHistogram by bool("show_histogram", false)
     var showGrid by bool("show_grid", false)  // 网格线显示
     var eyeFocusEnabled by bool("eye_focus_enabled", false)  // MediaPipe 人眼对焦
     var shutterSoundEnabled by bool("shutter_sound_enabled", true)  // 快门声音

@@ -460,6 +460,14 @@ object AppIcons {
         )
     }
     val CloseLine: ImageVector by lazy { lineIcon("AppIcons.CloseLine", "M18 6l-12 12M6 6l12 12") }
+    // Two overlapping frames: several shots in one picture.
+    val MultiExposureLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.MultiExposureLine",
+            "M8 10a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2z" +
+                "M16 8v-2a2 2 0 0 0 -2 -2h-8a2 2 0 0 0 -2 2v8a2 2 0 0 0 2 2h2"
+        )
+    }
 
     private fun lineIcon(name: String, pathData: String): ImageVector = ImageVector.Builder(
         name = name,
