@@ -445,6 +445,114 @@ internal fun CameraTopSheet(
                         }
                     }
                 } else {
+                    // Multi-frame and multi-exposure, shown in Photo's own section or in a plain group in Portrait.
+                    val photoStackRows: @Composable ColumnScope.() -> Unit = {
+                        rows.Setting(
+                            key = "mf",
+                            label = stringResource(R.string.quick_multi_frame),
+                            explanation = stringResource(R.string.settings_multi_frame_denoise_frame_count_description),
+                            settingsTarget = SettingsTarget.MULTI_FRAME
+                        ) {
+                            FrameCountSlider(
+                                frames = if (useJpgMax) multiFrameCount else 0,
+                                min = MultiFrameConfig.MIN_DENOISE_FRAME_COUNT,
+                                withOff = true,
+                                onFramesChange = { frames ->
+                                    if (frames == 0) onJpgMaxToggle(false) else onMultiFrameCountChange(frames)
+                                }
+                            )
+                        }
+                        rows.Setting(
+                            key = "mexp",
+                            label = stringResource(R.string.quick_multi_exposure),
+                            explanation = stringResource(R.string.quick_explain_multiple_exposure),
+                            settingsTarget = SettingsTarget.MULTIPLE_EXPOSURE,
+                            last = true
+                        ) {
+                            QuickSwitch(useMultipleExposure) { onMultipleExposureToggle(!useMultipleExposure) }
+                        }
+                    }
+                    // The current mode's own settings, always first and marked, so the shared groups
+                    // below keep their place at the bottom of the sheet from mode to mode.
+                    ModeGroup(
+                        title = stringResource(
+                            when {
+                                isPortraitMode -> R.string.capture_mode_portrait
+                                isProfessionalMode -> R.string.capture_mode_professional
+                                else -> R.string.capture_mode_photo
+                            }
+                        )
+                    ) {
+                        if (isPortraitMode) {
+                            rows.Setting(
+                                key = "pblur",
+                                label = stringResource(R.string.portrait_blur),
+                                explanation = stringResource(R.string.quick_explain_portrait_blur),
+                                onLongClick = onPortraitHelp
+                            ) {
+                                QuickChoice(
+                                    text = stringResource(R.string.portrait_blur_quick),
+                                    selected = portraitQuickBlur,
+                                    minWidth = 56.dp,
+                                    onClick = { onPortraitQuickBlurChange(true) }
+                                )
+                                QuickChoice(
+                                    text = stringResource(R.string.portrait_blur_depth),
+                                    selected = !portraitQuickBlur,
+                                    minWidth = 56.dp,
+                                    onClick = { onPortraitQuickBlurChange(false) }
+                                )
+                            }
+                            rows.Setting(
+                                key = "pbokeh",
+                                label = stringResource(R.string.gallery_bokeh_style_title),
+                                explanation = stringResource(R.string.quick_explain_portrait_bokeh),
+                                last = true
+                            ) {
+                                listOf(
+                                    BokehStyle.NATURAL to R.string.gallery_bokeh_style_natural,
+                                    BokehStyle.DEFAULT to R.string.gallery_bokeh_style_default,
+                                    BokehStyle.BUBBLE to R.string.gallery_bokeh_style_bubble,
+                                ).forEach { (style, label) ->
+                                    QuickChoice(
+                                        text = stringResource(label),
+                                        selected = portraitBokehStyle == style,
+                                        minWidth = 48.dp,
+                                        onClick = { onPortraitBokehStyleChange(style) }
+                                    )
+                                }
+                            }
+                        } else if (isProfessionalMode) {
+                            rows.Setting(
+                                key = "engine",
+                                label = stringResource(R.string.quick_rendering),
+                                explanation = rawColorEngineDescription(rawRenderingEngine),
+                                settingsTarget = SettingsTarget.RAW_DEVELOPMENT
+                            ) {
+                                QuickLink(rawRenderingEngineName(rawRenderingEngine), open = false) {
+                                    showRenderingEngineSheet = true
+                                }
+                            }
+                            rows.Setting(
+                                key = "hdrp",
+                                label = stringResource(R.string.quick_hdr_plus_frames),
+                                explanation = stringResource(R.string.settings_hdr_plus_frame_count_description),
+                                settingsTarget = SettingsTarget.HDR_PLUS,
+                                last = true
+                            ) {
+                                FrameCountSlider(
+                                    frames = hdrPlusFrameCount,
+                                    min = hdrPlusMinFrames,
+                                    withOff = false,
+                                    onFramesChange = onHdrPlusFrameCountChange
+                                )
+                            }
+                        } else {
+                            photoStackRows()
+                        }
+                    }
+                    // In Portrait, Photo's own multi-frame and multi-exposure keep their plain group after Portrait's.
+                    if (isPortraitMode) QuickGroup { photoStackRows() }
                     QuickGroup {
                         rows.Setting(
                             key = "meter",
@@ -455,8 +563,8 @@ internal fun CameraTopSheet(
                                 MeteringMode.SYSTEM_DEFAULT to R.string.quick_metering_auto,
                                 MeteringMode.CENTER_WEIGHTED to R.string.quick_metering_centre,
                                 MeteringMode.SPOT to R.string.metering_spot,
-                                MeteringMode.AVERAGE to R.string.metering_average,
-                                MeteringMode.HIGHLIGHT_PRIORITY to R.string.metering_highlight_priority,
+                                MeteringMode.AVERAGE to R.string.quick_metering_average,
+                                MeteringMode.HIGHLIGHT_PRIORITY to R.string.quick_metering_highlight,
                             ).forEach { (mode, label) ->
                                 QuickChoice(
                                     text = stringResource(label),
@@ -522,101 +630,6 @@ internal fun CameraTopSheet(
                             last = true
                         ) {
                             QuickSwitch(ultraHdrEnabled) { onUltraHdrToggle(!ultraHdrEnabled) }
-                        }
-                    }
-                    if (isPortraitMode) {
-                        QuickGroup {
-                            rows.Setting(
-                                key = "pblur",
-                                label = stringResource(R.string.portrait_blur),
-                                explanation = stringResource(R.string.quick_explain_portrait_blur),
-                                onLongClick = onPortraitHelp
-                            ) {
-                                QuickChoice(
-                                    text = stringResource(R.string.portrait_blur_quick),
-                                    selected = portraitQuickBlur,
-                                    minWidth = 56.dp,
-                                    onClick = { onPortraitQuickBlurChange(true) }
-                                )
-                                QuickChoice(
-                                    text = stringResource(R.string.portrait_blur_depth),
-                                    selected = !portraitQuickBlur,
-                                    minWidth = 56.dp,
-                                    onClick = { onPortraitQuickBlurChange(false) }
-                                )
-                            }
-                            rows.Setting(
-                                key = "pbokeh",
-                                label = stringResource(R.string.gallery_bokeh_style_title),
-                                explanation = stringResource(R.string.quick_explain_portrait_bokeh),
-                                last = true
-                            ) {
-                                listOf(
-                                    BokehStyle.NATURAL to R.string.gallery_bokeh_style_natural,
-                                    BokehStyle.DEFAULT to R.string.gallery_bokeh_style_default,
-                                    BokehStyle.BUBBLE to R.string.gallery_bokeh_style_bubble,
-                                ).forEach { (style, label) ->
-                                    QuickChoice(
-                                        text = stringResource(label),
-                                        selected = portraitBokehStyle == style,
-                                        minWidth = 48.dp,
-                                        onClick = { onPortraitBokehStyleChange(style) }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    QuickGroup {
-                        if (isProfessionalMode) {
-                            rows.Setting(
-                                key = "engine",
-                                label = stringResource(R.string.quick_rendering),
-                                explanation = rawColorEngineDescription(rawRenderingEngine),
-                                settingsTarget = SettingsTarget.RAW_DEVELOPMENT
-                            ) {
-                                QuickLink(rawRenderingEngineName(rawRenderingEngine), open = false) {
-                                    showRenderingEngineSheet = true
-                                }
-                            }
-                            rows.Setting(
-                                key = "hdrp",
-                                label = stringResource(R.string.quick_hdr_plus_frames),
-                                explanation = stringResource(R.string.settings_hdr_plus_frame_count_description),
-                                settingsTarget = SettingsTarget.HDR_PLUS,
-                                last = true
-                            ) {
-                                FrameCountSlider(
-                                    frames = hdrPlusFrameCount,
-                                    min = hdrPlusMinFrames,
-                                    withOff = false,
-                                    onFramesChange = onHdrPlusFrameCountChange
-                                )
-                            }
-                        } else {
-                            rows.Setting(
-                                key = "mf",
-                                label = stringResource(R.string.quick_multi_frame),
-                                explanation = stringResource(R.string.settings_multi_frame_denoise_frame_count_description),
-                                settingsTarget = SettingsTarget.MULTI_FRAME
-                            ) {
-                                FrameCountSlider(
-                                    frames = if (useJpgMax) multiFrameCount else 0,
-                                    min = MultiFrameConfig.MIN_DENOISE_FRAME_COUNT,
-                                    withOff = true,
-                                    onFramesChange = { frames ->
-                                        if (frames == 0) onJpgMaxToggle(false) else onMultiFrameCountChange(frames)
-                                    }
-                                )
-                            }
-                            rows.Setting(
-                                key = "mexp",
-                                label = stringResource(R.string.quick_multi_exposure),
-                                explanation = stringResource(R.string.quick_explain_multiple_exposure),
-                                settingsTarget = SettingsTarget.MULTIPLE_EXPOSURE,
-                                last = true
-                            ) {
-                                QuickSwitch(useMultipleExposure) { onMultipleExposureToggle(!useMultipleExposure) }
-                            }
                         }
                     }
                 }
@@ -921,6 +934,27 @@ private fun QuickGroup(content: @Composable ColumnScope.() -> Unit) {
             .padding(start = 12.dp, end = 6.dp),
         content = content
     )
+}
+
+/** Like [QuickGroup], for the current mode's own settings: an amber outline and the mode's name on top. */
+@Composable
+private fun ModeGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+            .border(1.dp, ModeAmber.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+            .padding(start = 12.dp, end = 6.dp)
+    ) {
+        Text(
+            text = title,
+            color = ModeAmber,
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(top = 7.dp)
+        )
+        content()
+    }
 }
 
 /** List rows: the name on the left (tap: explanation, long press: Settings), the choices on the right. */
