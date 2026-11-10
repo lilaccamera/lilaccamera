@@ -3,6 +3,8 @@ package com.hinnka.mycamera.ui.icons
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.graphics.vector.group
@@ -1394,6 +1396,55 @@ object AppIcons {
             }
         }
 
+    /** Thermometer outline for the heat warning; drawn with [ThermometerReading] in a second colour. */
+    val ThermometerOutline: ImageVector
+        get() {
+            _thermometerOutline?.let { return it }
+            return ImageVector.Builder(
+                name = "AppIcons.ThermometerOutline",
+                defaultWidth = 24f.dp,
+                defaultHeight = 24f.dp,
+                viewportWidth = 24f,
+                viewportHeight = 24f,
+            ).apply {
+                addPath(
+                    pathData = addPathNodes("M9.5 13.31V5.5a2.5 2.5 0 0 1 5 0v7.81a4.25 4.25 0 1 1-5 0Z"),
+                    stroke = SolidColor(Color.Black),
+                    strokeLineWidth = 2f,
+                    strokeLineCap = StrokeCap.Round,
+                    strokeLineJoin = StrokeJoin.Round,
+                )
+            }.build().also {
+                _thermometerOutline = it
+            }
+        }
+
+    /** The reading line and bulb inside [ThermometerOutline], 1 dp clear of the outline all round. */
+    val ThermometerReading: ImageVector
+        get() {
+            _thermometerReading?.let { return it }
+            return ImageVector.Builder(
+                name = "AppIcons.ThermometerReading",
+                defaultWidth = 24f.dp,
+                defaultHeight = 24f.dp,
+                viewportWidth = 24f,
+                viewportHeight = 24f,
+            ).apply {
+                addPath(
+                    pathData = addPathNodes("M12 5.5V16.75"),
+                    stroke = SolidColor(Color.Black),
+                    strokeLineWidth = 1f,
+                    strokeLineCap = StrokeCap.Round,
+                )
+                addPath(
+                    pathData = addPathNodes("M9.75 16.75a2.25 2.25 0 1 0 4.5 0a2.25 2.25 0 1 0-4.5 0Z"),
+                    fill = SolidColor(Color.Black),
+                )
+            }.build().also {
+                _thermometerReading = it
+            }
+        }
+
     val Tune: ImageVector
         get() {
             _tune?.let { return it }
@@ -1600,6 +1651,8 @@ private var _starBorder: ImageVector? = null
 private var _stop: ImageVector? = null
 private var _swapHoriz: ImageVector? = null
 private var _timer: ImageVector? = null
+private var _thermometerOutline: ImageVector? = null
+private var _thermometerReading: ImageVector? = null
 private var _tune: ImageVector? = null
 private var _vibration: ImageVector? = null
 private var _stabilization: ImageVector? = null

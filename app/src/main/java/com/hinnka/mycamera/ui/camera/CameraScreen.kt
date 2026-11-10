@@ -849,6 +849,14 @@ fun CameraScreen(
         )
     }
 
+    if (viewModel.showVideoHeatStopDialog) {
+        VideoHeatStopDialog(
+            stopped = viewModel.videoHeatStop,
+            phoneNow = viewModel.videoHeatPhone,
+            onBackToCamera = viewModel::dismissVideoHeatStopDialog,
+        )
+    }
+
     if (showProUnavailableDialog) {
         ProModeUnavailableDialog(
             isFrontCamera = state.getCurrentCameraInfo()?.lensFacing ==
@@ -1006,6 +1014,8 @@ fun CameraScreen(
                 captureMode = state.captureMode,
                 isRecording = state.videoRecordingState.isRecording,
                 recordingElapsedMs = state.videoRecordingState.elapsedMs,
+                recordingIsHot = state.videoRecordingState.isHot,
+                recordingHeatGauge = state.videoRecordingState.heatGauge,
                 flashMode = state.flashMode,
                 onFlashToggle = {
                     viewModel.toggleFlash()
@@ -1447,6 +1457,11 @@ fun CameraScreen(
                     }
 
                     LensSwitchTransitionOverlay(lensSwitchTransition, Modifier.fillMaxSize())
+
+                    // While the camera is off to cool down, show black instead of the last frozen frame.
+                    if (viewModel.showVideoHeatStopDialog) {
+                        Box(Modifier.fillMaxSize().background(Color.Black))
+                    }
 
                     val showLivePhotoIndicator =
                         state.captureMode == CaptureMode.PHOTO && useLivePhoto
