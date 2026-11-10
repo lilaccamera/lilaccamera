@@ -352,6 +352,44 @@ object AppIcons {
             }
         }
 
+    // Mode dial pictograms: 24 dp line drawings with a 2 dp round stroke.
+    val MoonStars: ImageVector
+        get() = _moonStars ?: lineIcon(
+            "AppIcons.MoonStars",
+            "M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" +
+                "M17 4a2 2 0 0 0 2 2a2 2 0 0 0 -2 2a2 2 0 0 0 -2 -2a2 2 0 0 0 2 -2M19 11h2m-1 -1v2"
+        ).also { _moonStars = it }
+
+    val User: ImageVector
+        get() = _user ?: lineIcon(
+            "AppIcons.User",
+            "M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2"
+        ).also { _user = it }
+
+    val MovieCamera: ImageVector
+        get() = _movieCamera ?: lineIcon(
+            "AppIcons.MovieCamera",
+            "M15 10l4.553 -2.276a1 1 0 0 1 1.447 .894v6.764a1 1 0 0 1 -1.447 .894l-4.553 -2.276v-4z" +
+                "M5 6h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2v-8a2 2 0 0 1 2 -2z"
+        ).also { _movieCamera = it }
+
+    private fun lineIcon(name: String, pathData: String): ImageVector = ImageVector.Builder(
+        name = name,
+        defaultWidth = 24f.dp,
+        defaultHeight = 24f.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f,
+    ).apply {
+        addPath(
+            pathData = addPathNodes(pathData),
+            fill = null,
+            stroke = SolidColor(Color.Black),
+            strokeLineWidth = 2f,
+            strokeLineCap = StrokeCap.Round,
+            strokeLineJoin = StrokeJoin.Round,
+        )
+    }.build()
+
     val CheckBox: ImageVector
         get() {
             _checkBox?.let { return it }
@@ -1633,6 +1671,9 @@ private var _business: ImageVector? = null
 private var _cameraAlt: ImageVector? = null
 private var _cameraswitch: ImageVector? = null
 private var _turningArrows: ImageVector? = null
+private var _moonStars: ImageVector? = null
+private var _user: ImageVector? = null
+private var _movieCamera: ImageVector? = null
 private var _checkBox: ImageVector? = null
 private var _checkBoxOutlineBlank: ImageVector? = null
 private var _chevronRight: ImageVector? = null
