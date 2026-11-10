@@ -81,7 +81,6 @@ private const val SWIPE_START = 16f      // dp of mostly sideways push before th
 private const val TAP_SLOP = 12f         // dp a neighbour tap may move
 private const val FLICK = 0.35f          // dp per ms
 private const val RESISTANCE = 0.3f      // past the first selectable mode and Video
-private const val BUZZ_GAP = 60L         // ms of stillness between pulses; the vibrator runs pulses that come closer into one
 
 // The work-in-progress note is shown this often per app run; after that the dim marks and the end bar say it.
 private var wipToastsLeft = 2
@@ -141,7 +140,23 @@ internal class ModeLineState(initial: CameraShootingMode) {
     internal var closeJob: Job? = null
     internal var pastEnd = false
     internal var wipSaid = false
-    internal var buzzFreeAt = 0L
+}
+
+/** Haptic pulses with stillness between them: the vibrator runs pulses that come closer into one long buzz. */
+internal class SpacedBuzz(private val vibration: VibrationHelper) {
+    private var freeAt = 0L
+
+    // A fast movement skips pulses rather than queue them into one long buzz.
+    fun buzz(ms: Long) {
+        val now = SystemClock.uptimeMillis()
+        if (now < freeAt) return
+        freeAt = now + ms + GAP_MS
+        vibration.vibrate(ms)
+    }
+
+    private companion object {
+        const val GAP_MS = 60L
+    }
 }
 
 /**
@@ -159,11 +174,13 @@ internal fun ModeLine(
     videoProcessing: Boolean,
     onSelect: (CameraShootingMode) -> Unit,
     modifier: Modifier = Modifier,
+    // Drawn under the shutter in the mode zone; presses that start on it are its own.
+    collar: (@Composable () -> Unit)? = null,
     shutter: @Composable (Modifier) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val vibration = remember(context) { VibrationHelper(context) }
+    val haptics = remember(context) { SpacedBuzz(VibrationHelper(context)) }
     val click = remember(context) { ModeClick(context.applicationContext) }
     DisposableEffect(click) { onDispose { click.release() } }
     val soundEnabled by preferenceValue { it.shutterSoundEnabled }
@@ -174,6 +191,7 @@ internal fun ModeLine(
     val currentLo by rememberUpdatedState(lo)
     fun slotOf(i: Int) = if (!proAvailable && i < PRO) i + 1 else i
     val currentOnSelect by rememberUpdatedState(onSelect)
+    val hasCollar by rememberUpdatedState(collar != null)
 
     // A mode change from elsewhere (the front camera has no Pro, for example) moves the dial silently.
     val selectedIndex = selected.dialIndex()
@@ -196,13 +214,7 @@ internal fun ModeLine(
         }
     }
 
-    // A fast swipe skips pulses rather than queue them into one long buzz.
-    fun buzz(ms: Long) {
-        val now = SystemClock.uptimeMillis()
-        if (now < state.buzzFreeAt) return
-        state.buzzFreeAt = now + ms + BUZZ_GAP
-        vibration.vibrate(ms)
-    }
+    fun buzz(ms: Long) = haptics.buzz(ms)
 
     fun setPos(p: Float) {
         state.pos = p
@@ -326,11 +338,17 @@ internal fun ModeLine(
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         val centre = size.width / 2f
-                        val onShutter = abs(down.position.x - centre) < CameraControlsLayoutDefaults.CaptureButtonSize.toPx() / 2
+                        val fromCentre = down.position - Offset(centre, size.height / 2f)
+                        val shutterHalf = CameraControlsLayoutDefaults.CaptureButtonSize.toPx() / 2
+                        val onShutter = abs(fromCentre.x) < shutterHalf
+                        // The shutter keeps its whole square, where the collar's inner corners overlap it.
+                        val onCollar = hasCollar && onZoomCollar(fromCentre) &&
+                            !(onShutter && abs(fromCentre.y) < shutterHalf)
                         val tracker = VelocityTracker().apply { addPosition(down.uptimeMillis, down.position) }
                         var swiping = false
-                        // The shutter's long press owns the press, or a locked dial already answered it.
-                        var ignored = false
+                        // The shutter's long press owns the press, a locked dial already answered it, or the zoom
+                        // collar has it.
+                        var ignored = onCollar
                         var shift = 0f
                         var p0 = 0f
                         var dx = 0f
@@ -399,6 +417,7 @@ internal fun ModeLine(
                 },
             contentAlignment = Alignment.Center
         ) {
+            collar?.invoke()
             shutter(Modifier.graphicsLayer { translationX = state.nudge })
         }
 

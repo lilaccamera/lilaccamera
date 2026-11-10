@@ -5038,7 +5038,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             it.lensType == if (currentCamera.lensType == LensType.FRONT) LensType.FRONT else LensType.BACK_MAIN
         } ?: return
 
-        // 2. 计算变焦档位 (逻辑同步自 ZoomControlBar.kt)
+        // 2. 计算变焦档位 (逻辑同步自 ZoomCollar.kt)
         val lensZoomStops = calculateLensZoomStops(availableCameras, currentCamera)
         val zoomStops = allZoomStops(
             lensZoomStops,
@@ -5074,7 +5074,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 return
             }
 
-            // 5. 检查是否需要切换镜头 (逻辑同步自 ZoomControlBar.kt)
+            // 5. 检查是否需要切换镜头 (逻辑同步自 ZoomCollar.kt)
             val optimalLens = findOptimalLens(targetZoom, availableCameras, currentCamera.cameraId)
             if (optimalLens != null && optimalLens.cameraId != currentCamera.cameraId) {
                 switchToLensAndSetZoomRatio(optimalLens.cameraId, targetZoom)

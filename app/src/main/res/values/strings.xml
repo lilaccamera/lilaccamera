@@ -1755,4 +1755,7 @@
     <string name="ai_denoise_model_failed">The model could not be downloaded or verified. Check your connection and try again.</string>
     <string name="ai_denoise_model_download">Download</string>
     <string name="ai_denoise_model_retry">Retry</string>
+    <string name="zoom_collar">Zoom</string>
+    <string name="zoom_collar_wide">Wide</string>
+    <string name="zoom_collar_telephoto">Telephoto</string>
 </resources>

@@ -314,7 +314,6 @@ fun CameraScreen(
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
-    var zoomBarBounds by remember { mutableStateOf<Rect?>(null) }
     var filterButtonBounds by remember { mutableStateOf<Rect?>(null) }
     var captureButtonBounds by remember { mutableStateOf<Rect?>(null) }
     var parameterRulerBounds by remember { mutableStateOf<Rect?>(null) }
@@ -1046,29 +1045,6 @@ fun CameraScreen(
             )
         }
 
-        val zoomBar = @Composable {
-            if (activePanel == ActivePanel.NONE && !isXpan) {
-                ZoomControlBar(
-                    viewModel = viewModel,
-                    zoomRatio = viewModel.zoomRatioByMain,
-                    availableCameras = state.availableCameras,
-                    currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
-                    onZoomChange = { setZoomWithPreviewTransition(it) },
-                    onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
-                    onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .onGloballyPositioned { coordinates ->
-                            zoomBarBounds = coordinates.boundsInRoot()
-                        }
-                )
-            } else {
-                SideEffect {
-                    zoomBarBounds = null
-                }
-            }
-        }
-
         val parameterRuler = @Composable { rulerModifier: Modifier ->
             val whiteBalanceCurrentValue = if (
                 state.awbMode == android.hardware.camera2.CameraMetadata.CONTROL_AWB_MODE_AUTO
@@ -1220,8 +1196,7 @@ fun CameraScreen(
                                             if (firstPressedChange != null && currentPreviewBounds != null) {
                                                 val positionInRoot =
                                                     currentPreviewBounds.topLeft + firstPressedChange.position
-                                                zoomBarBounds?.contains(positionInRoot) == true ||
-                                                    parameterRulerBounds?.contains(positionInRoot) == true
+                                                parameterRulerBounds?.contains(positionInRoot) == true
                                             } else {
                                                 false
                                             }
@@ -1719,6 +1694,21 @@ fun CameraScreen(
                 onLooksBoundsChanged = { bounds ->
                     filterButtonBounds = bounds
                 },
+                zoomCollar = if (!isXpan && activePanel == ActivePanel.NONE) {
+                    {
+                        ZoomCollar(
+                            viewModel = viewModel,
+                            zoomRatio = viewModel.zoomRatioByMain,
+                            availableCameras = state.availableCameras,
+                            currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
+                            enabled = state.getCurrentCameraInfo() != null,
+                            onZoom = { setZoomWithPreviewTransition(it) },
+                            onStop = { animateZoomStopWithPreviewTransition(it) }
+                        )
+                    }
+                } else {
+                    null
+                },
                 sideControlInset = if (isXpan) {
                     (xpanSideWidth - CameraControlsLayoutDefaults.SideButtonSize) / 2
                 } else {
@@ -1782,17 +1772,6 @@ fun CameraScreen(
                         alpha = controlsArrival.value
                         translationY = (1f - controlsArrival.value) * 16.dp.toPx()
                     },
-                zoomBar = {
-                    // Panel visibility changes the zoom content, not the space used to
-                    // position the parameter row beneath it. XPAN has no horizontal bar.
-                    Box(
-                        modifier = if (isXpan) Modifier else Modifier
-                            .fillMaxWidth()
-                            .height(CameraControlsLayoutDefaults.ZoomBarHeight)
-                    ) {
-                        zoomBar()
-                    }
-                },
                 parameterRuler = {
                     AnimatedVisibility(
                         visible = showParameterRuler,
@@ -2185,6 +2164,7 @@ private fun Controls(
     isXpan: Boolean,
     onLooksClick: () -> Unit,
     onLooksBoundsChanged: (Rect) -> Unit,
+    zoomCollar: (@Composable () -> Unit)?,
     sideControlInset: Dp?,
     modifier: Modifier = Modifier.fillMaxSize()
 ) {
@@ -2230,7 +2210,8 @@ private fun Controls(
                     recording = state.videoRecordingState.isRecording,
                     videoProcessing = state.videoRecordingState.isProcessing,
                     onSelect = onCaptureModeSelected,
-                    modifier = Modifier.matchParentSize()
+                    modifier = Modifier.matchParentSize(),
+                    collar = zoomCollar
                 ) { shutterModifier ->
                     // The face follows the mode under the shutter while the dial turns.
                     CaptureButton(
@@ -2363,7 +2344,7 @@ private fun Controls(
                             if (!state.videoRecordingState.isProcessing && !switchSpin.isRunning) {
                                 onSwitchCameraClick()
                                 spinScope.launch {
-                                    switchSpin.animateTo(switchSpin.value + 180f, tween(560, easing = SwitchSpinEasing))
+                                    switchSpin.animateTo(switchSpin.value + 180f, tween(560, easing = BackEasing))
                                     vibration.vibrate(VibrationHelper.LIGHT_TICK_MS)
                                 }
                             }
@@ -2436,8 +2417,8 @@ private fun GraphicsLayerScope.makeRoom(side: Float, direction: Float) {
     alpha = 1f - side
 }
 
-// Half a turn that swings about 12 % past and settles (back easing, c = 1.9).
-private val SwitchSpinEasing = Easing { t -> val u = t - 1f; 1f + 2.9f * u * u * u + 1.9f * u * u }
+// Back easing (c = 1.9): swings about 12 % past the target and settles.
+internal val BackEasing = Easing { t -> val u = t - 1f; 1f + 2.9f * u * u * u + 1.9f * u * u }
 
 /** Shared breathing for the waiting shutter ring and thumbnail edge; both start when waiting starts, so they stay in step. */
 @Composable
