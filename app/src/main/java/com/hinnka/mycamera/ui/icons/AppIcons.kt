@@ -3,8 +3,8 @@ package com.hinnka.mycamera.ui.icons
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.graphics.vector.group
@@ -325,6 +325,30 @@ object AppIcons {
                 }
             }.build().also {
                 _cameraswitch = it
+            }
+        }
+
+    /** Two turning arrows drawn as a 2 dp line at the default 26 dp size, for the camera switch. */
+    val TurningArrows: ImageVector
+        get() {
+            _turningArrows?.let { return it }
+            return ImageVector.Builder(
+                name = "AppIcons.TurningArrows",
+                defaultWidth = 26f.dp,
+                defaultHeight = 26f.dp,
+                viewportWidth = 24f,
+                viewportHeight = 24f,
+            ).apply {
+                addPath(
+                    pathData = addPathNodes("M2.6 8.6A10 10 0 0 1 20.4 9.6M21.4 15.4A10 10 0 0 1 3.6 14.4M21.5 5L20.4 9.6L15.9 8.6M2.5 19L3.6 14.4L8.1 15.4"),
+                    fill = null,
+                    stroke = SolidColor(Color.Black),
+                    strokeLineWidth = 2f * 24f / 26f,
+                    strokeLineCap = StrokeCap.Round,
+                    strokeLineJoin = StrokeJoin.Round,
+                )
+            }.build().also {
+                _turningArrows = it
             }
         }
 
@@ -1608,6 +1632,7 @@ private var _burstMode: ImageVector? = null
 private var _business: ImageVector? = null
 private var _cameraAlt: ImageVector? = null
 private var _cameraswitch: ImageVector? = null
+private var _turningArrows: ImageVector? = null
 private var _checkBox: ImageVector? = null
 private var _checkBoxOutlineBlank: ImageVector? = null
 private var _chevronRight: ImageVector? = null

@@ -2303,26 +2303,40 @@ private fun Controls(
                         )
                     }
                 } else {
+                    val switchSpin = remember { Animatable(0f) }
+                    val spinScope = rememberCoroutineScope()
+                    val switchContext = LocalContext.current
+                    val vibration = remember(switchContext) { VibrationHelper(switchContext) }
+                    val switchShape = RoundedCornerShape(ThumbnailCorner)
                     PhysicalButton(
                         onClick = {
-                            if (!state.videoRecordingState.isProcessing) {
+                            // Taps during the spin are ignored, so one spin is one switch.
+                            if (!state.videoRecordingState.isProcessing && !switchSpin.isRunning) {
                                 onSwitchCameraClick()
+                                spinScope.launch {
+                                    switchSpin.animateTo(switchSpin.value + 180f, tween(560, easing = SwitchSpinEasing))
+                                    vibration.vibrate(VibrationHelper.LIGHT_TICK_MS)
+                                }
                             }
                         },
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
                             .padding(end = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
                             .size(CameraControlsLayoutDefaults.SideButtonSize)
-                            .autoRotate(),
-                        shape = CircleShape
+                            .autoRotate()
+                            .border(CameraControlsLayoutDefaults.LineWidth, CameraControlsLayoutDefaults.LineColor, switchShape),
+                        shape = switchShape,
+                        backgroundColor = Color.Transparent
                     ) {
                         Icon(
-                            imageVector = AppIcons.Cameraswitch,
+                            imageVector = AppIcons.TurningArrows,
                             contentDescription = stringResource(R.string.switch_camera),
-                            tint = Color.White.copy(
+                            tint = CameraControlsLayoutDefaults.LineColor.copy(
                                 alpha = if (state.videoRecordingState.isProcessing) 0.35f else 1f
                             ),
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier
+                                .size(26.dp)
+                                .graphicsLayer { rotationZ = switchSpin.value }
                         )
                     }
                 }
@@ -2345,6 +2359,9 @@ private fun Controls(
         }
     }
 }
+
+// Half a turn that swings about 12 % past and settles (back easing, c = 1.9).
+private val SwitchSpinEasing = Easing { t -> val u = t - 1f; 1f + 2.9f * u * u * u + 1.9f * u * u }
 
 /** Shared breathing for the waiting shutter ring and thumbnail edge; both start when waiting starts, so they stay in step. */
 @Composable
