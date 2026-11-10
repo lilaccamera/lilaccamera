@@ -366,6 +366,23 @@ object AppIcons {
             "M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2"
         ).also { _user = it }
 
+    // Portrait guide: an info mark, a lens aperture for the blur, scissors for the subject cut-out.
+    val DownloadLine: ImageVector by lazy { lineIcon("AppIcons.DownloadLine", "M12 4v11M7 10l5 5l5 -5M5 19h14") }
+    val InfoLine: ImageVector by lazy { lineIcon("AppIcons.InfoLine", "M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0M12 9h.01M11 12h1v4h1") }
+    val ApertureLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.ApertureLine",
+            "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M3.6 15h10.55M6.551 4.938l3.26 10.034M17.032 4.636l-8.535 6.201" +
+                "M20.559 14.51l-8.535 -6.201M12.257 20.916l3.261 -10.034"
+        )
+    }
+    val ScissorsLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.ScissorsLine",
+            "M3 7a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M3 17a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M8.6 8.6l10.4 10.4M8.6 15.4l10.4 -10.4"
+        )
+    }
+
     val MovieCamera: ImageVector
         get() = _movieCamera ?: lineIcon(
             "AppIcons.MovieCamera",

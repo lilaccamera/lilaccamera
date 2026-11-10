@@ -197,7 +197,11 @@ class UserPreferences internal constructor(
     var useBuiltInAiService by bool("use_built_in_ai_service", false)
     var phantomSaveAsNew by bool("phantom_save_as_new", false)
     var portraitQuickBlur by bool("portrait_quick_blur", true)  // 背景虚化：快速（无深度模型）或深度
-    var portraitIntroSeen by bool("portrait_intro_seen", false)  // 人像模式首次说明已显示
+    // The Portrait guide was opened once; until then a pill offers it. A key of its own, so the pill also
+    // shows once where only the earlier full-screen introduction was seen.
+    var portraitIntroSeen by bool("portrait_guide_seen", false)
+    // After the guide, the pill reminds once that the depth model is missing; opening it ends the reminder.
+    var portraitDepthReminderSeen by bool("portrait_depth_reminder_seen", false)
     // Portrait lens effect, a BokehStyle persisted name; "BUBBLE" is the Natural style.
     var portraitBokehStyle by string("portrait_bokeh_style", "BUBBLE")
     var defaultVirtualAperture by float("default_virtual_aperture", 0f)  // 默认虚化光圈，0表示关闭

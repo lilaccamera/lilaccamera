@@ -1,6 +1,8 @@
 package com.hinnka.mycamera.ui.camera
 
 import androidx.activity.compose.BackHandler
+import com.hinnka.mycamera.ml.DepthModelManager
+import com.hinnka.mycamera.ml.DepthModelDownloadState
 import com.hinnka.mycamera.ui.prefs.rememberUserPreferencesRepository
 import com.hinnka.mycamera.data.UserPreferences
 import com.hinnka.mycamera.ui.prefs.rememberPreference
@@ -268,6 +270,8 @@ fun CameraScreen(
     val showLevelIndicator by preferenceValue { it.showLevelIndicator }
     val focusPeakingEnabled by preferenceValue { it.focusPeakingEnabled }
     val portraitQuickBlur by preferenceValue { it.portraitQuickBlur }
+    val portraitIntroSeen by preferenceValue { it.portraitIntroSeen }
+    val portraitDepthReminderSeen by preferenceValue { it.portraitDepthReminderSeen }
     val portraitBokehStyle by preferenceValue { BokehStyle.fromPersistedName(it.portraitBokehStyle) }
     val eyeFocusEnabled by preferenceValue { it.eyeFocusEnabled }
     val keepScreenOn by preferenceValue { it.keepScreenOn }
@@ -322,6 +326,7 @@ fun CameraScreen(
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
     var filterButtonBounds by remember { mutableStateOf<Rect?>(null) }
     var captureButtonBounds by remember { mutableStateOf<Rect?>(null) }
+    var parameterBarTop by remember { mutableStateOf<Float?>(null) }
     var parameterRulerBounds by remember { mutableStateOf<Rect?>(null) }
     var galleryThumbnailBounds by remember { mutableStateOf<Rect?>(null) }
     var captureAnimationSnapshot by remember { mutableStateOf<CaptureAnimationSnapshot?>(null) }
@@ -908,16 +913,6 @@ fun CameraScreen(
             phoneNow = viewModel.videoHeatPhone,
             coolFromC = viewModel.videoHeatCoolFromC,
             onBackToCamera = viewModel::dismissVideoHeatStopDialog,
-        )
-    }
-
-    if (viewModel.showPortraitIntro) {
-        PortraitIntroDialog(
-            onDismiss = viewModel::dismissPortraitIntro,
-            onUseQuickBlur = {
-                viewModel.setPortraitQuickBlur(true)
-                viewModel.dismissPortraitIntro()
-            },
         )
     }
 
@@ -1842,6 +1837,47 @@ fun CameraScreen(
                 )
             }
 
+            // Portrait offers its guide in a pill centred just above the picture's bottom, the manual
+            // values and the shutter, until the guide has been opened once. After that the same pill
+            // reminds once, while the depth model is missing, and opens the guide at its download.
+            val depthModelState by DepthModelManager.observe(context).collectAsState()
+            val depthModelMissing = depthModelState is DepthModelDownloadState.Missing ||
+                depthModelState is DepthModelDownloadState.Failed
+            val showDepthReminder = portraitIntroSeen && !portraitDepthReminderSeen && depthModelMissing
+            if (
+                state.isPortraitMode && state.captureMode == CaptureMode.PHOTO &&
+                (!portraitIntroSeen || showDepthReminder) &&
+                activePanel == ActivePanel.NONE && !viewModel.showPortraitIntro
+            ) {
+                val pillBottom = listOfNotNull(
+                    previewBounds?.bottom,
+                    parameterBarTop.takeIf { !isXpan },
+                    captureButtonBounds?.top,
+                ).minOrNull()?.let { it - (cameraScreenBounds?.top ?: 0f) }
+                if (pillBottom != null) {
+                    PortraitGuidePill(
+                        icon = if (showDepthReminder) AppIcons.DownloadLine else AppIcons.InfoLine,
+                        text = stringResource(if (showDepthReminder) R.string.portrait_depth_pill else R.string.portrait_guide_pill),
+                        onClick = {
+                            if (showDepthReminder) {
+                                preferencesRepository.updateAsync { this.portraitDepthReminderSeen = true }
+                                viewModel.showPortraitHelp(atBlur = true)
+                            } else {
+                                viewModel.showPortraitHelp()
+                            }
+                        },
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .layout { measurable, constraints ->
+                                val placeable = measurable.measure(constraints)
+                                layout(placeable.width, placeable.height) {
+                                    placeable.place(0, (pillBottom - 8.dp.toPx()).roundToInt() - placeable.height)
+                                }
+                            }
+                    )
+                }
+            }
+
             CameraBottomControlsLayout(
                 viewfinderBottom = viewfinderTop + cardHeight,
                 modifier = Modifier
@@ -1874,7 +1910,9 @@ fun CameraScreen(
                 },
                 parameterBar = {
                     if (!isXpan) {
-                        parameterBar(selectedParameter.takeIf { showParameterRuler }, onParameterClick)
+                        Box(Modifier.onGloballyPositioned { parameterBarTop = it.boundsInRoot().top }) {
+                            parameterBar(selectedParameter.takeIf { showParameterRuler }, onParameterClick)
+                        }
                     }
                 },
                 captureControls = {
@@ -2022,6 +2060,15 @@ fun CameraScreen(
             onDismiss = { activePanel = ActivePanel.NONE },
             modifier = Modifier.align(Alignment.BottomCenter)
         )
+
+        if (viewModel.showPortraitIntro) {
+            PortraitGuide(
+                startStep = if (viewModel.portraitGuideAtBlur) PortraitGuideBlurStep else 0,
+                quickBlur = portraitQuickBlur,
+                onUseDepth = { viewModel.setPortraitQuickBlur(false) },
+                onDismiss = viewModel::dismissPortraitIntro,
+            )
+        }
 
         // During navigation measurement or window resizing, the viewport can be
         // shorter than the top inset. The panel then has no available vertical space.

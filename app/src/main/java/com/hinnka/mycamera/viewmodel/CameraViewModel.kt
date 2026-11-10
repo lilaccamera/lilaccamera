@@ -1552,8 +1552,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var latestPortraitFace: PortraitFace? = null
     private var latestPortraitFaceAtMs = 0L
 
-    /** Portrait on the mode dial explains itself the first time it is chosen. */
+    /** The Portrait guide is open; it opens from the pill in the picture or a long press on Portrait blur. */
     var showPortraitIntro by mutableStateOf(false)
+        private set
+    /** The guide opens at its blur step, where the depth model can be downloaded. */
+    var portraitGuideAtBlur by mutableStateOf(false)
         private set
     private var virtualApertureBeforePortrait: Pair<Boolean, Float>? = null
 
@@ -3275,9 +3278,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         userPreferencesRepository.updateAsync { portraitBokehStyle = style.persistedName }
     }
 
-    /** Reopens the Portrait explanation. */
-    fun showPortraitHelp() {
+    /** Opens the Portrait guide; once opened, the pill that offers it no longer shows. */
+    fun showPortraitHelp(atBlur: Boolean = false) {
+        portraitGuideAtBlur = atBlur
         showPortraitIntro = true
+        userPreferencesRepository.updateAsync { portraitIntroSeen = true }
     }
 
     /** Switches Portrait on or off; Portrait takes the blur strength of the default virtual aperture. */
@@ -3292,7 +3297,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val aperture = userPreferencesRepository.current.defaultVirtualAperture
             cameraController.setAperture(if (aperture > 0f) aperture else PORTRAIT_DEFAULT_APERTURE)
             setVirtualApertureAuto(true)
-            if (!userPreferencesRepository.current.portraitIntroSeen) showPortraitIntro = true
         } else {
             virtualApertureBeforePortrait?.let { (wasEnabled, aperture) ->
                 cameraController.setAperture(aperture)
@@ -3306,7 +3310,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /** Depth blur needs the depth model; without it the choice is explained and offered for download. */
     fun setPortraitQuickBlur(quick: Boolean) {
         if (!quick && !DepthModelManager.isInstalled(getApplication())) {
-            showPortraitIntro = true
+            showPortraitHelp(atBlur = true)
             return
         }
         userPreferencesRepository.updateAsync { portraitQuickBlur = quick }
@@ -3314,7 +3318,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun dismissPortraitIntro() {
         showPortraitIntro = false
-        userPreferencesRepository.updateAsync { portraitIntroSeen = true }
     }
 
     private fun snapshotCaptureSettings() = CaptureSettingsSnapshot(
