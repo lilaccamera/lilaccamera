@@ -373,6 +373,22 @@ class RealtimeVideoRenderer(
         check(error == GLES30.GL_NO_ERROR) { "Realtime video post-process output glError=$error" }
     }
 
+    /**
+     * Latches and drops every queued camera frame without encoding it, so a paused recording
+     * returns the camera's buffers. Must run on the recording GL thread.
+     */
+    fun discardQueuedCameraFrames() {
+        if (!initialized || !makeCurrent()) return
+        val surfaceTexture = cameraSurfaceTexture ?: return
+        cameraFramePending.set(false)
+        // updateTexImage latches one queued buffer; the timestamp stops changing once the queue is empty.
+        var latchedTimestampNs: Long
+        do {
+            latchedTimestampNs = surfaceTexture.timestamp
+            surfaceTexture.updateTexImage()
+        } while (surfaceTexture.timestamp != latchedTimestampNs)
+    }
+
     private fun acquireLatestCameraFrame(surfaceTexture: SurfaceTexture): Boolean {
         return try {
             surfaceTexture.updateTexImage()

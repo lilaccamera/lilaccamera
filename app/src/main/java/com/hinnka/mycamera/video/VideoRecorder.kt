@@ -384,8 +384,9 @@ class VideoRecorder(
     }
 
     private fun onRealtimeFrameAvailable() {
-        if (!isRecording || stopRequested || isPaused) return
-        statsIncomingFrames += 1
+        // Paused frames still go through the render loop, which discards them (see drainRealtimeFrames).
+        if (!isRecording || stopRequested) return
+        if (!isPaused) statsIncomingFrames += 1
         synchronized(realtimeFrameLock) {
             if (pendingRealtimeFrameCount > 0) {
                 statsReplacedPendingFrames += 1
@@ -883,14 +884,19 @@ class VideoRecorder(
 
             if (!hasFrame ||
                 !isRecording ||
-                (stopRequested && !allowWhenStopping) ||
-                isPaused
+                (stopRequested && !allowWhenStopping)
             ) {
                 continue
             }
 
             try {
                 val videoRenderer = renderer ?: continue
+                if (isPaused) {
+                    // Frames left unconsumed fill the camera's buffer queue, and the camera then
+                    // stops delivering to the recording surface even after Resume.
+                    videoRenderer.discardQueuedCameraFrames()
+                    continue
+                }
                 val renderStartMs = SystemClock.elapsedRealtime()
                 val presentationTimeNs = videoRenderer.renderLatestFrame(
                     mapPresentationTimeNs = ::mapCameraTimestampToBoottimeNs,
