@@ -853,6 +853,7 @@ fun CameraScreen(
         VideoHeatStopDialog(
             stopped = viewModel.videoHeatStop,
             phoneNow = viewModel.videoHeatPhone,
+            coolFromC = viewModel.videoHeatCoolFromC,
             onBackToCamera = viewModel::dismissVideoHeatStopDialog,
         )
     }
