@@ -31,8 +31,6 @@ internal object CameraControlsLayoutDefaults {
     val MarkColor = Color(0xFFD3D1C7)
 
     val CaptureAreaHeight = ModeZoneHeight + BottomPadding
-    // The XPAN picture ends level with the bottom of the shutter.
-    val XpanViewfinderClearance = BottomPadding + (ModeZoneHeight - CaptureButtonSize) / 2
     // Room above the mode zone for the zoom collar: 8 dp off the shutter, 26 dp deep.
     val CollarRise = CaptureButtonSize / 2 + 8.dp + 26.dp - ModeZoneHeight / 2
     val CollapsedControlsHeight = CaptureAreaHeight + CollarRise + CaptureClearance + ParameterBarHeight

@@ -380,6 +380,87 @@ object AppIcons {
                 "M8 3v18M16 3v18M4 7h2M4 12h2M4 17h2M18 7h2M18 12h2M18 17h2"
         ).also { _film = it }
 
+    // Three slider lines with hollow knobs; the lines stop at each knob, so the icon has no fill to show on a picture.
+    val Sliders: ImageVector
+        get() = _sliders ?: lineIcon(
+            "AppIcons.Sliders",
+            "M3 6h3.6M11.4 6h9.6M3 12h10.6M18.4 12h2.6M3 18h1.6M9.4 18h11.6" +
+                "M11.4 6a2.4 2.4 0 1 0 -4.8 0a2.4 2.4 0 1 0 4.8 0" +
+                "M18.4 12a2.4 2.4 0 1 0 -4.8 0a2.4 2.4 0 1 0 4.8 0" +
+                "M9.4 18a2.4 2.4 0 1 0 -4.8 0a2.4 2.4 0 1 0 4.8 0"
+        ).also { _sliders = it }
+
+    // Footer line icons for recording: two bars, a play triangle and a camera.
+    val PauseLine: ImageVector
+        get() = _pauseLine ?: lineIcon("AppIcons.PauseLine", "M9 6v12M15 6v12").also { _pauseLine = it }
+
+    val PlayLine: ImageVector
+        get() = _playLine ?: lineIcon("AppIcons.PlayLine", "M8 5v14l11 -7z").also { _playLine = it }
+
+    val CameraLine: ImageVector
+        get() = _cameraLine ?: lineIcon(
+            "AppIcons.CameraLine",
+            "M5 7h1a2 2 0 0 0 2 -2a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1a2 2 0 0 0 2 2h1a2 2 0 0 1 2 2v9a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-9a2 2 0 0 1 2 -2z" +
+                "M9 13a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"
+        ).also { _cameraLine = it }
+
+    // Line icons at the shared 2 dp stroke for the camera screen's controls and quick settings.
+    private const val Slash = "M3 3l18 18"
+    private const val BoltPath = "M13 3v7h6l-8 11v-7h-6l8 -11z"
+    private const val BulbPath = "M3 12h1M12 3v1M20 12h1M5.6 5.6l.7 .7M18.4 5.6l-.7 .7" +
+        "M9 16a5 5 0 1 1 6 0a3.5 3.5 0 0 0 -1 3a2 2 0 0 1 -4 0a3.5 3.5 0 0 0 -1 -3M9.7 17h4.6"
+    val SwapLine: ImageVector by lazy { lineIcon("AppIcons.SwapLine", "M21 17h-18M6 10l-3 -3l3 -3M3 7h18M18 20l3 -3l-3 -3") }
+    val StopwatchLine: ImageVector by lazy {
+        lineIcon("AppIcons.StopwatchLine", "M5 13a7 7 0 1 0 14 0a7 7 0 0 0 -14 0zM14.5 10.5l-2.5 2.5M17 8l1 -1M14 3h-4")
+    }
+    val BoltLine: ImageVector by lazy { lineIcon("AppIcons.BoltLine", BoltPath) }
+    val BoltOffLine: ImageVector by lazy { lineIcon("AppIcons.BoltOffLine", BoltPath + Slash) }
+    val BulbLine: ImageVector by lazy { lineIcon("AppIcons.BulbLine", BulbPath) }
+    val BulbOffLine: ImageVector by lazy { lineIcon("AppIcons.BulbOffLine", BulbPath + Slash) }
+    // A ring of dots around a ring and a centre dot; the dots are zero-length strokes with round caps.
+    val LivePhotoLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.LivePhotoLine",
+            "M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" +
+                "M15.9 20.11v.01M19.04 17.61v.01M20.77 14v.01M20.77 10v.01M19.04 6.39v.01M15.9 3.89v.01" +
+                "M12 3v.01M8.1 3.89v.01M4.96 6.39v.01M3.23 10v.01M3.23 14v.01M4.96 17.61v.01M8.1 20.11v.01M12 21v.01"
+        )
+    }
+    val ChevronRightLine: ImageVector by lazy { lineIcon("AppIcons.ChevronRightLine", "M9 6l6 6l-6 6") }
+    val ChevronUpLine: ImageVector by lazy { lineIcon("AppIcons.ChevronUpLine", "M6 15l6 -6l6 6") }
+    val ToolboxLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.ToolboxLine",
+            "M3 9a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v9a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2zM8 8v-2a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v2M3 13h18M10 13v2h4v-2"
+        )
+    }
+    val FoldersLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.FoldersLine",
+            "M9 3h3l2 2h5a2 2 0 0 1 2 2v7a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-9a2 2 0 0 1 2 -2z" +
+                "M17 16v2a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-9a2 2 0 0 1 2 -2h2"
+        )
+    }
+    val SettingsLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.SettingsLine",
+            "M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37" +
+                "a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573" +
+                "c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0" +
+                "a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572" +
+                "c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37" +
+                "c1 .608 2.296 .07 2.572 -1.065zM9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"
+        )
+    }
+    val PhotoLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.PhotoLine",
+            "M15 8h.01M3 6a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3zM3 16l5 -5c.928 -.893 2.072 -.893 3 0l5 5" +
+                "M14 14l1 -1c.928 -.893 2.072 -.893 3 0l3 3"
+        )
+    }
+    val CloseLine: ImageVector by lazy { lineIcon("AppIcons.CloseLine", "M18 6l-12 12M6 6l12 12") }
+
     private fun lineIcon(name: String, pathData: String): ImageVector = ImageVector.Builder(
         name = name,
         defaultWidth = 24f.dp,
@@ -1682,6 +1763,10 @@ private var _moonStars: ImageVector? = null
 private var _user: ImageVector? = null
 private var _movieCamera: ImageVector? = null
 private var _film: ImageVector? = null
+private var _sliders: ImageVector? = null
+private var _pauseLine: ImageVector? = null
+private var _playLine: ImageVector? = null
+private var _cameraLine: ImageVector? = null
 private var _checkBox: ImageVector? = null
 private var _checkBoxOutlineBlank: ImageVector? = null
 private var _chevronRight: ImageVector? = null

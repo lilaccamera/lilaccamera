@@ -266,6 +266,12 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         requestRender()
     }
 
+    /** The face the Portrait viewfinder blurs around and outlines; null clears it. */
+    fun setPortraitFace(face: com.hinnka.mycamera.preview.PortraitFace?) {
+        renderer.setPortraitFace(face)
+        requestRender()
+    }
+
     fun updateEyeFocusTiming(timing: EyeFocusProcessingTiming) {
         renderer.updateEyeFocusTiming(timing)
     }

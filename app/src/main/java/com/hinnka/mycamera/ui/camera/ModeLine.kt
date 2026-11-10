@@ -6,7 +6,6 @@ import android.media.SoundPool
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.EaseInOutCubic
 import androidx.compose.animation.core.EaseOutCubic
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
@@ -59,6 +58,7 @@ import com.hinnka.mycamera.utils.VibrationHelper
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.ceil
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.floor
@@ -68,8 +68,8 @@ import kotlin.math.sign
 import kotlin.math.sin
 import kotlin.random.Random
 
-// Positions on the mode dial. Night and Portrait are listed but cannot be selected yet. Without Pro (the
-// front camera has no RAW) Night and Portrait move up one place, next to Photo.
+// The marks on the mode dial. Night is listed but cannot be selected yet. Dial positions are slots: without
+// Pro (the front camera has no RAW) its slot is left out, so Night and Portrait sit next to Photo.
 private const val NIGHT = 0
 private const val PORTRAIT = 1
 private const val PRO = 2
@@ -81,24 +81,37 @@ private const val TRAVEL = 44f           // dp of finger travel per mode: one sl
 private const val SWIPE_START = 16f      // dp of mostly sideways push before the list moves
 private const val TAP_SLOP = 12f         // dp a neighbour tap may move
 private const val FLICK = 0.35f          // dp per ms
+private const val RIDGE_FADE = 185f      // dp from the centre where the ridges have faded out, just past the screen edge
+private const val TAP_GRACE_MS = 250L  // wait after a neighbour tap's roll for a further tap
 private const val RESISTANCE = 0.3f      // past the first selectable mode and Video
 
 // The work-in-progress note is shown this often per app run; after that the dim marks and the end bar say it.
 private var wipToastsLeft = 2
 
-private val ModeAmber = Color(0xFFEF9F27)
+internal val ModeAmber = Color(0xFFEF9F27)
 private val AutoGreen = Color(0xFF5DCAA5)
 private val VideoRed = Color(0xFFE24B4A)
 private val RidgeColor = Color(0xFF6B6A65)
 private val EndBarColor = Color(0xFF9C9A92)
 
-private fun CameraShootingMode.dialIndex() = when (this) {
-    CameraShootingMode.PROFESSIONAL -> PRO
-    CameraShootingMode.PHOTO -> PHOTO
-    CameraShootingMode.VIDEO -> VIDEO
-}
+private fun markAt(slot: Int, proAvailable: Boolean) = if (!proAvailable && slot >= PRO) slot + 1 else slot
 
-private fun shootingModeAt(index: Int) = when (index) {
+private fun slotOfMark(mark: Int, proAvailable: Boolean) = if (!proAvailable && mark > PRO) mark - 1 else mark
+
+private fun lastSlot(proAvailable: Boolean) = slotOfMark(VIDEO, proAvailable)
+
+internal fun CameraShootingMode.dialIndex(proAvailable: Boolean) = slotOfMark(
+    when (this) {
+        CameraShootingMode.PORTRAIT -> PORTRAIT
+        CameraShootingMode.PROFESSIONAL -> PRO
+        CameraShootingMode.PHOTO -> PHOTO
+        CameraShootingMode.VIDEO -> VIDEO
+    },
+    proAvailable
+)
+
+private fun shootingModeAt(slot: Int, proAvailable: Boolean) = when (markAt(slot, proAvailable)) {
+    PORTRAIT -> CameraShootingMode.PORTRAIT
     PRO -> CameraShootingMode.PROFESSIONAL
     VIDEO -> CameraShootingMode.VIDEO
     else -> CameraShootingMode.PHOTO
@@ -111,9 +124,9 @@ private fun latch(r: Float): Float {
     return n + t - 0.8f * sin(2f * PI.toFloat() * t) / (2f * PI.toFloat())
 }
 
-private fun resist(p: Float, lo: Int) = when {
+private fun resist(p: Float, lo: Int, hi: Int) = when {
     p < lo -> lo + (p - lo) * RESISTANCE
-    p > VIDEO -> VIDEO + (p - VIDEO) * RESISTANCE
+    p > hi -> hi + (p - hi) * RESISTANCE
     else -> p
 }
 
@@ -121,19 +134,21 @@ private fun smoothstep(k: Float) = k * k * (3f - 2f * k)
 
 /** Where the mode dial stands. Positions are dial indices; [nudge] is in pixels. */
 @Stable
-internal class ModeLineState(initial: CameraShootingMode) {
+internal class ModeLineState(initial: CameraShootingMode, proAvailable: Boolean) {
+    /** Whether the dial has a Pro slot; kept current by [ModeLine]. */
+    internal var proAvailable = proAvailable
     /** The dial position under the shutter; fractional while it moves. */
-    var pos by mutableFloatStateOf(initial.dialIndex().toFloat())
+    var pos by mutableFloatStateOf(initial.dialIndex(proAvailable).toFloat())
     /** The mode the shutter face and the name show: the nearest selectable detent. */
-    var shown by mutableIntStateOf(initial.dialIndex())
+    var shown by mutableIntStateOf(initial.dialIndex(proAvailable))
     /** The last committed mode. */
-    var mode by mutableIntStateOf(initial.dialIndex())
+    var mode by mutableIntStateOf(initial.dialIndex(proAvailable))
     /** The shutter's sideways give before a swipe starts. */
     var nudge by mutableFloatStateOf(0f)
     /** 0 closed, 1 open. */
     val lift = Animatable(0f)
 
-    val shownMode: CameraShootingMode get() = shootingModeAt(shown)
+    val shownMode: CameraShootingMode get() = shootingModeAt(shown, proAvailable)
     /** How far the side controls have made room; they move first, while the list opens. */
     val side: Float get() = smoothstep((lift.value / 0.7f).coerceAtMost(1f))
     /** Set while the list closes, so the zoom collar can come back after the side controls. */
@@ -145,6 +160,11 @@ internal class ModeLineState(initial: CameraShootingMode) {
     internal var closeJob: Job? = null
     internal var pastEnd = false
     internal var wipSaid = false
+    // The mode just chosen on the dial, until the camera reports it; the reports in between are ignored.
+    internal var pending: Int? = null
+    // Where the list is rolling to, so a further tap goes on from there.
+    internal var rollTarget = mode
+    internal var pendingJob: Job? = null
 }
 
 /** Haptic pulses with stillness between them: the vibrator runs pulses that come closer into one long buzz. */
@@ -191,22 +211,37 @@ internal fun ModeLine(
     val soundEnabled by preferenceValue { it.shutterSoundEnabled }
     val currentEnabled by rememberUpdatedState(enabled)
     val currentRecording by rememberUpdatedState(recording)
-    // The first mode the dial can land on, and where each mark sits.
-    val lo = if (proAvailable) PRO else PHOTO
+    // The first mode the dial can land on (Night is not built yet) and the last slot, Video.
+    val lo = slotOfMark(PORTRAIT, proAvailable)
+    val last = lastSlot(proAvailable)
+    state.proAvailable = proAvailable
     val currentLo by rememberUpdatedState(lo)
-    fun slotOf(i: Int) = if (!proAvailable && i < PRO) i + 1 else i
+    val currentLast by rememberUpdatedState(last)
     val currentOnSelect by rememberUpdatedState(onSelect)
     val hasCollar by rememberUpdatedState(collar != null)
 
     // A mode change from elsewhere (the front camera has no Pro, for example) moves the dial silently.
-    val selectedIndex = selected.dialIndex()
-    LaunchedEffect(selectedIndex) {
-        if (selectedIndex != state.mode) {
+    val selectedIndex = selected.dialIndex(proAvailable)
+    val currentSelectedIndex by rememberUpdatedState(selectedIndex)
+    fun follow(index: Int) {
+        if (index != state.mode) {
             state.posJob?.cancel()
-            state.mode = selectedIndex
-            state.shown = selectedIndex
-            state.pos = selectedIndex.toFloat()
+            state.mode = index
+            state.shown = index
+            state.pos = index.toFloat()
         }
+    }
+    LaunchedEffect(selectedIndex) {
+        // A switch can pass through other modes while the camera reconfigures (Pro may read as Photo for a
+        // moment); following those would make the list jump while it closes.
+        state.pending?.let { pending ->
+            if (selectedIndex == pending) {
+                state.pending = null
+                state.pendingJob?.cancel()
+            }
+            return@LaunchedEffect
+        }
+        follow(selectedIndex)
     }
 
     fun say(text: Int) = Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
@@ -224,11 +259,11 @@ internal fun ModeLine(
     fun setPos(p: Float) {
         state.pos = p
         val first = currentLo
-        val over = p < first - 0.08f || p > VIDEO + 0.08f
+        val over = p < first - 0.08f || p > currentLast + 0.08f
         if (over && !state.pastEnd) buzz(50L)
         state.pastEnd = over
         if (p < first - 0.15f && !state.wipSaid) sayWip()
-        val detent = p.roundToInt().coerceIn(first, VIDEO)
+        val detent = p.roundToInt().coerceIn(first, currentLast)
         if (detent != state.shown) {
             state.shown = detent
             buzz(VibrationHelper.LIGHT_TICK_MS)
@@ -247,12 +282,14 @@ internal fun ModeLine(
         state.closing = true
         state.closeJob = scope.launch {
             delay(afterMs)
-            state.lift.animateTo(0f, tween(380, easing = EaseInOutCubic))
+            // Fast at the start, so the footer is back soon after the finger lifts.
+            state.lift.animateTo(0f, tween(240, easing = EaseOutCubic))
         }
     }
 
-    fun roll(target: Int, durationMs: Int, then: () -> Unit) {
+    fun roll(target: Int, durationMs: Int, then: suspend () -> Unit) {
         state.posJob?.cancel()
+        state.rollTarget = target
         state.posJob = scope.launch {
             animate(state.pos, target.toFloat(), animationSpec = tween(durationMs, easing = EaseOutCubic)) { v, _ -> setPos(v) }
             then()
@@ -261,24 +298,43 @@ internal fun ModeLine(
 
     fun settleMs(target: Int) = (160 + 70 * abs(target - state.pos)).toInt()
 
-    fun commit(target: Int, closeAfterMs: Long) {
+    fun select(target: Int) {
         if (target != state.mode) {
             state.mode = target
-            currentOnSelect(shootingModeAt(target))
+            state.pending = target
+            state.pendingJob?.cancel()
+            // If the camera never reports the chosen mode (a refused switch), follow what it reports. Long
+            // enough for a choice that waits for the previous mode to finish loading.
+            state.pendingJob = scope.launch {
+                delay(3000)
+                state.pending = null
+                follow(currentSelectedIndex)
+            }
+            currentOnSelect(shootingModeAt(target, state.proAvailable))
         }
+    }
+
+    fun commit(target: Int, closeAfterMs: Long) {
+        select(target)
         close(closeAfterMs)
     }
 
     fun tapNeighbour(x: Float) {
         val k = sign(x).toInt()
-        val target = state.mode + k
-        if (abs(abs(x) - SPACING) >= 28f || target !in NIGHT..VIDEO) return
+        // Each tap moves one more mode: while the list still rolls or waits, count from where it is heading.
+        val from = if (state.posJob?.isActive == true) state.rollTarget else state.mode
+        val target = from + k
+        if (abs(abs(x) - SPACING) >= 28f || target !in 0..currentLast) return
         if (target < currentLo) {
             sayWip()
         } else {
             // The whole list plays out, which also shows that it can be swiped.
             open()
-            roll(target, 380) { commit(target, 420) }
+            roll(target, 300) {
+                // A short pause for another tap before the camera switches, which locks the dial for a moment.
+                delay(TAP_GRACE_MS)
+                commit(target, 120)
+            }
         }
     }
 
@@ -311,10 +367,14 @@ internal fun ModeLine(
                 size = Size(size.width, bottom + 48.dp.toPx() - backdropTop),
                 alpha = lift
             )
-            // Ridges along the bottom edge, four per mode, travel with the list.
-            for (k in 0 until 24) {
+            // Ridges along the bottom edge, four per mode, travel with the list. Like a wheel's knurl they run
+            // on past both ends of the list to the screen edges; only the end bars mark where it stops.
+            val reach = RIDGE_FADE / SPACING
+            val firstRidge = ceil((state.pos + 0.5f - reach) * 4f).toInt()
+            val lastRidge = floor((state.pos + 0.5f + reach) * 4f).toInt()
+            for (k in firstRidge..lastRidge) {
                 val offsetDp = (k / 4f - 0.5f - state.pos) * SPACING
-                val fade = (1f - (offsetDp / 185f).let { it * it }).coerceIn(0f, 1f)
+                val fade = (1f - (offsetDp / RIDGE_FADE).let { it * it }).coerceIn(0f, 1f)
                 val x = cx + offsetDp.dp.toPx()
                 drawLine(
                     RidgeColor, Offset(x, bottom - 10.dp.toPx()), Offset(x, bottom),
@@ -322,7 +382,7 @@ internal fun ModeLine(
                 )
             }
             // End bars just outside the first selectable mode and Video: the list stops there.
-            for (end in floatArrayOf(lo - 0.5f, VIDEO + 0.62f)) {
+            for (end in floatArrayOf(lo - 0.5f, last + 0.62f)) {
                 val x = cx + (end - state.pos) * unit
                 drawRoundRect(
                     EndBarColor,
@@ -358,6 +418,8 @@ internal fun ModeLine(
                         var ignored = onCollar
                         var shift = 0f
                         var p0 = 0f
+                        var lowest = 0f
+                        var highest = 0f
                         var dx = 0f
                         var dy = 0f
                         while (true) {
@@ -392,11 +454,15 @@ internal fun ModeLine(
                                 state.posJob?.cancel()
                                 state.wipSaid = false
                                 p0 = state.pos
+                                lowest = p0
+                                highest = p0
                                 open()
                             }
                             // Consuming the swipe also cancels the shutter's tap and long press.
                             change.consume()
-                            setPos(resist(latch(p0 - (dx - shift) / travel), currentLo))
+                            setPos(resist(latch(p0 - (dx - shift) / travel), currentLo, currentLast))
+                            lowest = minOf(lowest, state.pos)
+                            highest = maxOf(highest, state.pos)
                         }
                         state.nudge = 0f
                         if (swiping) {
@@ -405,7 +471,9 @@ internal fun ModeLine(
                             val v = -tracker.calculateVelocity().x / density / 1000f
                             val swipedDp = abs(dx - shift) / density
                             var target = state.pos.roundToInt()
-                            if (abs(v) > FLICK) {
+                            // A swipe that went one way and came back is a return, not a flick past the start.
+                            val reversed = if (v > 0) lowest < p0 - 0.3f else highest > p0 + 0.3f
+                            if (abs(v) > FLICK && !reversed) {
                                 target = if (swipedDp < 1.2f * TRAVEL) {
                                     state.mode + sign(v).toInt()
                                 } else {
@@ -413,8 +481,10 @@ internal fun ModeLine(
                                 }
                             }
                             if (target < currentLo && !state.wipSaid) sayWip()
-                            target = target.coerceIn(currentLo, VIDEO)
-                            roll(target, settleMs(target)) { commit(target, 260) }
+                            target = target.coerceIn(currentLo, currentLast)
+                            // The camera starts loading the mode at once, while the list settles on it.
+                            select(target)
+                            roll(target, settleMs(target)) { close(80) }
                         } else if (!ignored && !onShutter && currentEnabled &&
                             hypot(dx, dy) / density <= TAP_SLOP
                         ) {
@@ -433,9 +503,8 @@ internal fun ModeLine(
             videoProcessing -> 0.35f
             else -> 1f
         }
-        for (i in NIGHT..VIDEO) {
-            if (i == PRO && !proAvailable) continue
-            val slot = slotOf(i)
+        for (slot in 0..last) {
+            val mark = markAt(slot, proAvailable)
             val neighbour = abs(slot - state.mode) == 1 && enabled
             val unavailable = slot < lo
             Box(
@@ -457,7 +526,7 @@ internal fun ModeLine(
                     .clearAndSetSemantics {
                         if (neighbour) {
                             role = Role.Button
-                            contentDescription = names[i]
+                            contentDescription = names[mark]
                             onClick {
                                 tapNeighbour((slot - state.mode) * SPACING)
                                 true
@@ -467,13 +536,14 @@ internal fun ModeLine(
                     .autoRotate(),
                 contentAlignment = Alignment.Center
             ) {
-                ModeMark(i, current = i == state.shown)
+                ModeMark(mark, current = slot == state.shown)
             }
         }
 
         // The name takes the place above the shutter once the list is mostly open; it stays in screen axes.
         Text(
-            text = names[state.shown].uppercase(),
+            // The dial can still hold the old slot for a frame after the Pro slot appears or goes.
+            text = names[markAt(state.shown, proAvailable).coerceIn(0, names.lastIndex)].uppercase(),
             color = ModeAmber,
             fontSize = 11.5.sp,
             fontWeight = FontWeight.Medium,

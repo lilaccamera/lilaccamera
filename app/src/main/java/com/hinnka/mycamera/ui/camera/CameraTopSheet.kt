@@ -4,15 +4,27 @@ import com.hinnka.mycamera.raw.fotufilm.FotufilmDocument
 import android.media.AudioDeviceInfo
 import android.os.Build
 import androidx.compose.animation.*
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -23,9 +35,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -33,13 +50,13 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.ui.theme.OnAccentColor
-import android.content.Context
 import com.hinnka.mycamera.R
+import com.hinnka.mycamera.processor.BokehStyle
 import com.hinnka.mycamera.ui.settings.SettingsTarget
 import com.hinnka.mycamera.camera.AspectRatio
-import com.hinnka.mycamera.camera.DeviceQuirks
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.runtime.remember
+import com.hinnka.mycamera.camera.CameraInfo
+import com.hinnka.mycamera.camera.LensType
+import com.hinnka.mycamera.camera.MultiFrameConfig
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.platform.LocalViewConfiguration
@@ -52,28 +69,81 @@ import com.hinnka.mycamera.raw.SpectralFilmSelection
 import com.hinnka.mycamera.ui.components.AppModalBottomSheet
 import com.hinnka.mycamera.ui.components.RawDcpLensOption
 import com.hinnka.mycamera.ui.components.RawRenderingEngineSettingsPanel
+import com.hinnka.mycamera.ui.components.rawColorEngineDescription
+import com.hinnka.mycamera.ui.components.rawRenderingEngineName
 import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
 import com.hinnka.mycamera.ui.icons.AppIcons
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
-private enum class VideoSettingPanel {
-    ASPECT_RATIO,
-    LOG_PROFILE,
-    BITRATE,
-    CODEC,
-    MICROPHONE
+// Quick settings sheet: a row of everyday settings floating above a translucent list in outlined groups.
+private val SheetEasing = CubicBezierEasing(0.3f, 1.35f, 0.5f, 1f)
+private val SheetText = Color(0xFFE8E6DF)
+private val SheetLabel = Color(0xFFC2C0B6)
+private val SheetDim = Color(0xFFB4B2A9)
+private val SheetGrey = Color(0xFF888780)
+private val SheetTextStyle = TextStyle(shadow = ViewfinderTextShadow)
+
+/** One camera the Lens row can switch to: a second camera at the same zoom, or a macro camera. */
+internal data class QuickLensChoice(val cameraId: String, val label: String)
+
+/**
+ * Lens choices for phones with several cameras at one zoom or a macro camera; empty otherwise,
+ * so the row never shows on a phone without them.
+ */
+internal fun quickLensChoices(cameras: List<CameraInfo>, current: CameraInfo?): List<QuickLensChoice> {
+    val front = current?.lensType == LensType.FRONT
+    val zoomable = cameras
+        .filter { it.displayIntrinsicZoomRatio > 0f }
+        .filter { if (front) it.lensType == LensType.FRONT else it.lensType != LensType.FRONT && it.lensType != LensType.BACK_MACRO }
+        .sortedWith(compareBy<CameraInfo>({ it.displayIntrinsicZoomRatio }, { it.cameraId }))
+    val variants = mutableListOf<QuickLensChoice>()
+    val groups = mutableListOf<MutableList<CameraInfo>>()
+    zoomable.forEach { camera ->
+        val group = groups.lastOrNull()
+        if (group != null && abs(group.first().displayIntrinsicZoomRatio - camera.displayIntrinsicZoomRatio) <= 0.01f) {
+            group += camera
+        } else {
+            groups += mutableListOf(camera)
+        }
+    }
+    groups.filter { it.size > 1 }.forEach { group ->
+        group.forEachIndexed { index, camera ->
+            variants += QuickLensChoice(camera.cameraId, "${formatZoomRatioLabel(camera.displayIntrinsicZoomRatio)} ${index + 1}")
+        }
+    }
+    val macros = if (front) emptyList() else cameras.filter { it.lensType == LensType.BACK_MACRO }
+    macros.forEachIndexed { index, camera ->
+        variants += QuickLensChoice(camera.cameraId, if (macros.size > 1) "M${index + 1}" else "")
+    }
+    return variants
 }
-
-private val CameraTopSheetContentTopPadding = 32.dp
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun CameraTopSheet(
+internal fun CameraTopSheet(
     visible: Boolean,
     captureMode: CaptureMode,
+    // Everyday row
+    flashMode: Int,
+    onFlashToggle: () -> Unit,
+    timerSeconds: Int,
+    onTimerToggle: () -> Unit,
+    useLivePhoto: Boolean,
+    onLivePhotoToggle: () -> Unit,
     aspectRatio: AspectRatio,
     topSheetAspectRatios: List<AspectRatio>,
     onAspectRatioChange: (AspectRatio) -> Unit,
+    videoConfig: VideoConfig,
+    videoCapabilities: VideoCapabilities,
+    onVideoResolutionClick: () -> Unit,
+    onVideoFpsClick: () -> Unit,
+    onVideoTorchToggle: () -> Unit,
+    onVideoStabilizationModeChange: (VideoStabilizationMode) -> Unit,
+    // List
+    showHistogram: Boolean,
+    onHistogramChange: (Boolean) -> Unit,
     videoAspectRatio: VideoAspectRatio,
     onVideoAspectRatioChange: (VideoAspectRatio) -> Unit,
     videoLogProfile: VideoLogProfile,
@@ -100,19 +170,27 @@ fun CameraTopSheet(
     rawFotufilmDocument: FotufilmDocument?,
     ultraHdrEnabled: Boolean,
     onUltraHdrToggle: (Boolean) -> Unit,
-    photoPreviewStabilizationEnabled: Boolean,
-    photoPreviewStabilizationAvailable: Boolean,
-    onPhotoPreviewStabilizationChange: (Boolean) -> Unit,
+    isFrontCamera: Boolean,
     photoResolutionCapMp: Int,
+    frontPhotoResolutionCapMp: Int,
     photoResolutionAdjustable: Boolean,
     onPhotoResolutionCapChange: (Int) -> Unit,
+    onFrontPhotoResolutionCapChange: (Int) -> Unit,
     saveCameraJpeg: Boolean,
     onSaveCameraJpegChange: (Boolean) -> Unit,
-    // Long press on a tile opens Settings at that tile's setting.
+    isPortraitMode: Boolean = false,
+    portraitQuickBlur: Boolean = true,
+    onPortraitQuickBlurChange: (Boolean) -> Unit = {},
+    portraitBokehStyle: BokehStyle = BokehStyle.NATURAL,
+    onPortraitBokehStyleChange: (BokehStyle) -> Unit = {},
+    onPortraitHelp: () -> Unit = {},
+    // Long press on a setting's name opens Settings at that setting.
     onOpenSettingsAt: (SettingsTarget) -> Unit = {},
     multiFrameCount: Int,
+    // Choosing a frame count also switches multi-frame on.
     onMultiFrameCountChange: (Int) -> Unit,
     hdrPlusFrameCount: Int,
+    hdrPlusMinFrames: Int,
     onHdrPlusFrameCountChange: (Int) -> Unit,
     onRawDcpChange: (String?) -> Unit,
     onRawDcpIdsByLensChange: ((Map<String, String?>) -> Unit)? = null,
@@ -126,6 +204,9 @@ fun CameraTopSheet(
     onRawFotufilmDocumentChange: (FotufilmDocument) -> Unit,
     meteringMode: MeteringMode,
     onMeteringModeChange: (MeteringMode) -> Unit,
+    lensChoices: List<QuickLensChoice>,
+    currentCameraId: String?,
+    onLensSelect: (String) -> Unit,
     onFilterManageClick: () -> Unit,
     onFrameManageClick: () -> Unit,
     onPresetManageClick: () -> Unit,
@@ -135,12 +216,14 @@ fun CameraTopSheet(
     onJpgMaxToggle: (Boolean) -> Unit,
     useMultipleExposure: Boolean,
     onMultipleExposureToggle: (Boolean) -> Unit,
-    contentTopPadding: Dp = CameraTopSheetContentTopPadding,
+    onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var expandedVideoPanel by rememberSaveable { mutableStateOf<VideoSettingPanel?>(null) }
     var showRenderingEngineSheet by rememberSaveable { mutableStateOf(false) }
     var showContentManagementOptions by rememberSaveable { mutableStateOf(false) }
+    // One explanation and one inline picker (Log, Microphone) open at a time.
+    var explained by remember { mutableStateOf<String?>(null) }
+    var openPicker by remember { mutableStateOf<String?>(null) }
     fun handleContentManagementAction(action: () -> Unit) {
         showContentManagementOptions = false
         action()
@@ -148,6 +231,8 @@ fun CameraTopSheet(
 
     LaunchedEffect(visible, captureMode) {
         showContentManagementOptions = false
+        explained = null
+        openPicker = null
     }
 
     LaunchedEffect(useRaw) {
@@ -156,433 +241,416 @@ fun CameraTopSheet(
         }
     }
 
+    // Each aspect change rebuilds the camera session, so taps only move the label; the last one
+    // applies once the taps pause. Kept outside the sheet so closing it still applies the choice.
+    var pendingAspect by remember { mutableStateOf<AspectRatio?>(null) }
+    LaunchedEffect(pendingAspect) {
+        val target = pendingAspect ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(500)
+        if (target != aspectRatio) onAspectRatioChange(target)
+        // If the camera refuses the ratio, the label falls back to the real one.
+        kotlinx.coroutines.delay(2000)
+        pendingAspect = null
+    }
+    LaunchedEffect(aspectRatio) {
+        if (aspectRatio == pendingAspect) pendingAspect = null
+    }
+    val shownAspect = pendingAspect ?: aspectRatio
+
+    val riseOffset = with(androidx.compose.ui.platform.LocalDensity.current) { 24.dp.roundToPx() }
+    val isProfessionalMode = captureMode == CaptureMode.PHOTO && useRaw && isRawSupported
+    val isVideo = captureMode == CaptureMode.VIDEO
+
     AnimatedVisibility(
         visible = visible,
-        enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
-        exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+        enter = slideInVertically(tween(260, easing = SheetEasing)) { riseOffset } + fadeIn(tween(160)),
+        exit = slideOutVertically(tween(200)) { riseOffset } + fadeOut(tween(160)),
         modifier = modifier
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
-                .background(Color.Black.copy(alpha = 0.8f))
-                // Keep the screen's top inset fixed, but measure content and side padding
-                // in the rotated viewport so landscape controls stay inside the sheet.
-                .padding(top = contentTopPadding)
-                .autoRotate(matchParentSize = true)
-                .padding(horizontal = 24.dp)
+                // Drag down closes; the handler also keeps touches on empty parts of the sheet from reaching the footer.
+                .pointerInput(Unit) {
+                    var dragged = 0f
+                    detectVerticalDragGestures(
+                        onDragStart = { dragged = 0f },
+                        onDragEnd = { if (dragged > 50.dp.toPx()) onDismiss() },
+                        onVerticalDrag = { change, amount ->
+                            dragged += amount
+                            change.consume()
+                        }
+                    )
+                }
         ) {
-            Column(
+            // Everyday row: floats on the picture above the list; a tap steps to the next value.
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
+                    .fillMaxWidth()
+                    .height(72.dp)
+                    .padding(horizontal = 6.dp)
             ) {
-                if (captureMode == CaptureMode.PHOTO) {
-                    val isProfessionalMode = useRaw && isRawSupported
-                    SectionLabel(title = stringResource(R.string.aspect_ratio))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios).forEach { ratio ->
-                            val isSelected = aspectRatio == ratio
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(min = 40.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        if (isSelected) AccentColor else Color.White.copy(
-                                            alpha = 0.12f
-                                        )
-                                    )
-                                    .clickable { onAspectRatioChange(ratio) }
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = ratio.getDisplayName(),
-                                    color = if (isSelected) OnAccentColor else Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    QuickSettingGrid { itemModifier ->
-                        if (isProfessionalMode) {
-                            QuickSettingButton2(
-                                title = stringResource(R.string.settings_raw_color_engine),
-                                checked = true,
-                                onClick = { showRenderingEngineSheet = true },
-                                onLongClick = { onOpenSettingsAt(SettingsTarget.RAW_DEVELOPMENT) },
-                                modifier = itemModifier
-                            )
-                            // Each tap steps to the next preset, wrapping to a single frame.
-                            QuickSettingValue(
-                                title = stringResource(R.string.settings_use_raw_max),
-                                value = pluralStringResource(R.plurals.quick_frame_count, hdrPlusFrameCount, hdrPlusFrameCount),
-                                // One frame is a plain single shot, so HDR+ merging is off.
-                                highlighted = hdrPlusFrameCount > 1,
-                                onClick = {
-                                    onHdrPlusFrameCountChange(
-                                        HDR_PLUS_FRAME_PRESETS.firstOrNull { it > hdrPlusFrameCount } ?: HDR_PLUS_FRAME_PRESETS.first()
-                                    )
-                                },
-                                onLongClick = { onOpenSettingsAt(SettingsTarget.HDR_PLUS) },
-                                modifier = itemModifier
-                            )
-                        } else {
-                            // From Off a tap resumes the saved count (also set by the Settings slider);
-                            // then each tap steps to the next preset above it, and past the last one to Off.
-                            QuickSettingValue(
-                                title = stringResource(R.string.settings_use_jpg_max),
-                                value = if (useJpgMax) {
-                                    pluralStringResource(R.plurals.quick_frame_count, multiFrameCount, multiFrameCount)
-                                } else {
-                                    stringResource(R.string.quick_frames_off)
-                                },
-                                highlighted = useJpgMax,
-                                onClick = {
-                                    if (!useJpgMax) {
-                                        onJpgMaxToggle(true)
-                                    } else {
-                                        val next = MULTI_FRAME_PRESETS.firstOrNull { it > multiFrameCount }
-                                        if (next == null) onJpgMaxToggle(false) else onMultiFrameCountChange(next)
-                                    }
-                                },
-                                onLongClick = { onOpenSettingsAt(SettingsTarget.MULTI_FRAME) },
-                                modifier = itemModifier
-                            )
-                            QuickSettingToggle(
-                                title = stringResource(R.string.settings_use_multiple_exposure),
-                                checked = useMultipleExposure,
-                                onCheckedChange = onMultipleExposureToggle,
-                                onLongClick = { onOpenSettingsAt(SettingsTarget.MULTIPLE_EXPOSURE) },
-                                modifier = itemModifier
-                            )
-                        }
-                        val cameraJpegContext = LocalContext.current
-                        QuickSettingValue(
-                            title = stringResource(R.string.camera_jpeg),
-                            value = stringResource(if (saveCameraJpeg) R.string.camera_jpeg_on else R.string.camera_jpeg_off),
-                            onClick = {
-                                // The tile's name alone does not say where the JPEG goes.
-                                if (!saveCameraJpeg) {
-                                    android.widget.Toast.makeText(
-                                        cameraJpegContext, R.string.camera_jpeg_turned_on, android.widget.Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                                onSaveCameraJpegChange(!saveCameraJpeg)
-                            },
-                            onLongClick = { showQuickSettingExplanation(cameraJpegContext, R.string.quick_explain_camera_jpeg) },
-                            modifier = itemModifier
-                        )
-                        QuickSettingToggle(
-                            title = stringResource(R.string.settings_ultra_hdr_gain_map),
-                            checked = ultraHdrEnabled,
-                            onCheckedChange = onUltraHdrToggle,
-                            onLongClick = { onOpenSettingsAt(SettingsTarget.ULTRA_HDR) },
-                            modifier = itemModifier
-                        )
-                        if (!DeviceQuirks.isLilac) {
-                            QuickSettingToggle(
-                                title = stringResource(R.string.camera_preview_stabilization),
-                                checked = photoPreviewStabilizationEnabled,
-                                onCheckedChange = onPhotoPreviewStabilizationChange,
-                                enabled = photoPreviewStabilizationAvailable,
-                                onLongClick = { onOpenSettingsAt(SettingsTarget.PREVIEW_STABILIZATION) },
-                                modifier = itemModifier
-                            )
-                        }
-                        // Pro (RAW) is always full size: the RAW stream only exists at full sensor size.
-                        val resolutionEnabled = !isProfessionalMode && photoResolutionAdjustable
-                        val resolutionCap = if (resolutionEnabled) photoResolutionCapMp else 0
-                        val resolutionContext = LocalContext.current
-                        QuickSettingValue(
-                            title = stringResource(R.string.photo_resolution),
-                            value = if (resolutionCap > 0) "$resolutionCap MP" else stringResource(R.string.photo_resolution_full),
-                            enabled = resolutionEnabled,
-                            onClick = {
-                                if (resolutionEnabled) {
-                                    onPhotoResolutionCapChange(
-                                        when (photoResolutionCapMp) {
-                                            0 -> 12
-                                            12 -> 8
-                                            else -> 0
-                                        }
-                                    )
-                                } else {
-                                    android.widget.Toast.makeText(
-                                        resolutionContext,
-                                        if (isProfessionalMode) R.string.photo_resolution_pro_full else R.string.photo_resolution_small_camera,
-                                        android.widget.Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            },
-                            onLongClick = { showQuickSettingExplanation(resolutionContext, R.string.quick_explain_resolution) },
-                            modifier = itemModifier
-                        )
-                        MeteringModeQuickSetting(
-                            meteringMode = meteringMode,
-                            onMeteringModeChange = onMeteringModeChange,
-                            modifier = itemModifier
-                        )
-
-                        ToolboxQuickSetting(
-                            onToolboxClick = onToolboxClick,
-                            modifier = itemModifier
-                        )
-
-                        ContentManagementQuickSetting(
-                            onClick = { showContentManagementOptions = !showContentManagementOptions },
-                            modifier = itemModifier
-                        )
-
-                    }
-
-                    ContentManagementOptionsPanel(
-                        visible = showContentManagementOptions,
-                        onFilterManageClick = {
-                            handleContentManagementAction(onFilterManageClick)
-                        },
-                        onFrameManageClick = {
-                            handleContentManagementAction(onFrameManageClick)
-                        },
-                        onPresetManageClick = {
-                            handleContentManagementAction(onPresetManageClick)
-                        }
+                val itemModifier = Modifier.weight(1f)
+                if (isVideo) {
+                    VideoEverydayItems(
+                        videoConfig = videoConfig,
+                        videoCapabilities = videoCapabilities,
+                        onResolutionClick = onVideoResolutionClick,
+                        onFpsClick = onVideoFpsClick,
+                        onTorchToggle = onVideoTorchToggle,
+                        onStabilizationModeChange = onVideoStabilizationModeChange,
+                        itemModifier = itemModifier
                     )
                 } else {
-                    SectionLabel(title = stringResource(R.string.video_aspect_chip))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        VideoAspectRatio.entries.forEach { ratio ->
-                            val isSelected = videoAspectRatio == ratio
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(min = 40.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        if (isSelected) AccentColor else Color.White.copy(
-                                            alpha = 0.12f
-                                        )
-                                    )
-                                    .clickable { onVideoAspectRatioChange(ratio) }
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
+                    PhotoEverydayItems(
+                        useLivePhoto = useLivePhoto,
+                        onLivePhotoToggle = onLivePhotoToggle,
+                        timerSeconds = timerSeconds,
+                        onTimerToggle = onTimerToggle,
+                        aspectRatio = shownAspect,
+                        onAspectClick = {
+                            val ratios = AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios)
+                            pendingAspect = ratios[(ratios.indexOf(shownAspect) + 1).mod(ratios.size)]
+                        },
+                        flashMode = flashMode,
+                        // Refreshed from the open camera's data in Photo mode too.
+                        flashAvailable = videoCapabilities.supportsTorch,
+                        onFlashToggle = onFlashToggle,
+                        itemModifier = itemModifier
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // shortcut: plain 72 % black, no blur (Compose can't blur a GL preview surface behind it); add a GL blur pass if the plain sheet hides too much.
+                    .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                    .navigationBarsPadding()
+                    .padding(start = 10.dp, end = 10.dp, bottom = 6.dp)
+            ) {
+                SheetHeader(
+                    onToolboxClick = onToolboxClick,
+                    onContentManagementClick = { showContentManagementOptions = !showContentManagementOptions },
+                    onSettingsClick = onMoreSettingsClick
+                )
+                ContentManagementOptionsPanel(
+                    visible = showContentManagementOptions,
+                    onFilterManageClick = { handleContentManagementAction(onFilterManageClick) },
+                    onFrameManageClick = { handleContentManagementAction(onFrameManageClick) },
+                    onPresetManageClick = { handleContentManagementAction(onPresetManageClick) }
+                )
+                if (showContentManagementOptions) Spacer(Modifier.height(8.dp))
+
+                val rows = QuickRows(
+                    explained = explained,
+                    onExplain = { key -> explained = if (explained == key) null else key },
+                    onOpenSettingsAt = onOpenSettingsAt
+                )
+                if (isVideo) {
+                    QuickGroup {
+                        rows.Setting(
+                            key = "vasp",
+                            label = stringResource(R.string.video_aspect_chip),
+                            explanation = stringResource(R.string.quick_explain_video_aspect)
+                        ) {
+                            VideoAspectRatio.entries.forEach { ratio ->
+                                QuickChoice(
                                     text = videoAspectRatioLabel(ratio),
-                                    color = if (isSelected) OnAccentColor else Color.White,
-                                    fontSize = 13.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                    selected = videoAspectRatio == ratio,
+                                    minWidth = 56.dp,
+                                    onClick = { onVideoAspectRatioChange(ratio) }
+                                )
+                            }
+                        }
+                        rows.Setting(
+                            key = "log",
+                            label = stringResource(R.string.video_log_chip),
+                            explanation = stringResource(R.string.quick_explain_log),
+                            last = openPicker != "log"
+                        ) {
+                            QuickLink(videoLogProfileLabel(videoLogProfile), open = openPicker == "log") {
+                                openPicker = if (openPicker == "log") null else "log"
+                            }
+                        }
+                        InlinePicker(visible = openPicker == "log") {
+                            availableVideoLogProfiles.forEach { profile ->
+                                VideoOptionChip(
+                                    title = videoLogProfileLabel(profile),
+                                    selected = videoLogProfile == profile,
+                                    onClick = { onVideoLogProfileChange(profile) }
                                 )
                             }
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    QuickSettingGrid(columns = 2, itemHeight = 40.dp) { itemModifier ->
-                        VideoSettingTile(
-                            title = stringResource(R.string.video_log_chip),
-                            summary = videoLogProfileLabel(videoLogProfile),
-                            expanded = expandedVideoPanel == VideoSettingPanel.LOG_PROFILE,
-                            onClick = {
-                                expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.LOG_PROFILE) null else VideoSettingPanel.LOG_PROFILE
-                            },
-                            modifier = itemModifier
-                        )
-                        VideoSettingTile(
-                            title = stringResource(R.string.video_bitrate_chip),
-                            summary = "${videoBitrate.bitrateMbps}M",
-                            expanded = expandedVideoPanel == VideoSettingPanel.BITRATE,
-                            onClick = {
-                                expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.BITRATE) null else VideoSettingPanel.BITRATE
-                            },
-                            modifier = itemModifier
-                        )
-                        VideoSettingTile(
-                            title = stringResource(R.string.video_codec_chip),
-                            summary = videoCodec.displayName,
-                            expanded = expandedVideoPanel == VideoSettingPanel.CODEC,
-                            onClick = {
-                                expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.CODEC) null else VideoSettingPanel.CODEC
-                            },
-                            modifier = itemModifier
-                        )
-                        VideoSettingTile(
-                            title = stringResource(R.string.video_microphone_title),
-                            summary = selectedVideoAudioInputLabel(
-                                selectedAudioInputId = videoAudioInputId,
-                                options = videoAudioInputOptions
-                            ),
-                            expanded = expandedVideoPanel == VideoSettingPanel.MICROPHONE,
-                            onClick = {
-                                expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.MICROPHONE) null else VideoSettingPanel.MICROPHONE
-                            },
-                            modifier = itemModifier
-                        )
-                    }
-
-                    AnimatedVisibility(
-                        visible = expandedVideoPanel != null,
-                        enter = expandVertically() + fadeIn(),
-                        exit = shrinkVertically() + fadeOut()
-                    ) {
-                        Column {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            VideoSettingExpandedPanel {
-                                when (expandedVideoPanel) {
-                                    VideoSettingPanel.LOG_PROFILE -> {
-                                        FlowRow(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            availableVideoLogProfiles.forEach { profile ->
-                                                val isSelected = videoLogProfile == profile
-                                                VideoOptionChip(
-                                                    title = videoLogProfileLabel(profile),
-                                                    selected = isSelected,
-                                                    onClick = { onVideoLogProfileChange(profile) }
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    VideoSettingPanel.BITRATE -> {
-                                        FlowRow(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            VideoBitratePreset.entries.forEach { bitrate ->
-                                                VideoOptionChip(
-                                                    title = "${bitrate.bitrateMbps}M",
-                                                    selected = videoBitrate == bitrate,
-                                                    onClick = { onVideoBitrateChange(bitrate) }
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    VideoSettingPanel.CODEC -> {
-                                        FlowRow(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            VideoCodec.entries.forEach { codec ->
-                                                VideoOptionChip(
-                                                    title = codec.displayName,
-                                                    selected = videoCodec == codec,
-                                                    onClick = { onVideoCodecChange(codec) }
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    VideoSettingPanel.MICROPHONE -> {
-                                        FlowRow(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            VideoOptionChip(
-                                                title = stringResource(R.string.video_microphone_auto),
-                                                selected = videoAudioInputId == VIDEO_AUDIO_INPUT_AUTO,
-                                                onClick = { onVideoAudioInputChange(VIDEO_AUDIO_INPUT_AUTO) }
-                                            )
-                                            videoAudioInputOptions.forEach { option ->
-                                                VideoOptionChip(
-                                                    title = videoAudioInputLabel(option),
-                                                    selected = videoAudioInputId == option.id,
-                                                    onClick = { onVideoAudioInputChange(option.id) }
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    else -> Unit
-                                }
+                    QuickGroup {
+                        rows.Setting(
+                            key = "bitrate",
+                            label = stringResource(R.string.quick_bitrate),
+                            explanation = stringResource(R.string.quick_explain_bitrate)
+                        ) {
+                            VideoBitratePreset.entries.forEach { bitrate ->
+                                QuickChoice(
+                                    text = bitrate.bitrateMbps.toString(),
+                                    selected = videoBitrate == bitrate,
+                                    minWidth = 42.dp,
+                                    onClick = { onVideoBitrateChange(bitrate) }
+                                )
+                            }
+                        }
+                        rows.Setting(
+                            key = "codec",
+                            label = stringResource(R.string.quick_codec),
+                            explanation = stringResource(R.string.quick_explain_codec),
+                            last = true
+                        ) {
+                            VideoCodec.entries.forEach { codec ->
+                                QuickChoice(
+                                    text = codec.displayName,
+                                    selected = videoCodec == codec,
+                                    minWidth = 56.dp,
+                                    onClick = { onVideoCodecChange(codec) }
+                                )
                             }
                         }
                     }
-                }
-
-                if (captureMode == CaptureMode.VIDEO) {
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    ContentManagementQuickSetting(
-                        onClick = { showContentManagementOptions = !showContentManagementOptions },
-                        modifier = Modifier.fillMaxWidth().height(40.dp)
-                    )
-
-                    ContentManagementOptionsPanel(
-                        visible = showContentManagementOptions,
-                        onFilterManageClick = {
-                            handleContentManagementAction(onFilterManageClick)
-                        },
-                        onFrameManageClick = {
-                            handleContentManagementAction(onFrameManageClick)
-                        },
-                        onPresetManageClick = {
-                            handleContentManagementAction(onPresetManageClick)
-                        }
-                    )
-                }
-
-                // More Settings Button
-                Box(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .clickable(onClick = onMoreSettingsClick)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(color = Color.White.copy(alpha = 0.15f))
-                            .padding(16.dp, 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.White.copy(alpha = 0.1f)),
-                            contentAlignment = Alignment.Center
+                    QuickGroup {
+                        rows.Setting(
+                            key = "mic",
+                            label = stringResource(R.string.video_microphone_title),
+                            explanation = stringResource(R.string.quick_explain_microphone),
+                            last = openPicker != "mic"
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
+                            QuickLink(
+                                selectedVideoAudioInputLabel(videoAudioInputId, videoAudioInputOptions),
+                                open = openPicker == "mic"
+                            ) {
+                                openPicker = if (openPicker == "mic") null else "mic"
+                            }
+                        }
+                        InlinePicker(visible = openPicker == "mic") {
+                            VideoOptionChip(
+                                title = stringResource(R.string.video_microphone_auto),
+                                selected = videoAudioInputId == VIDEO_AUDIO_INPUT_AUTO,
+                                onClick = { onVideoAudioInputChange(VIDEO_AUDIO_INPUT_AUTO) }
+                            )
+                            videoAudioInputOptions.forEach { option ->
+                                VideoOptionChip(
+                                    title = videoAudioInputLabel(option),
+                                    selected = videoAudioInputId == option.id,
+                                    onClick = { onVideoAudioInputChange(option.id) }
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // Multi-frame and multi-exposure, shown in Photo's own section or in a plain group in Portrait.
+                    val photoStackRows: @Composable ColumnScope.() -> Unit = {
+                        rows.Setting(
+                            key = "mf",
+                            label = stringResource(R.string.quick_multi_frame),
+                            explanation = stringResource(R.string.settings_multi_frame_denoise_frame_count_description),
+                            settingsTarget = SettingsTarget.MULTI_FRAME
+                        ) {
+                            FrameCountSlider(
+                                frames = if (useJpgMax) multiFrameCount else 0,
+                                min = MultiFrameConfig.MIN_DENOISE_FRAME_COUNT,
+                                withOff = true,
+                                onFramesChange = { frames ->
+                                    if (frames == 0) onJpgMaxToggle(false) else onMultiFrameCountChange(frames)
+                                }
                             )
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = stringResource(R.string.settings_title),
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.weight(1f)
+                        rows.Setting(
+                            key = "mexp",
+                            label = stringResource(R.string.quick_multi_exposure),
+                            explanation = stringResource(R.string.quick_explain_multiple_exposure),
+                            settingsTarget = SettingsTarget.MULTIPLE_EXPOSURE,
+                            last = true
+                        ) {
+                            QuickSwitch(useMultipleExposure) { onMultipleExposureToggle(!useMultipleExposure) }
+                        }
+                    }
+                    // The current mode's own settings, always first and marked, so the shared groups
+                    // below keep their place at the bottom of the sheet from mode to mode.
+                    ModeGroup(
+                        title = stringResource(
+                            when {
+                                isPortraitMode -> R.string.capture_mode_portrait
+                                isProfessionalMode -> R.string.capture_mode_professional
+                                else -> R.string.capture_mode_photo
+                            }
                         )
-                        Icon(
-                            imageVector = AppIcons.ChevronRight,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.3f),
-                            modifier = Modifier.size(20.dp)
-                        )
+                    ) {
+                        if (isPortraitMode) {
+                            rows.Setting(
+                                key = "pblur",
+                                label = stringResource(R.string.portrait_blur),
+                                explanation = stringResource(R.string.quick_explain_portrait_blur),
+                                onLongClick = onPortraitHelp
+                            ) {
+                                QuickChoice(
+                                    text = stringResource(R.string.portrait_blur_quick),
+                                    selected = portraitQuickBlur,
+                                    minWidth = 56.dp,
+                                    onClick = { onPortraitQuickBlurChange(true) }
+                                )
+                                QuickChoice(
+                                    text = stringResource(R.string.portrait_blur_depth),
+                                    selected = !portraitQuickBlur,
+                                    minWidth = 56.dp,
+                                    onClick = { onPortraitQuickBlurChange(false) }
+                                )
+                            }
+                            rows.Setting(
+                                key = "pbokeh",
+                                label = stringResource(R.string.gallery_bokeh_style_title),
+                                explanation = stringResource(R.string.quick_explain_portrait_bokeh),
+                                last = true
+                            ) {
+                                listOf(
+                                    BokehStyle.NATURAL to R.string.gallery_bokeh_style_natural,
+                                    BokehStyle.DEFAULT to R.string.gallery_bokeh_style_default,
+                                    BokehStyle.BUBBLE to R.string.gallery_bokeh_style_bubble,
+                                ).forEach { (style, label) ->
+                                    QuickChoice(
+                                        text = stringResource(label),
+                                        selected = portraitBokehStyle == style,
+                                        minWidth = 48.dp,
+                                        onClick = { onPortraitBokehStyleChange(style) }
+                                    )
+                                }
+                            }
+                        } else if (isProfessionalMode) {
+                            rows.Setting(
+                                key = "engine",
+                                label = stringResource(R.string.quick_rendering),
+                                explanation = rawColorEngineDescription(rawRenderingEngine),
+                                settingsTarget = SettingsTarget.RAW_DEVELOPMENT
+                            ) {
+                                QuickLink(rawRenderingEngineName(rawRenderingEngine), open = false) {
+                                    showRenderingEngineSheet = true
+                                }
+                            }
+                            rows.Setting(
+                                key = "hdrp",
+                                label = stringResource(R.string.quick_hdr_plus_frames),
+                                explanation = stringResource(R.string.settings_hdr_plus_frame_count_description),
+                                settingsTarget = SettingsTarget.HDR_PLUS,
+                                last = true
+                            ) {
+                                FrameCountSlider(
+                                    frames = hdrPlusFrameCount,
+                                    min = hdrPlusMinFrames,
+                                    withOff = false,
+                                    onFramesChange = onHdrPlusFrameCountChange
+                                )
+                            }
+                        } else {
+                            photoStackRows()
+                        }
+                    }
+                    // In Portrait, Photo's own multi-frame and multi-exposure keep their plain group after Portrait's.
+                    if (isPortraitMode) QuickGroup { photoStackRows() }
+                    QuickGroup {
+                        rows.Setting(
+                            key = "meter",
+                            label = stringResource(R.string.metering_mode),
+                            explanation = stringResource(R.string.quick_explain_metering)
+                        ) {
+                            listOf(
+                                MeteringMode.SYSTEM_DEFAULT to R.string.quick_metering_auto,
+                                MeteringMode.CENTER_WEIGHTED to R.string.quick_metering_centre,
+                                MeteringMode.SPOT to R.string.metering_spot,
+                                MeteringMode.AVERAGE to R.string.quick_metering_average,
+                                MeteringMode.HIGHLIGHT_PRIORITY to R.string.quick_metering_highlight,
+                            ).forEach { (mode, label) ->
+                                QuickChoice(
+                                    text = stringResource(label),
+                                    selected = meteringMode == mode,
+                                    minWidth = 42.dp,
+                                    onClick = { onMeteringModeChange(mode) }
+                                )
+                            }
+                        }
+                        rows.Setting(
+                            key = "hist",
+                            label = stringResource(R.string.histogram),
+                            explanation = stringResource(R.string.quick_explain_histogram),
+                            last = true
+                        ) {
+                            QuickSwitch(showHistogram) { onHistogramChange(!showHistogram) }
+                        }
+                    }
+                    QuickGroup {
+                        rows.Setting(
+                            key = "res",
+                            label = stringResource(R.string.photo_resolution),
+                            explanation = stringResource(
+                                if (isFrontCamera && !isProfessionalMode) R.string.quick_explain_resolution_front
+                                else R.string.quick_explain_resolution
+                            )
+                        ) {
+                            when {
+                                // Pro (RAW) is always full size: the RAW stream only exists at full sensor size.
+                                isProfessionalMode -> QuickFixed(stringResource(R.string.quick_resolution_full_raw))
+                                isFrontCamera -> listOf(0, 2).forEach { cap ->
+                                    QuickChoice(
+                                        text = resolutionLabel(cap),
+                                        selected = frontPhotoResolutionCapMp == cap,
+                                        minWidth = 56.dp,
+                                        onClick = { onFrontPhotoResolutionCapChange(cap) }
+                                    )
+                                }
+                                // A camera of 8 MP or less picks one size for every cap.
+                                !photoResolutionAdjustable -> QuickFixed(stringResource(R.string.photo_resolution_full))
+                                else -> listOf(0, 12, 8).forEach { cap ->
+                                    QuickChoice(
+                                        text = resolutionLabel(cap),
+                                        selected = photoResolutionCapMp == cap,
+                                        minWidth = 56.dp,
+                                        onClick = { onPhotoResolutionCapChange(cap) }
+                                    )
+                                }
+                            }
+                        }
+                        rows.Setting(
+                            key = "jpeg",
+                            label = stringResource(R.string.camera_jpeg),
+                            explanation = stringResource(R.string.quick_explain_camera_jpeg)
+                        ) {
+                            QuickSwitch(saveCameraJpeg) { onSaveCameraJpegChange(!saveCameraJpeg) }
+                        }
+                        rows.Setting(
+                            key = "uhdr",
+                            label = stringResource(R.string.settings_ultra_hdr_gain_map),
+                            explanation = stringResource(R.string.quick_explain_ultra_hdr),
+                            settingsTarget = SettingsTarget.ULTRA_HDR,
+                            last = true
+                        ) {
+                            QuickSwitch(ultraHdrEnabled) { onUltraHdrToggle(!ultraHdrEnabled) }
+                        }
+                    }
+                }
+                if (lensChoices.isNotEmpty()) {
+                    QuickGroup {
+                        rows.Setting(
+                            key = "lens",
+                            label = stringResource(R.string.quick_lens),
+                            explanation = stringResource(R.string.quick_explain_lens),
+                            last = true
+                        ) {
+                            // shortcut: one line of choices, so about six lenses fit; wrap them if a phone offers more.
+                            lensChoices.forEach { choice ->
+                                QuickChoice(
+                                    text = choice.label.ifEmpty { stringResource(R.string.quick_lens_macro) },
+                                    selected = choice.cameraId == currentCameraId,
+                                    minWidth = 42.dp,
+                                    onClick = { onLensSelect(choice.cameraId) }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -640,66 +708,491 @@ fun CameraTopSheet(
 }
 
 @Composable
-private fun VideoSettingTile(
-    title: String,
-    summary: String,
-    expanded: Boolean,
+private fun RowScope.PhotoEverydayItems(
+    useLivePhoto: Boolean,
+    onLivePhotoToggle: () -> Unit,
+    timerSeconds: Int,
+    onTimerToggle: () -> Unit,
+    aspectRatio: AspectRatio,
+    onAspectClick: () -> Unit,
+    flashMode: Int,
+    flashAvailable: Boolean,
+    onFlashToggle: () -> Unit,
+    itemModifier: Modifier
+) {
+    val on = stringResource(R.string.quick_on)
+    val off = stringResource(R.string.quick_off)
+    EverydayItem(
+        label = "${stringResource(R.string.quick_live)} ${if (useLivePhoto) on else off}",
+        active = useLivePhoto,
+        onClick = onLivePhotoToggle,
+        modifier = itemModifier
+    ) { color -> Icon(AppIcons.LivePhotoLine, contentDescription = null, tint = color, modifier = Modifier.size(24.dp)) }
+    EverydayItem(
+        label = "${stringResource(R.string.timer)} ${if (timerSeconds > 0) "${timerSeconds}s" else off}",
+        active = timerSeconds > 0,
+        onClick = onTimerToggle,
+        modifier = itemModifier
+    ) { color -> Icon(AppIcons.StopwatchLine, contentDescription = null, tint = color, modifier = Modifier.size(24.dp)) }
+    EverydayItem(
+        label = aspectRatio.getDisplayName(),
+        active = false,
+        onClick = onAspectClick,
+        modifier = itemModifier
+    ) { color -> AspectIcon(aspectRatio, color) }
+    EverydayItem(
+        label = "${stringResource(R.string.flash)} ${
+            when (flashMode) {
+                1 -> on
+                2 -> stringResource(R.string.quick_torch)
+                else -> off
+            }
+        }",
+        active = flashAvailable && flashMode != 0,
+        enabled = flashAvailable,
+        onClick = onFlashToggle,
+        modifier = itemModifier
+    ) { color ->
+        Icon(
+            imageVector = when (flashMode) {
+                1 -> AppIcons.BoltLine
+                2 -> AppIcons.BulbLine
+                else -> AppIcons.BoltOffLine
+            },
+            contentDescription = null,
+            tint = color,
+            modifier = Modifier.size(24.dp)
+        )
+    }
+}
+
+@Composable
+private fun RowScope.VideoEverydayItems(
+    videoConfig: VideoConfig,
+    videoCapabilities: VideoCapabilities,
+    onResolutionClick: () -> Unit,
+    onFpsClick: () -> Unit,
+    onTorchToggle: () -> Unit,
+    onStabilizationModeChange: (VideoStabilizationMode) -> Unit,
+    itemModifier: Modifier
+) {
+    val resolution = if (videoConfig.resolution == VideoResolutionPreset.MAX) {
+        stringResource(R.string.video_resolution_max)
+    } else {
+        videoConfig.resolution.displayName
+    }
+    EverydayItem(stringResource(R.string.photo_resolution), active = false, onClick = onResolutionClick, modifier = itemModifier) { color ->
+        EverydayValue(resolution, color)
+    }
+    EverydayItem(stringResource(R.string.quick_fps), active = false, onClick = onFpsClick, modifier = itemModifier) { color ->
+        EverydayValue(videoConfig.fps.fps.toString(), color)
+    }
+    val torch = videoConfig.torchEnabled
+    EverydayItem(
+        label = "${stringResource(R.string.video_torch_chip)} ${stringResource(if (torch) R.string.quick_on else R.string.quick_off)}",
+        active = torch,
+        enabled = videoCapabilities.supportsTorch,
+        onClick = onTorchToggle,
+        modifier = itemModifier
+    ) { color ->
+        Icon(
+            imageVector = if (torch) AppIcons.BulbLine else AppIcons.BulbOffLine,
+            contentDescription = null,
+            tint = color,
+            modifier = Modifier.size(24.dp)
+        )
+    }
+    val modes = videoCapabilities.availableStabilizationModes
+    if (modes.size > 1) {
+        EverydayItem(
+            label = stringResource(R.string.quick_stabilise),
+            active = false,
+            onClick = {
+                onStabilizationModeChange(modes[(modes.indexOf(videoConfig.stabilizationMode) + 1).mod(modes.size)])
+            },
+            modifier = itemModifier
+        ) { color -> EverydayValue(videoStabilizationModeLabel(videoConfig.stabilizationMode), color) }
+    }
+}
+
+/** An everyday setting: its icon or value, and its name with the value underneath. Turns with the phone. */
+@Composable
+private fun EverydayItem(
+    label: String,
+    active: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    big: @Composable (Color) -> Unit
 ) {
-    Column(
+    val color = when {
+        !enabled -> SheetText.copy(alpha = 0.35f)
+        active -> ModeAmber
+        else -> SheetText
+    }
+    // The item floats on the picture, so a pressed box would look out of place: the icon and its name
+    // shrink and dim under the finger instead.
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val press by animateFloatAsState(if (pressed) 1f else 0f, tween(if (pressed) 60 else 180), label = "press")
+    Box(
         modifier = modifier
-            .height(40.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (expanded) AccentColor else Color.White.copy(alpha = 0.14f)
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically)
+            .fillMaxHeight()
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = title,
-            color = if (expanded) OnAccentColor.copy(alpha = 0.75f) else Color.White.copy(alpha = 0.72f),
-            fontSize = 9.sp,
-            lineHeight = 12.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1
-        )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .graphicsLayer {
+                    scaleX = 1f - 0.12f * press
+                    scaleY = 1f - 0.12f * press
+                    alpha = 1f - 0.4f * press
+                }
+                .autoRotate(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            QuickSettingLabel(
-                text = summary,
-                color = if (expanded) OnAccentColor else Color.White,
-                maxFontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f)
-            )
-            Icon(
-                imageVector = if (expanded) AppIcons.ExpandLess else AppIcons.OpenInFull,
-                contentDescription = null,
-                tint = if (expanded) OnAccentColor else Color.White.copy(alpha = 0.8f),
-                modifier = Modifier.size(12.dp)
+            Box(Modifier.height(24.dp), contentAlignment = Alignment.Center) { big(color) }
+            Text(
+                text = label,
+                color = if (active || !enabled) color else SheetDim,
+                fontSize = 10.5.sp,
+                maxLines = 1,
+                softWrap = false,
+                style = SheetTextStyle
             )
         }
     }
 }
 
 @Composable
-private fun VideoSettingExpandedPanel(
-    content: @Composable ColumnScope.() -> Unit
+private fun EverydayValue(text: String, color: Color) {
+    Text(text = text, color = color, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, style = SheetTextStyle)
+}
+
+/** An outline of the frame in that ratio, upright, at most 22 dp. */
+@Composable
+private fun AspectIcon(ratio: AspectRatio, color: Color) {
+    val w = ratio.heightRatio.toFloat()
+    val h = ratio.widthRatio.toFloat()
+    val scale = 22f / maxOf(w, h)
+    Box(
+        Modifier
+            .size(width = maxOf(8f, w * scale).dp, height = (h * scale).dp)
+            .border(1.5.dp, color, RoundedCornerShape(2.dp))
+    )
+}
+
+@Composable
+private fun SheetHeader(
+    onToolboxClick: () -> Unit,
+    onContentManagementClick: () -> Unit,
+    onSettingsClick: () -> Unit
 ) {
+    Box(Modifier.fillMaxWidth().height(34.dp)) {
+        Box(
+            Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 8.dp)
+                .size(width = 36.dp, height = 3.dp)
+                .background(SheetGrey, RoundedCornerShape(2.dp))
+        )
+        Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            HeaderIcon(AppIcons.ToolboxLine, stringResource(R.string.toolbox_title), onToolboxClick)
+            HeaderIcon(AppIcons.FoldersLine, stringResource(R.string.settings_section_management), onContentManagementClick)
+            HeaderIcon(AppIcons.SettingsLine, stringResource(R.string.settings_title), onSettingsClick)
+        }
+    }
+}
+
+@Composable
+private fun HeaderIcon(icon: ImageVector, description: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(width = 40.dp, height = 34.dp)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = description, tint = SheetDim, modifier = Modifier.size(19.dp))
+    }
+}
+
+@Composable
+private fun QuickGroup(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.White.copy(alpha = 0.08f))
-            .padding(14.dp),
+            .padding(bottom = 8.dp)
+            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(14.dp))
+            .padding(start = 12.dp, end = 6.dp),
         content = content
     )
 }
+
+/** Like [QuickGroup], for the current mode's own settings: an amber outline and the mode's name on top. */
+@Composable
+private fun ModeGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+            .border(1.dp, ModeAmber.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+            .padding(start = 12.dp, end = 6.dp)
+    ) {
+        Text(
+            text = title,
+            color = ModeAmber,
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(top = 7.dp)
+        )
+        content()
+    }
+}
+
+/** List rows: the name on the left (tap: explanation, long press: Settings), the choices on the right. */
+private class QuickRows(
+    val explained: String?,
+    val onExplain: (String) -> Unit,
+    val onOpenSettingsAt: (SettingsTarget) -> Unit
+) {
+    @OptIn(ExperimentalLayoutApi::class)
+    @Composable
+    fun Setting(
+        key: String,
+        label: String,
+        explanation: String,
+        settingsTarget: SettingsTarget? = null,
+        last: Boolean = false,
+        // A long press that does something else than opening Settings.
+        onLongClick: (() -> Unit)? = null,
+        content: @Composable RowScope.() -> Unit
+    ) {
+        val open = explained == key
+        // The choices drop to a second line, still right-aligned, when they don't fit beside the name.
+        FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            LongerLongPress {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp)
+                        .combinedClickable(
+                            onClick = { onExplain(key) },
+                            onLongClick = onLongClick ?: settingsTarget?.let { target -> { onOpenSettingsAt(target) } }
+                        ),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Text(
+                        text = label,
+                        color = if (open) Color.White else SheetLabel,
+                        fontSize = 12.5.sp,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.height(36.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                content = content
+            )
+        }
+        if (open) {
+            Text(
+                text = explanation,
+                color = SheetDim,
+                fontSize = 11.5.sp,
+                lineHeight = 1.4.em,
+                modifier = Modifier.padding(top = 2.dp, end = 8.dp, bottom = if (last) 11.dp else 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickChoice(text: String, selected: Boolean, minWidth: Dp, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(13.dp)
+    Box(
+        modifier = Modifier
+            .widthIn(min = minWidth)
+            .height(26.dp)
+            .clip(shape)
+            .then(if (selected) Modifier.border(1.25.dp, ModeAmber.copy(alpha = 0.8f), shape) else Modifier)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = if (selected) ModeAmber else SheetText,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
+@Composable
+private fun QuickSwitch(checked: Boolean, onClick: () -> Unit) {
+    val knob by androidx.compose.animation.core.animateDpAsState(if (checked) 25.dp else 5.dp, tween(150), label = "quickSwitch")
+    val color = if (checked) ModeAmber else SheetGrey
+    Box(
+        modifier = Modifier
+            .height(36.dp)
+            .clickable(onClick = onClick)
+            .padding(start = 8.dp, end = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(Modifier.size(width = 42.dp, height = 22.dp).border(1.25.dp, color, RoundedCornerShape(11.dp))) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = knob)
+                    .size(12.dp)
+                    .background(color, CircleShape)
+            )
+        }
+    }
+}
+
+/** A value that opens a picker: an inline list under the row, or a sheet. */
+@Composable
+private fun QuickLink(value: String, open: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .height(36.dp)
+            .clickable(onClick = onClick)
+            .padding(start = 8.dp, end = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(value, color = SheetText, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        Icon(
+            imageVector = if (open) AppIcons.ChevronUpLine else AppIcons.ChevronRightLine,
+            contentDescription = null,
+            tint = SheetGrey,
+            modifier = Modifier.size(16.dp)
+        )
+    }
+}
+
+@Composable
+private fun QuickFixed(text: String) {
+    Text(
+        text = text,
+        color = SheetGrey,
+        fontSize = 12.5.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(end = 6.dp)
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun InlinePicker(visible: Boolean, content: @Composable () -> Unit) {
+    AnimatedVisibility(visible = visible, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth().padding(end = 6.dp, bottom = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) { content() }
+    }
+}
+
+/**
+ * A frame count as a slider, whole counts from [min] up to the maximum. With [withOff] the left end is Off
+ * (reported as 0); without it a single frame is the inactive state.
+ */
+@Composable
+private fun FrameCountSlider(frames: Int, min: Int, withOff: Boolean, onFramesChange: (Int) -> Unit) {
+    val start = if (withOff) min - 1 else min
+    val max = MultiFrameConfig.MAX_FRAME_COUNT
+    // The value while dragging, until the saved setting catches up.
+    var dragged by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(frames) { dragged = null }
+    val currentOnFramesChange by rememberUpdatedState(onFramesChange)
+    val shown = dragged ?: if (withOff && frames <= 0) 0 else frames.coerceIn(min, max)
+    val active = if (withOff) shown > 0 else shown > 1
+    val fraction = ((if (shown == 0) start else shown) - start).toFloat() / (max - start)
+    Row(
+        modifier = Modifier.height(36.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = if (shown == 0) stringResource(R.string.quick_frames_off)
+            else pluralStringResource(R.plurals.quick_frame_count, shown, shown),
+            color = if (active) ModeAmber else SheetText,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+            modifier = Modifier.width(62.dp)
+        )
+        Box(
+            modifier = Modifier
+                .padding(end = 8.dp)
+                .width(120.dp)
+                .fillMaxHeight()
+                .pointerInput(Unit) {
+                    fun select(x: Float) {
+                        val position = (start + (x / size.width).coerceIn(0f, 1f) * (max - start)).roundToInt()
+                        val value = if (withOff && position <= start) 0 else position
+                        if (value != dragged) {
+                            dragged = value
+                            currentOnFramesChange(value)
+                        }
+                    }
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        down.consume()
+                        select(down.position.x)
+                        while (true) {
+                            val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            if (change.positionChange() != androidx.compose.ui.geometry.Offset.Zero) select(change.position.x)
+                            change.consume()
+                        }
+                    }
+                }
+        ) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .background(Color.White.copy(alpha = 0.3f), RoundedCornerShape(1.dp))
+            )
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxWidth(fraction)
+                    .height(2.dp)
+                    .background(ModeAmber, RoundedCornerShape(1.dp))
+            )
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = 120.dp * fraction - 8.dp)
+                    .size(16.dp)
+                    .background(Color.Black, CircleShape)
+                    .border(1.5.dp, ModeAmber, CircleShape)
+            )
+        }
+    }
+}
+
+@Composable
+private fun resolutionLabel(capMp: Int): String =
+    if (capMp == 0) stringResource(R.string.photo_resolution_full) else stringResource(R.string.quick_resolution_mp, capMp)
 
 @Composable
 private fun VideoOptionChip(
@@ -780,75 +1273,6 @@ private fun videoLogProfileLabel(profile: VideoLogProfile): String {
         VideoLogProfile.OFF -> stringResource(R.string.video_log_off)
         else -> profile.displayName
     }
-}
-
-@Composable
-private fun SectionLabel(title: String) {
-    Text(
-        text = title,
-        color = Color.White.copy(alpha = 0.6f),
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.padding(bottom = 12.dp)
-    )
-}
-
-@Composable
-private fun MeteringModeQuickSetting(
-    meteringMode: MeteringMode,
-    onMeteringModeChange: (MeteringMode) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val meteringLabel = when (meteringMode) {
-        MeteringMode.SPOT -> stringResource(R.string.metering_spot)
-        MeteringMode.CENTER_WEIGHTED -> stringResource(R.string.metering_center_weighted)
-        MeteringMode.SYSTEM_DEFAULT -> stringResource(R.string.metering_system_default)
-        MeteringMode.AVERAGE -> stringResource(R.string.metering_average)
-        MeteringMode.HIGHLIGHT_PRIORITY -> stringResource(R.string.metering_highlight_priority)
-    }
-    val meteringContext = LocalContext.current
-    QuickSettingValue(
-        title = stringResource(R.string.metering_mode),
-        value = meteringLabel,
-        onClick = {
-            val next = when (meteringMode) {
-                MeteringMode.SPOT -> MeteringMode.SYSTEM_DEFAULT
-                MeteringMode.SYSTEM_DEFAULT -> MeteringMode.CENTER_WEIGHTED
-                MeteringMode.CENTER_WEIGHTED -> MeteringMode.AVERAGE
-                MeteringMode.AVERAGE -> MeteringMode.HIGHLIGHT_PRIORITY
-                MeteringMode.HIGHLIGHT_PRIORITY -> MeteringMode.SPOT
-            }
-            onMeteringModeChange(next)
-        },
-        onLongClick = { showQuickSettingExplanation(meteringContext, R.string.quick_explain_metering) },
-        modifier = modifier
-    )
-}
-
-@Composable
-private fun ToolboxQuickSetting(
-    onToolboxClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    QuickSettingButton(
-        title = stringResource(R.string.toolbox_title),
-        icon = AppIcons.Palette,
-        onClick = onToolboxClick,
-        modifier = modifier
-    )
-}
-
-@Composable
-private fun ContentManagementQuickSetting(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    QuickSettingButton(
-        title = stringResource(R.string.settings_section_management),
-        icon = AppIcons.Tune,
-        onClick = onClick,
-        modifier = modifier
-    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -941,57 +1365,6 @@ private fun LongerLongPress(content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalViewConfiguration provides longer, content = content)
 }
 
-/** Long press on a tile that has no Settings page: say what it does. */
-private fun showQuickSettingExplanation(context: Context, textRes: Int) {
-    android.widget.Toast.makeText(context, textRes, android.widget.Toast.LENGTH_LONG).show()
-}
-
-@Composable
-fun QuickSettingValue(
-    title: String,
-    value: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    // A disabled tile is greyed but still takes taps, so the caller can say why.
-    enabled: Boolean = true,
-    // An active feature gets the accent fill, like a checked QuickSettingToggle.
-    highlighted: Boolean = false,
-    onLongClick: (() -> Unit)? = null,
-) {
-    LongerLongPress {
-        Box(
-            modifier = modifier
-                .height(48.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(
-                    when {
-                        highlighted -> AccentColor
-                        else -> Color.White.copy(alpha = if (enabled) 0.15f else 0.06f)
-                    }
-                )
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = title,
-                    color = if (highlighted) OnAccentColor.copy(alpha = 0.7f) else Color.White.copy(alpha = if (enabled) 0.6f else 0.3f),
-                    fontSize = 8.sp,
-                    lineHeight = 10.sp,
-                    fontWeight = FontWeight.Normal,
-                    maxLines = 1,
-                )
-                QuickSettingLabel(
-                    text = value,
-                    color = if (highlighted) OnAccentColor else Color.White.copy(alpha = if (enabled) 1f else 0.38f),
-                    fontWeight = if (highlighted) FontWeight.Bold else FontWeight.Medium
-                )
-            }
-        }
-    }
-}
-
 @Composable
 fun QuickSettingButton(
     title: String,
@@ -1029,109 +1402,3 @@ fun QuickSettingButton(
     }
 }
 
-
-
-@Composable
-fun QuickSettingButton2(
-    title: String,
-    checked: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    onLongClick: (() -> Unit)? = null,
-) {
-    LongerLongPress {
-        Box(
-            modifier = modifier
-                .height(48.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(
-                    if (checked) AccentColor else Color.White.copy(
-                        alpha = 0.15f
-                    )
-                )
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                QuickSettingLabel(
-                    text = title,
-                    color = if (checked) OnAccentColor else Color.White.copy(alpha = 0.9f),
-                    fontWeight = if (checked) FontWeight.Bold else FontWeight.Normal,
-                    modifier = Modifier.weight(1f)
-                )
-                Icon(
-                    imageVector = AppIcons.ChevronRight,
-                    contentDescription = null,
-                    tint = if (checked) OnAccentColor else Color.White.copy(alpha = 0.9f),
-                    modifier = Modifier.size(14.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun QuickSettingToggle(
-    title: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    enabled: Boolean = true,
-    modifier: Modifier = Modifier,
-    onLongClick: (() -> Unit)? = null,
-) {
-    LongerLongPress {
-        val contentAlpha = if (enabled) 1f else 0.38f
-        Box(
-            modifier = modifier
-                .height(48.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(
-                    if (checked) AccentColor.copy(alpha = contentAlpha) else Color.White.copy(
-                        alpha = 0.15f
-                    )
-                )
-                .combinedClickable(enabled = enabled, onClick = { onCheckedChange(!checked) }, onLongClick = onLongClick)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                QuickSettingLabel(
-                    text = title,
-                    color = if (checked) {
-                        OnAccentColor.copy(alpha = contentAlpha)
-                    } else {
-                        Color.White.copy(alpha = 0.9f * contentAlpha)
-                    },
-                    fontWeight = if (checked) FontWeight.Bold else FontWeight.Normal,
-                    modifier = Modifier.weight(1f)
-                )
-
-                // Simple indicator
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(
-                            if (checked) {
-                                OnAccentColor.copy(alpha = contentAlpha)
-                            } else {
-                                Color.White.copy(alpha = 0.2f * contentAlpha)
-                            }
-                        )
-                )
-            }
-        }
-    }
-}
-
-private val MULTI_FRAME_PRESETS = listOf(3, 6, 10, 20)
-private val HDR_PLUS_FRAME_PRESETS = listOf(1, 2, 3)

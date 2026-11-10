@@ -223,8 +223,14 @@ object GlesGpuScheduler {
         GLES31.glMemoryBarrier(GLES31.GL_ALL_BARRIER_BITS)
     }
 
-    fun createBackgroundContext(display: EGLDisplay, config: EGLConfig, tag: String): EGLContext {
-        if (supportsLowPriorityContext(display)) {
+    /** [lowPriority] false asks for a normal-priority context, for drivers that corrupt preempted work. */
+    fun createBackgroundContext(
+        display: EGLDisplay,
+        config: EGLConfig,
+        tag: String,
+        lowPriority: Boolean = true,
+    ): EGLContext {
+        if (lowPriority && supportsLowPriorityContext(display)) {
             val lowPriorityContext = EGL14.eglCreateContext(
                 display,
                 config,

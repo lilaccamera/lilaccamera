@@ -3372,7 +3372,8 @@ object GalleryManager {
             val originalFile = writeInternalOriginalPhoto(photoDir, previewBitmap, photoQuality) ?: return@withContext
             PLog.d(TAG, "saveYuvStackedPhoto internal original saved=${originalFile.name}")
             markProcessingPhotoDisplayReady(photoId, originalFile, metadata)
-            generateBokehPhoto(context, photoId, metadata, previewBitmap)
+            // The blurred picture is kept: blurring it again at export took as long as the first pass.
+            val bokehBitmap = renderAndSaveBokehPhoto(context, photoId, metadata, previewBitmap)
             // Auto Save
             if (shouldAutoSave) {
                 val metadata = loadMetadata(context, photoId) ?: return@withContext
@@ -3380,7 +3381,7 @@ object GalleryManager {
                     null
                 } else {
                     PLog.w(TAG, "Internal HEIC unavailable; exporting stacked preview bitmap")
-                    result
+                    bokehBitmap
                 }
                 exportPhoto(
                     context,
@@ -3391,9 +3392,11 @@ object GalleryManager {
                     sharpeningValue,
                     noiseReductionValue,
                     chromaNoiseReductionValue,
-                    photoQuality
+                    photoQuality,
+                    bitmapComputationalBokehApplied = true,
                 )
             }
+            if (bokehBitmap !== result && !bokehBitmap.isRecycled) bokehBitmap.recycle()
             result.recycle()
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to savePhoto", e)

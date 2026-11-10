@@ -143,6 +143,7 @@ class UserPreferences internal constructor(
     var oppoSuperStabilizationEnabled by bool("oppo_super_stabilization_enabled", false)
     var photoPreviewStabilizationEnabled by bool("photo_preview_stabilization_enabled", false)
     var photoResolutionCapMp by int("photo_resolution_cap_mp", 0)
+    var frontPhotoResolutionCapMp by int("front_photo_resolution_cap_mp", 0)
     // Pro: also save the full-size JPEG the camera delivers beside each RAW, in the shot's photo stack.
     var saveCameraJpeg by bool("save_camera_jpeg", false)
     var videoCodec by enum("video_codec", com.hinnka.mycamera.video.VideoCodec.H264)
@@ -195,6 +196,10 @@ class UserPreferences internal constructor(
     var saveLocation by bool("save_location", false)
     var useBuiltInAiService by bool("use_built_in_ai_service", false)
     var phantomSaveAsNew by bool("phantom_save_as_new", false)
+    var portraitQuickBlur by bool("portrait_quick_blur", true)  // 背景虚化：快速（无深度模型）或深度
+    var portraitIntroSeen by bool("portrait_intro_seen", false)  // 人像模式首次说明已显示
+    // Portrait lens effect, a BokehStyle persisted name; "BUBBLE" is the Natural style.
+    var portraitBokehStyle by string("portrait_bokeh_style", "BUBBLE")
     var defaultVirtualAperture by float("default_virtual_aperture", 0f)  // 默认虚化光圈，0表示关闭
     var useHdrScreenMode by bool("use_hdr_screen_mode", true)
     var deleteExported by bool("delete_exported", true)
