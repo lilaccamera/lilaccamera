@@ -6,8 +6,10 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Handler
+import android.os.SystemClock
 import com.hinnka.mycamera.utils.PLog
 import java.util.ArrayDeque
+import kotlin.math.sqrt
 
 class BurstGyroRecorder(context: Context) {
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -75,6 +77,15 @@ class BurstGyroRecorder(context: Context) {
         return GyroExposureWindowIntegrator.integrate(snapshot, startTimestampNs, endTimestampNs)
     }
 
+    /** Root-mean-square rotation speed in rad/s over the last [windowNs], or null with too few samples. */
+    fun recentAngularSpeed(windowNs: Long): Float? {
+        val since = SystemClock.elapsedRealtimeNanos() - windowNs
+        val recent = synchronized(lock) { samples.filter { it.timestampNs >= since } }
+        if (recent.size < MIN_RECENT_SAMPLES) return null
+        val meanSquare = recent.sumOf { (it.x * it.x + it.y * it.y + it.z * it.z).toDouble() } / recent.size
+        return sqrt(meanSquare).toFloat()
+    }
+
     fun release() {
         stop()
         synchronized(lock) { samples.clear() }
@@ -88,5 +99,6 @@ class BurstGyroRecorder(context: Context) {
         const val TAG = "BurstGyroRecorder"
         const val MAX_SAMPLES = 8_192
         const val WINDOW_GUARD_NS = 2_000_000L
+        const val MIN_RECENT_SAMPLES = 20
     }
 }

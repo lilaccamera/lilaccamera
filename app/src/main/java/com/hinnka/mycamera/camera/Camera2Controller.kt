@@ -483,6 +483,8 @@ class Camera2Controller(private val context: Context) {
 
     private var nextPhotoCaptureId = 0L
     private var activePhotoCapture: PhotoCaptureContext? = null
+    // Exposure for the YUV burst being captured, when it is planned for low light.
+    private var nightPlan: NightCapturePlan? = null
     private var pendingContinuousBurstCapture: PhotoCaptureContext? = null
     private val photoCaptures = mutableMapOf<Long, PhotoCaptureContext>()
     private val photoCaptureByTimestamp = mutableMapOf<Long, PhotoCaptureContext>()
@@ -772,6 +774,7 @@ class Camera2Controller(private val context: Context) {
 
     private fun finishPhotoCaptureSequence(shot: PhotoCaptureContext, successful: Boolean) {
         shot.sequenceCompleted = true
+        nightPlan = null
         clearPhotoCaptureProgress(shot)
         if (!successful) failPhotoCapture(shot, "capture sequence aborted")
         if (shot.failed) settleFailedPhotoCapture(shot)
@@ -8125,7 +8128,14 @@ class Camera2Controller(private val context: Context) {
             if (currentState.requiresMultiFrameCaptureSequence) {
                 burstGyroRecorder.start(cameraHandler)
             }
-            prepareCaptureLighting(device, reader, baseExposureResult)
+            nightPlan = null
+            if (isNightPlanCandidate(currentState)) {
+                // Measure how steady the phone is before choosing the exposure.
+                val start = { startNightCapture(device, reader, baseExposureResult) }
+                cameraHandler?.postDelayed(start, NightCapturePlanner.STEADINESS_WINDOW_MS) ?: start()
+            } else {
+                prepareCaptureLighting(device, reader, baseExposureResult)
+            }
 
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to capture", e)
@@ -8134,6 +8144,78 @@ class Camera2Controller(private val context: Context) {
             burstGyroRecorder.stop()
             resetPreviewAfterCapture()
         }
+    }
+
+    private fun isNightPlanCandidate(state: CameraState): Boolean =
+        NightCapturePlanner.enabled &&
+            state.isJpgMaxEnabled &&
+            !state.isJpgMaxHdrEnabled &&
+            state.requiresMultiFrameCaptureSequence &&
+            state.isAutoExposure &&
+            !shouldUseMultiFrameTorch(state)
+
+    private fun startNightCapture(device: CameraDevice, reader: ImageReader, baseExposureResult: CaptureResult?) {
+        try {
+            check(cameraDevice === device && imageReader === reader && captureSession != null) {
+                "camera changed while measuring steadiness"
+            }
+            nightPlan = planNightCapture(_state.value, reader, baseExposureResult)?.also { plan ->
+                activePhotoCapture?.let { it.state = it.state.copy(nightBrightenGain = plan.brightenGain) }
+            }
+            prepareCaptureLighting(device, reader, baseExposureResult)
+        } catch (e: Exception) {
+            PLog.e(TAG, "Failed to start low-light capture", e)
+            nightPlan = null
+            _state.value = _state.value.copy(isCapturing = false)
+            burstGyroRecorder.stop()
+            resetPreviewAfterCapture()
+        }
+    }
+
+    private fun planNightCapture(
+        state: CameraState,
+        reader: ImageReader,
+        baseExposureResult: CaptureResult?,
+    ): NightCapturePlan? {
+        val characteristics = getActiveOpenCameraCharacteristics()
+        val aeIso = baseExposureResult?.get(CaptureResult.SENSOR_SENSITIVITY)?.takeIf { it > 0 }
+        val aeExposureNs = baseExposureResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.takeIf { it > 0L }
+        val focalMm = characteristics?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+            ?.firstOrNull()?.takeIf { it > 0f }
+        val sensorWidthMm = characteristics?.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+            ?.width?.takeIf { it > 0f }
+        val shake = burstGyroRecorder.recentAngularSpeed(NightCapturePlanner.STEADINESS_WINDOW_MS * 1_000_000L)
+        val manualExposure = isManualSensorSupported &&
+            availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_OFF)
+        if (!manualExposure || aeIso == null || aeExposureNs == null || focalMm == null ||
+            sensorWidthMm == null || shake == null
+        ) {
+            PLog.w(
+                TAG,
+                "Low-light plan unavailable: manual=$manualExposure aeIso=$aeIso aeShutter=$aeExposureNs " +
+                    "focal=$focalMm sensorWidth=$sensorWidthMm shake=$shake",
+            )
+            return null
+        }
+        // The frame spans the sensor's long side, so this is the focal length in frame pixels.
+        val focalPx = focalMm / sensorWidthMm * maxOf(reader.width, reader.height)
+        val plan = NightCapturePlanner.plan(
+            aeIso = aeIso,
+            aeExposureNs = aeExposureNs,
+            angularSpeedRadS = shake,
+            focalLengthPx = focalPx,
+            frames = state.activeMultiFrameCount,
+            isoRange = state.getIsoRange(),
+            exposureRangeNs = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE),
+        )
+        PLog.i(
+            TAG,
+            "Low-light plan: shake=%.4f rad/s focalPx=%.0f ae=ISO%d %.1fms -> frames=%d ISO%d %.1fms gain=%.2f".format(
+                shake, focalPx, aeIso, aeExposureNs / 1e6, state.activeMultiFrameCount,
+                plan.iso, plan.exposureTimeNs / 1e6, plan.brightenGain,
+            ),
+        )
+        return plan
     }
 
     private fun performHdrBracketCapture(
@@ -8400,6 +8482,12 @@ class Camera2Controller(private val context: Context) {
                     builder.set(CaptureRequest.SENSOR_SENSITIVITY, fittedIso)
                     builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, lockedExposure)
                 }
+            }
+            val plan = nightPlan
+            if (!isRawCapture && plan != null && !requestUsesManualExposure && !useMultiFrameTorch) {
+                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                builder.set(CaptureRequest.SENSOR_SENSITIVITY, plan.iso)
+                builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, plan.exposureTimeNs)
             }
 
             if (builder.get(CaptureRequest.CONTROL_AE_MODE) != CaptureRequest.CONTROL_AE_MODE_OFF) {
