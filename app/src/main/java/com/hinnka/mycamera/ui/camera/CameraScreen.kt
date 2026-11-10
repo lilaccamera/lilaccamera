@@ -70,7 +70,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import coil.compose.AsyncImage
 import com.hinnka.mycamera.ui.theme.AccentColor
-import com.hinnka.mycamera.ui.theme.accentContentColor
 import com.hinnka.mycamera.MyCameraApplication
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
@@ -125,7 +124,7 @@ enum class ActivePanel {
     PRESETS
 }
 
-private enum class CameraShootingMode {
+internal enum class CameraShootingMode {
     PROFESSIONAL,
     PHOTO,
     VIDEO
@@ -2185,10 +2184,63 @@ private fun Controls(
                 .padding(bottom = CameraControlsLayoutDefaults.BottomPadding),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            val shootingMode = when {
+                state.captureMode == CaptureMode.VIDEO -> CameraShootingMode.VIDEO
+                state.useRaw && state.isRawSupported -> CameraShootingMode.PROFESSIONAL
+                else -> CameraShootingMode.PHOTO
+            }
+            val line = remember { ModeLineState(shootingMode) }
             Box(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(CameraControlsLayoutDefaults.ModeZoneHeight),
                 contentAlignment = Alignment.Center
             ) {
+                // First, so the side controls drawn above it keep their own touches.
+                ModeLine(
+                    state = line,
+                    selected = shootingMode,
+                    proAvailable = state.isRawSupported,
+                    enabled = modeSwitchEnabled &&
+                        !state.videoRecordingState.isRecording &&
+                        !state.videoRecordingState.isProcessing,
+                    recording = state.videoRecordingState.isRecording,
+                    videoProcessing = state.videoRecordingState.isProcessing,
+                    onSelect = onCaptureModeSelected,
+                    modifier = Modifier.matchParentSize()
+                ) { shutterModifier ->
+                    // The face follows the mode under the shutter while the dial turns.
+                    CaptureButton(
+                        captureMode = if (line.shownMode == CameraShootingMode.VIDEO) CaptureMode.VIDEO else CaptureMode.PHOTO,
+                        isProfessionalMode = line.shownMode == CameraShootingMode.PROFESSIONAL,
+                        isCapturing = state.isCapturing,
+                        isCaptureBusy = captureBusy,
+                        isCountdownActive = state.countdownValue > 0,
+                        photoCaptureProgress = state.photoCaptureProgress,
+                        isBurstCapturing = state.burstCapturing,
+                        isVideoRecording = state.videoRecordingState.isRecording,
+                        isVideoProcessing = state.videoRecordingState.isProcessing,
+                        isPaused = state.videoRecordingState.isPaused,
+                        allowLongPress = state.captureMode == CaptureMode.PHOTO &&
+                            !useMultipleExposure,
+                        multipleExposureEnabled = useMultipleExposure && state.captureMode == CaptureMode.PHOTO,
+                        multipleExposureProgress = multipleExposureState.capturedCount.toFloat() /
+                                multipleExposureState.targetCount.coerceAtLeast(1).toFloat(),
+                        customStyle = captureButtonStyle,
+                        customColor = captureButtonColor,
+                        customImagePath = captureButtonImagePath,
+                        previewPending = previewPending,
+                        onTap = onCaptureTap,
+                        onLongPressStart = { viewModel.startContinuousCapture() },
+                        onLongPressEnd = { viewModel.stopContinuousCapture() },
+                        modifier = Modifier
+                            .onGloballyPositioned { coordinates ->
+                                onCaptureButtonBoundsChanged(coordinates.boundsInRoot())
+                            }
+                            .then(shutterModifier),
+                    )
+                }
+
                 val thumbnailPhotoInset = CameraControlsLayoutDefaults.LineWidth + CameraControlsLayoutDefaults.LineGap
                 val thumbnailPhotoInsetPx = with(LocalDensity.current) { thumbnailPhotoInset.toPx() }
                 Box(
@@ -2234,34 +2286,6 @@ private fun Controls(
                         )
                     }
                 }
-
-                CaptureButton(
-                    captureMode = state.captureMode,
-                    isProfessionalMode = state.useRaw && state.isRawSupported,
-                    isCapturing = state.isCapturing,
-                    isCaptureBusy = captureBusy,
-                    isCountdownActive = state.countdownValue > 0,
-                    photoCaptureProgress = state.photoCaptureProgress,
-                    isBurstCapturing = state.burstCapturing,
-                    isVideoRecording = state.videoRecordingState.isRecording,
-                    isVideoProcessing = state.videoRecordingState.isProcessing,
-                    isPaused = state.videoRecordingState.isPaused,
-                    allowLongPress = state.captureMode == CaptureMode.PHOTO &&
-                        !useMultipleExposure,
-                    multipleExposureEnabled = useMultipleExposure && state.captureMode == CaptureMode.PHOTO,
-                    multipleExposureProgress = multipleExposureState.capturedCount.toFloat() /
-                            multipleExposureState.targetCount.coerceAtLeast(1).toFloat(),
-                    customStyle = captureButtonStyle,
-                    customColor = captureButtonColor,
-                    customImagePath = captureButtonImagePath,
-                    previewPending = previewPending,
-                    onTap = onCaptureTap,
-                    onLongPressStart = { viewModel.startContinuousCapture() },
-                    onLongPressEnd = { viewModel.stopContinuousCapture() },
-                    modifier = Modifier.onGloballyPositioned { coordinates ->
-                        onCaptureButtonBoundsChanged(coordinates.boundsInRoot())
-                    },
-                )
 
                 if (state.videoRecordingState.isRecording) {
                     IconButton(
@@ -2341,21 +2365,6 @@ private fun Controls(
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ModeSwitcherSpacing))
-
-            CaptureModeSwitcher(
-                shootingMode = when {
-                    state.captureMode == CaptureMode.VIDEO -> CameraShootingMode.VIDEO
-                    state.useRaw && state.isRawSupported -> CameraShootingMode.PROFESSIONAL
-                    else -> CameraShootingMode.PHOTO
-                },
-                professionalModeEnabled = state.isRawSupported,
-                enabled = modeSwitchEnabled &&
-                    !state.videoRecordingState.isRecording &&
-                    !state.videoRecordingState.isProcessing,
-                onModeSelected = onCaptureModeSelected
-            )
         }
     }
 }
@@ -2613,7 +2622,8 @@ fun CaptureButton(
                         isLongPressStarted = false
                         if (currentShowBusy) pressedWhileBusy = true
                         try {
-                            tryAwaitRelease()
+                            // A swipe on the mode dial took the press: no ready tick for it later.
+                            if (!tryAwaitRelease()) pressedWhileBusy = false
                         } finally {
                             isPressed = false
                             if (isLongPressStarted) {
@@ -2769,118 +2779,6 @@ private fun rememberPhotoCaptureProgress(progress: PhotoCaptureProgress?): State
         }
     }
     return fraction
-}
-
-@Composable
-private fun CaptureModeSwitcher(
-    shootingMode: CameraShootingMode,
-    professionalModeEnabled: Boolean,
-    enabled: Boolean,
-    onModeSelected: (CameraShootingMode) -> Unit
-) {
-    BoxWithConstraints(
-        modifier = Modifier
-            .width(228.dp)
-            .height(CameraControlsLayoutDefaults.ModeSwitcherHeight)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color.Black.copy(alpha = 0.28f))
-            .border(
-                width = 0.5.dp,
-                color = Color.White.copy(alpha = 0.18f),
-                shape = RoundedCornerShape(18.dp)
-            )
-            .padding(3.dp)
-    ) {
-        val knobWidth = maxWidth / 3
-        val selectedIndex = when (shootingMode) {
-            CameraShootingMode.PROFESSIONAL -> 0
-            CameraShootingMode.PHOTO -> 1
-            CameraShootingMode.VIDEO -> 2
-        }
-        val knobOffset by animateDpAsState(
-            targetValue = knobWidth * selectedIndex,
-            animationSpec = tween(durationMillis = 220),
-            label = "modeSwitcher"
-        )
-        val selectedBackground by animateColorAsState(
-            targetValue = if (shootingMode == CameraShootingMode.PROFESSIONAL) {
-                AccentColor
-            } else {
-                Color.White
-            },
-            animationSpec = tween(durationMillis = 220),
-            label = "modeSwitcherColor"
-        )
-        Box(
-            modifier = Modifier
-                .offset(x = knobOffset)
-                .width(knobWidth)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(15.dp))
-                .background(selectedBackground)
-        )
-        Row(
-            modifier = Modifier.fillMaxSize(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_professional),
-                selectedContentColor = accentContentColor(selectedBackground),
-                selected = shootingMode == CameraShootingMode.PROFESSIONAL,
-                // Still tappable without RAW, so the tap can explain why Pro is unavailable.
-                enabled = enabled,
-                dimmed = !professionalModeEnabled,
-                onClick = { onModeSelected(CameraShootingMode.PROFESSIONAL) },
-                modifier = Modifier.weight(1f)
-            )
-            ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_photo),
-                selected = shootingMode == CameraShootingMode.PHOTO,
-                enabled = enabled,
-                onClick = { onModeSelected(CameraShootingMode.PHOTO) },
-                modifier = Modifier.weight(1f)
-            )
-            ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_video),
-                selected = shootingMode == CameraShootingMode.VIDEO,
-                enabled = enabled,
-                onClick = { onModeSelected(CameraShootingMode.VIDEO) },
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@Composable
-private fun ModeSwitcherItem(
-    label: String,
-    selected: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    selectedContentColor: Color = Color.Black,
-    dimmed: Boolean = false
-) {
-    Box(
-        modifier = modifier
-            .fillMaxHeight()
-            .clip(RoundedCornerShape(20.dp))
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            color = when {
-                selected -> selectedContentColor.copy(alpha = 0.88f)
-                enabled && !dimmed -> Color.White.copy(alpha = 0.82f)
-                else -> Color.White.copy(alpha = 0.3f)
-            },
-            fontSize = 12.sp,
-            lineHeight = 14.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            maxLines = 1
-        )
-    }
 }
 
 private fun cycleVideoResolution(state: CameraState): VideoResolutionPreset? {

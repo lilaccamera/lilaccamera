@@ -15,13 +15,12 @@ internal object CameraControlsLayoutDefaults {
     val ZoomBarHeight = 32.dp
     val CaptureButtonSize = 80.dp
     val SideButtonSize = 48.dp
-    val ModeSwitcherHeight = 36.dp
-    // The larger shutter grows into this gap, so the controls' total height and the viewfinder sums stay the same.
-    val ModeSwitcherSpacing = 22.dp
-    val BottomPadding = 8.dp
+    // The mode swipe zone, centred on the shutter; its centre sits 63 dp above the bottom.
+    val ModeZoneWidth = 240.dp
+    val ModeZoneHeight = 100.dp
+    val BottomPadding = 13.dp
     val CaptureClearance = 8.dp
     val BarSpacing = 4.dp
-    val ViewfinderModeSpacing = 12.dp
 
     // Footer grid: side controls centred 40 dp from the screen edges, columns 70 dp apart.
     val SideMargin = 16.dp
@@ -30,10 +29,12 @@ internal object CameraControlsLayoutDefaults {
     val LineWidth = 2.dp
     val LineGap = 2.dp
     val LineColor = Color(0xFFC9C7BF)
+    // Mode marks that are not the current mode.
+    val MarkColor = Color(0xFFD3D1C7)
 
-    val ModeAreaHeight = ModeSwitcherSpacing + ModeSwitcherHeight + BottomPadding
-    val XpanViewfinderClearance = ViewfinderModeSpacing + ModeSwitcherHeight + BottomPadding
-    val CaptureAreaHeight = CaptureButtonSize + ModeAreaHeight
+    val CaptureAreaHeight = ModeZoneHeight + BottomPadding
+    // The XPAN picture ends level with the bottom of the shutter.
+    val XpanViewfinderClearance = BottomPadding + (ModeZoneHeight - CaptureButtonSize) / 2
     val CollapsedControlsHeight = CaptureAreaHeight + CaptureClearance +
         ParameterBarHeight + BarSpacing + ZoomBarHeight
 }

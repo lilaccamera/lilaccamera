@@ -31,6 +31,9 @@
     <string name="capture_mode_professional">Pro</string>
     <string name="capture_mode_photo">Photo</string>
     <string name="capture_mode_video">Video</string>
+    <string name="capture_mode_portrait">Portrait</string>
+    <string name="capture_mode_wip">Night and Portrait: work in progress</string>
+    <string name="capture_mode_stop_recording">Stop recording to switch mode</string>
 
     <!-- Exposure Controls -->
     <string name="camera_parameter_exposure" translatable="false">EV</string>
