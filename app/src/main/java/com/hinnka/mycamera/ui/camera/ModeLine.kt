@@ -6,7 +6,6 @@ import android.media.SoundPool
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.EaseInOutCubic
 import androidx.compose.animation.core.EaseOutCubic
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
@@ -59,6 +58,7 @@ import com.hinnka.mycamera.utils.VibrationHelper
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.ceil
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.floor
@@ -81,6 +81,8 @@ private const val TRAVEL = 44f           // dp of finger travel per mode: one sl
 private const val SWIPE_START = 16f      // dp of mostly sideways push before the list moves
 private const val TAP_SLOP = 12f         // dp a neighbour tap may move
 private const val FLICK = 0.35f          // dp per ms
+private const val RIDGE_FADE = 185f      // dp from the centre where the ridges have faded out, just past the screen edge
+private const val TAP_GRACE_MS = 250L  // wait after a neighbour tap's roll for a further tap
 private const val RESISTANCE = 0.3f      // past the first selectable mode and Video
 
 // The work-in-progress note is shown this often per app run; after that the dim marks and the end bar say it.
@@ -158,6 +160,11 @@ internal class ModeLineState(initial: CameraShootingMode, proAvailable: Boolean)
     internal var closeJob: Job? = null
     internal var pastEnd = false
     internal var wipSaid = false
+    // The mode just chosen on the dial, until the camera reports it; the reports in between are ignored.
+    internal var pending: Int? = null
+    // Where the list is rolling to, so a further tap goes on from there.
+    internal var rollTarget = mode
+    internal var pendingJob: Job? = null
 }
 
 /** Haptic pulses with stillness between them: the vibrator runs pulses that come closer into one long buzz. */
@@ -215,13 +222,26 @@ internal fun ModeLine(
 
     // A mode change from elsewhere (the front camera has no Pro, for example) moves the dial silently.
     val selectedIndex = selected.dialIndex(proAvailable)
-    LaunchedEffect(selectedIndex) {
-        if (selectedIndex != state.mode) {
+    val currentSelectedIndex by rememberUpdatedState(selectedIndex)
+    fun follow(index: Int) {
+        if (index != state.mode) {
             state.posJob?.cancel()
-            state.mode = selectedIndex
-            state.shown = selectedIndex
-            state.pos = selectedIndex.toFloat()
+            state.mode = index
+            state.shown = index
+            state.pos = index.toFloat()
         }
+    }
+    LaunchedEffect(selectedIndex) {
+        // A switch can pass through other modes while the camera reconfigures (Pro may read as Photo for a
+        // moment); following those would make the list jump while it closes.
+        state.pending?.let { pending ->
+            if (selectedIndex == pending) {
+                state.pending = null
+                state.pendingJob?.cancel()
+            }
+            return@LaunchedEffect
+        }
+        follow(selectedIndex)
     }
 
     fun say(text: Int) = Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
@@ -262,12 +282,14 @@ internal fun ModeLine(
         state.closing = true
         state.closeJob = scope.launch {
             delay(afterMs)
-            state.lift.animateTo(0f, tween(380, easing = EaseInOutCubic))
+            // Fast at the start, so the footer is back soon after the finger lifts.
+            state.lift.animateTo(0f, tween(240, easing = EaseOutCubic))
         }
     }
 
-    fun roll(target: Int, durationMs: Int, then: () -> Unit) {
+    fun roll(target: Int, durationMs: Int, then: suspend () -> Unit) {
         state.posJob?.cancel()
+        state.rollTarget = target
         state.posJob = scope.launch {
             animate(state.pos, target.toFloat(), animationSpec = tween(durationMs, easing = EaseOutCubic)) { v, _ -> setPos(v) }
             then()
@@ -276,24 +298,43 @@ internal fun ModeLine(
 
     fun settleMs(target: Int) = (160 + 70 * abs(target - state.pos)).toInt()
 
-    fun commit(target: Int, closeAfterMs: Long) {
+    fun select(target: Int) {
         if (target != state.mode) {
             state.mode = target
+            state.pending = target
+            state.pendingJob?.cancel()
+            // If the camera never reports the chosen mode (a refused switch), follow what it reports. Long
+            // enough for a choice that waits for the previous mode to finish loading.
+            state.pendingJob = scope.launch {
+                delay(3000)
+                state.pending = null
+                follow(currentSelectedIndex)
+            }
             currentOnSelect(shootingModeAt(target, state.proAvailable))
         }
+    }
+
+    fun commit(target: Int, closeAfterMs: Long) {
+        select(target)
         close(closeAfterMs)
     }
 
     fun tapNeighbour(x: Float) {
         val k = sign(x).toInt()
-        val target = state.mode + k
+        // Each tap moves one more mode: while the list still rolls or waits, count from where it is heading.
+        val from = if (state.posJob?.isActive == true) state.rollTarget else state.mode
+        val target = from + k
         if (abs(abs(x) - SPACING) >= 28f || target !in 0..currentLast) return
         if (target < currentLo) {
             sayWip()
         } else {
             // The whole list plays out, which also shows that it can be swiped.
             open()
-            roll(target, 380) { commit(target, 420) }
+            roll(target, 300) {
+                // A short pause for another tap before the camera switches, which locks the dial for a moment.
+                delay(TAP_GRACE_MS)
+                commit(target, 120)
+            }
         }
     }
 
@@ -326,10 +367,14 @@ internal fun ModeLine(
                 size = Size(size.width, bottom + 48.dp.toPx() - backdropTop),
                 alpha = lift
             )
-            // Ridges along the bottom edge, four per mode, travel with the list.
-            for (k in 0 until 24) {
+            // Ridges along the bottom edge, four per mode, travel with the list. Like a wheel's knurl they run
+            // on past both ends of the list to the screen edges; only the end bars mark where it stops.
+            val reach = RIDGE_FADE / SPACING
+            val firstRidge = ceil((state.pos + 0.5f - reach) * 4f).toInt()
+            val lastRidge = floor((state.pos + 0.5f + reach) * 4f).toInt()
+            for (k in firstRidge..lastRidge) {
                 val offsetDp = (k / 4f - 0.5f - state.pos) * SPACING
-                val fade = (1f - (offsetDp / 185f).let { it * it }).coerceIn(0f, 1f)
+                val fade = (1f - (offsetDp / RIDGE_FADE).let { it * it }).coerceIn(0f, 1f)
                 val x = cx + offsetDp.dp.toPx()
                 drawLine(
                     RidgeColor, Offset(x, bottom - 10.dp.toPx()), Offset(x, bottom),
@@ -373,6 +418,8 @@ internal fun ModeLine(
                         var ignored = onCollar
                         var shift = 0f
                         var p0 = 0f
+                        var lowest = 0f
+                        var highest = 0f
                         var dx = 0f
                         var dy = 0f
                         while (true) {
@@ -407,11 +454,15 @@ internal fun ModeLine(
                                 state.posJob?.cancel()
                                 state.wipSaid = false
                                 p0 = state.pos
+                                lowest = p0
+                                highest = p0
                                 open()
                             }
                             // Consuming the swipe also cancels the shutter's tap and long press.
                             change.consume()
                             setPos(resist(latch(p0 - (dx - shift) / travel), currentLo, currentLast))
+                            lowest = minOf(lowest, state.pos)
+                            highest = maxOf(highest, state.pos)
                         }
                         state.nudge = 0f
                         if (swiping) {
@@ -420,7 +471,9 @@ internal fun ModeLine(
                             val v = -tracker.calculateVelocity().x / density / 1000f
                             val swipedDp = abs(dx - shift) / density
                             var target = state.pos.roundToInt()
-                            if (abs(v) > FLICK) {
+                            // A swipe that went one way and came back is a return, not a flick past the start.
+                            val reversed = if (v > 0) lowest < p0 - 0.3f else highest > p0 + 0.3f
+                            if (abs(v) > FLICK && !reversed) {
                                 target = if (swipedDp < 1.2f * TRAVEL) {
                                     state.mode + sign(v).toInt()
                                 } else {
@@ -429,7 +482,9 @@ internal fun ModeLine(
                             }
                             if (target < currentLo && !state.wipSaid) sayWip()
                             target = target.coerceIn(currentLo, currentLast)
-                            roll(target, settleMs(target)) { commit(target, 260) }
+                            // The camera starts loading the mode at once, while the list settles on it.
+                            select(target)
+                            roll(target, settleMs(target)) { close(80) }
                         } else if (!ignored && !onShutter && currentEnabled &&
                             hypot(dx, dy) / density <= TAP_SLOP
                         ) {
