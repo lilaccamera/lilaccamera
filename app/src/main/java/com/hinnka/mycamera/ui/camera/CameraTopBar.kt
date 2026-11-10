@@ -370,7 +370,7 @@ private fun VideoActionIcon(
 }
 
 @Composable
-private fun videoStabilizationModeLabel(mode: VideoStabilizationMode): String {
+internal fun videoStabilizationModeLabel(mode: VideoStabilizationMode): String {
     return when (mode) {
         VideoStabilizationMode.OFF ->
             stringResource(R.string.settings_video_stabilization_mode_off)

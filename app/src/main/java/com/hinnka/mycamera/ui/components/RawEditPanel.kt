@@ -1408,7 +1408,7 @@ private fun RawRenderingEngineSelector(
 }
 
 @Composable
-private fun rawRenderingEngineName(engine: RawRenderingEngine): String {
+internal fun rawRenderingEngineName(engine: RawRenderingEngine): String {
     return when (engine) {
         RawRenderingEngine.AdobeCurve -> stringResource(R.string.settings_raw_color_engine_adobe_curve)
         RawRenderingEngine.AgX -> stringResource(R.string.settings_raw_color_engine_agx)
@@ -1424,7 +1424,7 @@ private fun rawRenderingEngineName(engine: RawRenderingEngine): String {
 }
 
 @Composable
-private fun rawColorEngineDescription(engine: RawRenderingEngine): String {
+internal fun rawColorEngineDescription(engine: RawRenderingEngine): String {
     return when (engine) {
         RawRenderingEngine.AdobeCurve -> stringResource(R.string.settings_raw_color_engine_adobe_curve_description)
         RawRenderingEngine.AgX -> stringResource(R.string.settings_raw_color_engine_agx_description)
