@@ -61,6 +61,7 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
         private const val FACE_CONTINUITY_DISTANCE = 0.22f
         private const val EYE_DISCONTINUITY_DISTANCE = 0.18f
         private const val POSITION_SMOOTHING_ALPHA = 0.42f
+        private const val PORTRAIT_FACE_LOST_FRAMES = 4
     }
 
     private val appContext = context.applicationContext
@@ -94,9 +95,12 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
     private var missingResultCount = 0
     private var missingTargetSinceNanos = 0L
     private var hasConfirmedTarget = false
+    private var portraitFaceMisses = 0
 
     var onEyeTarget: ((EyeTarget) -> Unit)? = null
     var onPortraitMask: ((PortraitMaskSnapshot) -> Unit)? = null
+    /** The tracked face for the Portrait viewfinder; null once no face has been seen for a few frames. */
+    var onPortraitFace: ((PortraitFace?) -> Unit)? = null
     var onTargetLost: (() -> Unit)? = null
     var onBusyStateChanged: ((Boolean) -> Unit)? = null
     var onFrameProcessed: ((EyeFocusProcessingTiming) -> Unit)? = null
@@ -120,9 +124,10 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
         frame: EyeFocusPreviewFrame,
         detectEyeTarget: Boolean,
         createFaceMask: Boolean,
+        trackPortraitFace: Boolean = false,
     ): Boolean {
         val detectorPathAvailable =
-            (detectEyeTarget || createFaceMask) && !detectorInitializationFailed
+            (detectEyeTarget || createFaceMask || trackPortraitFace) && !detectorInitializationFailed
         if (
             released.get() ||
             !detectorPathAvailable ||
@@ -143,6 +148,7 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
                     generation = generation,
                     detectEyeTarget = detectEyeTarget,
                     createFaceMask = createFaceMask,
+                    trackPortraitFace = trackPortraitFace,
                 )
             }
             return true
@@ -164,6 +170,7 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
         generation: Int,
         detectEyeTarget: Boolean,
         createFaceMask: Boolean,
+        trackPortraitFace: Boolean,
     ) {
         var frameFinished = false
         try {
@@ -184,6 +191,7 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
                 generation = generation,
                 eyeTargetRequested = detectEyeTarget,
                 faceMaskRequested = createFaceMask,
+                portraitFaceRequested = trackPortraitFace,
             )
         } finally {
             if (!bitmap.isRecycled) bitmap.recycle()
@@ -215,9 +223,12 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
         generation: Int,
         eyeTargetRequested: Boolean,
         faceMaskRequested: Boolean,
+        portraitFaceRequested: Boolean,
     ) {
         val target: EyeTarget?
         val faceMask: PortraitMaskSnapshot?
+        var portraitFace: PortraitFace? = null
+        var portraitFaceChanged = false
         var targetLost = false
         var targetConfirmed = false
         synchronized(stateLock) {
@@ -226,6 +237,20 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
                 faceMask = null
             } else {
                 val candidate = selectCandidateLocked(detections, inputWidth, inputHeight)
+                if (portraitFaceRequested) {
+                    if (candidate != null) {
+                        portraitFaceMisses = 0
+                        portraitFace = PortraitFace(
+                            centerX = candidate.faceCenterX,
+                            centerY = candidate.faceCenterY,
+                            width = candidate.boxWidth,
+                            height = candidate.boxHeight,
+                        )
+                        portraitFaceChanged = true
+                    } else if (++portraitFaceMisses == PORTRAIT_FACE_LOST_FRAMES) {
+                        portraitFaceChanged = true
+                    }
+                }
                 faceMask = if (faceMaskRequested && candidate != null) {
                     createFaceMask(candidate)
                 } else {
@@ -273,6 +298,7 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
 
         finishFrame()
         faceMask?.let { onPortraitMask?.invoke(it) }
+        if (portraitFaceChanged) onPortraitFace?.invoke(portraitFace)
         if (targetConfirmed) {
             PLog.d(TAG, "Human face confirmed: confidence=${target?.confidence}")
         }

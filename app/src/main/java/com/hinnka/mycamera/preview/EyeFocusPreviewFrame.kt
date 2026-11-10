@@ -34,3 +34,11 @@ data class PortraitMaskSnapshot(
         require(Math.floorMod(previewToCaptureRotationDegrees, 90) == 0)
     }
 }
+
+/** A detected face as a box in the viewfinder, normalized to its width and height (origin top left). */
+data class PortraitFace(
+    val centerX: Float,
+    val centerY: Float,
+    val width: Float,
+    val height: Float,
+)

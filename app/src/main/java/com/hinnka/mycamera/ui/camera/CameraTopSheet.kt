@@ -108,6 +108,9 @@ fun CameraTopSheet(
     onPhotoResolutionCapChange: (Int) -> Unit,
     saveCameraJpeg: Boolean,
     onSaveCameraJpegChange: (Boolean) -> Unit,
+    isPortraitMode: Boolean = false,
+    portraitQuickBlur: Boolean = true,
+    onPortraitQuickBlurChange: (Boolean) -> Unit = {},
     // Long press on a tile opens Settings at that tile's setting.
     onOpenSettingsAt: (SettingsTarget) -> Unit = {},
     multiFrameCount: Int,
@@ -238,6 +241,19 @@ fun CameraTopSheet(
                                 modifier = itemModifier
                             )
                         } else {
+                            if (isPortraitMode) {
+                                val portraitContext = LocalContext.current
+                                QuickSettingValue(
+                                    title = stringResource(R.string.portrait_blur),
+                                    value = stringResource(
+                                        if (portraitQuickBlur) R.string.portrait_blur_quick else R.string.portrait_blur_depth
+                                    ),
+                                    highlighted = !portraitQuickBlur,
+                                    onClick = { onPortraitQuickBlurChange(!portraitQuickBlur) },
+                                    onLongClick = { showQuickSettingExplanation(portraitContext, R.string.quick_explain_portrait_blur) },
+                                    modifier = itemModifier
+                                )
+                            }
                             // From Off a tap resumes the saved count (also set by the Settings slider);
                             // then each tap steps to the next preset above it, and past the last one to Off.
                             QuickSettingValue(

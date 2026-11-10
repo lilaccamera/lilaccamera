@@ -192,6 +192,12 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private var clarityOutputWidth: Int = 0
     private var clarityOutputHeight: Int = 0
     private val filmGrainGl = FilmGrainGl(TAG)
+    private val portraitBlurGl = PortraitBlurGl(TAG, 2f * context.resources.displayMetrics.density)
+
+    /** The face the Portrait viewfinder blurs around; null shows the plain picture. */
+    fun setPortraitFace(face: com.hinnka.mycamera.preview.PortraitFace?) {
+        portraitBlurGl.target = face
+    }
     private val highlightDiffusionGl = HighlightDiffusionGl(TAG)
     private val previewLiteEffects = PreviewLiteEffectsGl(TAG)
     private val toneBase = ToneBaseGl(TAG)
@@ -647,6 +653,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         clarityOutputWidth = 0
         clarityOutputHeight = 0
         filmGrainGl.resetAfterContextLoss()
+        portraitBlurGl.resetAfterContextLoss()
         highlightDiffusionGl.resetAfterContextLoss()
         filmGrainSourceTextureId = 0
         filmGrainSourceFboId = 0
@@ -1135,6 +1142,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         val filmGrainEnabled = fullPostProcess && filmGrain > 0.001f && !preLogFilmGrainEnabled
         val postProcessEffectEnabled = hdfEnabled || halationEnabled || bloomEnabled || softLightEnabled
         val eyeFocusSamplingNeeded = onEyeFocusInputAvailable != null && !isEyeFocusBusy
+        val portraitBlurActive = portraitBlurGl.isActive()
         val suppressBaselineLayerForVideoLog = videoLogProfile.isEnabled
         val hasBaselineLayer = hasBaselineLayer() && !suppressBaselineLayerForVideoLog
         val hasCreativeLayer = hasCreativeLayer()
@@ -1145,6 +1153,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             clarityEnabled ||
             filmGrainEnabled ||
             eyeFocusSamplingNeeded ||
+            portraitBlurActive ||
             hasDualLayer ||
             (!isAutoFocus && focusPeakingEnabled)
         if (requestedFbo && !isMainFboReady(viewportWidth, viewportHeight)) {
@@ -1213,7 +1222,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
             var postProcessMaterialized = false
             if (
-                filmGrainEnabled &&
+                (filmGrainEnabled || portraitBlurActive) &&
                 postProcessEffectEnabled &&
                 setupFilmGrainSourceFramebuffer(currentWidth, currentHeight)
             ) {
@@ -1281,7 +1290,13 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             if (postProcessEffectEnabled && !postProcessMaterialized) {
                 drawPostProcessEffects(0, viewportWidth, viewportHeight, currentTexId)
             } else {
-                drawFboToScreen(0, viewportWidth, viewportHeight, currentTexId)
+                // Only what is shown is blurred; the metering and captures below read the plain picture.
+                val shownTexId = if (portraitBlurActive) {
+                    portraitBlurGl.render(currentTexId, currentWidth, currentHeight, ::drawSimpleQuad)
+                } else {
+                    currentTexId
+                }
+                drawFboToScreen(0, viewportWidth, viewportHeight, shownTexId)
             }
             val finalDisplayTextureId = currentTexId
             val finalDisplayWidth = viewportWidth
@@ -3241,6 +3256,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         previewLiteEffects.release()
         toneBase.release()
         filmGrainGl.release()
+        portraitBlurGl.release()
         highlightDiffusionGl.release()
         releaseFilmGrainSourceFramebuffer()
 

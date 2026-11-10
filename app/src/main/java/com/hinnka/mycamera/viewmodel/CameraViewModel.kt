@@ -61,6 +61,7 @@ import com.hinnka.mycamera.model.withoutIndependentEffects
 import com.hinnka.mycamera.ml.DepthModelManager
 import com.hinnka.mycamera.phantom.PhantomWidgetProvider
 import com.hinnka.mycamera.preview.EyeFocusPreviewFrame
+import com.hinnka.mycamera.preview.PortraitFace
 import com.hinnka.mycamera.preview.PortraitMaskSnapshot
 import com.hinnka.mycamera.preview.PreviewEyeFocusProcessor
 import com.hinnka.mycamera.processor.CaptureProcessingQueue
@@ -556,6 +557,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         private const val EYE_FOCUS_REFRESH_INTERVAL_MS = 1_800L
         private const val EYE_FOCUS_RETRY_INTERVAL_MS = 1_200L
         private const val PORTRAIT_MASK_MAX_AGE_NS = 1_000_000_000L
+        private const val PORTRAIT_FACE_MAX_AGE_MS = 1_500L
+        private const val PORTRAIT_DEFAULT_APERTURE = 2.0f
     }
 
     private data class HdrBracketFrame(
@@ -1545,6 +1548,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var lastEyeFocusTriggerElapsedMs = 0L
     @Volatile
     private var latestPortraitMask: PortraitMaskSnapshot? = null
+    private var latestPortraitFace: PortraitFace? = null
+    private var latestPortraitFaceAtMs = 0L
+
+    /** Portrait on the mode dial explains itself the first time it is chosen. */
+    var showPortraitIntro by mutableStateOf(false)
+        private set
+    private var virtualApertureBeforePortrait: Pair<Boolean, Float>? = null
 
     // 保存当前的 SurfaceTexture 以便切换摄像头时重用
     private var currentSurfaceTexture: SurfaceTexture? = null
@@ -1670,6 +1680,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     360,
                 ),
             )
+        }
+        previewEyeFocusProcessor.onPortraitFace = { face ->
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                // A late detection must not light the viewfinder after leaving Portrait.
+                val shown = face.takeIf { state.value.isPortraitMode }
+                latestPortraitFace = shown
+                latestPortraitFaceAtMs = SystemClock.elapsedRealtime()
+                glSurfaceView?.setPortraitFace(shown)
+            }
         }
         previewEyeFocusProcessor.onTargetLost = {
             viewModelScope.launch(Dispatchers.Main.immediate) {
@@ -3228,8 +3247,61 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * In Portrait the blur after the shot is centred on the face seen just before the press, unless the
+     * user tapped a focus point of their own.
+     */
+    private fun snapshotCaptureState(): CameraState {
+        val current = state.value
+        val face = latestPortraitFace
+        if (!current.isPortraitMode || face == null ||
+            SystemClock.elapsedRealtime() - latestPortraitFaceAtMs > PORTRAIT_FACE_MAX_AGE_MS ||
+            (current.focusPoint != null && current.focusPointSource == FocusPointSource.MANUAL)
+        ) {
+            return current
+        }
+        return current.copy(focusPoint = Pair(face.centerX, face.centerY))
+    }
+
+    /** Switches Portrait on or off; Portrait takes the blur strength of the default virtual aperture. */
+    fun setPortraitMode(enabled: Boolean) {
+        if (state.value.isPortraitMode == enabled) return
+        cameraController.setPortraitMode(enabled)
+        latestPortraitFace = null
+        glSurfaceView?.setPortraitFace(null)
+        if (enabled) {
+            val current = state.value
+            virtualApertureBeforePortrait = Pair(current.isVirtualApertureEnabled, current.virtualAperture)
+            val aperture = userPreferencesRepository.current.defaultVirtualAperture
+            cameraController.setAperture(if (aperture > 0f) aperture else PORTRAIT_DEFAULT_APERTURE)
+            setVirtualApertureAuto(true)
+            if (!userPreferencesRepository.current.portraitIntroSeen) showPortraitIntro = true
+        } else {
+            virtualApertureBeforePortrait?.let { (wasEnabled, aperture) ->
+                cameraController.setAperture(aperture)
+                setVirtualApertureAuto(wasEnabled)
+            }
+            virtualApertureBeforePortrait = null
+            showPortraitIntro = false
+        }
+    }
+
+    /** Depth blur needs the depth model; without it the choice is explained and offered for download. */
+    fun setPortraitQuickBlur(quick: Boolean) {
+        if (!quick && !DepthModelManager.isInstalled(getApplication())) {
+            showPortraitIntro = true
+            return
+        }
+        userPreferencesRepository.updateAsync { portraitQuickBlur = quick }
+    }
+
+    fun dismissPortraitIntro() {
+        showPortraitIntro = false
+        userPreferencesRepository.updateAsync { portraitIntroSeen = true }
+    }
+
     private fun snapshotCaptureSettings() = CaptureSettingsSnapshot(
-        state = state.value,
+        state = snapshotCaptureState(),
         preferences = userPreferencesRepository.current,
         lutId = currentLutId.value,
         frameId = currentFrameId,
@@ -4569,6 +4641,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             cameraState.isRawSupported &&
             cameraState.isPreviewActive &&
             !cameraState.isCapturing
+        val acceptsPortraitFace = cameraState.isPortraitMode &&
+            cameraState.isPreviewActive &&
+            !cameraState.isCapturing
         val acceptsEyeFocus = userPreferencesRepository.current.eyeFocusEnabled &&
             isEyeFocusRuntimeAvailable &&
             cameraState.isPreviewActive &&
@@ -4576,7 +4651,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             !cameraState.isHyperfocalFocusEnabled &&
             !cameraState.isCapturing &&
             (cameraState.focusPoint == null || cameraState.focusPointSource == FocusPointSource.EYE)
-        if (!acceptsEyeFocus && !acceptsPortraitMask) {
+        if (!acceptsEyeFocus && !acceptsPortraitMask && !acceptsPortraitFace) {
             frame.bitmap.recycle()
             completeEyeFocusInput()
             return
@@ -4587,6 +4662,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 frame = frame,
                 detectEyeTarget = acceptsEyeFocus,
                 createFaceMask = acceptsPortraitMask,
+                trackPortraitFace = acceptsPortraitFace,
             )
         ) {
             frame.bitmap.recycle()
