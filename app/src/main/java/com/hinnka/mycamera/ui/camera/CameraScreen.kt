@@ -2549,13 +2549,12 @@ fun CaptureButton(
     val showCaptureProgress = captureMode == CaptureMode.PHOTO && isCapturing
     val showVideoProcessingProgress = captureMode == CaptureMode.VIDEO && isVideoProcessing
     // While a shot would be refused (Pro: RAW still saving; Photo: buffers full): grey centre and a breathing
-    // white ring (capture uses a spinning accent ring); a pop and a light tick when it is usable again.
+    // white ring (capture uses a spinning accent ring); a small pop and a light tick when it is usable again.
+    // Every ring takes the place of the outline, at its width, one at a time.
     val showBusy = (captureMode == CaptureMode.PHOTO && isCaptureBusy && !isCapturing) || previewPending
     // During the self-timer a press cancels it, so the centre shows a cross instead of a second shot.
     val showCancelTimer = captureMode == CaptureMode.PHOTO && isCountdownActive && !isCapturing
     val showActivityProgress = showCaptureProgress || showVideoProcessingProgress
-    val progressRingCount = (if (showMultipleExposureProgress) 1 else 0) +
-        (if (showActivityProgress || showBusy) 1 else 0)
     val infiniteTransition = rememberInfiniteTransition(label = "infinite transition")
     var isPressed by remember { mutableStateOf(false) }
     val customImage = remember(customImagePath) {
@@ -2570,8 +2569,9 @@ fun CaptureButton(
         label = "captureScale"
     )
     // Opaque neutral grey on top of the centre: a dark tint over the yellow would read as muddy olive.
+    // Not while the camera reopens after a mode switch: the face keeps the new mode's colour and the ring breathes.
     val busyTint by animateFloatAsState(
-        targetValue = if (showBusy || showCancelTimer) 1f else 0f,
+        targetValue = if ((showBusy && !previewPending) || showCancelTimer) 1f else 0f,
         animationSpec = tween(250),
         label = "captureBusyTint"
     )
@@ -2591,8 +2591,8 @@ fun CaptureButton(
                 vibration.vibrate(VibrationHelper.LIGHT_TICK_MS)
             }
             pressedWhileBusy = false
-            readyPop.animateTo(1.15f, tween(120))
-            readyPop.animateTo(1f, spring(dampingRatio = 0.4f))
+            readyPop.animateTo(1.04f, tween(110))
+            readyPop.animateTo(1f, spring(dampingRatio = 0.6f))
         }
         wasBusy = showBusy
     }
@@ -2687,7 +2687,6 @@ fun CaptureButton(
         val centerPadding by animateDpAsState(
             targetValue = when {
                 captureMode == CaptureMode.VIDEO && isVideoRecording -> 21.dp
-                progressRingCount > 0 -> CaptureProgressRingDefaults.contentPadding(progressRingCount)
                 else -> CameraControlsLayoutDefaults.LineWidth + CameraControlsLayoutDefaults.LineGap
             },
             animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow),
@@ -2760,17 +2759,15 @@ fun CaptureButton(
                 )
             }
         }
-        if (showBusy) {
+        if (showBusy && !showActivityProgress) {
             CaptureProgressRing(
                 color = Color.White.copy(alpha = rememberRawBusyPulse()),
                 startAngle = -90f,
                 sweepAngle = 360f,
-                inset = CaptureProgressRingDefaults.OuterInset +
-                    if (showMultipleExposureProgress) CaptureProgressRingDefaults.RingSpacing else 0.dp,
                 modifier = Modifier.progressSemantics()
             )
         }
-        if (showMultipleExposureProgress) {
+        if (showMultipleExposureProgress && !showActivityProgress && !showBusy) {
             CaptureProgressRing(
                 color = progressColor,
                 startAngle = -90f,
@@ -2783,8 +2780,6 @@ fun CaptureButton(
                 color = progressColor,
                 startAngle = if (isIndeterminate) rotation - 90f else -90f,
                 sweepAngle = if (isIndeterminate) 90f else 360f * captureProgress.value,
-                inset = CaptureProgressRingDefaults.OuterInset +
-                    if (showMultipleExposureProgress) CaptureProgressRingDefaults.RingSpacing else 0.dp,
                 modifier = if (isIndeterminate) Modifier.progressSemantics()
                     else Modifier.progressSemantics(captureProgress.value)
             )
