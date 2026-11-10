@@ -404,8 +404,10 @@ data class CameraState(
     val isP3Supported: Boolean = false,
     val captureMode: CaptureMode = CaptureMode.PHOTO,
     val photoPreviewStabilizationEnabled: Boolean = false,
-    /** Photo-mode capture size cap in megapixels; 0 = full sensor size. */
+    /** Photo-mode capture size cap in megapixels for the back cameras; 0 = full sensor size. */
     val photoResolutionCapMp: Int = 0,
+    /** The same cap for the front camera, kept apart because its useful sizes differ. */
+    val frontPhotoResolutionCapMp: Int = 0,
     /** False when every cap picks the same size (camera at most 8 MP, e.g. the XZ1 Compact front camera). */
     val photoResolutionAdjustable: Boolean = true,
     val videoConfig: VideoConfig = VideoConfig(),
