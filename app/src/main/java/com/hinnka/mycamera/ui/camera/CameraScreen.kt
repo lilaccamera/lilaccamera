@@ -1,9 +1,13 @@
 package com.hinnka.mycamera.ui.camera
 
+import androidx.activity.compose.BackHandler
+import com.hinnka.mycamera.ml.DepthModelManager
+import com.hinnka.mycamera.ml.DepthModelDownloadState
 import com.hinnka.mycamera.ui.prefs.rememberUserPreferencesRepository
 import com.hinnka.mycamera.data.UserPreferences
 import com.hinnka.mycamera.ui.prefs.rememberPreference
 import com.hinnka.mycamera.ui.prefs.preferenceValue
+import android.hardware.camera2.CaptureRequest
 import android.Manifest
 import android.app.Activity
 import android.content.Context
@@ -31,6 +35,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -42,11 +47,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -70,13 +77,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import coil.compose.AsyncImage
 import com.hinnka.mycamera.ui.theme.AccentColor
-import com.hinnka.mycamera.ui.theme.accentContentColor
 import com.hinnka.mycamera.MyCameraApplication
 import com.hinnka.mycamera.R
+import com.hinnka.mycamera.processor.BokehStyle
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.CameraState
 import com.hinnka.mycamera.camera.DeviceQuirks
+import com.hinnka.mycamera.camera.MultiFrameConfig
 import com.hinnka.mycamera.camera.FocusPointSource
+import com.hinnka.mycamera.camera.LensType
 import com.hinnka.mycamera.camera.PhotoCaptureProgress
 import com.hinnka.mycamera.data.CaptureButtonStyle
 import com.hinnka.mycamera.data.DevelopAnimationStyle
@@ -113,6 +122,10 @@ import com.hinnka.mycamera.ui.components.EdgeRingStyle
 import com.hinnka.mycamera.ui.components.ThumbnailCorner
 import com.hinnka.mycamera.ui.components.ThumbnailEdgeRing
 import com.hinnka.mycamera.ui.settings.SettingsTarget
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.foundation.Canvas
 
 /**
  * 主相机界面
@@ -125,13 +138,15 @@ enum class ActivePanel {
     PRESETS
 }
 
-private enum class CameraShootingMode {
+internal enum class CameraShootingMode {
+    PORTRAIT,
     PROFESSIONAL,
     PHOTO,
     VIDEO
 }
 
-private const val PreviewTransitionRevealDurationMillis = 150
+private const val PreviewTransitionRevealDurationMillis = 130
+private const val PreviewMorphDurationMillis = 280
 private const val ControlsArrivalDurationMillis = 200
 private val ControlsArrivalEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
@@ -143,10 +158,6 @@ private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
 private const val DefaultIso = 100f
 private const val DefaultAwbTemperature = 5000f
 private const val DefaultFocusDistance = 0f
-private val CameraTopBarBaseTopPadding = 32.dp
-private val CameraTopBarBaseHeight = 80.dp
-private val VideoTopBarBaseHeight = 80.dp
-private val VideoTopBarLoweredOffset = 36.dp
 private val XpanViewfinderInnerBorder = 4.dp
 private val XpanSideControlReservedWidth = 56.dp
 
@@ -155,16 +166,13 @@ private fun formatVirtualApertureFStop(aperture: Float): String {
     return if (aperture == rounded.toFloat()) rounded.toString() else aperture.toString()
 }
 
+/**
+ * The picture starts below a display cutout only. The status bar is hidden and shows transiently on a
+ * swipe; following its inset would make the picture jump while it shows.
+ */
 @Composable
-private fun cameraTopSafePadding(): Dp {
-    val density = LocalDensity.current
-    val topInset = with(density) {
-        maxOf(
-            WindowInsets.statusBars.getTop(this).toDp(),
-            WindowInsets.displayCutout.getTop(this).toDp()
-        )
-    }
-    return (topInset - CameraTopBarBaseTopPadding).coerceAtLeast(0.dp)
+private fun cameraTopCutoutInset(): Dp = with(LocalDensity.current) {
+    WindowInsets.displayCutout.getTop(this).toDp()
 }
 
 private fun Bitmap.copyForCaptureAnimation(): Bitmap? {
@@ -263,6 +271,11 @@ fun CameraScreen(
     val latestPhoto by galleryViewModel.latestPhoto.collectAsState()
     val showLevelIndicator by preferenceValue { it.showLevelIndicator }
     val focusPeakingEnabled by preferenceValue { it.focusPeakingEnabled }
+    val portraitQuickBlur by preferenceValue { it.portraitQuickBlur }
+    val portraitIntroSeen by preferenceValue { it.portraitIntroSeen }
+    val portraitDepthReminderSeen by preferenceValue { it.portraitDepthReminderSeen }
+    val proGuideSeen by preferenceValue { it.proGuideSeen }
+    val portraitBokehStyle by preferenceValue { BokehStyle.fromPersistedName(it.portraitBokehStyle) }
     val eyeFocusEnabled by preferenceValue { it.eyeFocusEnabled }
     val keepScreenOn by preferenceValue { it.keepScreenOn }
     val currentLutId by viewModel.currentLutId.collectAsState()
@@ -314,9 +327,9 @@ fun CameraScreen(
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
-    var zoomBarBounds by remember { mutableStateOf<Rect?>(null) }
     var filterButtonBounds by remember { mutableStateOf<Rect?>(null) }
     var captureButtonBounds by remember { mutableStateOf<Rect?>(null) }
+    var parameterBarTop by remember { mutableStateOf<Float?>(null) }
     var parameterRulerBounds by remember { mutableStateOf<Rect?>(null) }
     var galleryThumbnailBounds by remember { mutableStateOf<Rect?>(null) }
     var captureAnimationSnapshot by remember { mutableStateOf<CaptureAnimationSnapshot?>(null) }
@@ -380,6 +393,14 @@ fun CameraScreen(
     var activePanel by remember { mutableStateOf(ActivePanel.NONE) }
     var selectedParameter by remember { mutableStateOf(CameraParameter.EXPOSURE_COMPENSATION) }
     var showParameterRuler by remember(state.captureMode, state.useRaw) { mutableStateOf(false) }
+    // Vertical swipes on the picture: up shows the manual values on its bottom edge, down drops the
+    // everyday quick settings onto its top edge. Each swipe first closes what the other one opened.
+    var manualControlsShown by rememberSaveable { mutableStateOf(false) }
+    var everydayRowShown by remember { mutableStateOf(false) }
+    // A value set by hand (EV, ISO, shutter, focus, white balance) stays visible while the panel is closed,
+    // as a compact line of just those values, so a shot is never taken with a fixed value nobody can see.
+    val anyManualValue = state.exposureCompensation != 0 || !state.isIsoAuto || !state.isShutterSpeedAuto ||
+        !state.isAutoFocus || state.awbMode != CaptureRequest.CONTROL_AWB_MODE_AUTO
     val isXpan = state.aspectRatio == AspectRatio.XPAN
     val burstCapturingCount = viewModel.burstImageCount
 
@@ -548,6 +569,24 @@ fun CameraScreen(
         },
         label = "previewTransitionCoverAlpha"
     )
+    // The held frame moves from the old picture rectangle to the new one while the camera restarts.
+    // Drawn in a Compose layer above the preview: the preview surface itself changes size only once.
+    val previewMorphProgress = remember { Animatable(1f) }
+    var previewMorphFrom by remember { mutableStateOf<Rect?>(null) }
+    var previewMorphTo by remember { mutableStateOf<Rect?>(null) }
+    LaunchedEffect(previewBounds) {
+        val target = previewBounds ?: return@LaunchedEffect
+        val shown = previewMorphTo
+        if (previewTransitionFrame == null || shown == null || shown == target) {
+            previewMorphFrom = target
+            previewMorphTo = target
+            return@LaunchedEffect
+        }
+        previewMorphFrom = androidx.compose.ui.geometry.lerp(previewMorphFrom ?: shown, shown, previewMorphProgress.value)
+        previewMorphTo = target
+        previewMorphProgress.snapTo(0f)
+        previewMorphProgress.animateTo(1f, tween(PreviewMorphDurationMillis, easing = FastOutSlowInEasing))
+    }
 
     fun cancelZoomStopAnimation() {
         zoomStopAnimationJob?.cancel()
@@ -600,11 +639,13 @@ fun CameraScreen(
         if (!covered) closeCover()
         scope.launch {
             if (covered) {
-                // Copy the frame before the cover closes; without one the cover is black.
+                // Copy the last frame before the camera stops; it is held over the picture until the new one arrives.
                 previewTransitionFrame = viewModel.glSurfaceView?.captureLastFrame()?.asImageBitmap()
+                previewMorphFrom = previewBounds
+                previewMorphTo = previewBounds
+                previewMorphProgress.snapTo(1f)
                 closeCover()
             }
-            withFrameNanos { }
             onSwitch()
         }
     }
@@ -697,18 +738,23 @@ fun CameraScreen(
 
         val targetCaptureMode = when (mode) {
             CameraShootingMode.PROFESSIONAL,
+            CameraShootingMode.PORTRAIT,
             CameraShootingMode.PHOTO -> CaptureMode.PHOTO
             CameraShootingMode.VIDEO -> CaptureMode.VIDEO
         }
         val targetUseRaw = when (mode) {
             CameraShootingMode.PROFESSIONAL -> true
+            CameraShootingMode.PORTRAIT,
             CameraShootingMode.PHOTO -> false
             CameraShootingMode.VIDEO -> null
         }
+        val targetPortrait = mode == CameraShootingMode.PORTRAIT
         if (
             targetCaptureMode == state.captureMode &&
             (targetUseRaw == null || targetUseRaw == state.useRaw)
         ) {
+            // Photo and Portrait share the camera setup, so only the portrait flag changes.
+            viewModel.setPortraitMode(targetPortrait)
             return
         }
 
@@ -717,6 +763,29 @@ fun CameraScreen(
                 viewModel.setAspectRatio(AspectRatio.RATIO_4_3)
             }
             viewModel.setShootingMode(targetCaptureMode, targetUseRaw)
+            viewModel.setPortraitMode(targetPortrait)
+        }
+    }
+
+    // A mode chosen on the dial while the camera is still loading the last one waits for that load to finish,
+    // so a session is never torn down mid-configuration; only the latest choice is kept. The dial itself
+    // stays free meanwhile.
+    var queuedShootingMode by remember { mutableStateOf<CameraShootingMode?>(null) }
+    val modeSwitchReady = !previewTransitionActive && !lensSwitchTransition.isActive
+    LaunchedEffect(modeSwitchReady, queuedShootingMode) {
+        val mode = queuedShootingMode ?: return@LaunchedEffect
+        if (modeSwitchReady) {
+            queuedShootingMode = null
+            setShootingModeWithPreviewTransition(mode)
+        }
+    }
+
+    fun selectShootingMode(mode: CameraShootingMode) {
+        if (modeSwitchReady) {
+            queuedShootingMode = null
+            setShootingModeWithPreviewTransition(mode)
+        } else {
+            queuedShootingMode = mode
         }
     }
 
@@ -956,19 +1025,26 @@ fun CameraScreen(
                 parameterRulerBounds = null
             }
         }
+        // The everyday row gives way to any panel and to a recording.
+        LaunchedEffect(activePanel, state.videoRecordingState.isRecording) {
+            if (activePanel != ActivePanel.NONE || state.videoRecordingState.isRecording) everydayRowShown = false
+        }
+        // XPAN keeps its manual values on the side bar, so there a swipe only moves the everyday row.
+        val onPictureSwipe by rememberUpdatedState<(Boolean) -> Unit> { up ->
+            if (up) {
+                if (everydayRowShown) everydayRowShown = false else if (!isXpan) manualControlsShown = true
+            } else if (manualControlsShown && !isXpan) {
+                manualControlsShown = false
+                showParameterRuler = false
+            } else {
+                everydayRowShown = true
+            }
+        }
 
         val density = LocalDensity.current
         val width = with(density) { constraints.maxWidth.toDp() }
         val height = with(density) { constraints.maxHeight.toDp() }
-        val topSafePadding = cameraTopSafePadding()
-        val topBarOffset = 0.dp
-        val topBarBaseHeight = if (isVideoMode) {
-            VideoTopBarBaseHeight
-        } else {
-            CameraTopBarBaseHeight
-        }
-        val topBarHeight = topBarBaseHeight + topSafePadding
-        val topBarBottom = topBarHeight + topBarOffset - 4.dp
+        val topInset = cameraTopCutoutInset()
         val navigationBarHeight = with(density) {
             WindowInsets.navigationBars.getBottom(this).toDp()
         }
@@ -977,9 +1053,9 @@ fun CameraScreen(
         val sideControlSpace = if (isXpan) XpanSideControlReservedWidth else 0.dp
         val maxCardWidth = (width - sideControlSpace * 2)
             .coerceAtLeast(viewfinderFramePadding)
+        // XPAN runs the full height, from the top inset to the bottom edge, between its side bars.
         val maxCardHeight = if (isXpan) {
-            (contentHeight - topBarBottom - CameraControlsLayoutDefaults.XpanViewfinderClearance)
-                .coerceAtLeast(viewfinderFramePadding)
+            (contentHeight - topInset).coerceAtLeast(viewfinderFramePadding)
         } else {
             contentHeight
         }
@@ -994,85 +1070,19 @@ fun CameraScreen(
         val cardWidth = viewfinderContentWidth + viewfinderFramePadding
         val cardHeight = viewfinderContentWidth / previewAspectRatio + viewfinderFramePadding
         val xpanSideWidth = ((width - cardWidth) / 2).coerceAtLeast(0.dp)
-        val placeViewfinderBelowTopBar = contentHeight - cardHeight >= topBarBottom
-        // Balance small previews between the toolbar and collapsed controls. Reserving both
-        // bars first prevents the downward shift from pushing parameters back into the image.
+        val placeViewfinderBelowInset = contentHeight - cardHeight >= topInset
+        // Balance small previews between the top edge and the collapsed controls. Reserving the
+        // controls first prevents the downward shift from pushing parameters back into the image.
         val extraViewfinderTopSpacing = if (isXpan) {
             0.dp
         } else {
-            ((contentHeight - topBarBottom - cardHeight -
+            ((contentHeight - topInset - cardHeight -
                 CameraControlsLayoutDefaults.CollapsedControlsHeight) / 2).coerceAtLeast(0.dp)
         }
-        val viewfinderTop = if (placeViewfinderBelowTopBar) {
-            topBarBottom + extraViewfinderTopSpacing
+        val viewfinderTop = if (placeViewfinderBelowInset) {
+            topInset + extraViewfinderTopSpacing
         } else {
             ((contentHeight - cardHeight) / 2).coerceAtLeast(0.dp)
-        }
-        val viewfinderTopOverlayPadding = (topBarBottom - viewfinderTop).coerceAtLeast(0.dp)
-
-        val topBar = @Composable {
-            CameraTopBar(
-                captureMode = state.captureMode,
-                isRecording = state.videoRecordingState.isRecording,
-                recordingElapsedMs = state.videoRecordingState.elapsedMs,
-                recordingIsHot = state.videoRecordingState.isHot,
-                recordingHeatGauge = state.videoRecordingState.heatGauge,
-                flashMode = state.flashMode,
-                onFlashToggle = {
-                    viewModel.toggleFlash()
-                },
-                timerSeconds = state.timerSeconds,
-                onTimerToggle = { viewModel.toggleTimer() },
-                showHistogram = showHistogram,
-                onHistogramToggle = { showHistogram = !showHistogram },
-                useLivePhoto = useLivePhoto,
-                onLivePhotoToggle = { viewModel.setUseLivePhoto(!state.useLivePhoto) },
-                videoConfig = state.videoConfig,
-                videoCapabilities = state.videoCapabilities,
-                onVideoTorchToggle = { videoTorchEnabled = !state.videoConfig.torchEnabled },
-                onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
-                onVideoResolutionClick = {
-                    cycleVideoResolution(state)?.let(viewModel::setVideoResolution)
-                },
-                onVideoFpsClick = {
-                    cycleVideoFps(state)?.let(viewModel::setVideoFps)
-                },
-                onSettingsClick = {
-                    activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
-                },
-                modifier = Modifier
-                    .padding(top = topSafePadding)
-                    .offset(y = topBarOffset)
-            )
-        }
-
-        val zoomBar = @Composable {
-            if (activePanel == ActivePanel.NONE && !isXpan) {
-                ZoomControlBar(
-                    viewModel = viewModel,
-                    zoomRatio = viewModel.zoomRatioByMain,
-                    availableCameras = state.availableCameras,
-                    currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
-                    onZoomChange = { setZoomWithPreviewTransition(it) },
-                    onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
-                    onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
-                    onFilterClick = {
-                        activePanel = if (activePanel == ActivePanel.FILTERS) ActivePanel.NONE else ActivePanel.FILTERS
-                    },
-                    onFilterButtonBoundsChanged = { bounds ->
-                        filterButtonBounds = bounds
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .onGloballyPositioned { coordinates ->
-                            zoomBarBounds = coordinates.boundsInRoot()
-                        }
-                )
-            } else {
-                SideEffect {
-                    zoomBarBounds = null
-                }
-            }
         }
 
         val parameterRuler = @Composable { rulerModifier: Modifier ->
@@ -1181,7 +1191,6 @@ fun CameraScreen(
         val viewfinder = @Composable {
             Card(
                 modifier = Modifier
-                    .animateContentSize(alignment = Alignment.Center)
                     .width(cardWidth)
                     .height(cardHeight),
                 shape = RoundedCornerShape(if (isXpan) XpanViewfinderInnerBorder else 0.dp),
@@ -1210,10 +1219,12 @@ fun CameraScreen(
                                 var swipeDownTime = 0L
                                 var swipeDecided = false
                                 var swipeTracking = false
+                                var verticalTracking = false
                                 val velocityTracker = VelocityTracker()
                                 fun cancelSwipe() {
                                     if (swipeTracking) lutSwipeState.cancel()
                                     swipeTracking = false
+                                    verticalTracking = false
                                     swipeDecided = true
                                 }
                                 while (true) {
@@ -1226,8 +1237,12 @@ fun CameraScreen(
                                             if (firstPressedChange != null && currentPreviewBounds != null) {
                                                 val positionInRoot =
                                                     currentPreviewBounds.topLeft + firstPressedChange.position
-                                                zoomBarBounds?.contains(positionInRoot) == true ||
-                                                    parameterRulerBounds?.contains(positionInRoot) == true
+                                                // The footer's top: the Looks and Q buttons, above the shutter.
+                                                val footerTop = captureButtonBounds?.let { it.top - 53.dp.toPx() }
+                                                parameterRulerBounds?.contains(positionInRoot) == true ||
+                                                    // Quick settings open: a tap still closes them and focuses.
+                                                    activePanel != ActivePanel.NONE ||
+                                                    (footerTop != null && positionInRoot.y > footerTop)
                                             } else {
                                                 false
                                             }
@@ -1282,6 +1297,8 @@ fun CameraScreen(
                                                     horizontal &&
                                                     !afterLongPress &&
                                                     nextLut != null &&
+                                                    // The look stays fixed during a recording.
+                                                    !state.videoRecordingState.isRecording &&
                                                     nextLut.id != currentLutId
                                                 ) {
                                                     swipeTracking = true
@@ -1291,13 +1308,30 @@ fun CameraScreen(
                                                         previousName = previousLut?.getName(),
                                                         nextName = nextLut.getName(),
                                                     )
+                                                } else if (
+                                                    abs(dy) > abs(dx) * 1.5f &&
+                                                    !afterLongPress &&
+                                                    !state.videoRecordingState.isRecording &&
+                                                    !viewModel.showPortraitIntro &&
+                                                    !viewModel.showProGuide
+                                                ) {
+                                                    verticalTracking = true
                                                 }
+                                            }
+                                            if (verticalTracking) {
+                                                // Taken by the swipe: no tap focus or long-press lock at its end.
+                                                change.consume()
                                             }
                                             if (swipeTracking) {
                                                 // 消费事件，使预览上的点按对焦 / 长按锁焦随之取消
                                                 change.consume()
                                                 lutSwipeState.drag(sign(dx) * max(abs(dx) - touchSlop, 0f))
                                             }
+                                        } else if (!change.pressed && verticalTracking) {
+                                            change.consume()
+                                            verticalTracking = false
+                                            val dy = change.position.y - (swipeStart?.y ?: change.position.y)
+                                            if (abs(dy) >= 40.dp.toPx()) onPictureSwipe(dy < 0)
                                         } else if (!change.pressed && swipeTracking) {
                                             change.consume()
                                             val direction = lutSwipeState.release(
@@ -1378,7 +1412,15 @@ fun CameraScreen(
                                 viewModel.closeCamera(surfaceTexture)
                             },
                             onTap = { x, y, w, h ->
-                                if (state.isFocusLocked) {
+                                // Quick settings and the everyday row close and the tap still focuses;
+                                // other panels only close.
+                                everydayRowShown = false
+                                if (activePanel == ActivePanel.SETTINGS) activePanel = ActivePanel.NONE
+                                if (manualControlsShown && !isXpan) {
+                                    // The open manual panel closes, ruler included, without focusing.
+                                    manualControlsShown = false
+                                    showParameterRuler = false
+                                } else if (state.isFocusLocked) {
                                     viewModel.unlockFocus()
                                 } else if (activePanel != ActivePanel.NONE) {
                                     activePanel = ActivePanel.NONE
@@ -1401,7 +1443,7 @@ fun CameraScreen(
                                     hy
                                 )
                             },
-                            onEyeFocusInputAvailable = if (eyeFocusActive || portraitMaskActive) {
+                            onEyeFocusInputAvailable = if (eyeFocusActive || portraitMaskActive || state.isPortraitMode) {
                                 viewModel::handleEyeFocusInputUpdate
                             } else {
                                 null
@@ -1441,20 +1483,15 @@ fun CameraScreen(
                         )
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer { alpha = previewTransitionCoverAlpha.value }
-                            .background(Color.Black)
-                    ) {
-                        previewTransitionFrame?.let { frame ->
-                            Image(
-                                bitmap = frame,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
+                    // Black at start-up until the camera's first frame, then a quick fade-in. Later switches
+                    // are never covered: the held frame above moves to the new picture and fades out.
+                    if (!hasPlayedInitialPreviewTransition) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .graphicsLayer { alpha = previewTransitionCoverAlpha.value }
+                                .background(Color.Black)
+                        )
                     }
 
                     LensSwitchTransitionOverlay(lensSwitchTransition, Modifier.fillMaxSize())
@@ -1464,37 +1501,20 @@ fun CameraScreen(
                         Box(Modifier.fillMaxSize().background(Color.Black))
                     }
 
-                    val showLivePhotoIndicator =
-                        state.captureMode == CaptureMode.PHOTO && useLivePhoto
                     val showVirtualApertureIndicator =
                         state.captureMode != CaptureMode.VIDEO &&
                             state.isVirtualApertureEnabled
-                    if (showLivePhotoIndicator || showVirtualApertureIndicator) {
+                    if (showVirtualApertureIndicator) {
                         Column(
                             modifier = Modifier
                                 .padding(
-                                    top = viewfinderTopOverlayPadding + 8.dp,
+                                    top = TopEdgeLineHeight + 8.dp,
                                     end = 12.dp
                                 )
                                 .align(Alignment.TopEnd),
                             horizontalAlignment = Alignment.End,
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            if (showLivePhotoIndicator) {
-                                Surface(
-                                    color = Color.Black.copy(alpha = 0.8f),
-                                    shape = CircleShape
-                                ) {
-                                    Icon(
-                                        painterResource(R.drawable.ic_live_photo),
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier
-                                            .padding(4.dp)
-                                            .size(18.dp)
-                                    )
-                                }
-                            }
                             if (showVirtualApertureIndicator) {
                                 Surface(
                                     color = Color.Black.copy(alpha = 0.2f),
@@ -1534,21 +1554,6 @@ fun CameraScreen(
                             )
                         }
 
-                        // 实时直方图 (Overlaid on preview if enabled)
-                        if (isPhotoStyleMode && state.histogram != null && showHistogram) {
-                            HistogramView(
-                                histogram = state.histogram,
-                                modifier = Modifier
-                                    .padding(
-                                        start = 8.dp,
-                                        top = viewfinderTopOverlayPadding + 8.dp
-                                    )
-                                    .size(80.dp, 40.dp)
-                                    .align(Alignment.TopStart)
-                                    .autoRotate(dx = -20.dp, dy = 20.dp)
-                            )
-                        }
-
                         // 网格线覆盖
                         if (state.showGrid) {
                             GridOverlay(
@@ -1579,7 +1584,7 @@ fun CameraScreen(
                                 count = burstCapturingCount,
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(top = viewfinderTopOverlayPadding)
+                                    .padding(top = TopEdgeLineHeight)
                             )
                         }
 
@@ -1591,7 +1596,7 @@ fun CameraScreen(
                                 onCancel = { viewModel.cancelMultipleExposureSession() },
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(top = viewfinderTopOverlayPadding)
+                                    .padding(top = TopEdgeLineHeight)
                             )
                         }
 
@@ -1683,8 +1688,7 @@ fun CameraScreen(
                     captureButtonBounds = bounds
                 },
                 onSwitchCameraClick = ::switchCameraWithPreviewTransition,
-                onCaptureModeSelected = ::setShootingModeWithPreviewTransition,
-                modeSwitchEnabled = !previewTransitionActive && !lensSwitchTransition.isActive,
+                onCaptureModeSelected = ::selectShootingMode,
                 previewPending = !previewTransitionRevealing &&
                     (!hasPlayedInitialPreviewTransition || previewTransitionAwaitingResume),
                 onCaptureTap = {
@@ -1718,6 +1722,32 @@ fun CameraScreen(
                 onGalleryClick = {
                     onGalleryClick()
                 },
+                isXpan = isXpan,
+                onLooksClick = {
+                    activePanel = if (activePanel == ActivePanel.FILTERS) ActivePanel.NONE else ActivePanel.FILTERS
+                },
+                onLooksBoundsChanged = { bounds ->
+                    filterButtonBounds = bounds
+                },
+                onQuickSettingsClick = {
+                    activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
+                },
+                zoomCollar = if (!isXpan && activePanel == ActivePanel.NONE) {
+                    { fold ->
+                        ZoomCollar(
+                            viewModel = viewModel,
+                            zoomRatio = viewModel.zoomRatioByMain,
+                            availableCameras = state.availableCameras,
+                            currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
+                            enabled = state.getCurrentCameraInfo() != null,
+                            onZoom = { setZoomWithPreviewTransition(it) },
+                            onStop = { animateZoomStopWithPreviewTransition(it) },
+                            fold = fold
+                        )
+                    }
+                } else {
+                    null
+                },
                 sideControlInset = if (isXpan) {
                     (xpanSideWidth - CameraControlsLayoutDefaults.SideButtonSize) / 2
                 } else {
@@ -1727,6 +1757,11 @@ fun CameraScreen(
             )
         }
 
+        val quickSheetCover by animateFloatAsState(
+            targetValue = if (activePanel == ActivePanel.SETTINGS) 1f else 0f,
+            animationSpec = tween(160),
+            label = "quickSheetCover"
+        )
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1749,13 +1784,172 @@ fun CameraScreen(
                 viewfinder()
             }
 
-            Box(
-                modifier = Modifier.graphicsLayer {
-                    alpha = controlsArrival.value
-                    translationY = -(1f - controlsArrival.value) * 12.dp.toPx()
+            previewTransitionFrame?.let { frame ->
+                var layerOrigin by remember { mutableStateOf(Offset.Zero) }
+                Canvas(
+                    Modifier
+                        .fillMaxSize()
+                        .onGloballyPositioned { layerOrigin = it.positionInRoot() }
+                ) {
+                    val cover = previewTransitionCoverAlpha.value
+                    val from = previewMorphFrom
+                    val to = previewMorphTo
+                    if (cover <= 0f || from == null || to == null) return@Canvas
+                    val rect = androidx.compose.ui.geometry.lerp(from, to, previewMorphProgress.value).translate(-layerOrigin)
+                    // Fades on the new camera's first frame, even while it is still moving.
+                    drawCenterCropped(frame, rect, alpha = cover)
                 }
+            }
+
+            // A picture reaching below the top of the shutter gets a soft scrim under the footer controls.
+            // It only ever fades: while a held frame moves from or to a picture under the shutter, it stays
+            // until that move has finished, and comes up as soon as the new picture will reach there, so it is
+            // never added over a picture or taken away from one.
+            val shutterTopAboveBottom = CameraControlsLayoutDefaults.BottomPadding +
+                (CameraControlsLayoutDefaults.ModeZoneHeight + CameraControlsLayoutDefaults.CaptureButtonSize) / 2
+            val liveUnderShutter = viewfinderTop + cardHeight > contentHeight - shutterTopAboveBottom
+            val heldFrameUnderShutter by remember {
+                derivedStateOf {
+                    val top = captureButtonBounds?.top ?: return@derivedStateOf false
+                    val from = previewMorphFrom
+                    val to = previewMorphTo
+                    // The move, not the held frame's fade: the frame may fade out before it has arrived.
+                    if (previewTransitionFrame == null || previewMorphProgress.value >= 1f || from == null || to == null) {
+                        false
+                    } else {
+                        from.bottom > top || to.bottom > top
+                    }
+                }
+            }
+            val footerScrim by animateFloatAsState(
+                targetValue = if (liveUnderShutter || heldFrameUnderShutter) 1f else 0f,
+                animationSpec = tween(220),
+                label = "footerScrim"
+            )
+            if (footerScrim > 0f) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(140.dp)
+                        .graphicsLayer { alpha = footerScrim }
+                        .background(
+                            Brush.verticalGradient(0f to Color.Transparent, 0.45f to Color.Black.copy(alpha = 0.45f))
+                        )
+                )
+            }
+
+            // Active settings and the histogram on the picture's top edge, while quick settings are closed and
+            // nothing records (the recording line takes their place). A tap opens quick settings.
+            val topEdgeMarks = buildList {
+                if (isVideoMode) {
+                    if (state.videoConfig.torchEnabled && state.videoCapabilities.supportsTorch) {
+                        add(TopEdgeMark(AppIcons.BulbLine))
+                    }
+                    if (state.videoConfig.logProfile != VideoLogProfile.OFF) add(TopEdgeMark(null, "LOG"))
+                } else {
+                    if (useLivePhoto) add(TopEdgeMark(AppIcons.LivePhotoLine))
+                    if (state.timerSeconds > 0) add(TopEdgeMark(AppIcons.StopwatchLine, "${state.timerSeconds}s"))
+                    // The front camera has no flash, whatever the stored flash mode says.
+                    if (state.flashMode != 0 && state.videoCapabilities.supportsTorch) {
+                        add(TopEdgeMark(if (state.flashMode == 2) AppIcons.BulbLine else AppIcons.BoltLine))
+                    }
+                    if (useMultipleExposure) add(TopEdgeMark(AppIcons.MultiExposureLine))
+                }
+            }
+            val topEdgeHistogram = state.histogram.takeIf { isPhotoStyleMode && showHistogram }
+            AnimatedVisibility(
+                visible = activePanel != ActivePanel.SETTINGS && !state.videoRecordingState.isRecording &&
+                    !everydayRowShown && (topEdgeMarks.isNotEmpty() || topEdgeHistogram != null),
+                enter = fadeIn(tween(150)),
+                exit = fadeOut(tween(150)),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = viewfinderTop)
             ) {
-                topBar()
+                TopEdgeLine(
+                    marks = topEdgeMarks,
+                    histogram = topEdgeHistogram,
+                    onClick = { everydayRowShown = true }
+                )
+            }
+
+            // While recording: time, heat and format, centred just below the picture's top edge.
+            // It drops in a few dp and fades in when recording starts, and leaves the same way.
+            val recordingHudDrop = with(LocalDensity.current) { 8.dp.roundToPx() }
+            AnimatedVisibility(
+                visible = isVideoMode && state.videoRecordingState.isRecording,
+                enter = slideInVertically(tween(200, easing = FastOutSlowInEasing)) { -recordingHudDrop } +
+                    fadeIn(tween(200)),
+                exit = slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { -recordingHudDrop } +
+                    fadeOut(tween(200)),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = viewfinderTop + 8.dp)
+            ) {
+                RecordingHud(
+                    elapsedMs = state.videoRecordingState.elapsedMs,
+                    isHot = state.videoRecordingState.isHot,
+                    heatGauge = state.videoRecordingState.heatGauge,
+                    videoConfig = state.videoConfig
+                )
+            }
+
+            // Portrait offers its guide in a pill centred just above the picture's bottom, the manual
+            // values and the shutter, until the guide has been opened once. After that the same pill
+            // reminds once, while the depth model is missing, and opens the guide at its download.
+            val depthModelState by DepthModelManager.observe(context).collectAsState()
+            val depthModelMissing = depthModelState is DepthModelDownloadState.Missing ||
+                depthModelState is DepthModelDownloadState.Failed
+            val showDepthReminder = portraitIntroSeen && !portraitDepthReminderSeen && depthModelMissing
+            // Guide pills sit 8 dp above the highest of the picture's bottom, the manual values and the shutter.
+            val guidePillBottom = listOfNotNull(
+                previewBounds?.bottom,
+                parameterBarTop.takeIf { !isXpan && (manualControlsShown || anyManualValue) },
+                captureButtonBounds?.top,
+            ).minOrNull()?.let { it - (cameraScreenBounds?.top ?: 0f) }
+            val guidePillPlacement = Modifier
+                .align(Alignment.TopCenter)
+                .layout { measurable, constraints ->
+                    val placeable = measurable.measure(constraints)
+                    layout(placeable.width, placeable.height) {
+                        placeable.place(0, ((guidePillBottom ?: 0f) - 8.dp.toPx()).roundToInt() - placeable.height)
+                    }
+                }
+            if (
+                state.isPortraitMode && state.captureMode == CaptureMode.PHOTO &&
+                (!portraitIntroSeen || showDepthReminder) &&
+                activePanel == ActivePanel.NONE && !viewModel.showPortraitIntro
+            ) {
+                if (guidePillBottom != null) {
+                    ModeGuidePill(
+                        icon = if (showDepthReminder) AppIcons.DownloadLine else AppIcons.InfoLine,
+                        text = stringResource(if (showDepthReminder) R.string.portrait_depth_pill else R.string.portrait_guide_pill),
+                        onClick = {
+                            if (showDepthReminder) {
+                                preferencesRepository.updateAsync { this.portraitDepthReminderSeen = true }
+                                viewModel.showPortraitHelp(atBlur = true)
+                            } else {
+                                viewModel.showPortraitHelp()
+                            }
+                        },
+                        modifier = guidePillPlacement
+                    )
+                }
+            }
+            // Pro offers its guide the same way, until it has been opened once.
+            val proMode = state.captureMode == CaptureMode.PHOTO && state.useRaw && state.isRawSupported &&
+                !state.isPortraitMode
+            if (
+                proMode && !proGuideSeen && guidePillBottom != null &&
+                activePanel == ActivePanel.NONE && !viewModel.showProGuide
+            ) {
+                ModeGuidePill(
+                    icon = AppIcons.InfoLine,
+                    text = stringResource(R.string.pro_guide_pill),
+                    onClick = { viewModel.showProHelp() },
+                    modifier = guidePillPlacement
+                )
             }
 
             CameraBottomControlsLayout(
@@ -1763,20 +1957,10 @@ fun CameraScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        alpha = controlsArrival.value
+                        // The footer gives way under the quick settings sheet so it doesn't show through.
+                        alpha = controlsArrival.value * (1f - quickSheetCover)
                         translationY = (1f - controlsArrival.value) * 16.dp.toPx()
                     },
-                zoomBar = {
-                    // Panel visibility changes the zoom content, not the space used to
-                    // position the parameter row beneath it. XPAN has no horizontal bar.
-                    Box(
-                        modifier = if (isXpan) Modifier else Modifier
-                            .fillMaxWidth()
-                            .height(CameraControlsLayoutDefaults.ZoomBarHeight)
-                    ) {
-                        zoomBar()
-                    }
-                },
                 parameterRuler = {
                     AnimatedVisibility(
                         visible = showParameterRuler,
@@ -1793,14 +1977,57 @@ fun CameraScreen(
                             Modifier
                                 .then(if (isXpan) Modifier.width(viewfinderContentWidth) else Modifier)
                                 .onGloballyPositioned { coordinates ->
-                                    parameterRulerBounds = coordinates.boundsInRoot()
+                                    // Only while it shows: during its exit animation it keeps reporting its
+                                    // full rectangle, which would leave swipes there ignored after it has gone.
+                                    parameterRulerBounds = coordinates.boundsInRoot().takeIf { showParameterRuler }
                                 }
                         )
                     }
                 },
                 parameterBar = {
                     if (!isXpan) {
-                        parameterBar(selectedParameter.takeIf { showParameterRuler }, onParameterClick)
+                        // Swipes that start on the values themselves work too: down closes, up opens.
+                        Box(
+                            Modifier
+                                .onGloballyPositioned { parameterBarTop = it.boundsInRoot().top }
+                                .pointerInput(Unit) {
+                                    var dragged = 0f
+                                    detectVerticalDragGestures(
+                                        onDragStart = { dragged = 0f },
+                                        onDragEnd = {
+                                            if (abs(dragged) >= 40.dp.toPx()) onPictureSwipe(dragged < 0)
+                                        },
+                                        onVerticalDrag = { change, amount ->
+                                            dragged += amount
+                                            change.consume()
+                                        }
+                                    )
+                                }
+                        ) {
+                            AnimatedVisibility(
+                                visible = manualControlsShown,
+                                enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 3 },
+                                exit = fadeOut(tween(150)) + slideOutVertically(tween(150)) { it / 3 }
+                            ) {
+                                parameterBar(selectedParameter.takeIf { showParameterRuler }, onParameterClick)
+                            }
+                            // Closed: only the values set by hand; a tap opens the panel at that value.
+                            AnimatedVisibility(
+                                visible = !manualControlsShown && anyManualValue,
+                                enter = fadeIn(tween(180)),
+                                exit = fadeOut(tween(120)),
+                                modifier = Modifier.align(Alignment.Center)
+                            ) {
+                                ManualValuesLine(
+                                    state = state,
+                                    onValueClick = { parameter ->
+                                        manualControlsShown = true
+                                        selectedParameter = parameter
+                                        showParameterRuler = true
+                                    }
+                                )
+                            }
+                        }
                     }
                 },
                 captureControls = {
@@ -1814,23 +2041,39 @@ fun CameraScreen(
             previewBounds
         }
 
-        if (activePanel != ActivePanel.NONE) {
+        if (activePanel != ActivePanel.NONE && activePanel != ActivePanel.SETTINGS) {
             PanelDismissPreviewOverlay(
-                // Quick settings shade the whole app; a tap anywhere on it closes them.
-                bounds = if (activePanel == ActivePanel.SETTINGS) cameraScreenBounds else panelDismissBounds,
+                // A tap on the picture closes the open panel; quick settings leave the picture undimmed.
+                bounds = panelDismissBounds,
                 parentBounds = cameraScreenBounds,
-                dimBackground = activePanel == ActivePanel.SETTINGS,
+                dimBackground = false,
                 onDismiss = { activePanel = ActivePanel.NONE }
             )
         }
 
-        // TopSheet for settings
+        // Quick settings: a sheet from the bottom, opened by Q.
+        // Back closes it instead of leaving the camera.
+        BackHandler(enabled = activePanel == ActivePanel.SETTINGS) { activePanel = ActivePanel.NONE }
         CameraTopSheet(
             visible = activePanel == ActivePanel.SETTINGS,
             captureMode = state.captureMode,
+            flashMode = state.flashMode,
+            onFlashToggle = { viewModel.toggleFlash() },
+            timerSeconds = state.timerSeconds,
+            onTimerToggle = { viewModel.toggleTimer() },
+            useLivePhoto = useLivePhoto,
+            onLivePhotoToggle = { viewModel.setUseLivePhoto(!state.useLivePhoto) },
             aspectRatio = state.aspectRatio,
             topSheetAspectRatios = topSheetAspectRatios,
             onAspectRatioChange = { runPreviewTransition { viewModel.setAspectRatio(it) } },
+            videoConfig = state.videoConfig,
+            videoCapabilities = state.videoCapabilities,
+            onVideoResolutionClick = { cycleVideoResolution(state)?.let(viewModel::setVideoResolution) },
+            onVideoFpsClick = { cycleVideoFps(state)?.let(viewModel::setVideoFps) },
+            onVideoTorchToggle = { videoTorchEnabled = !state.videoConfig.torchEnabled },
+            onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
+            showHistogram = showHistogram,
+            onHistogramChange = { showHistogram = it },
             videoAspectRatio = state.videoConfig.aspectRatio,
             onVideoAspectRatioChange = { runPreviewTransition { viewModel.setVideoAspectRatio(it) } },
             videoLogProfile = state.videoConfig.logProfile,
@@ -1856,21 +2099,27 @@ fun CameraScreen(
             rawSpectralFilmPrint = rawSpectralFilmPrint ?: "kodak_portra_endura",
             ultraHdrEnabled = ultraHdrEnabled,
             onUltraHdrToggle = { preferencesRepository.updateAsync { this.ultraHdrGainMapEnabled = it } },
-            photoPreviewStabilizationEnabled =
-                state.photoPreviewStabilizationEnabled,
-            photoPreviewStabilizationAvailable =
-                viewModel.realtimeStabilizationCoordinator.isCurrentCameraSupported,
-            onPhotoPreviewStabilizationChange =
-                viewModel::setPhotoPreviewStabilizationEnabled,
+            isFrontCamera = state.getCurrentCameraInfo()?.lensType == LensType.FRONT,
             photoResolutionCapMp = state.photoResolutionCapMp,
+            frontPhotoResolutionCapMp = state.frontPhotoResolutionCapMp,
             photoResolutionAdjustable = state.photoResolutionAdjustable,
             onPhotoResolutionCapChange = viewModel::setPhotoResolutionCapMp,
+            onFrontPhotoResolutionCapChange = viewModel::setFrontPhotoResolutionCapMp,
             saveCameraJpeg = saveCameraJpeg,
             onSaveCameraJpegChange = { saveCameraJpeg = it },
+            isPortraitMode = state.isPortraitMode,
+            portraitQuickBlur = portraitQuickBlur,
+            onPortraitQuickBlurChange = viewModel::setPortraitQuickBlur,
+            portraitBokehStyle = portraitBokehStyle,
+            onPortraitBokehStyleChange = viewModel::setPortraitBokehStyle,
+            onPortraitHelp = viewModel::showPortraitHelp,
+            onProHelp = viewModel::showProHelp,
             onOpenSettingsAt = onOpenSettingsAt,
             multiFrameCount = jpgMultiFrameCount,
-            onMultiFrameCountChange = { viewModel.setJpgMultiFrameDenoiseFrameCount(it) },
+            onMultiFrameCountChange = { viewModel.setJpgMultiFrameDenoiseFrameCountAndEnable(it) },
             hdrPlusFrameCount = hdrPlusFrameCount,
+            hdrPlusMinFrames = if (state.hdrPlusBracketExposureEnabled) MultiFrameConfig.MIN_HDR_PLUS_BRACKET_FRAME_COUNT
+            else MultiFrameConfig.MIN_HDR_PLUS_FRAME_COUNT,
             onHdrPlusFrameCountChange = { viewModel.setHdrPlusFrameCount(it) },
             onRawDcpChange = { viewModel.setRawDcpId(it) },
             onRawDcpIdsByLensChange = { viewModel.setRawDcpIdsByLens(it) },
@@ -1893,6 +2142,11 @@ fun CameraScreen(
             onRawFotufilmDocumentChange = { viewModel.setRawFotufilmDocument(it) },
             meteringMode = state.meteringMode,
             onMeteringModeChange = { viewModel.setMeteringMode(it) },
+            lensChoices = remember(state.availableCameras, state.getCurrentCameraInfo()?.lensType) {
+                quickLensChoices(state.availableCameras, state.getCurrentCameraInfo())
+            },
+            currentCameraId = state.getCurrentCameraInfo()?.cameraId,
+            onLensSelect = { switchToLensWithPreviewTransition(it) },
             onFilterManageClick = {
                 activePanel = ActivePanel.NONE
                 onFilterManagementClick(null)
@@ -1919,24 +2173,38 @@ fun CameraScreen(
             },
             useMultipleExposure = useMultipleExposure,
             onMultipleExposureToggle = { viewModel.setUseMultipleExposure(it) },
-            contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding
+            onDismiss = { activePanel = ActivePanel.NONE },
+            everydayRowOnTop = everydayRowShown && activePanel == ActivePanel.NONE,
+            everydayRowOnTopModifier = Modifier.align(Alignment.TopCenter).padding(top = viewfinderTop),
+            modifier = Modifier.align(Alignment.BottomCenter)
         )
 
+        if (viewModel.showPortraitIntro) {
+            PortraitGuide(
+                startStep = if (viewModel.portraitGuideAtBlur) PortraitGuideBlurStep else 0,
+                quickBlur = portraitQuickBlur,
+                onUseDepth = { viewModel.setPortraitQuickBlur(false) },
+                onDismiss = viewModel::dismissPortraitIntro,
+            )
+        }
+
+        if (viewModel.showProGuide) {
+            ProGuide(onDismiss = viewModel::dismissProGuide)
+        }
+
         // During navigation measurement or window resizing, the viewport can be
-        // shorter than the toolbar. The panel then has no available vertical space.
-        val filterPanelTop = minOf(
-            if (!isXpan && !isVideoMode) topBarHeight else 0.dp,
-            maxHeight
-        )
+        // shorter than the top inset. The panel then has no available vertical space.
+        val filterPanelTop = minOf(topInset, maxHeight)
         val fallbackFilterPanelBottom = when {
             isXpan -> maxHeight - 48.dp
             isVideoMode -> maxHeight - 170.dp
-            else -> topBarHeight + cardHeight - 48.dp
+            else -> viewfinderTop + cardHeight - 48.dp
         }
         val filterPanelAnchorY = if (isXpan) {
             captureButtonBounds?.top
         } else {
-            filterButtonBounds?.bottom
+            // Above the Looks button and the zoom collar beside it.
+            filterButtonBounds?.top
         }
         val requestedFilterPanelBottom = filterPanelAnchorY?.let { anchorY ->
             val parentTop = cameraScreenBounds?.top ?: 0f
@@ -2159,11 +2427,16 @@ private fun Controls(
     onCaptureButtonBoundsChanged: (Rect) -> Unit,
     onSwitchCameraClick: () -> Unit,
     onCaptureModeSelected: (CameraShootingMode) -> Unit,
-    modeSwitchEnabled: Boolean,
     // The camera is not showing live frames yet or again: the shutter shows its busy look, as when it cannot shoot.
     previewPending: Boolean,
     onCaptureTap: () -> Unit,
     onGalleryClick: () -> Unit,
+    // XPAN keeps its filter button on the side bar and has no Looks button or collar.
+    isXpan: Boolean,
+    onLooksClick: () -> Unit,
+    onLooksBoundsChanged: (Rect) -> Unit,
+    onQuickSettingsClick: () -> Unit,
+    zoomCollar: (@Composable (fold: () -> Float) -> Unit)?,
     sideControlInset: Dp?,
     modifier: Modifier = Modifier.fillMaxSize()
 ) {
@@ -2185,17 +2458,82 @@ private fun Controls(
                 .padding(bottom = CameraControlsLayoutDefaults.BottomPadding),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            val shootingMode = when {
+                state.captureMode == CaptureMode.VIDEO -> CameraShootingMode.VIDEO
+                state.useRaw && state.isRawSupported -> CameraShootingMode.PROFESSIONAL
+                state.isPortraitMode -> CameraShootingMode.PORTRAIT
+                else -> CameraShootingMode.PHOTO
+            }
+            val line = remember { ModeLineState(shootingMode, state.isRawSupported) }
+            if (!isXpan) Spacer(Modifier.height(CameraControlsLayoutDefaults.CollarRise))
             Box(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(CameraControlsLayoutDefaults.ModeZoneHeight),
                 contentAlignment = Alignment.Center
             ) {
-                Box(
+                // First, so the side controls drawn above it keep their own touches.
+                ModeLine(
+                    state = line,
+                    selected = shootingMode,
+                    proAvailable = state.isRawSupported,
+                    // Free while a mode loads: a further choice waits for that load (see selectShootingMode).
+                    enabled = !state.videoRecordingState.isRecording &&
+                        !state.videoRecordingState.isProcessing,
+                    recording = state.videoRecordingState.isRecording,
+                    videoProcessing = state.videoRecordingState.isProcessing,
+                    onSelect = onCaptureModeSelected,
+                    modifier = Modifier.matchParentSize(),
+                    collar = zoomCollar?.let { collar -> @Composable { collar { line.fold } } }
+                ) { shutterModifier ->
+                    // The face follows the mode under the shutter while the dial turns.
+                    CaptureButton(
+                        captureMode = if (line.shownMode == CameraShootingMode.VIDEO) CaptureMode.VIDEO else CaptureMode.PHOTO,
+                        isProfessionalMode = line.shownMode == CameraShootingMode.PROFESSIONAL,
+                        isCapturing = state.isCapturing,
+                        isCaptureBusy = captureBusy,
+                        isCountdownActive = state.countdownValue > 0,
+                        photoCaptureProgress = state.photoCaptureProgress,
+                        isBurstCapturing = state.burstCapturing,
+                        isVideoRecording = state.videoRecordingState.isRecording,
+                        isVideoProcessing = state.videoRecordingState.isProcessing,
+                        isPaused = state.videoRecordingState.isPaused,
+                        allowLongPress = state.captureMode == CaptureMode.PHOTO &&
+                            !useMultipleExposure,
+                        multipleExposureEnabled = useMultipleExposure && state.captureMode == CaptureMode.PHOTO,
+                        multipleExposureProgress = multipleExposureState.capturedCount.toFloat() /
+                                multipleExposureState.targetCount.coerceAtLeast(1).toFloat(),
+                        customStyle = captureButtonStyle,
+                        customColor = captureButtonColor,
+                        customImagePath = captureButtonImagePath,
+                        previewPending = previewPending,
+                        // The XPAN picture runs behind the shutter.
+                        seeThrough = isXpan,
+                        onTap = onCaptureTap,
+                        onLongPressStart = { viewModel.startContinuousCapture() },
+                        onLongPressEnd = { viewModel.stopContinuousCapture() },
+                        modifier = Modifier
+                            .onGloballyPositioned { coordinates ->
+                                onCaptureButtonBoundsChanged(coordinates.boundsInRoot())
+                            }
+                            .then(shutterModifier),
+                    )
+                }
+
+                val thumbnailPhotoInset = CameraControlsLayoutDefaults.LineWidth + CameraControlsLayoutDefaults.LineGap
+                val thumbnailPhotoInsetPx = with(LocalDensity.current) { thumbnailPhotoInset.toPx() }
+                val recording = state.videoRecordingState.isRecording
+                // While recording, Pause takes the thumbnail's place and Snapshot the switch's.
+                if (!recording) Box(
                     modifier = Modifier
                         .align(Alignment.CenterStart)
-                        .padding(start = sideControlInset ?: 32.dp)
+                        .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
                         .onGloballyPositioned { coordinates ->
-                            onGalleryThumbnailBoundsChanged(coordinates.boundsInRoot())
+                            // The capture fly-in lands on the photo, inside the frame.
+                            onGalleryThumbnailBoundsChanged(coordinates.boundsInRoot().deflate(thumbnailPhotoInsetPx))
                         }
+                        // After the bounds above, so making room for the mode list does not move the fly-in target.
+                        .graphicsLayer { makeRoom(line.side, -1f) }
                         .autoRotate()
                 ) {
                     GalleryThumbnail(
@@ -2203,6 +2541,7 @@ private fun Controls(
                         viewModel = galleryViewModel,
                         capturedThumbnail = capturedThumbnail,
                         onCapturedThumbnailLoaded = viewModel::acknowledgeCapturedThumbnail,
+                        photoInset = thumbnailPhotoInset,
                         onClick = onGalleryClick
                     )
                     val queueStatus by RenderQueue.status.collectAsState()
@@ -2231,52 +2570,8 @@ private fun Controls(
                     }
                 }
 
-                CaptureButton(
-                    captureMode = state.captureMode,
-                    isProfessionalMode = state.useRaw && state.isRawSupported,
-                    isCapturing = state.isCapturing,
-                    isCaptureBusy = captureBusy,
-                    isCountdownActive = state.countdownValue > 0,
-                    photoCaptureProgress = state.photoCaptureProgress,
-                    isBurstCapturing = state.burstCapturing,
-                    isVideoRecording = state.videoRecordingState.isRecording,
-                    isVideoProcessing = state.videoRecordingState.isProcessing,
-                    isPaused = state.videoRecordingState.isPaused,
-                    allowLongPress = state.captureMode == CaptureMode.PHOTO &&
-                        !useMultipleExposure,
-                    multipleExposureEnabled = useMultipleExposure && state.captureMode == CaptureMode.PHOTO,
-                    multipleExposureProgress = multipleExposureState.capturedCount.toFloat() /
-                            multipleExposureState.targetCount.coerceAtLeast(1).toFloat(),
-                    customStyle = captureButtonStyle,
-                    customColor = captureButtonColor,
-                    customImagePath = captureButtonImagePath,
-                    previewPending = previewPending,
-                    onTap = onCaptureTap,
-                    onLongPressStart = { viewModel.startContinuousCapture() },
-                    onLongPressEnd = { viewModel.stopContinuousCapture() },
-                    modifier = Modifier.onGloballyPositioned { coordinates ->
-                        onCaptureButtonBoundsChanged(coordinates.boundsInRoot())
-                    },
-                )
-
-                if (state.videoRecordingState.isRecording) {
-                    IconButton(
-                        onClick = { viewModel.captureVideoFrame() },
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = sideControlInset ?: 40.dp)
-                            .size(CameraControlsLayoutDefaults.SideButtonSize)
-                            .autoRotate()
-                    ) {
-                        Icon(
-                            imageVector = AppIcons.CameraAlt,
-                            contentDescription = stringResource(R.string.take_photo),
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
-
-                    IconButton(
+                if (recording) {
+                    FramedFooterButton(
                         onClick = {
                             if (state.videoRecordingState.isPaused) {
                                 viewModel.resumeVideoRecording()
@@ -2284,62 +2579,174 @@ private fun Controls(
                                 viewModel.pauseVideoRecording()
                             }
                         },
+                        icon = if (state.videoRecordingState.isPaused) AppIcons.PlayLine else AppIcons.PauseLine,
+                        contentDescription = stringResource(
+                            if (state.videoRecordingState.isPaused) R.string.render_queue_resume else R.string.render_queue_pause
+                        ),
                         modifier = Modifier
                             .align(Alignment.CenterStart)
-                            .padding(start = 100.dp)
-                            .size(48.dp)
-                            .autoRotate()
-                    ) {
-                        Icon(
-                            imageVector = if (state.videoRecordingState.isPaused) Icons.Default.PlayArrow else AppIcons.Pause,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
+                            .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
+                    )
+                    FramedFooterButton(
+                        onClick = { viewModel.captureVideoFrame() },
+                        icon = AppIcons.CameraLine,
+                        contentDescription = stringResource(R.string.take_photo),
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
+                    )
                 } else {
+                    val switchSpin = remember { Animatable(0f) }
+                    val spinScope = rememberCoroutineScope()
+                    val switchContext = LocalContext.current
+                    val vibration = remember(switchContext) { VibrationHelper(switchContext) }
+                    val switchShape = RoundedCornerShape(ThumbnailCorner)
                     PhysicalButton(
                         onClick = {
-                            if (!state.videoRecordingState.isProcessing) {
+                            // Taps during the spin are ignored, so one spin is one switch.
+                            if (!state.videoRecordingState.isProcessing && !switchSpin.isRunning) {
                                 onSwitchCameraClick()
+                                spinScope.launch {
+                                    switchSpin.animateTo(switchSpin.value + 180f, tween(560, easing = BackEasing))
+                                    vibration.vibrate(VibrationHelper.LIGHT_TICK_MS)
+                                }
                             }
                         },
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
-                            .padding(end = sideControlInset ?: 40.dp)
+                            .padding(end = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
+                            .graphicsLayer { makeRoom(line.side, 1f) }
                             .size(CameraControlsLayoutDefaults.SideButtonSize)
-                            .autoRotate(),
-                        shape = CircleShape
+                            .autoRotate()
+                            .border(CameraControlsLayoutDefaults.LineWidth, CameraControlsLayoutDefaults.LineColor, switchShape),
+                        shape = switchShape,
+                        backgroundColor = Color.Transparent
                     ) {
                         Icon(
-                            imageVector = AppIcons.Cameraswitch,
+                            imageVector = AppIcons.TurningArrows,
                             contentDescription = stringResource(R.string.switch_camera),
-                            tint = Color.White.copy(
+                            tint = CameraControlsLayoutDefaults.LineColor.copy(
                                 alpha = if (state.videoRecordingState.isProcessing) 0.35f else 1f
                             ),
+                            modifier = Modifier
+                                .size(26.dp)
+                                .graphicsLayer { rotationZ = switchSpin.value }
+                        )
+                    }
+                }
+
+                // Quick settings mirror Looks on the left column; not while recording, as the settings can't change then.
+                if (!state.videoRecordingState.isRecording && !state.videoRecordingState.isProcessing) {
+                    PhysicalButton(
+                        onClick = onQuickSettingsClick,
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
+                            .offset(y = -LooksRise)
+                            .size(CameraControlsLayoutDefaults.SideButtonSize)
+                            .graphicsLayer {
+                                translationY = -10.dp.toPx() * line.side
+                                alpha = 1f - line.side
+                            }
+                            .autoRotate(),
+                        shape = RoundedCornerShape(ThumbnailCorner),
+                        backgroundColor = Color.Transparent
+                    ) {
+                        Icon(
+                            imageVector = AppIcons.Sliders,
+                            contentDescription = stringResource(R.string.quick_settings),
+                            tint = CameraControlsLayoutDefaults.LineColor,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+
+                // Looks can't change during a recording.
+                if (!isXpan && !recording) {
+                    PhysicalButton(
+                        onClick = onLooksClick,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = CameraControlsLayoutDefaults.SideMargin)
+                            // Level with the zoom collar's knob.
+                            .offset(y = -LooksRise)
+                            .size(CameraControlsLayoutDefaults.SideButtonSize)
+                            // Before the lift, so the filter panel's anchor stays put.
+                            .onGloballyPositioned { coordinates ->
+                                onLooksBoundsChanged(coordinates.boundsInRoot())
+                            }
+                            .graphicsLayer {
+                                translationY = -10.dp.toPx() * line.side
+                                alpha = 1f - line.side
+                            }
+                            .autoRotate(),
+                        shape = RoundedCornerShape(ThumbnailCorner),
+                        backgroundColor = Color.Transparent
+                    ) {
+                        Icon(
+                            imageVector = AppIcons.Film,
+                            contentDescription = stringResource(R.string.filters_panel),
+                            tint = CameraControlsLayoutDefaults.LineColor,
                             modifier = Modifier.size(24.dp)
                         )
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ModeSwitcherSpacing))
-
-            CaptureModeSwitcher(
-                shootingMode = when {
-                    state.captureMode == CaptureMode.VIDEO -> CameraShootingMode.VIDEO
-                    state.useRaw && state.isRawSupported -> CameraShootingMode.PROFESSIONAL
-                    else -> CameraShootingMode.PHOTO
-                },
-                professionalModeEnabled = state.isRawSupported,
-                enabled = modeSwitchEnabled &&
-                    !state.videoRecordingState.isRecording &&
-                    !state.videoRecordingState.isProcessing,
-                onModeSelected = onCaptureModeSelected
-            )
         }
     }
 }
+
+// The zoom collar's knob centre above the shutter centre: halfway through the 48 to 74 dp band.
+private val LooksRise = 61.dp
+
+/** While the mode list opens, a side control slides 44 dp outward, shrinks a little and fades. */
+private fun GraphicsLayerScope.makeRoom(side: Float, direction: Float) {
+    translationX = direction * 44.dp.toPx() * side
+    scaleX = 1f - 0.12f * side
+    scaleY = scaleX
+    alpha = 1f - side
+}
+
+/** Fills [rect] with [image], cropped around its centre to the rectangle's shape. */
+private fun DrawScope.drawCenterCropped(image: ImageBitmap, rect: Rect, alpha: Float = 1f) {
+    if (rect.width <= 0f || rect.height <= 0f) return
+    val scale = maxOf(rect.width / image.width, rect.height / image.height)
+    val srcWidth = (rect.width / scale).roundToInt().coerceIn(1, image.width)
+    val srcHeight = (rect.height / scale).roundToInt().coerceIn(1, image.height)
+    drawImage(
+        image = image,
+        srcOffset = IntOffset((image.width - srcWidth) / 2, (image.height - srcHeight) / 2),
+        srcSize = IntSize(srcWidth, srcHeight),
+        dstOffset = IntOffset(rect.left.roundToInt(), rect.top.roundToInt()),
+        dstSize = IntSize(rect.width.roundToInt(), rect.height.roundToInt()),
+        alpha = alpha
+    )
+}
+
+/** A footer button in the switch's 48 dp frame: a 2 dp outline, then a line icon. */
+@Composable
+private fun FramedFooterButton(
+    onClick: () -> Unit,
+    icon: ImageVector,
+    contentDescription: String,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(ThumbnailCorner)
+    PhysicalButton(
+        onClick = onClick,
+        modifier = modifier
+            .size(CameraControlsLayoutDefaults.SideButtonSize)
+            .autoRotate()
+            .border(CameraControlsLayoutDefaults.LineWidth, CameraControlsLayoutDefaults.LineColor, shape),
+        shape = shape,
+        backgroundColor = Color.Transparent
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = CameraControlsLayoutDefaults.LineColor, modifier = Modifier.size(24.dp))
+    }
+}
+
+// Back easing (c = 1.9): swings about 12 % past the target and settles.
+internal val BackEasing = Easing { t -> val u = t - 1f; 1f + 2.9f * u * u * u + 1.9f * u * u }
 
 /** Shared breathing for the waiting shutter ring and thumbnail edge; both start when waiting starts, so they stay in step. */
 @Composable
@@ -2404,6 +2811,10 @@ private fun GalleryProcessingOverlay(
         ),
         contentAlignment = Alignment.Center
     ) {
+        // Idle frame line; the processing states below draw their edge in its place.
+        if (processing == null) {
+            Box(Modifier.matchParentSize().border(CameraControlsLayoutDefaults.LineWidth, CameraControlsLayoutDefaults.LineColor, thumbnailShape))
+        }
         if (processing == ThumbnailProcessing.PAUSED) {
             // The one state that needs the user (Resume), so the only one that covers the photo.
             Box(Modifier.matchParentSize().clip(thumbnailShape).background(Color.Black.copy(alpha = 0.35f)))
@@ -2477,6 +2888,8 @@ fun CaptureButton(
     customColor: Int,
     customImagePath: String?,
     previewPending: Boolean = false,
+    // Over a picture that runs behind the shutter: no dark disc, and a see-through face inside the full ring.
+    seeThrough: Boolean = false,
     onTap: () -> Unit,
     onLongPressStart: () -> Unit,
     onLongPressEnd: () -> Unit,
@@ -2487,13 +2900,12 @@ fun CaptureButton(
     val showCaptureProgress = captureMode == CaptureMode.PHOTO && isCapturing
     val showVideoProcessingProgress = captureMode == CaptureMode.VIDEO && isVideoProcessing
     // While a shot would be refused (Pro: RAW still saving; Photo: buffers full): grey centre and a breathing
-    // white ring (capture uses a spinning accent ring); a pop and a light tick when it is usable again.
+    // white ring (capture uses a spinning accent ring); a small pop and a light tick when it is usable again.
+    // Every ring takes the place of the outline, at its width, one at a time.
     val showBusy = (captureMode == CaptureMode.PHOTO && isCaptureBusy && !isCapturing) || previewPending
     // During the self-timer a press cancels it, so the centre shows a cross instead of a second shot.
     val showCancelTimer = captureMode == CaptureMode.PHOTO && isCountdownActive && !isCapturing
     val showActivityProgress = showCaptureProgress || showVideoProcessingProgress
-    val progressRingCount = (if (showMultipleExposureProgress) 1 else 0) +
-        (if (showActivityProgress || showBusy) 1 else 0)
     val infiniteTransition = rememberInfiniteTransition(label = "infinite transition")
     var isPressed by remember { mutableStateOf(false) }
     val customImage = remember(customImagePath) {
@@ -2508,8 +2920,9 @@ fun CaptureButton(
         label = "captureScale"
     )
     // Opaque neutral grey on top of the centre: a dark tint over the yellow would read as muddy olive.
+    // Not while the camera reopens after a mode switch: the face keeps the new mode's colour and the ring breathes.
     val busyTint by animateFloatAsState(
-        targetValue = if (showBusy || showCancelTimer) 1f else 0f,
+        targetValue = if ((showBusy && !previewPending) || showCancelTimer) 1f else 0f,
         animationSpec = tween(250),
         label = "captureBusyTint"
     )
@@ -2529,8 +2942,8 @@ fun CaptureButton(
                 vibration.vibrate(VibrationHelper.LIGHT_TICK_MS)
             }
             pressedWhileBusy = false
-            readyPop.animateTo(1.15f, tween(120))
-            readyPop.animateTo(1f, spring(dampingRatio = 0.4f))
+            readyPop.animateTo(1.04f, tween(110))
+            readyPop.animateTo(1f, spring(dampingRatio = 0.6f))
         }
         wasBusy = showBusy
     }
@@ -2587,7 +3000,8 @@ fun CaptureButton(
                         isLongPressStarted = false
                         if (currentShowBusy) pressedWhileBusy = true
                         try {
-                            tryAwaitRelease()
+                            // A swipe on the mode dial took the press: no ready tick for it later.
+                            if (!tryAwaitRelease()) pressedWhileBusy = false
                         } finally {
                             isPressed = false
                             if (isLongPressStarted) {
@@ -2598,6 +3012,7 @@ fun CaptureButton(
                 )
             },
         shape = CircleShape,
+        backgroundColor = if (seeThrough) Color.Transparent else PhysicalButtonDefaults.BackgroundColor,
         contentAlignment = Alignment.Center
     ) {
         val ringColor = when {
@@ -2607,14 +3022,14 @@ fun CaptureButton(
                 if (isPaused) Color.White.copy(alpha = 0.8f)
                 else Color.Red.copy(alpha = pulseAlpha)
             }
-            else -> Color.White.copy(alpha = 0.32f)
+            else -> CameraControlsLayoutDefaults.LineColor
         }
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .border(
-                    width = 1.dp,
+                    width = CameraControlsLayoutDefaults.LineWidth,
                     color = ringColor,
                     shape = CircleShape
                 )
@@ -2623,9 +3038,8 @@ fun CaptureButton(
         // Center shutter surface
         val centerPadding by animateDpAsState(
             targetValue = when {
-                captureMode == CaptureMode.VIDEO && isVideoRecording -> 19.dp
-                progressRingCount > 0 -> CaptureProgressRingDefaults.contentPadding(progressRingCount)
-                else -> 2.dp
+                captureMode == CaptureMode.VIDEO && isVideoRecording -> 21.dp
+                else -> CameraControlsLayoutDefaults.LineWidth + CameraControlsLayoutDefaults.LineGap
             },
             animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow),
             label = "centerPadding"
@@ -2668,6 +3082,7 @@ fun CaptureButton(
             modifier = Modifier
                 .padding(centerPadding)
                 .fillMaxSize()
+                .graphicsLayer { if (seeThrough) alpha = SeeThroughFaceAlpha }
                 .clip(RoundedCornerShape(centerCorner))
                 .then(centerBackgroundModifier)
         ) {
@@ -2688,26 +3103,24 @@ fun CaptureButton(
             if (busyTint > 0f) {
                 Box(Modifier.fillMaxSize().background(Color(0xFF3C3C3C).copy(alpha = busyTint)))
             }
-            if (showCancelTimer) {
-                Icon(
-                    Icons.Default.Close,
-                    contentDescription = stringResource(R.string.capture_cancel_timer),
-                    tint = Color.White,
-                    modifier = Modifier.align(Alignment.Center).size(32.dp)
-                )
-            }
         }
-        if (showBusy) {
+        if (showCancelTimer) {
+            Icon(
+                AppIcons.CloseLine,
+                contentDescription = stringResource(R.string.capture_cancel_timer),
+                tint = Color.White,
+                modifier = Modifier.align(Alignment.Center).size(28.dp)
+            )
+        }
+        if (showBusy && !showActivityProgress) {
             CaptureProgressRing(
                 color = Color.White.copy(alpha = rememberRawBusyPulse()),
                 startAngle = -90f,
                 sweepAngle = 360f,
-                inset = CaptureProgressRingDefaults.OuterInset +
-                    if (showMultipleExposureProgress) CaptureProgressRingDefaults.RingSpacing else 0.dp,
                 modifier = Modifier.progressSemantics()
             )
         }
-        if (showMultipleExposureProgress) {
+        if (showMultipleExposureProgress && !showActivityProgress && !showBusy) {
             CaptureProgressRing(
                 color = progressColor,
                 startAngle = -90f,
@@ -2720,14 +3133,15 @@ fun CaptureButton(
                 color = progressColor,
                 startAngle = if (isIndeterminate) rotation - 90f else -90f,
                 sweepAngle = if (isIndeterminate) 90f else 360f * captureProgress.value,
-                inset = CaptureProgressRingDefaults.OuterInset +
-                    if (showMultipleExposureProgress) CaptureProgressRingDefaults.RingSpacing else 0.dp,
                 modifier = if (isIndeterminate) Modifier.progressSemantics()
                     else Modifier.progressSemantics(captureProgress.value)
             )
         }
     }
 }
+
+// The shutter face over a picture: enough to read as the shutter and show its mode colour and busy grey.
+private const val SeeThroughFaceAlpha = 0.3f
 
 @Composable
 private fun rememberPhotoCaptureProgress(progress: PhotoCaptureProgress?): State<Float> {
@@ -2743,118 +3157,6 @@ private fun rememberPhotoCaptureProgress(progress: PhotoCaptureProgress?): State
         }
     }
     return fraction
-}
-
-@Composable
-private fun CaptureModeSwitcher(
-    shootingMode: CameraShootingMode,
-    professionalModeEnabled: Boolean,
-    enabled: Boolean,
-    onModeSelected: (CameraShootingMode) -> Unit
-) {
-    BoxWithConstraints(
-        modifier = Modifier
-            .width(228.dp)
-            .height(CameraControlsLayoutDefaults.ModeSwitcherHeight)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color.Black.copy(alpha = 0.28f))
-            .border(
-                width = 0.5.dp,
-                color = Color.White.copy(alpha = 0.18f),
-                shape = RoundedCornerShape(18.dp)
-            )
-            .padding(3.dp)
-    ) {
-        val knobWidth = maxWidth / 3
-        val selectedIndex = when (shootingMode) {
-            CameraShootingMode.PROFESSIONAL -> 0
-            CameraShootingMode.PHOTO -> 1
-            CameraShootingMode.VIDEO -> 2
-        }
-        val knobOffset by animateDpAsState(
-            targetValue = knobWidth * selectedIndex,
-            animationSpec = tween(durationMillis = 220),
-            label = "modeSwitcher"
-        )
-        val selectedBackground by animateColorAsState(
-            targetValue = if (shootingMode == CameraShootingMode.PROFESSIONAL) {
-                AccentColor
-            } else {
-                Color.White
-            },
-            animationSpec = tween(durationMillis = 220),
-            label = "modeSwitcherColor"
-        )
-        Box(
-            modifier = Modifier
-                .offset(x = knobOffset)
-                .width(knobWidth)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(15.dp))
-                .background(selectedBackground)
-        )
-        Row(
-            modifier = Modifier.fillMaxSize(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_professional),
-                selectedContentColor = accentContentColor(selectedBackground),
-                selected = shootingMode == CameraShootingMode.PROFESSIONAL,
-                // Still tappable without RAW, so the tap can explain why Pro is unavailable.
-                enabled = enabled,
-                dimmed = !professionalModeEnabled,
-                onClick = { onModeSelected(CameraShootingMode.PROFESSIONAL) },
-                modifier = Modifier.weight(1f)
-            )
-            ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_photo),
-                selected = shootingMode == CameraShootingMode.PHOTO,
-                enabled = enabled,
-                onClick = { onModeSelected(CameraShootingMode.PHOTO) },
-                modifier = Modifier.weight(1f)
-            )
-            ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_video),
-                selected = shootingMode == CameraShootingMode.VIDEO,
-                enabled = enabled,
-                onClick = { onModeSelected(CameraShootingMode.VIDEO) },
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@Composable
-private fun ModeSwitcherItem(
-    label: String,
-    selected: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    selectedContentColor: Color = Color.Black,
-    dimmed: Boolean = false
-) {
-    Box(
-        modifier = modifier
-            .fillMaxHeight()
-            .clip(RoundedCornerShape(20.dp))
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            color = when {
-                selected -> selectedContentColor.copy(alpha = 0.88f)
-                enabled && !dimmed -> Color.White.copy(alpha = 0.82f)
-                else -> Color.White.copy(alpha = 0.3f)
-            },
-            fontSize = 12.sp,
-            lineHeight = 14.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            maxLines = 1
-        )
-    }
 }
 
 private fun cycleVideoResolution(state: CameraState): VideoResolutionPreset? {

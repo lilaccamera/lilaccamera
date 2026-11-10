@@ -1,6 +1,7 @@
 package com.hinnka.mycamera.processor
 
 import android.graphics.Bitmap
+import com.hinnka.mycamera.camera.DeviceQuirks
 import android.graphics.ColorSpace
 import android.opengl.EGL14
 import android.opengl.GLES30
@@ -51,7 +52,11 @@ import kotlin.math.roundToInt
 class OglBokehProcessor {
     companion object {
         private const val TAG = "OglBokehProcessor"
-        private const val MAX_BOKEH_RENDER_EDGE = 2560
+        // The blur is computed at this size and composited onto the full picture. The 2560 px render took
+        // 10 to 13 s on the XZ1 Compact and its GPU hung when anything else drew meanwhile.
+        private val MAX_BOKEH_RENDER_EDGE = if (DeviceQuirks.isLilac) 1536 else 2560
+        /** The working-to-photo scale of a 19 MP photo at 1536 px. */
+        private const val LILAC_MAX_RENDER_SCALE = 1536f / 5056f
         private const val GUIDE_SHORT_EDGE = 512
         private const val STRIP_ROWS = 256
         /** Rows per full-resolution composite / readback submission. */
@@ -359,7 +364,7 @@ class OglBokehProcessor {
         uniform1i(guidedMomentsProgramId, "uRadius", radius)
         uniform1i(guidedMomentsProgramId, "uLinearInput", if (linearInput) 1 else 0)
         GLES31.glDispatchCompute(groupsX, groupsY, 1)
-        GLES31.glMemoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
+        memoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
 
         val coefficients = createBuffer(halfPixels * 16, "guided filter coefficients")
         useProgram(guidedSolveProgramId)
@@ -369,7 +374,7 @@ class OglBokehProcessor {
         uniform1i(guidedSolveProgramId, "uRadius", radius)
         uniform1f(guidedSolveProgramId, "uEpsilon", GUIDED_EPSILON)
         GLES31.glDispatchCompute(groupsX, groupsY, 1)
-        GLES31.glMemoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
+        memoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
         releaseBuffer(moments)
 
         val meanScratch = createBuffer(halfPixels * 16, "guided filter coefficient mean")
@@ -387,7 +392,7 @@ class OglBokehProcessor {
                 if (horizontal) 1 else 0, if (horizontal) 0 else 1,
             )
             GLES31.glDispatchCompute(groupsX, groupsY, 1)
-            GLES31.glMemoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
+            memoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
         }
         releaseBuffer(meanScratch)
 
@@ -405,7 +410,7 @@ class OglBokehProcessor {
             GlesComputeWorkGroup.imageGroupCount(height),
             1,
         )
-        GLES31.glMemoryBarrier(
+        memoryBarrier(
             GLES31.GL_TEXTURE_FETCH_BARRIER_BIT or GLES31.GL_FRAMEBUFFER_BARRIER_BIT or
                 GLES31.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT,
         )
@@ -484,7 +489,7 @@ class OglBokehProcessor {
             GlesComputeWorkGroup.imageGroupCount(height),
             1,
         )
-        GLES31.glMemoryBarrier(
+        memoryBarrier(
             GLES31.GL_TEXTURE_FETCH_BARRIER_BIT or GLES31.GL_FRAMEBUFFER_BARRIER_BIT or
                 GLES31.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT,
         )
@@ -888,7 +893,7 @@ class OglBokehProcessor {
                 1,
             )
         }
-        GLES31.glMemoryBarrier(GLES31.GL_BUFFER_UPDATE_BARRIER_BIT)
+        memoryBarrier(GLES31.GL_BUFFER_UPDATE_BARRIER_BIT)
         val histogram = readIntBuffer(buffer, words)
         releaseBuffer(buffer)
         requireNoGlError("lens blur histogram")
@@ -932,7 +937,7 @@ class OglBokehProcessor {
         val farBuffer = createBuffer(stripPixels * 16, "lens blur far scene").also {
             clearBuffer(it, (stripPixels * 4).toInt())
         }
-        GLES31.glMemoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
+        memoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
         val boostRadius = BOOST_RADIUS_FRACTION * min(originalImage.width, originalImage.height) * radiusScale
         // Layer-color mip of the neighborhood the bubble-source pass subtracted.
         val bubbleBackgroundLod = log2(
@@ -985,7 +990,7 @@ class OglBokehProcessor {
             store(nearBuffer, farBuffer, nearTex, farTex, width, stripRow, stripRows)
             stripRow += stripRows
         }
-        GLES31.glMemoryBarrier(
+        memoryBarrier(
             GLES31.GL_TEXTURE_FETCH_BARRIER_BIT or GLES31.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT,
         )
         requireNoGlError("lens blur strips")
@@ -1062,7 +1067,7 @@ class OglBokehProcessor {
             GlesComputeWorkGroup.imageGroupCount(sourceHigh - sourceLow),
             1,
         )
-        GLES31.glMemoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
+        memoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
     }
 
     private fun integrate(deltaBuffer: Int, targetBuffer: Int, width: Int, rows: Int, accumulate: Boolean) {
@@ -1073,7 +1078,7 @@ class OglBokehProcessor {
         uniform1i(integrateProgramId, "uRows", rows)
         uniform1i(integrateProgramId, "uAccumulate", if (accumulate) 1 else 0)
         GLES31.glDispatchCompute(GlesComputeWorkGroup.linearGroupCount(rows), 1, 1)
-        GLES31.glMemoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
+        memoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
     }
 
     private fun upsampleAdd(
@@ -1100,7 +1105,7 @@ class OglBokehProcessor {
             GlesComputeWorkGroup.imageGroupCount(stripRows),
             1,
         )
-        GLES31.glMemoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
+        memoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
     }
 
     private fun alphaBlend(bandBuffer: Int, sceneBuffer: Int, width: Int, rows: Int, gain: Float, linearInput: Boolean) {
@@ -1116,7 +1121,7 @@ class OglBokehProcessor {
             GlesComputeWorkGroup.imageGroupCount(rows),
             1,
         )
-        GLES31.glMemoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
+        memoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
     }
 
     private fun store(
@@ -1141,7 +1146,7 @@ class OglBokehProcessor {
             GlesComputeWorkGroup.imageGroupCount(rows),
             1,
         )
-        GLES31.glMemoryBarrier(
+        memoryBarrier(
             GLES31.GL_SHADER_STORAGE_BARRIER_BIT or GLES31.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT,
         )
         GLES31.glBindImageTexture(0, 0, 0, false, 0, GLES31.GL_WRITE_ONLY, GLES30.GL_RGBA16F)
@@ -1160,7 +1165,7 @@ class OglBokehProcessor {
             GlesComputeWorkGroup.imageGroupCount(height),
             1,
         )
-        GLES31.glMemoryBarrier(GLES31.GL_BUFFER_UPDATE_BARRIER_BIT)
+        memoryBarrier(GLES31.GL_BUFFER_UPDATE_BARRIER_BIT)
         val bits = readIntBuffer(buffer, 1)[0]
         releaseBuffer(buffer)
         requireNoGlError("lens blur maximum")
@@ -1204,7 +1209,7 @@ class OglBokehProcessor {
         GLES31.glBindBufferBase(GLES31.GL_SHADER_STORAGE_BUFFER, 0, buffer)
         uniform1i(clearProgramId, "uCount", words)
         GLES31.glDispatchCompute(GlesComputeWorkGroup.linearGroupCount(words), 1, 1)
-        GLES31.glMemoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
+        memoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
     }
 
     private fun readIntBuffer(buffer: Int, words: Int): IntArray {
@@ -1260,14 +1265,31 @@ class OglBokehProcessor {
 
     private fun resolveBokehRenderSize(width: Int, height: Int): Pair<Int, Int> {
         val maxEdge = maxOf(width, height)
-        if (maxEdge <= MAX_BOKEH_RENDER_EDGE) return width to height
-        return if (width >= height) {
-            MAX_BOKEH_RENDER_EDGE to
-                (height.toLong() * MAX_BOKEH_RENDER_EDGE / width).toInt().coerceAtLeast(1)
+        // On the XZ1 Compact a picture under about 2000 px (the 2 MP front camera) was blurred in one
+        // full-size pass with radii up to 44 px; that pass outran the GPU's command timeout, the driver
+        // reset the GPU and every later GL call in the app failed. The blur is computed at most at the
+        // scale a 19 MP photo uses, which keeps each pass as short as for the back camera.
+        val limit = if (DeviceQuirks.isLilac) {
+            minOf(MAX_BOKEH_RENDER_EDGE, (maxEdge * LILAC_MAX_RENDER_SCALE).roundToInt().coerceAtLeast(1))
         } else {
-            (width.toLong() * MAX_BOKEH_RENDER_EDGE / height).toInt().coerceAtLeast(1) to
-                MAX_BOKEH_RENDER_EDGE
+            MAX_BOKEH_RENDER_EDGE
         }
+        if (maxEdge <= limit) return width to height
+        return if (width >= height) {
+            limit to (height.toLong() * limit / width).toInt().coerceAtLeast(1)
+        } else {
+            (width.toLong() * limit / height).toInt().coerceAtLeast(1) to limit
+        }
+    }
+
+    /**
+     * On the XZ1 Compact (Adreno 540) glMemoryBarrier alone does not keep a pass from reading what the
+     * previous pass has not finished writing: 8 MP blurs came out with black bands along whole strips in
+     * 8 of 8 renders. Waiting for the GPU after each barrier gave 8 of 8 clean renders at the same speed.
+     */
+    private fun memoryBarrier(bits: Int) {
+        GLES31.glMemoryBarrier(bits)
+        if (DeviceQuirks.isLilac) GLES30.glFinish()
     }
 
     private fun ceilDiv(value: Int, divisor: Int): Int = (value + divisor - 1) / divisor
@@ -1457,8 +1479,13 @@ class OglBokehProcessor {
         EGL14.eglChooseConfig(eglDisplay, configAttribs, 0, configs, 0, 1, numConfigs, 0)
         val config = configs[0]
 
-        // Low priority where supported: the UI renderer preempts the lens blur between submissions.
-        eglContext = GlesGpuScheduler.createBackgroundContext(eglDisplay, checkNotNull(config), TAG)
+        // Low priority where supported: the UI renderer preempts the lens blur between submissions. Not on
+        // the XZ1 Compact: its Adreno 540 driver corrupted preempted lens blur passes while the viewfinder
+        // drew, giving streaked rows, black bands and GPU page faults; at normal priority repeated renders
+        // of one picture came out identical.
+        eglContext = GlesGpuScheduler.createBackgroundContext(
+            eglDisplay, checkNotNull(config), TAG, lowPriority = !DeviceQuirks.isLilac,
+        )
         check(eglContext != EGL14.EGL_NO_CONTEXT) {
             "Bokeh eglCreateContext failed: 0x${EGL14.eglGetError().toString(16)}"
         }
@@ -1628,6 +1655,8 @@ class OglBokehProcessor {
 
         GLES30.glBindBuffer(GLES30.GL_ELEMENT_ARRAY_BUFFER, indexBufferId)
         GLES30.glDrawElements(GLES30.GL_TRIANGLES, 6, GLES30.GL_UNSIGNED_SHORT, 0)
+        // Draw passes feed compute passes too; see memoryBarrier.
+        if (DeviceQuirks.isLilac) GLES30.glFinish()
 
         if (posLoc >= 0) GLES30.glDisableVertexAttribArray(posLoc)
         if (texLoc >= 0) GLES30.glDisableVertexAttribArray(texLoc)

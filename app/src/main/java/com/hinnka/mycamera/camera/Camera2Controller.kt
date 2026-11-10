@@ -2710,7 +2710,7 @@ class Camera2Controller(private val context: Context) {
     private fun surfacelessOpenSettings(): List<Any?> = _state.value.let {
         listOf(
             it.currentCameraId, it.captureMode, it.aspectRatio, requestedRawCaptureEnabled,
-            it.useP010, it.useP3ColorSpace, it.photoResolutionCapMp, it.multiFrameOutputScale,
+            it.useP010, it.useP3ColorSpace, it.photoResolutionCapMp, it.frontPhotoResolutionCapMp, it.multiFrameOutputScale,
             it.photoPreviewStabilizationEnabled, it.useLivePhoto,
             it.vendorCaptureSettingsByLens, it.customVendorKeySettings,
         )
@@ -3076,7 +3076,14 @@ class Camera2Controller(private val context: Context) {
                         aspectRatio,
                         captureFormat,
                         includeHighResolution = highResolutionProfile !in failedHighResolutionCaptureProfiles,
-                        maxMegapixels = _state.value.photoResolutionCapMp,
+                        maxMegapixels = if (
+                            outputCharacteristicsForStreams.get(CameraCharacteristics.LENS_FACING) ==
+                            CameraCharacteristics.LENS_FACING_FRONT
+                        ) {
+                            _state.value.frontPhotoResolutionCapMp
+                        } else {
+                            _state.value.photoResolutionCapMp
+                        },
                     )
                 }
                 val captureSize = rawOutput?.size ?: captureSizeSelection!!.size
@@ -5823,6 +5830,10 @@ class Camera2Controller(private val context: Context) {
         PLog.d(TAG, "设置虚拟光圈: $value")
     }
 
+    fun setPortraitMode(enabled: Boolean) {
+        _state.value = _state.value.copy(isPortraitMode = enabled)
+    }
+
     /**
      * 启用/禁用虚拟光圈控制
      */
@@ -7477,10 +7488,24 @@ class Camera2Controller(private val context: Context) {
         realtimeStabilizationCoordinator.setExternalLensStabilizationConfig(config)
     }
 
-    /** Caps the Photo-mode (YUV) capture size; 0 = full sensor size. RAW is always full size. */
+    /** Caps the Photo-mode (YUV) capture size of the back cameras; 0 = full sensor size. RAW is always full size. */
     fun setPhotoResolutionCapMp(megapixels: Int) {
         if (_state.value.photoResolutionCapMp == megapixels) return
         _state.value = _state.value.copy(photoResolutionCapMp = megapixels)
+        if (!isFrontCameraOpen()) restartForPhotoResolutionCap(megapixels)
+    }
+
+    /** Caps the front camera's Photo-mode capture size; 0 = full sensor size. */
+    fun setFrontPhotoResolutionCapMp(megapixels: Int) {
+        if (_state.value.frontPhotoResolutionCapMp == megapixels) return
+        _state.value = _state.value.copy(frontPhotoResolutionCapMp = megapixels)
+        if (isFrontCameraOpen()) restartForPhotoResolutionCap(megapixels)
+    }
+
+    private fun isFrontCameraOpen(): Boolean =
+        _state.value.getCurrentCameraInfo()?.lensFacing == CameraCharacteristics.LENS_FACING_FRONT
+
+    private fun restartForPhotoResolutionCap(megapixels: Int) {
         // The capture size is fixed when the camera opens, so a running YUV camera must reopen.
         val reader = imageReader ?: return
         if (isRawCaptureReader(reader) || _state.value.captureMode != CaptureMode.PHOTO || _state.value.isCapturing) return

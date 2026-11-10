@@ -4,6 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -51,6 +55,7 @@ fun GalleryThumbnail(
     onClick: () -> Unit,
     capturedThumbnail: CapturedThumbnail? = null,
     onCapturedThumbnailLoaded: (Long) -> Unit = {},
+    photoInset: Dp = 0.dp,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -61,7 +66,7 @@ fun GalleryThumbnail(
     }?.captureId
     val capturePreview = capturedThumbnail?.bitmap?.takeUnless { finalThumbnailLoaded || it.isRecycled }
 
-    ThumbnailTile(onClick = onClick, modifier = modifier) {
+    ThumbnailTile(onClick = onClick, modifier = modifier, photoInset = photoInset) {
         if (latestPhoto != null) {
             AsyncImage(
                 model = ImageRequest.Builder(context)
@@ -93,7 +98,7 @@ fun GalleryThumbnail(
         } else {
             // 没有照片时显示图标
             Icon(
-                imageVector = AppIcons.PhotoLibrary,
+                imageVector = AppIcons.PhotoLine,
                 contentDescription = "Gallery",
                 tint = Color.White.copy(alpha = 0.7f),
                 modifier = Modifier.size(24.dp)
@@ -114,19 +119,40 @@ fun GalleryThumbnail(
 
 /** The gallery thumbnail's size and corner, shared by the viewfinder thumbnail, its edge line and the version strip. */
 internal val ThumbnailSize = 48.dp
-internal val ThumbnailCorner = 10.dp
+internal val ThumbnailCorner = 12.dp
 private val ThumbnailInnerCorner = 7.dp
 
 /** The viewfinder's thumbnail tile: one look for the camera's gallery button and the photo view's version strip. */
 @Composable
-internal fun ThumbnailTile(onClick: (() -> Unit)?, modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
+internal fun ThumbnailTile(
+    onClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    // Above zero, the photo sits this far inside the tile, leaving room for a frame line with no backing behind it.
+    photoInset: Dp = 0.dp,
+    content: @Composable BoxScope.() -> Unit
+) {
+    val framed = photoInset > 0.dp
     PhysicalButton(
         modifier = modifier.size(ThumbnailSize),
         onClick = onClick,
         shape = RoundedCornerShape(ThumbnailCorner),
+        backgroundColor = if (framed) Color.Transparent else PhysicalButtonDefaults.BackgroundColor,
         contentShape = RoundedCornerShape(ThumbnailInnerCorner),
-        content = content
-    )
+    ) {
+        if (framed) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(photoInset)
+                    .clip(RoundedCornerShape(ThumbnailCorner - photoInset))
+                    .background(PhysicalButtonDefaults.BackgroundColor),
+                contentAlignment = Alignment.Center,
+                content = content
+            )
+        } else {
+            content()
+        }
+    }
 }
 
 /** The light-to-dark sheen over a thumbnail photo. */
@@ -161,7 +187,7 @@ internal fun ThumbnailEdgeRing(
     alpha: () -> Float = { 1f },
 ) {
     val density = LocalDensity.current
-    val strokePx = with(density) { 2.5.dp.toPx() }
+    val strokePx = with(density) { 2.dp.toPx() }
     val cornerPx = with(density) { ThumbnailCorner.toPx() }
     val periodTargetPx = with(density) { 8.dp.toPx() }
     val gapPx = with(density) { 3.5.dp.toPx() }

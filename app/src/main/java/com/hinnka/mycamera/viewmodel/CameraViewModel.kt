@@ -61,8 +61,10 @@ import com.hinnka.mycamera.model.withoutIndependentEffects
 import com.hinnka.mycamera.ml.DepthModelManager
 import com.hinnka.mycamera.phantom.PhantomWidgetProvider
 import com.hinnka.mycamera.preview.EyeFocusPreviewFrame
+import com.hinnka.mycamera.preview.PortraitFace
 import com.hinnka.mycamera.preview.PortraitMaskSnapshot
 import com.hinnka.mycamera.preview.PreviewEyeFocusProcessor
+import com.hinnka.mycamera.processor.BokehStyle
 import com.hinnka.mycamera.processor.CaptureProcessingQueue
 import com.hinnka.mycamera.processor.RawBurstFrameRole
 import com.hinnka.mycamera.processor.MgcSpatialOutputMode
@@ -556,6 +558,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         private const val EYE_FOCUS_REFRESH_INTERVAL_MS = 1_800L
         private const val EYE_FOCUS_RETRY_INTERVAL_MS = 1_200L
         private const val PORTRAIT_MASK_MAX_AGE_NS = 1_000_000_000L
+        private const val PORTRAIT_FACE_MAX_AGE_MS = 1_500L
+        private const val PORTRAIT_DEFAULT_APERTURE = 2.0f
     }
 
     private data class HdrBracketFrame(
@@ -1545,6 +1549,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var lastEyeFocusTriggerElapsedMs = 0L
     @Volatile
     private var latestPortraitMask: PortraitMaskSnapshot? = null
+    private var latestPortraitFace: PortraitFace? = null
+    private var latestPortraitFaceAtMs = 0L
+
+    /** The Portrait guide is open; it opens from the pill in the picture or a long press on Portrait blur. */
+    var showPortraitIntro by mutableStateOf(false)
+        private set
+    /** The guide opens at its blur step, where the depth model can be downloaded. */
+    var portraitGuideAtBlur by mutableStateOf(false)
+        private set
+    private var virtualApertureBeforePortrait: Pair<Boolean, Float>? = null
 
     // 保存当前的 SurfaceTexture 以便切换摄像头时重用
     private var currentSurfaceTexture: SurfaceTexture? = null
@@ -1670,6 +1684,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     360,
                 ),
             )
+        }
+        previewEyeFocusProcessor.onPortraitFace = { face ->
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                // A late detection must not light the viewfinder after leaving Portrait.
+                val shown = face.takeIf { state.value.isPortraitMode }
+                latestPortraitFace = shown
+                latestPortraitFaceAtMs = SystemClock.elapsedRealtime()
+                glSurfaceView?.setPortraitFace(shown)
+            }
         }
         previewEyeFocusProcessor.onTargetLost = {
             viewModelScope.launch(Dispatchers.Main.immediate) {
@@ -1997,6 +2020,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     it.photoPreviewStabilizationEnabled
                 )
                 cameraController.setPhotoResolutionCapMp(it.photoResolutionCapMp)
+                cameraController.setFrontPhotoResolutionCapMp(it.frontPhotoResolutionCapMp)
                 cameraController.keepRawCompanionJpeg = it.saveCameraJpeg
                 cameraController.setVideoCodec(it.videoCodec)
                 multipleExposureState = multipleExposureState.copy(enabled = it.useMultipleExposure)
@@ -2566,6 +2590,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             )
         )
         cameraController.setPhotoResolutionCapMp(prefs.photoResolutionCapMp)
+        cameraController.setFrontPhotoResolutionCapMp(prefs.frontPhotoResolutionCapMp)
         cameraController.setUseP010(prefs.useP010)
         cameraController.setUseP3ColorSpace(prefs.useP3ColorSpace)
         cameraController.setPhotoPreviewStabilizationEnabled(prefs.photoPreviewStabilizationEnabled)
@@ -2915,6 +2940,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             isMirrored = shouldMirror,
             colorSpace = captureInfo.colorSpace,
             computationalAperture = aperture,
+            computationalBokehStyle = portraitBokehStyle(settings.state, settings.preferences),
             focusPointX = settings.state.focusPoint?.first,
             focusPointY = settings.state.focusPoint?.second,
             manualHdrEffectEnabled = defaultHdrEffectEnabled,
@@ -3228,8 +3254,88 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * In Portrait the blur after the shot is centred on the face seen just before the press, unless the
+     * user tapped a focus point of their own.
+     */
+    private fun snapshotCaptureState(): CameraState {
+        val current = state.value
+        val face = latestPortraitFace
+        if (!current.isPortraitMode || face == null ||
+            SystemClock.elapsedRealtime() - latestPortraitFaceAtMs > PORTRAIT_FACE_MAX_AGE_MS ||
+            (current.focusPoint != null && current.focusPointSource == FocusPointSource.MANUAL)
+        ) {
+            return current
+        }
+        return current.copy(focusPoint = Pair(face.centerX, face.centerY))
+    }
+
+    /** Portrait shots record the Portrait lens effect; other shots keep the default style. */
+    private fun portraitBokehStyle(state: CameraState, preferences: UserPreferences): String =
+        if (state.isPortraitMode) preferences.portraitBokehStyle else BokehStyle.DEFAULT.persistedName
+
+    fun setPortraitBokehStyle(style: BokehStyle) {
+        userPreferencesRepository.updateAsync { portraitBokehStyle = style.persistedName }
+    }
+
+    /** Opens the Portrait guide; once opened, the pill that offers it no longer shows. */
+    fun showPortraitHelp(atBlur: Boolean = false) {
+        portraitGuideAtBlur = atBlur
+        showPortraitIntro = true
+        userPreferencesRepository.updateAsync { portraitIntroSeen = true }
+    }
+
+    /** Switches Portrait on or off; Portrait takes the blur strength of the default virtual aperture. */
+    fun setPortraitMode(enabled: Boolean) {
+        if (state.value.isPortraitMode == enabled) return
+        cameraController.setPortraitMode(enabled)
+        latestPortraitFace = null
+        glSurfaceView?.setPortraitFace(null)
+        if (enabled) {
+            val current = state.value
+            virtualApertureBeforePortrait = Pair(current.isVirtualApertureEnabled, current.virtualAperture)
+            val aperture = userPreferencesRepository.current.defaultVirtualAperture
+            cameraController.setAperture(if (aperture > 0f) aperture else PORTRAIT_DEFAULT_APERTURE)
+            setVirtualApertureAuto(true)
+        } else {
+            virtualApertureBeforePortrait?.let { (wasEnabled, aperture) ->
+                cameraController.setAperture(aperture)
+                setVirtualApertureAuto(wasEnabled)
+            }
+            virtualApertureBeforePortrait = null
+            showPortraitIntro = false
+        }
+    }
+
+    /** Depth blur needs the depth model; without it the choice is explained and offered for download. */
+    fun setPortraitQuickBlur(quick: Boolean) {
+        if (!quick && !DepthModelManager.isInstalled(getApplication())) {
+            showPortraitHelp(atBlur = true)
+            return
+        }
+        userPreferencesRepository.updateAsync { portraitQuickBlur = quick }
+    }
+
+    fun dismissPortraitIntro() {
+        showPortraitIntro = false
+    }
+
+    /** The Pro guide is open; it opens from the pill in the picture or the mode name in quick settings. */
+    var showProGuide by mutableStateOf(false)
+        private set
+
+    /** Opens the Pro guide; once opened, the pill that offers it no longer shows. */
+    fun showProHelp() {
+        showProGuide = true
+        userPreferencesRepository.updateAsync { proGuideSeen = true }
+    }
+
+    fun dismissProGuide() {
+        showProGuide = false
+    }
+
     private fun snapshotCaptureSettings() = CaptureSettingsSnapshot(
-        state = state.value,
+        state = snapshotCaptureState(),
         preferences = userPreferencesRepository.current,
         lutId = currentLutId.value,
         frameId = currentFrameId,
@@ -3844,6 +3950,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.setPhotoResolutionCapMp(megapixels)
         viewModelScope.launch {
             userPreferencesRepository.update { photoResolutionCapMp = megapixels }
+        }
+    }
+
+    fun setFrontPhotoResolutionCapMp(megapixels: Int) {
+        cameraController.setFrontPhotoResolutionCapMp(megapixels)
+        viewModelScope.launch {
+            userPreferencesRepository.update { frontPhotoResolutionCapMp = megapixels }
         }
     }
 
@@ -4493,6 +4606,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * Clockwise turn that stands faces in the viewfinder frame upright: the phone's rotation, for the back
+     * and the front camera alike (on the XZ1 Compact the opposite turn lost the face on the front camera).
+     */
+    private fun previewFaceUprightRotation(): Int =
+        Math.floorMod(OrientationObserver.captureRotationDegrees.toInt(), 360)
+
     private fun capturePreviewThumbnailRotation(): Float {
         val deviceRotation = OrientationObserver.captureRotationDegrees.toInt()
         val lensFacing = cameraController.getLensFacing()
@@ -4569,6 +4689,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             cameraState.isRawSupported &&
             cameraState.isPreviewActive &&
             !cameraState.isCapturing
+        val acceptsPortraitFace = cameraState.isPortraitMode &&
+            cameraState.isPreviewActive &&
+            !cameraState.isCapturing
         val acceptsEyeFocus = userPreferencesRepository.current.eyeFocusEnabled &&
             isEyeFocusRuntimeAvailable &&
             cameraState.isPreviewActive &&
@@ -4576,7 +4699,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             !cameraState.isHyperfocalFocusEnabled &&
             !cameraState.isCapturing &&
             (cameraState.focusPoint == null || cameraState.focusPointSource == FocusPointSource.EYE)
-        if (!acceptsEyeFocus && !acceptsPortraitMask) {
+        if (!acceptsEyeFocus && !acceptsPortraitMask && !acceptsPortraitFace) {
             frame.bitmap.recycle()
             completeEyeFocusInput()
             return
@@ -4587,6 +4710,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 frame = frame,
                 detectEyeTarget = acceptsEyeFocus,
                 createFaceMask = acceptsPortraitMask,
+                trackPortraitFace = acceptsPortraitFace,
+                uprightRotationDegrees = previewFaceUprightRotation(),
             )
         ) {
             frame.bitmap.recycle()
@@ -5038,7 +5163,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             it.lensType == if (currentCamera.lensType == LensType.FRONT) LensType.FRONT else LensType.BACK_MAIN
         } ?: return
 
-        // 2. 计算变焦档位 (逻辑同步自 ZoomControlBar.kt)
+        // 2. 计算变焦档位 (逻辑同步自 ZoomCollar.kt)
         val lensZoomStops = calculateLensZoomStops(availableCameras, currentCamera)
         val zoomStops = allZoomStops(
             lensZoomStops,
@@ -5074,7 +5199,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 return
             }
 
-            // 5. 检查是否需要切换镜头 (逻辑同步自 ZoomControlBar.kt)
+            // 5. 检查是否需要切换镜头 (逻辑同步自 ZoomCollar.kt)
             val optimalLens = findOptimalLens(targetZoom, availableCameras, currentCamera.cameraId)
             if (optimalLens != null && optimalLens.cameraId != currentCamera.cameraId) {
                 switchToLensAndSetZoomRatio(optimalLens.cameraId, targetZoom)
@@ -5632,6 +5757,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isMirrored = shouldMirror,
                 colorSpace = captureInfo.colorSpace,
                 computationalAperture = aperture,
+                computationalBokehStyle = portraitBokehStyle(settings.state, settings.preferences),
                 focusPointX = settings.state.focusPoint?.first,
                 focusPointY = settings.state.focusPoint?.second,
                 manualHdrEffectEnabled = defaultHdrEffectEnabled,
@@ -5792,6 +5918,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isMirrored = shouldMirror,
                 colorSpace = captureInfo.colorSpace,
                 computationalAperture = computationalAperture,
+                computationalBokehStyle = portraitBokehStyle(currentState, userPreferencesRepository.current),
                 focusPointX = currentState.focusPoint?.first,
                 focusPointY = currentState.focusPoint?.second,
                 captureMode = metadataCaptureMode
@@ -6092,6 +6219,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isMirrored = shouldMirror,
                 colorSpace = captureInfo.colorSpace,
                 computationalAperture = aperture,
+                computationalBokehStyle = portraitBokehStyle(settings.state, settings.preferences),
                 focusPointX = settings.state.focusPoint?.first,
                 focusPointY = settings.state.focusPoint?.second,
                 manualHdrEffectEnabled = defaultHdrEffectEnabled,
@@ -6425,6 +6553,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             isMirrored = shouldMirror,
             colorSpace = captureInfo.colorSpace,
             computationalAperture = aperture,
+            computationalBokehStyle = portraitBokehStyle(settings.state, settings.preferences),
             focusPointX = settings.state.focusPoint?.first,
             focusPointY = settings.state.focusPoint?.second,
             manualHdrEffectEnabled = defaultHdrEffectEnabled
