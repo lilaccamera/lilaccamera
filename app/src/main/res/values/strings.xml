@@ -1165,6 +1165,14 @@
     <string name="portrait_intro_download">Download depth model</string>
     <string name="portrait_depth_pill">Get Depth blur · 100 MB</string>
     <string name="portrait_guide_pill">About Portrait</string>
+    <string name="pro_guide_pill">About Pro</string>
+    <string name="pro_guide_raw_title">RAW</string>
+    <string name="pro_guide_raw">Pro shoots RAW: the sensor\'s own data, before Sony\'s processing and noise reduction, so fine detail isn\'t smeared away.</string>
+    <string name="pro_guide_merge_title">Merge frames</string>
+    <string name="pro_guide_merge">HDR+ frames merges several shots into one. Noise drops with every frame, so less smoothing is needed. More frames are cleaner but need a steadier hand.</string>
+    <string name="pro_guide_render_title">Rendering</string>
+    <string name="pro_guide_render">Lilac develops the photo itself after the shot; the thumbnail\'s edge shows the progress. Pick the look under Rendering in quick settings.</string>
+    <string name="mode_guide_open">How %1$s works</string>
     <string name="portrait_guide_next">Next</string>
     <string name="portrait_guide_faces_title">Faces</string>
     <string name="portrait_guide_faces">The viewfinder outlines the face and softly blurs around it. It is only a guide.</string>

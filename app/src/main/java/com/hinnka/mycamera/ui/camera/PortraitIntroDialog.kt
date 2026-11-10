@@ -55,13 +55,13 @@ private val GuideText = Color(0xFFE8E6DF)
 private val GuideDim = Color(0xFFB4B2A9)
 private val GuideGrey = Color(0xFF888780)
 
-/** The Portrait guide's steps: an icon, a short title and one or two sentences. */
-private enum class PortraitGuideStep(val icon: () -> ImageVector, val title: Int, val text: Int) {
-    FACES({ AppIcons.User }, R.string.portrait_guide_faces_title, R.string.portrait_guide_faces),
-    BLUR({ AppIcons.ApertureLine }, R.string.portrait_guide_blur_title, R.string.portrait_guide_blur),
-    SUBJECT({ AppIcons.ScissorsLine }, R.string.portrait_guide_subject_title, R.string.portrait_guide_subject),
-    EDIT({ AppIcons.Sliders }, R.string.portrait_guide_edit_title, R.string.portrait_guide_edit),
-}
+/** One step of a mode guide: a line icon, a short title, one or two sentences, and optional content under them. */
+internal class GuideStep(
+    val icon: ImageVector,
+    val title: Int,
+    val text: Int,
+    val extra: (@Composable () -> Unit)? = null,
+)
 
 /** The index of the step about Quick and Depth blur, for opening the guide there. */
 internal const val PortraitGuideBlurStep = 1
@@ -71,7 +71,7 @@ internal const val PortraitGuideBlurStep = 1
  * opened once; then, while the depth model is missing, it reminds once that Depth blur needs it.
  */
 @Composable
-internal fun PortraitGuidePill(icon: ImageVector, text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+internal fun ModeGuidePill(icon: ImageVector, text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
@@ -93,9 +93,8 @@ internal fun PortraitGuidePill(icon: ImageVector, text: String, onClick: () -> U
 }
 
 /**
- * How Portrait works, as short steps in a sheet from the bottom: faces in the viewfinder, Quick and Depth
- * blur (with the depth model download), the subject cut-out, and editing later. A tap outside, the ×, Back
- * or the last step's Done closes it.
+ * How Portrait works: faces in the viewfinder, Quick and Depth blur (with the depth model download), the
+ * subject cut-out, and editing later.
  */
 @Composable
 internal fun BoxScope.PortraitGuide(
@@ -105,7 +104,30 @@ internal fun BoxScope.PortraitGuide(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
-    val steps = PortraitGuideStep.entries
+    ModeGuide(
+        steps = listOf(
+            GuideStep(AppIcons.User, R.string.portrait_guide_faces_title, R.string.portrait_guide_faces),
+            GuideStep(AppIcons.ApertureLine, R.string.portrait_guide_blur_title, R.string.portrait_guide_blur) {
+                DepthModelStatus(quickBlur = quickBlur, onUseDepth = onUseDepth, onDownload = { DepthModelManager.download(context) })
+            },
+            GuideStep(AppIcons.ScissorsLine, R.string.portrait_guide_subject_title, R.string.portrait_guide_subject),
+            GuideStep(AppIcons.Sliders, R.string.portrait_guide_edit_title, R.string.portrait_guide_edit),
+        ),
+        startStep = startStep,
+        onDismiss = onDismiss,
+    )
+}
+
+/**
+ * A mode explained as short steps in a sheet from the bottom, one step per page with dots, Back and
+ * Next. A tap outside, the ×, Back or the last step's Done closes it.
+ */
+@Composable
+internal fun BoxScope.ModeGuide(
+    steps: List<GuideStep>,
+    startStep: Int,
+    onDismiss: () -> Unit,
+) {
     val pager = rememberPagerState(initialPage = startStep.coerceIn(0, steps.lastIndex)) { steps.size }
     val scope = rememberCoroutineScope()
     BackHandler(onBack = onDismiss)
@@ -152,7 +174,7 @@ internal fun BoxScope.PortraitGuide(
         ) { page ->
             val step = steps[page]
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                Icon(step.icon(), contentDescription = null, tint = CameraControlsLayoutDefaults.LineColor, modifier = Modifier.size(40.dp))
+                Icon(step.icon, contentDescription = null, tint = CameraControlsLayoutDefaults.LineColor, modifier = Modifier.size(40.dp))
                 Spacer(Modifier.height(10.dp))
                 Text(stringResource(step.title), color = GuideText, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(6.dp))
@@ -161,11 +183,13 @@ internal fun BoxScope.PortraitGuide(
                     color = GuideDim,
                     fontSize = 13.sp,
                     lineHeight = 1.4.em,
-                    textAlign = TextAlign.Center
+                    // Icon and title are centred; the sentences read better from a straight left edge.
+                    textAlign = TextAlign.Start,
+                    modifier = Modifier.fillMaxWidth()
                 )
-                if (step == PortraitGuideStep.BLUR) {
+                step.extra?.let { extra ->
                     Spacer(Modifier.height(12.dp))
-                    DepthModelStatus(quickBlur = quickBlur, onUseDepth = onUseDepth, onDownload = { DepthModelManager.download(context) })
+                    extra()
                 }
             }
         }

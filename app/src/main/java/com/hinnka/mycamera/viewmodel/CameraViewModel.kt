@@ -3320,6 +3320,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         showPortraitIntro = false
     }
 
+    /** The Pro guide is open; it opens from the pill in the picture or the mode name in quick settings. */
+    var showProGuide by mutableStateOf(false)
+        private set
+
+    /** Opens the Pro guide; once opened, the pill that offers it no longer shows. */
+    fun showProHelp() {
+        showProGuide = true
+        userPreferencesRepository.updateAsync { proGuideSeen = true }
+    }
+
+    fun dismissProGuide() {
+        showProGuide = false
+    }
+
     private fun snapshotCaptureSettings() = CaptureSettingsSnapshot(
         state = snapshotCaptureState(),
         preferences = userPreferencesRepository.current,

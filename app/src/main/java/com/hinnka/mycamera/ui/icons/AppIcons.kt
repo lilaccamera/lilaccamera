@@ -1246,6 +1246,16 @@ object AppIcons {
             }
         }
 
+    // Pro guide: an image sensor for RAW, stacked frames for merging.
+    val SensorLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.SensorLine",
+            "M5 6a1 1 0 0 1 1 -1h12a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-12a1 1 0 0 1 -1 -1zM9 9h6v6h-6z" +
+                "M3 10h2M3 14h2M10 3v2M14 3v2M21 10h-2M21 14h-2M14 21v-2M10 21v-2"
+        )
+    }
+    val StackLine: ImageVector by lazy { lineIcon("AppIcons.StackLine", "M12 4l-8 4l8 4l8 -4zM4 12l8 4l8 -4M4 16l8 4l8 -4") }
+
     val Photo: ImageVector
         get() {
             _photo?.let { return it }

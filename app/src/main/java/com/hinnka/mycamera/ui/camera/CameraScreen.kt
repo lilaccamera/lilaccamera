@@ -272,6 +272,7 @@ fun CameraScreen(
     val portraitQuickBlur by preferenceValue { it.portraitQuickBlur }
     val portraitIntroSeen by preferenceValue { it.portraitIntroSeen }
     val portraitDepthReminderSeen by preferenceValue { it.portraitDepthReminderSeen }
+    val proGuideSeen by preferenceValue { it.proGuideSeen }
     val portraitBokehStyle by preferenceValue { BokehStyle.fromPersistedName(it.portraitBokehStyle) }
     val eyeFocusEnabled by preferenceValue { it.eyeFocusEnabled }
     val keepScreenOn by preferenceValue { it.keepScreenOn }
@@ -1844,18 +1845,27 @@ fun CameraScreen(
             val depthModelMissing = depthModelState is DepthModelDownloadState.Missing ||
                 depthModelState is DepthModelDownloadState.Failed
             val showDepthReminder = portraitIntroSeen && !portraitDepthReminderSeen && depthModelMissing
+            // Guide pills sit 8 dp above the highest of the picture's bottom, the manual values and the shutter.
+            val guidePillBottom = listOfNotNull(
+                previewBounds?.bottom,
+                parameterBarTop.takeIf { !isXpan },
+                captureButtonBounds?.top,
+            ).minOrNull()?.let { it - (cameraScreenBounds?.top ?: 0f) }
+            val guidePillPlacement = Modifier
+                .align(Alignment.TopCenter)
+                .layout { measurable, constraints ->
+                    val placeable = measurable.measure(constraints)
+                    layout(placeable.width, placeable.height) {
+                        placeable.place(0, ((guidePillBottom ?: 0f) - 8.dp.toPx()).roundToInt() - placeable.height)
+                    }
+                }
             if (
                 state.isPortraitMode && state.captureMode == CaptureMode.PHOTO &&
                 (!portraitIntroSeen || showDepthReminder) &&
                 activePanel == ActivePanel.NONE && !viewModel.showPortraitIntro
             ) {
-                val pillBottom = listOfNotNull(
-                    previewBounds?.bottom,
-                    parameterBarTop.takeIf { !isXpan },
-                    captureButtonBounds?.top,
-                ).minOrNull()?.let { it - (cameraScreenBounds?.top ?: 0f) }
-                if (pillBottom != null) {
-                    PortraitGuidePill(
+                if (guidePillBottom != null) {
+                    ModeGuidePill(
                         icon = if (showDepthReminder) AppIcons.DownloadLine else AppIcons.InfoLine,
                         text = stringResource(if (showDepthReminder) R.string.portrait_depth_pill else R.string.portrait_guide_pill),
                         onClick = {
@@ -1866,16 +1876,23 @@ fun CameraScreen(
                                 viewModel.showPortraitHelp()
                             }
                         },
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .layout { measurable, constraints ->
-                                val placeable = measurable.measure(constraints)
-                                layout(placeable.width, placeable.height) {
-                                    placeable.place(0, (pillBottom - 8.dp.toPx()).roundToInt() - placeable.height)
-                                }
-                            }
+                        modifier = guidePillPlacement
                     )
                 }
+            }
+            // Pro offers its guide the same way, until it has been opened once.
+            val proMode = state.captureMode == CaptureMode.PHOTO && state.useRaw && state.isRawSupported &&
+                !state.isPortraitMode
+            if (
+                proMode && !proGuideSeen && guidePillBottom != null &&
+                activePanel == ActivePanel.NONE && !viewModel.showProGuide
+            ) {
+                ModeGuidePill(
+                    icon = AppIcons.InfoLine,
+                    text = stringResource(R.string.pro_guide_pill),
+                    onClick = { viewModel.showProHelp() },
+                    modifier = guidePillPlacement
+                )
             }
 
             CameraBottomControlsLayout(
@@ -1998,6 +2015,7 @@ fun CameraScreen(
             portraitBokehStyle = portraitBokehStyle,
             onPortraitBokehStyleChange = viewModel::setPortraitBokehStyle,
             onPortraitHelp = viewModel::showPortraitHelp,
+            onProHelp = viewModel::showProHelp,
             onOpenSettingsAt = onOpenSettingsAt,
             multiFrameCount = jpgMultiFrameCount,
             onMultiFrameCountChange = { viewModel.setJpgMultiFrameDenoiseFrameCountAndEnable(it) },
@@ -2068,6 +2086,10 @@ fun CameraScreen(
                 onUseDepth = { viewModel.setPortraitQuickBlur(false) },
                 onDismiss = viewModel::dismissPortraitIntro,
             )
+        }
+
+        if (viewModel.showProGuide) {
+            ProGuide(onDismiss = viewModel::dismissProGuide)
         }
 
         // During navigation measurement or window resizing, the viewport can be

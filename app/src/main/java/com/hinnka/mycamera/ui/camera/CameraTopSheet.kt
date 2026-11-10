@@ -14,6 +14,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -184,6 +186,8 @@ internal fun CameraTopSheet(
     portraitBokehStyle: BokehStyle = BokehStyle.NATURAL,
     onPortraitBokehStyleChange: (BokehStyle) -> Unit = {},
     onPortraitHelp: () -> Unit = {},
+    // Opens the Pro guide from the mode name.
+    onProHelp: () -> Unit = {},
     // Long press on a setting's name opens Settings at that setting.
     onOpenSettingsAt: (SettingsTarget) -> Unit = {},
     multiFrameCount: Int,
@@ -481,7 +485,12 @@ internal fun CameraTopSheet(
                                 isProfessionalMode -> R.string.capture_mode_professional
                                 else -> R.string.capture_mode_photo
                             }
-                        )
+                        ),
+                        onGuide = when {
+                            isPortraitMode -> onPortraitHelp
+                            isProfessionalMode -> onProHelp
+                            else -> null
+                        }
                     ) {
                         if (isPortraitMode) {
                             rows.Setting(
@@ -937,7 +946,7 @@ private fun QuickGroup(content: @Composable ColumnScope.() -> Unit) {
 
 /** Like [QuickGroup], for the current mode's own settings: an amber outline and the mode's name on top. */
 @Composable
-private fun ModeGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
+private fun ModeGroup(title: String, onGuide: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -945,13 +954,28 @@ private fun ModeGroup(title: String, content: @Composable ColumnScope.() -> Unit
             .border(1.dp, ModeAmber.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
             .padding(start = 12.dp, end = 6.dp)
     ) {
-        Text(
-            text = title,
-            color = ModeAmber,
-            fontSize = 10.5.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(top = 7.dp)
-        )
+        // A mode with a guide shows a small info mark after its name; a tap on either opens the guide.
+        val guideDescription = stringResource(R.string.mode_guide_open, title)
+        Row(
+            modifier = Modifier
+                .padding(top = 7.dp)
+                .then(
+                    if (onGuide != null) {
+                        Modifier
+                            .clickable(onClick = onGuide)
+                            .semantics { contentDescription = guideDescription }
+                    } else {
+                        Modifier
+                    }
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(text = title, color = ModeAmber, fontSize = 10.5.sp, fontWeight = FontWeight.Medium)
+            if (onGuide != null) {
+                Icon(AppIcons.InfoLine, contentDescription = null, tint = ModeAmber.copy(alpha = 0.8f), modifier = Modifier.size(12.dp))
+            }
+        }
         content()
     }
 }

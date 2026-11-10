@@ -202,6 +202,8 @@ class UserPreferences internal constructor(
     var portraitIntroSeen by bool("portrait_guide_seen", false)
     // After the guide, the pill reminds once that the depth model is missing; opening it ends the reminder.
     var portraitDepthReminderSeen by bool("portrait_depth_reminder_seen", false)
+    // The Pro guide was opened once; until then a pill in the picture offers it.
+    var proGuideSeen by bool("pro_guide_seen", false)
     // Portrait lens effect, a BokehStyle persisted name; "BUBBLE" is the Natural style.
     var portraitBokehStyle by string("portrait_bokeh_style", "BUBBLE")
     var defaultVirtualAperture by float("default_virtual_aperture", 0f)  // 默认虚化光圈，0表示关闭
