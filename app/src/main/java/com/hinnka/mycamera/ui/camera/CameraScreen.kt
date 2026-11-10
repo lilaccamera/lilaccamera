@@ -1749,6 +1749,21 @@ fun CameraScreen(
                 viewfinder()
             }
 
+            // A picture reaching below the top of the shutter gets a soft scrim under the footer controls.
+            val shutterTopAboveBottom = CameraControlsLayoutDefaults.BottomPadding +
+                (CameraControlsLayoutDefaults.ModeZoneHeight + CameraControlsLayoutDefaults.CaptureButtonSize) / 2
+            if (viewfinderTop + cardHeight > contentHeight - shutterTopAboveBottom) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(140.dp)
+                        .background(
+                            Brush.verticalGradient(0f to Color.Transparent, 0.45f to Color.Black.copy(alpha = 0.45f))
+                        )
+                )
+            }
+
             Box(
                 modifier = Modifier.graphicsLayer {
                     alpha = controlsArrival.value
