@@ -150,6 +150,26 @@ object GalleryManager {
     private const val AI_DENOISE_FILE = "ai_denoise.jpg"
     private const val THUMBNAIL_FILE = "thumbnail.jpg"
     private const val CAMERA_JPEG_FILE_SUFFIX = "CameraJPEG"
+
+    /** The camera's EXIF a cropped camera JPEG keeps; size, orientation and thumbnail tags describe the new file. */
+    private val CAMERA_JPEG_EXIF_TAGS = listOf(
+        ExifInterface.TAG_MAKE, ExifInterface.TAG_MODEL, ExifInterface.TAG_SOFTWARE,
+        ExifInterface.TAG_DATETIME, ExifInterface.TAG_DATETIME_ORIGINAL, ExifInterface.TAG_DATETIME_DIGITIZED,
+        ExifInterface.TAG_SUBSEC_TIME, ExifInterface.TAG_SUBSEC_TIME_ORIGINAL, ExifInterface.TAG_SUBSEC_TIME_DIGITIZED,
+        ExifInterface.TAG_OFFSET_TIME, ExifInterface.TAG_OFFSET_TIME_ORIGINAL, ExifInterface.TAG_OFFSET_TIME_DIGITIZED,
+        ExifInterface.TAG_EXPOSURE_TIME, ExifInterface.TAG_F_NUMBER, ExifInterface.TAG_APERTURE_VALUE,
+        ExifInterface.TAG_MAX_APERTURE_VALUE, ExifInterface.TAG_SHUTTER_SPEED_VALUE, ExifInterface.TAG_BRIGHTNESS_VALUE,
+        ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY, ExifInterface.TAG_SENSITIVITY_TYPE,
+        ExifInterface.TAG_EXPOSURE_PROGRAM, ExifInterface.TAG_EXPOSURE_MODE, ExifInterface.TAG_EXPOSURE_BIAS_VALUE,
+        ExifInterface.TAG_METERING_MODE, ExifInterface.TAG_LIGHT_SOURCE, ExifInterface.TAG_FLASH,
+        ExifInterface.TAG_WHITE_BALANCE, ExifInterface.TAG_SCENE_CAPTURE_TYPE, ExifInterface.TAG_DIGITAL_ZOOM_RATIO,
+        ExifInterface.TAG_FOCAL_LENGTH, ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM, ExifInterface.TAG_SUBJECT_DISTANCE,
+        ExifInterface.TAG_COLOR_SPACE, ExifInterface.TAG_EXIF_VERSION, ExifInterface.TAG_IMAGE_UNIQUE_ID,
+        ExifInterface.TAG_GPS_VERSION_ID, ExifInterface.TAG_GPS_LATITUDE, ExifInterface.TAG_GPS_LATITUDE_REF,
+        ExifInterface.TAG_GPS_LONGITUDE, ExifInterface.TAG_GPS_LONGITUDE_REF, ExifInterface.TAG_GPS_ALTITUDE,
+        ExifInterface.TAG_GPS_ALTITUDE_REF, ExifInterface.TAG_GPS_TIMESTAMP, ExifInterface.TAG_GPS_DATESTAMP,
+        ExifInterface.TAG_GPS_PROCESSING_METHOD,
+    )
     private const val BOKEH_FILE = "bokeh.jpg"
     private const val DETAIL_HDR_FILE = "detail_hdr.jpg"
     private const val MULTIPLE_EXPOSURE_DIR = "multiple_exposure_sessions"
@@ -5723,6 +5743,12 @@ object GalleryManager {
         return if (yuv.compressToJpeg(rect, quality.coerceIn(1, 100), stream)) stream.toByteArray() else null
     }
 
+    /**
+     * Saves a camera JPEG as the oldest version of [stackId], framed like the shot: [cropRatio] crops it
+     * centred, as a RAW shot is cropped to its aspect ratio (a re-encode at [quality] that keeps the
+     * camera's EXIF); [rotation] and [mirrored] only set its EXIF orientation, so they cost nothing.
+     * [jpeg] must be in the sensor's orientation, as the camera delivers it without a JPEG orientation.
+     */
     suspend fun saveCameraJpeg(
         context: Context,
         jpeg: ByteArray,
@@ -5730,6 +5756,8 @@ object GalleryManager {
         dateAdded: Long,
         rotation: Int,
         mirrored: Boolean = false,
+        cropRatio: AspectRatio? = null,
+        quality: Int = 95,
     ): String? =
         withContext(Dispatchers.IO) {
             val photoId = UUID.randomUUID().toString()
@@ -5737,23 +5765,28 @@ object GalleryManager {
             try {
                 val photoFile = File(photoDir, PHOTO_FILE)
                 val tempFile = File(photoDir, "$PHOTO_FILE.tmp")
-                tempFile.writeBytes(jpeg)
+                val crop = cropRatio?.let { cameraJpegCrop(jpeg, it) }
+                if (crop == null) tempFile.writeBytes(jpeg) else encodeJpegRegion(jpeg, crop, quality, tempFile)
                 val exif = ExifInterface(tempFile)
-                val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_UNDEFINED)
-                if (rotation != 0 && (orientation == ExifInterface.ORIENTATION_UNDEFINED || orientation == ExifInterface.ORIENTATION_NORMAL)) {
-                    val tag = when (rotation) {
-                        90 -> ExifInterface.ORIENTATION_ROTATE_90
-                        180 -> ExifInterface.ORIENTATION_ROTATE_180
-                        270 -> ExifInterface.ORIENTATION_ROTATE_270
-                        else -> ExifInterface.ORIENTATION_NORMAL
-                    }
-                    exif.setAttribute(ExifInterface.TAG_ORIENTATION, tag.toString())
-                    exif.saveAttributes()
+                if (crop != null) {
+                    val cameraExif = ExifInterface(java.io.ByteArrayInputStream(jpeg))
+                    CAMERA_JPEG_EXIF_TAGS.forEach { tag -> cameraExif.getAttribute(tag)?.let { exif.setAttribute(tag, it) } }
+                    exif.setAttribute(ExifInterface.TAG_PIXEL_X_DIMENSION, crop.width().toString())
+                    exif.setAttribute(ExifInterface.TAG_PIXEL_Y_DIMENSION, crop.height().toString())
                 }
+                // The processed photo is turned by the rotation first, then flipped left to right.
+                val orientation = when (rotation) {
+                    90 -> if (mirrored) ExifInterface.ORIENTATION_TRANSPOSE else ExifInterface.ORIENTATION_ROTATE_90
+                    180 -> if (mirrored) ExifInterface.ORIENTATION_FLIP_VERTICAL else ExifInterface.ORIENTATION_ROTATE_180
+                    270 -> if (mirrored) ExifInterface.ORIENTATION_TRANSVERSE else ExifInterface.ORIENTATION_ROTATE_270
+                    else -> if (mirrored) ExifInterface.ORIENTATION_FLIP_HORIZONTAL else ExifInterface.ORIENTATION_NORMAL
+                }
+                exif.setAttribute(ExifInterface.TAG_ORIENTATION, orientation.toString())
+                exif.saveAttributes()
                 check(tempFile.renameTo(photoFile)) { "Cannot rename ${tempFile.absolutePath}" }
                 // The decoder turns the image by its EXIF orientation, so the gallery sees it upright.
                 val exifMetadata = MediaMetadata.fromUri(context, Uri.fromFile(photoFile))
-                val turned = exifMetadata.rotation % 180 != 0
+                val turned = rotation % 180 != 0
                 val metadata = exifMetadata.copy(
                     width = if (turned) exifMetadata.height else exifMetadata.width,
                     height = if (turned) exifMetadata.width else exifMetadata.height,
@@ -5772,15 +5805,50 @@ object GalleryManager {
                 }
                 check(saveMetadata(context, photoId, metadata, dateAdded)) { "Cannot save the metadata" }
                 notifyPhotoLibraryChanged()
-                PLog.i(TAG, "Saved the camera JPEG of $stackId as $photoId (${jpeg.size} bytes)")
+                PLog.i(
+                    TAG,
+                    "Saved the camera JPEG of $stackId as $photoId (${jpeg.size} bytes, crop ${crop ?: "none"}, " +
+                        "rotation $rotation, mirrored $mirrored)"
+                )
                 photoId
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 PLog.e(TAG, "Cannot save the camera JPEG of $stackId", e)
                 photoDir.deleteRecursively()
                 null
+            } catch (e: OutOfMemoryError) {
+                // The shot matters more than its camera JPEG.
+                PLog.e(TAG, "No memory to crop the camera JPEG of $stackId", e)
+                photoDir.deleteRecursively()
+                null
             }
         }
+
+    /** The centred [ratio] crop of a sensor-oriented JPEG, or null when the JPEG already has that shape. */
+    private fun cameraJpegCrop(jpeg: ByteArray, ratio: AspectRatio): Rect? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
+        check(bounds.outWidth > 0 && bounds.outHeight > 0) { "Cannot read the camera JPEG size" }
+        val crop = BitmapUtils.calculateProcessedRect(bounds.outWidth, bounds.outHeight, ratio, null, 0)
+        // A crop of less than one 16-pixel JPEG block is rounding, not worth a re-encode.
+        return crop.takeIf { it.width() <= bounds.outWidth - 16 || it.height() <= bounds.outHeight - 16 }
+    }
+
+    /** Decodes only [crop] of [jpeg], so the full frame is never held, and encodes it to [out]. */
+    private fun encodeJpegRegion(jpeg: ByteArray, crop: Rect, quality: Int, out: File) {
+        @Suppress("DEPRECATION") // the non-deprecated overload needs API 31
+        val decoder = checkNotNull(BitmapRegionDecoder.newInstance(jpeg, 0, jpeg.size, false)) { "Cannot read the camera JPEG" }
+        val bitmap = try {
+            checkNotNull(decoder.decodeRegion(crop, null)) { "Cannot decode the camera JPEG" }
+        } finally {
+            decoder.recycle()
+        }
+        try {
+            out.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(1, 100), it)) }
+        } finally {
+            bitmap.recycle()
+        }
+    }
 
     suspend fun importPhoto(
         context: Context,
