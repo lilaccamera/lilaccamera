@@ -1056,12 +1056,6 @@ fun CameraScreen(
                     onZoomChange = { setZoomWithPreviewTransition(it) },
                     onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
                     onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
-                    onFilterClick = {
-                        activePanel = if (activePanel == ActivePanel.FILTERS) ActivePanel.NONE else ActivePanel.FILTERS
-                    },
-                    onFilterButtonBoundsChanged = { bounds ->
-                        filterButtonBounds = bounds
-                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .onGloballyPositioned { coordinates ->
@@ -1718,6 +1712,13 @@ fun CameraScreen(
                 onGalleryClick = {
                     onGalleryClick()
                 },
+                isXpan = isXpan,
+                onLooksClick = {
+                    activePanel = if (activePanel == ActivePanel.FILTERS) ActivePanel.NONE else ActivePanel.FILTERS
+                },
+                onLooksBoundsChanged = { bounds ->
+                    filterButtonBounds = bounds
+                },
                 sideControlInset = if (isXpan) {
                     (xpanSideWidth - CameraControlsLayoutDefaults.SideButtonSize) / 2
                 } else {
@@ -1951,7 +1952,8 @@ fun CameraScreen(
         val filterPanelAnchorY = if (isXpan) {
             captureButtonBounds?.top
         } else {
-            filterButtonBounds?.bottom
+            // Above the Looks button and the zoom collar beside it.
+            filterButtonBounds?.top
         }
         val requestedFilterPanelBottom = filterPanelAnchorY?.let { anchorY ->
             val parentTop = cameraScreenBounds?.top ?: 0f
@@ -2179,6 +2181,10 @@ private fun Controls(
     previewPending: Boolean,
     onCaptureTap: () -> Unit,
     onGalleryClick: () -> Unit,
+    // XPAN keeps its filter button on the side bar and has no Looks button or collar.
+    isXpan: Boolean,
+    onLooksClick: () -> Unit,
+    onLooksBoundsChanged: (Rect) -> Unit,
     sideControlInset: Dp?,
     modifier: Modifier = Modifier.fillMaxSize()
 ) {
@@ -2206,6 +2212,7 @@ private fun Controls(
                 else -> CameraShootingMode.PHOTO
             }
             val line = remember { ModeLineState(shootingMode) }
+            if (!isXpan) Spacer(Modifier.height(CameraControlsLayoutDefaults.CollarRise))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2383,10 +2390,43 @@ private fun Controls(
                         )
                     }
                 }
+
+                if (!isXpan) {
+                    PhysicalButton(
+                        onClick = onLooksClick,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = CameraControlsLayoutDefaults.SideMargin)
+                            // Level with the zoom collar's knob.
+                            .offset(y = -LooksRise)
+                            .size(CameraControlsLayoutDefaults.SideButtonSize)
+                            // Before the lift, so the filter panel's anchor stays put.
+                            .onGloballyPositioned { coordinates ->
+                                onLooksBoundsChanged(coordinates.boundsInRoot())
+                            }
+                            .graphicsLayer {
+                                translationY = -10.dp.toPx() * line.side
+                                alpha = 1f - line.side
+                            }
+                            .autoRotate(),
+                        shape = RoundedCornerShape(ThumbnailCorner),
+                        backgroundColor = Color.Transparent
+                    ) {
+                        Icon(
+                            imageVector = AppIcons.Film,
+                            contentDescription = stringResource(R.string.filters_panel),
+                            tint = CameraControlsLayoutDefaults.LineColor,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
             }
         }
     }
 }
+
+// The zoom collar's knob centre above the shutter centre: halfway through the 48 to 74 dp band.
+private val LooksRise = 61.dp
 
 /** While the mode list opens, a side control slides 44 dp outward, shrinks a little and fades. */
 private fun GraphicsLayerScope.makeRoom(side: Float, direction: Float) {

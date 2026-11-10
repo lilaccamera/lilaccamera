@@ -373,6 +373,13 @@ object AppIcons {
                 "M5 6h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2v-8a2 2 0 0 1 2 -2z"
         ).also { _movieCamera = it }
 
+    val Film: ImageVector
+        get() = _film ?: lineIcon(
+            "AppIcons.Film",
+            "M6.5 3h11a2.5 2.5 0 0 1 2.5 2.5v13a2.5 2.5 0 0 1 -2.5 2.5h-11a2.5 2.5 0 0 1 -2.5 -2.5v-13a2.5 2.5 0 0 1 2.5 -2.5z" +
+                "M8 3v18M16 3v18M4 7h2M4 12h2M4 17h2M18 7h2M18 12h2M18 17h2"
+        ).also { _film = it }
+
     private fun lineIcon(name: String, pathData: String): ImageVector = ImageVector.Builder(
         name = name,
         defaultWidth = 24f.dp,
@@ -1674,6 +1681,7 @@ private var _turningArrows: ImageVector? = null
 private var _moonStars: ImageVector? = null
 private var _user: ImageVector? = null
 private var _movieCamera: ImageVector? = null
+private var _film: ImageVector? = null
 private var _checkBox: ImageVector? = null
 private var _checkBoxOutlineBlank: ImageVector? = null
 private var _chevronRight: ImageVector? = null

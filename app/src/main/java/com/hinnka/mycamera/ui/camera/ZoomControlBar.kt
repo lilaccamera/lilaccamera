@@ -74,8 +74,6 @@ fun ZoomControlBar(
     onZoomChange: (Float) -> Unit,
     onZoomStopClick: (Float) -> Unit,
     onLensSwitch: (String) -> Unit,
-    onFilterClick: () -> Unit,
-    onFilterButtonBoundsChanged: (Rect) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val displayMode by viewModel.zoomDisplayMode.collectAsState()
@@ -245,32 +243,6 @@ fun ZoomControlBar(
                         .size(32.dp)
                         .padding(8.dp),
                     tint = Color.White
-                )
-            }
-        }
-
-        AnimatedVisibility(
-            visible = !isContinuousZooming,
-            enter = fadeIn() + expandHorizontally(),
-            exit = fadeOut() + shrinkHorizontally(),
-            modifier = Modifier.align(Alignment.CenterEnd)
-        ) {
-            // 右侧滤镜按钮
-            IconButton(
-                onClick = onFilterClick,
-                modifier = Modifier
-                    .size(32.dp)
-                    .onGloballyPositioned { coordinates ->
-                        onFilterButtonBoundsChanged(coordinates.boundsInRoot())
-                    }
-            ) {
-                Icon(
-                    imageVector = AppIcons.AutoAwesome,
-                    contentDescription = stringResource(R.string.filters_panel),
-                    modifier = Modifier
-                        .size(32.dp)
-                        .padding(8.dp),
-                    tint = AccentColor
                 )
             }
         }
