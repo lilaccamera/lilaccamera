@@ -148,10 +148,8 @@ private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
 private const val DefaultIso = 100f
 private const val DefaultAwbTemperature = 5000f
 private const val DefaultFocusDistance = 0f
-private val CameraTopBarBaseTopPadding = 32.dp
-private val CameraTopBarBaseHeight = 80.dp
-private val VideoTopBarBaseHeight = 80.dp
-private val VideoTopBarLoweredOffset = 36.dp
+// Room kept free on the picture's top edge for the line of active-setting marks.
+private val TopEdgeLineHeight = 38.dp
 private val XpanViewfinderInnerBorder = 4.dp
 private val XpanSideControlReservedWidth = 56.dp
 
@@ -160,16 +158,13 @@ private fun formatVirtualApertureFStop(aperture: Float): String {
     return if (aperture == rounded.toFloat()) rounded.toString() else aperture.toString()
 }
 
+/**
+ * The picture starts below a display cutout only. The status bar is hidden and shows transiently on a
+ * swipe; following its inset would make the picture jump while it shows.
+ */
 @Composable
-private fun cameraTopSafePadding(): Dp {
-    val density = LocalDensity.current
-    val topInset = with(density) {
-        maxOf(
-            WindowInsets.statusBars.getTop(this).toDp(),
-            WindowInsets.displayCutout.getTop(this).toDp()
-        )
-    }
-    return (topInset - CameraTopBarBaseTopPadding).coerceAtLeast(0.dp)
+private fun cameraTopCutoutInset(): Dp = with(LocalDensity.current) {
+    WindowInsets.displayCutout.getTop(this).toDp()
 }
 
 private fun Bitmap.copyForCaptureAnimation(): Bitmap? {
@@ -982,15 +977,7 @@ fun CameraScreen(
         val density = LocalDensity.current
         val width = with(density) { constraints.maxWidth.toDp() }
         val height = with(density) { constraints.maxHeight.toDp() }
-        val topSafePadding = cameraTopSafePadding()
-        val topBarOffset = 0.dp
-        val topBarBaseHeight = if (isVideoMode) {
-            VideoTopBarBaseHeight
-        } else {
-            CameraTopBarBaseHeight
-        }
-        val topBarHeight = topBarBaseHeight + topSafePadding
-        val topBarBottom = topBarHeight + topBarOffset - 4.dp
+        val topInset = cameraTopCutoutInset()
         val navigationBarHeight = with(density) {
             WindowInsets.navigationBars.getBottom(this).toDp()
         }
@@ -1000,7 +987,7 @@ fun CameraScreen(
         val maxCardWidth = (width - sideControlSpace * 2)
             .coerceAtLeast(viewfinderFramePadding)
         val maxCardHeight = if (isXpan) {
-            (contentHeight - topBarBottom - CameraControlsLayoutDefaults.XpanViewfinderClearance)
+            (contentHeight - topInset - CameraControlsLayoutDefaults.XpanViewfinderClearance)
                 .coerceAtLeast(viewfinderFramePadding)
         } else {
             contentHeight
@@ -1016,56 +1003,19 @@ fun CameraScreen(
         val cardWidth = viewfinderContentWidth + viewfinderFramePadding
         val cardHeight = viewfinderContentWidth / previewAspectRatio + viewfinderFramePadding
         val xpanSideWidth = ((width - cardWidth) / 2).coerceAtLeast(0.dp)
-        val placeViewfinderBelowTopBar = contentHeight - cardHeight >= topBarBottom
-        // Balance small previews between the toolbar and collapsed controls. Reserving both
-        // bars first prevents the downward shift from pushing parameters back into the image.
+        val placeViewfinderBelowInset = contentHeight - cardHeight >= topInset
+        // Balance small previews between the top edge and the collapsed controls. Reserving the
+        // controls first prevents the downward shift from pushing parameters back into the image.
         val extraViewfinderTopSpacing = if (isXpan) {
             0.dp
         } else {
-            ((contentHeight - topBarBottom - cardHeight -
+            ((contentHeight - topInset - cardHeight -
                 CameraControlsLayoutDefaults.CollapsedControlsHeight) / 2).coerceAtLeast(0.dp)
         }
-        val viewfinderTop = if (placeViewfinderBelowTopBar) {
-            topBarBottom + extraViewfinderTopSpacing
+        val viewfinderTop = if (placeViewfinderBelowInset) {
+            topInset + extraViewfinderTopSpacing
         } else {
             ((contentHeight - cardHeight) / 2).coerceAtLeast(0.dp)
-        }
-        val viewfinderTopOverlayPadding = (topBarBottom - viewfinderTop).coerceAtLeast(0.dp)
-
-        val topBar = @Composable {
-            CameraTopBar(
-                captureMode = state.captureMode,
-                isRecording = state.videoRecordingState.isRecording,
-                recordingElapsedMs = state.videoRecordingState.elapsedMs,
-                recordingIsHot = state.videoRecordingState.isHot,
-                recordingHeatGauge = state.videoRecordingState.heatGauge,
-                flashMode = state.flashMode,
-                onFlashToggle = {
-                    viewModel.toggleFlash()
-                },
-                timerSeconds = state.timerSeconds,
-                onTimerToggle = { viewModel.toggleTimer() },
-                showHistogram = showHistogram,
-                onHistogramToggle = { showHistogram = !showHistogram },
-                useLivePhoto = useLivePhoto,
-                onLivePhotoToggle = { viewModel.setUseLivePhoto(!state.useLivePhoto) },
-                videoConfig = state.videoConfig,
-                videoCapabilities = state.videoCapabilities,
-                onVideoTorchToggle = { videoTorchEnabled = !state.videoConfig.torchEnabled },
-                onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
-                onVideoResolutionClick = {
-                    cycleVideoResolution(state)?.let(viewModel::setVideoResolution)
-                },
-                onVideoFpsClick = {
-                    cycleVideoFps(state)?.let(viewModel::setVideoFps)
-                },
-                onSettingsClick = {
-                    activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
-                },
-                modifier = Modifier
-                    .padding(top = topSafePadding)
-                    .offset(y = topBarOffset)
-            )
         }
 
         val parameterRuler = @Composable { rulerModifier: Modifier ->
@@ -1465,7 +1415,7 @@ fun CameraScreen(
                         Column(
                             modifier = Modifier
                                 .padding(
-                                    top = viewfinderTopOverlayPadding + 8.dp,
+                                    top = TopEdgeLineHeight + 8.dp,
                                     end = 12.dp
                                 )
                                 .align(Alignment.TopEnd),
@@ -1533,7 +1483,7 @@ fun CameraScreen(
                                 modifier = Modifier
                                     .padding(
                                         start = 8.dp,
-                                        top = viewfinderTopOverlayPadding + 8.dp
+                                        top = TopEdgeLineHeight + 8.dp
                                     )
                                     .size(80.dp, 40.dp)
                                     .align(Alignment.TopStart)
@@ -1571,7 +1521,7 @@ fun CameraScreen(
                                 count = burstCapturingCount,
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(top = viewfinderTopOverlayPadding)
+                                    .padding(top = TopEdgeLineHeight)
                             )
                         }
 
@@ -1583,7 +1533,7 @@ fun CameraScreen(
                                 onCancel = { viewModel.cancelMultipleExposureSession() },
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(top = viewfinderTopOverlayPadding)
+                                    .padding(top = TopEdgeLineHeight)
                             )
                         }
 
@@ -1787,13 +1737,17 @@ fun CameraScreen(
                 )
             }
 
-            Box(
-                modifier = Modifier.graphicsLayer {
-                    alpha = controlsArrival.value
-                    translationY = -(1f - controlsArrival.value) * 12.dp.toPx()
-                }
-            ) {
-                topBar()
+            // While recording: time, heat and format, centred just below the picture's top edge.
+            if (isVideoMode && state.videoRecordingState.isRecording) {
+                RecordingHud(
+                    elapsedMs = state.videoRecordingState.elapsedMs,
+                    isHot = state.videoRecordingState.isHot,
+                    heatGauge = state.videoRecordingState.heatGauge,
+                    videoConfig = state.videoConfig,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = viewfinderTop + 8.dp)
+                )
             }
 
             CameraBottomControlsLayout(
@@ -1852,7 +1806,7 @@ fun CameraScreen(
             )
         }
 
-        // Quick settings: a sheet from the bottom, opened by Q (and the top bar's gear).
+        // Quick settings: a sheet from the bottom, opened by Q.
         // Back closes it instead of leaving the camera.
         BackHandler(enabled = activePanel == ActivePanel.SETTINGS) { activePanel = ActivePanel.NONE }
         CameraTopSheet(
@@ -1978,15 +1932,12 @@ fun CameraScreen(
         )
 
         // During navigation measurement or window resizing, the viewport can be
-        // shorter than the toolbar. The panel then has no available vertical space.
-        val filterPanelTop = minOf(
-            if (!isXpan && !isVideoMode) topBarHeight else 0.dp,
-            maxHeight
-        )
+        // shorter than the top inset. The panel then has no available vertical space.
+        val filterPanelTop = minOf(topInset, maxHeight)
         val fallbackFilterPanelBottom = when {
             isXpan -> maxHeight - 48.dp
             isVideoMode -> maxHeight - 170.dp
-            else -> topBarHeight + cardHeight - 48.dp
+            else -> viewfinderTop + cardHeight - 48.dp
         }
         val filterPanelAnchorY = if (isXpan) {
             captureButtonBounds?.top
@@ -2434,7 +2385,7 @@ private fun Controls(
                     }
                 }
 
-                // Quick settings mirror Looks on the left column; like the top bar's gear, not while recording.
+                // Quick settings mirror Looks on the left column; not while recording, as the settings can't change then.
                 if (!state.videoRecordingState.isRecording && !state.videoRecordingState.isProcessing) {
                     PhysicalButton(
                         onClick = onQuickSettingsClick,
