@@ -869,7 +869,13 @@ fun CameraScreen(
     }
 
     if (viewModel.showPortraitIntro) {
-        PortraitIntroDialog(onDismiss = viewModel::dismissPortraitIntro)
+        PortraitIntroDialog(
+            onDismiss = viewModel::dismissPortraitIntro,
+            onUseQuickBlur = {
+                viewModel.setPortraitQuickBlur(true)
+                viewModel.dismissPortraitIntro()
+            },
+        )
     }
 
     if (showProUnavailableDialog) {

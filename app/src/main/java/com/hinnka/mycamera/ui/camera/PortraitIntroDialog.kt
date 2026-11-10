@@ -26,7 +26,7 @@ import com.hinnka.mycamera.ml.DepthModelManager
  * can be downloaded right here.
  */
 @Composable
-internal fun PortraitIntroDialog(onDismiss: () -> Unit) {
+internal fun PortraitIntroDialog(onDismiss: () -> Unit, onUseQuickBlur: () -> Unit) {
     val context = LocalContext.current
     val modelState = DepthModelManager.observe(context).collectAsState().value
     val busy = modelState is DepthModelDownloadState.Downloading
@@ -62,7 +62,7 @@ internal fun PortraitIntroDialog(onDismiss: () -> Unit) {
         },
         confirmButton = {
             if (ready || busy) {
-                TextButton(onClick = onDismiss) {
+                TextButton(onClick = if (ready) onDismiss else onUseQuickBlur) {
                     Text(stringResource(if (ready) R.string.depth_model_done else R.string.portrait_intro_quick))
                 }
             } else {
@@ -73,7 +73,7 @@ internal fun PortraitIntroDialog(onDismiss: () -> Unit) {
         },
         dismissButton = if (ready || busy) null else {
             {
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.portrait_intro_quick)) }
+                TextButton(onClick = onUseQuickBlur) { Text(stringResource(R.string.portrait_intro_quick)) }
             }
         },
     )

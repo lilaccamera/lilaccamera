@@ -1164,8 +1164,8 @@
     <string name="portrait_blur_depth">Depth</string>
     <string name="quick_explain_portrait_bokeh">Natural: round. Swirl: vintage lens. Bubble: bright rings. Change it later in the editor.</string>
     <string name="portrait_intro_title">Portrait</string>
-    <string name="portrait_intro_viewfinder">Portrait recognises faces. The viewfinder outlines the face and lightly blurs around the head and shoulders. This is only a guide.</string>
-    <string name="portrait_intro_blur">Quick blur is even and works right away. Depth blur grows with distance and looks more natural, but needs a depth model of about 100 MB. Choose it on the Portrait blur tile.</string>
+    <string name="portrait_intro_viewfinder">Portrait recognises faces. The viewfinder outlines the face and lightly blurs around the head and shoulders. This is only a guide; with no face in view it shows the plain picture.</string>
+    <string name="portrait_intro_blur">Quick blur is even and needs nothing extra. Depth blur grows with distance and looks more natural, but takes longer and needs a depth model of about 100 MB. Choose it on the Portrait blur tile.</string>
     <string name="portrait_intro_subject">After you shoot, a subject recognition model cuts out the main subject and blurs the rest. It works best on people, and also on pets or objects that stand out.</string>
     <string name="portrait_intro_edit">The original is kept: change the blur, its focus and the bokeh style later in the photo editor. Long-press the Portrait blur tile to read this again.</string>
     <string name="portrait_intro_ready">The depth model is installed. Choose Depth on the Portrait blur tile to use it.</string>
