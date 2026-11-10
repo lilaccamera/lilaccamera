@@ -3219,7 +3219,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** Saves a Pro shot's camera JPEG into the shot's photo stack; a failure is logged and never fails the shot. */
+    /**
+     * Saves a camera JPEG into the shot's photo stack; a failure is logged and never fails the shot.
+     * Photo mode passes its frame already cropped, with its [rotation] and [mirrored]; a Pro shot's full
+     * camera JPEG (no [rotation]) takes the shot's aspect crop, rotation and mirroring.
+     */
     private suspend fun saveCameraJpeg(
         settings: CaptureSettingsSnapshot,
         jpeg: ByteArray,
@@ -3229,17 +3233,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         try {
             settings.galleryRegistration.await()
             val context = getApplication<Application>()
-            // The shot's date orders the stack (the JPEG sorts as its oldest version); its rotation turns the JPEG too.
+            // The shot's date orders the stack (the JPEG sorts as its oldest version).
             val shot = GalleryManager.processingPhotos.value[settings.photoId]?.photo
                 ?: GalleryMediaStore.getPhotoData(context, settings.photoId)
                 ?: error("the shot is not in the gallery")
+            val isProJpeg = rotation == null
             GalleryManager.saveCameraJpeg(
                 context,
                 jpeg,
                 settings.photoId,
                 shot.dateAdded - 1,
                 rotation ?: shot.metadata?.rotation ?: 0,
-                mirrored,
+                if (isProJpeg) shot.metadata?.isMirrored ?: false else mirrored,
+                cropRatio = if (isProJpeg) shot.metadata?.ratio ?: settings.state.aspectRatio else null,
+                quality = settings.preferences.photoQuality,
             )
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
