@@ -51,7 +51,9 @@ import kotlin.math.roundToInt
 class OglBokehProcessor {
     companion object {
         private const val TAG = "OglBokehProcessor"
-        private const val MAX_BOKEH_RENDER_EDGE = 2560
+        // The blur is computed at this size and composited onto the full picture. The 2560 px render took
+        // 10 to 13 s on the XZ1 Compact and its GPU hung when anything else drew meanwhile.
+        private val MAX_BOKEH_RENDER_EDGE = if (com.hinnka.mycamera.camera.DeviceQuirks.isLilac) 1536 else 2560
         private const val GUIDE_SHORT_EDGE = 512
         private const val STRIP_ROWS = 256
         /** Rows per full-resolution composite / readback submission. */
