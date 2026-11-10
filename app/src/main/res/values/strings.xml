@@ -1811,4 +1811,26 @@
     <string name="zoom_collar">Zoom</string>
     <string name="zoom_collar_wide">Wide</string>
     <string name="zoom_collar_telephoto">Telephoto</string>
+    <string name="editor_section_look">Look</string>
+    <string name="editor_section_light">Light</string>
+    <string name="editor_section_color">Color</string>
+    <string name="editor_section_effects">Effects</string>
+    <string name="editor_section_detail">Detail</string>
+    <string name="editor_section_portrait">Portrait</string>
+    <string name="editor_section_crop">Crop</string>
+    <string name="editor_look">Look</string>
+    <string name="editor_intensity">Intensity</string>
+    <string name="editor_preset">Preset</string>
+    <string name="editor_full_view">Full view</string>
+    <string name="editor_exit_full_view">Leave full view</string>
+    <string name="editor_compare">Compare (hold)</string>
+    <string name="editor_undo">Undo</string>
+    <string name="editor_redo">Redo</string>
+    <string name="editor_undo_later">Undo and redo arrive in a later update</string>
+    <string name="editor_not_built">This arrives in a later update</string>
+    <string name="editor_section_not_built">%1$s arrives in a later update</string>
+    <string name="editor_discard_message">Your edits to this photo will be lost.</string>
+    <string name="editor_keep_editing">Keep editing</string>
+    <string name="editor_intensity_no_look">Choose a look first</string>
+    <string name="editor_discard_raw_saved">RAW settings are already saved to the photo.</string>
 </resources>

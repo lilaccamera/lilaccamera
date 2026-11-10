@@ -2277,6 +2277,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
+        editOpenState = editStateSnapshot()
+
         // Resolve the source from the file before exposing the video effect to the player.
         val manualProfile = VideoColorMetadata.manualProfile(currentMediaMetadata?.customProperties)
         viewModelScope.launch {
@@ -2297,6 +2299,62 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
         }
+    }
+
+    // The edit state as the editor opened, to tell which settings the user has changed since.
+    private var editOpenState: Map<String, Any?> = emptyMap()
+
+    // Keys name the settings the editor's sections show; the recipe's look intensity is its own key.
+    private fun editStateSnapshot(): Map<String, Any?> {
+        val recipe = editPhotoRecipeParams.value
+        return mapOf(
+            "look" to editLutId.value,
+            "lutIntensity" to recipe?.lutIntensity,
+            "recipe" to recipe?.copy(lutIntensity = 1f),
+            "frame" to editFrameId.value,
+            "applyEffectsToVideo" to editApplyEffectsToVideo.value,
+            "sharpening" to editSharpening.value,
+            "noiseReduction" to editNoiseReduction.value,
+            "chromaNoiseReduction" to editChromaNoiseReduction.value,
+            "aiDenoise" to editAiDenoiseEnabled.value,
+            "rawExposure" to editRawExposureCompensation.value,
+            "rawAutoExposure" to editRawAutoExposure.value,
+            "rawHighlights" to editRawHighlightsAdjustment.value,
+            "rawShadows" to editRawShadowsAdjustment.value,
+            "rawBlackPoint" to editRawBlackPointCorrection.value,
+            "rawWhitePoint" to editRawWhitePointCorrection.value,
+            "rawLensShading" to editRawLensShadingCorrectionEnabled.value,
+            "rawDro" to editRawDROMode.value,
+            "rawBlackLevel" to (editRawBlackLevelMode.value to editRawCustomBlackLevel.value),
+            "rawWhiteLevel" to (editRawWhiteLevelMode.value to editRawCustomWhiteLevel.value),
+            "rawCfa" to editRawCfaCorrectionMode.value,
+            "rawDcp" to editRawDcpId.value,
+            "rawEmbeddedProfile" to editRawEmbeddedDngProfileId.value,
+            "rawHncs" to listOf(editRawHncsProfileId.value, editRawHncsRenderIntent.value, editRawHncsFilmCurveMode.value),
+            "rawBaseLook" to editRawBaselineLutId.value,
+            "rawEngine" to editRawRenderingEngine.value,
+            "rawToneMapping" to editRawToneMappingParameters.value,
+            "rawSpectralFilm" to listOf(
+                editRawSpectralFilmStock.value, editRawSpectralFilmPrint.value,
+                editRawSpectralFilmCDensityGain.value, editRawSpectralFilmMDensityGain.value,
+                editRawSpectralFilmYDensityGain.value,
+            ),
+            "rawFotufilm" to editRawFotufilmDocument.value,
+            "aperture" to editComputationalAperture.value,
+            "bokeh" to editBokehStyle.value,
+            "focus" to (editFocusPointX.value to editFocusPointY.value),
+            "crop" to editCropRect.value?.let { RectF(it) },
+            "cropRatio" to editCropAspectOption.value,
+            "rotation" to editRotationDegrees.value,
+            "straighten" to editStraightenDegrees.value,
+            "mirror" to editMirrorHorizontal.value,
+        )
+    }
+
+    /** The settings changed since the editor opened, by the keys of [editStateSnapshot]. */
+    fun editChangedKeys(): Set<String> {
+        val now = editStateSnapshot()
+        return now.keys.filterTo(HashSet()) { now[it] != editOpenState[it] }
     }
 
     fun prepareCurrentPhotoForEdit(

@@ -77,16 +77,22 @@ import com.hinnka.mycamera.ui.components.rawRenderingEngineName
 import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.hinnka.mycamera.ui.components.LilacChip
+import com.hinnka.mycamera.ui.components.LilacDim
+import com.hinnka.mycamera.ui.components.LilacLabel
+import com.hinnka.mycamera.ui.components.LilacSecondary
+import com.hinnka.mycamera.ui.components.LilacText
+import com.hinnka.mycamera.ui.components.LilacTextStyle
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 // Quick settings sheet: a row of everyday settings floating above a translucent list in outlined groups.
 private val SheetEasing = CubicBezierEasing(0.3f, 1.35f, 0.5f, 1f)
-private val SheetText = Color(0xFFE8E6DF)
-private val SheetLabel = Color(0xFFC2C0B6)
-private val SheetDim = Color(0xFFB4B2A9)
-private val SheetGrey = Color(0xFF888780)
-private val SheetTextStyle = TextStyle(shadow = ViewfinderTextShadow)
+private val SheetText = LilacText
+private val SheetLabel = LilacLabel
+private val SheetDim = LilacSecondary
+private val SheetGrey = LilacDim
+private val SheetTextStyle = LilacTextStyle
 
 /** One camera the Lens row can switch to: a second camera at the same zoom, or a macro camera. */
 internal data class QuickLensChoice(val cameraId: String, val label: String)
@@ -1072,28 +1078,8 @@ private class QuickRows(
 }
 
 @Composable
-private fun QuickChoice(text: String, selected: Boolean, minWidth: Dp, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(13.dp)
-    Box(
-        modifier = Modifier
-            .widthIn(min = minWidth)
-            .height(26.dp)
-            .clip(shape)
-            .then(if (selected) Modifier.border(1.25.dp, ModeAmber.copy(alpha = 0.8f), shape) else Modifier)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 6.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = text,
-            color = if (selected) ModeAmber else SheetText,
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            softWrap = false
-        )
-    }
-}
+private fun QuickChoice(text: String, selected: Boolean, minWidth: Dp, onClick: () -> Unit) =
+    LilacChip(text = text, selected = selected, onClick = onClick, minWidth = minWidth)
 
 @Composable
 private fun QuickSwitch(checked: Boolean, onClick: () -> Unit) {
