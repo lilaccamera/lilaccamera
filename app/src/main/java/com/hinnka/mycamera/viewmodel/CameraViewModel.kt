@@ -1591,6 +1591,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /** Live phone temperature while the stop dialog is open (the camera sensor can't be read with the camera off). */
     var videoHeatPhone by mutableStateOf<CameraHeat.Gauge?>(null)
         private set
+    /** The phone temperature when cooling started, so the dialog can show progress toward [CameraHeat.COOLED_C]. */
+    var videoHeatCoolFromC by mutableStateOf<Int?>(null)
+        private set
     private var videoHeatJob: Job? = null
     private var videoHeatClosedSurface: SurfaceTexture? = null
 
@@ -1601,6 +1604,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.onVideoStoppedForHeat = { gauge ->
             viewModelScope.launch(Dispatchers.Main.immediate) {
                 videoHeatStop = gauge
+                videoHeatCoolFromC = null
                 showVideoHeatStopDialog = true
                 videoHeatJob?.cancel()
                 videoHeatJob = viewModelScope.launch {
@@ -1611,7 +1615,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         closeCamera()
                     }
                     while (true) {
-                        videoHeatPhone = withContext(Dispatchers.IO) { CameraHeat.readPhone(getApplication()) }
+                        val phone = withContext(Dispatchers.IO) { CameraHeat.readPhone(getApplication()) }
+                        if (videoHeatCoolFromC == null) videoHeatCoolFromC = phone?.nowC
+                        videoHeatPhone = phone
                         delay(1000)
                     }
                 }

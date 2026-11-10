@@ -27,6 +27,13 @@ object CameraHeat {
     const val WARN_C = 59
     const val STOP_C = 65
 
+    /**
+     * Phone body (board or battery) temperature to wait for after a heat stop. While recording, the camera
+     * sensor ran about 13 °C above the board (53 vs 40 °C, 60 vs 46.5 °C), and it cools within seconds once
+     * the camera is off, so the body sets how soon it heats up again: from 42 °C it restarts near 55 °C.
+     */
+    const val COOLED_C = 42
+
     enum class Level { OK, WARN, STOP }
     enum class Source(@StringRes val label: Int) {
         CAMERA(R.string.heat_source_camera),
