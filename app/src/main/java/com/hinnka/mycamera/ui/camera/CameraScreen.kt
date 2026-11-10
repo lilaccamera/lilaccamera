@@ -397,11 +397,10 @@ fun CameraScreen(
     // everyday quick settings onto its top edge. Each swipe first closes what the other one opened.
     var manualControlsShown by rememberSaveable { mutableStateOf(false) }
     var everydayRowShown by remember { mutableStateOf(false) }
-    // A value set by hand (EV, ISO, shutter, focus, white balance) keeps the row on screen, so a shot is never
-    // taken with a fixed value nobody can see.
+    // A value set by hand (EV, ISO, shutter, focus, white balance) stays visible while the panel is closed,
+    // as a compact line of just those values, so a shot is never taken with a fixed value nobody can see.
     val anyManualValue = state.exposureCompensation != 0 || !state.isIsoAuto || !state.isShutterSpeedAuto ||
         !state.isAutoFocus || state.awbMode != CaptureRequest.CONTROL_AWB_MODE_AUTO
-    val manualValuesVisible = manualControlsShown || anyManualValue
     val isXpan = state.aspectRatio == AspectRatio.XPAN
     val burstCapturingCount = viewModel.burstImageCount
 
@@ -1417,7 +1416,11 @@ fun CameraScreen(
                                 // other panels only close.
                                 everydayRowShown = false
                                 if (activePanel == ActivePanel.SETTINGS) activePanel = ActivePanel.NONE
-                                if (state.isFocusLocked) {
+                                if (manualControlsShown && !isXpan) {
+                                    // The open manual panel closes, ruler included, without focusing.
+                                    manualControlsShown = false
+                                    showParameterRuler = false
+                                } else if (state.isFocusLocked) {
                                     viewModel.unlockFocus()
                                 } else if (activePanel != ActivePanel.NONE) {
                                     activePanel = ActivePanel.NONE
@@ -1902,7 +1905,7 @@ fun CameraScreen(
             // Guide pills sit 8 dp above the highest of the picture's bottom, the manual values and the shutter.
             val guidePillBottom = listOfNotNull(
                 previewBounds?.bottom,
-                parameterBarTop.takeIf { !isXpan && manualValuesVisible },
+                parameterBarTop.takeIf { !isXpan && (manualControlsShown || anyManualValue) },
                 captureButtonBounds?.top,
             ).minOrNull()?.let { it - (cameraScreenBounds?.top ?: 0f) }
             val guidePillPlacement = Modifier
@@ -1974,20 +1977,55 @@ fun CameraScreen(
                             Modifier
                                 .then(if (isXpan) Modifier.width(viewfinderContentWidth) else Modifier)
                                 .onGloballyPositioned { coordinates ->
-                                    parameterRulerBounds = coordinates.boundsInRoot()
+                                    // Only while it shows: during its exit animation it keeps reporting its
+                                    // full rectangle, which would leave swipes there ignored after it has gone.
+                                    parameterRulerBounds = coordinates.boundsInRoot().takeIf { showParameterRuler }
                                 }
                         )
                     }
                 },
                 parameterBar = {
                     if (!isXpan) {
-                        AnimatedVisibility(
-                            visible = manualValuesVisible,
-                            enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 3 },
-                            exit = fadeOut(tween(150)) + slideOutVertically(tween(150)) { it / 3 }
+                        // Swipes that start on the values themselves work too: down closes, up opens.
+                        Box(
+                            Modifier
+                                .onGloballyPositioned { parameterBarTop = it.boundsInRoot().top }
+                                .pointerInput(Unit) {
+                                    var dragged = 0f
+                                    detectVerticalDragGestures(
+                                        onDragStart = { dragged = 0f },
+                                        onDragEnd = {
+                                            if (abs(dragged) >= 40.dp.toPx()) onPictureSwipe(dragged < 0)
+                                        },
+                                        onVerticalDrag = { change, amount ->
+                                            dragged += amount
+                                            change.consume()
+                                        }
+                                    )
+                                }
                         ) {
-                            Box(Modifier.onGloballyPositioned { parameterBarTop = it.boundsInRoot().top }) {
+                            AnimatedVisibility(
+                                visible = manualControlsShown,
+                                enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 3 },
+                                exit = fadeOut(tween(150)) + slideOutVertically(tween(150)) { it / 3 }
+                            ) {
                                 parameterBar(selectedParameter.takeIf { showParameterRuler }, onParameterClick)
+                            }
+                            // Closed: only the values set by hand; a tap opens the panel at that value.
+                            AnimatedVisibility(
+                                visible = !manualControlsShown && anyManualValue,
+                                enter = fadeIn(tween(180)),
+                                exit = fadeOut(tween(120)),
+                                modifier = Modifier.align(Alignment.Center)
+                            ) {
+                                ManualValuesLine(
+                                    state = state,
+                                    onValueClick = { parameter ->
+                                        manualControlsShown = true
+                                        selectedParameter = parameter
+                                        showParameterRuler = true
+                                    }
+                                )
                             }
                         }
                     }

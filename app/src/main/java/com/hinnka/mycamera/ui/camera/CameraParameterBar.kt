@@ -65,7 +65,9 @@ internal data class CameraParameterItem(
     val isEnabled: Boolean = true,
     val isWarning: Boolean = false,
     /** Shown when a disabled item is tapped, so the tap is never silent. */
-    @StringRes val disabledMessage: Int? = null
+    @StringRes val disabledMessage: Int? = null,
+    /** Set by hand rather than by the camera: the value always shows, with an amber dot. */
+    val isManual: Boolean = false,
 )
 
 @Composable
@@ -73,41 +75,51 @@ internal fun cameraParameterItems(state: CameraState): List<CameraParameterItem>
     // Match the mode switcher: PHOTO capture also backs the RAW professional mode.
     val showValues = state.captureMode == CaptureMode.VIDEO ||
         (state.useRaw && state.isRawSupported)
+    val evManual = state.exposureCompensation != 0
+    val shutterManual = !state.isShutterSpeedAuto
+    val isoManual = !state.isIsoAuto
+    val focusManual = !state.isAutoFocus
+    val wbManual = state.awbMode != CameraMetadata.CONTROL_AWB_MODE_AUTO
     return listOf(
         CameraParameterItem(
             CameraParameter.EXPOSURE_COMPENSATION,
             stringResource(R.string.camera_parameter_exposure),
-            if (showValues) CameraUtils.formatExposureCompensation(
+            if (showValues || evManual) CameraUtils.formatExposureCompensation(
                 state.exposureCompensation, state.getExposureCompensationStep()
             ) else null,
-            isEnabled = state.isAutoExposure
+            isEnabled = state.isAutoExposure,
+            isManual = evManual
         ),
         CameraParameterItem(
             CameraParameter.SHUTTER_SPEED,
             stringResource(R.string.camera_parameter_shutter),
-            if (showValues) formatShutterSpeedValue(state.shutterSpeed) else null,
+            if (showValues || shutterManual) formatShutterSpeedValue(state.shutterSpeed) else null,
             isEnabled = state.isManualSensorSupported,
             isWarning = showValues && state.isPreviewExposureLimited(),
-            disabledMessage = R.string.manual_sensor_unavailable
+            disabledMessage = R.string.manual_sensor_unavailable,
+            isManual = shutterManual
         ),
         CameraParameterItem(
             CameraParameter.ISO,
             stringResource(R.string.camera_parameter_iso),
-            if (showValues) state.iso.toString() else null,
+            if (showValues || isoManual) state.iso.toString() else null,
             isEnabled = state.isManualSensorSupported,
-            disabledMessage = R.string.manual_sensor_unavailable
+            disabledMessage = R.string.manual_sensor_unavailable,
+            isManual = isoManual
         ),
         CameraParameterItem(
             CameraParameter.FOCUS,
             stringResource(R.string.camera_parameter_focus),
-            if (showValues) formatFocusDistance(state.focusDistance) else null,
-            isEnabled = state.minimumFocusDistance > 0f
+            if (showValues || focusManual) formatFocusDistance(state.focusDistance) else null,
+            isEnabled = state.minimumFocusDistance > 0f,
+            isManual = focusManual
         ),
         CameraParameterItem(
             CameraParameter.WHITE_BALANCE,
             stringResource(R.string.camera_parameter_white_balance),
-            if (showValues) formatWhiteBalanceValue(state) else null,
-            isEnabled = state.canAdjustWhiteBalance || state.actualAwbTemperature != null
+            if (showValues || wbManual) formatWhiteBalanceValue(state) else null,
+            isEnabled = state.canAdjustWhiteBalance || state.actualAwbTemperature != null,
+            isManual = wbManual
         )
     )
 }
@@ -174,16 +186,19 @@ internal fun ParameterItem(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(1.dp)
                 ) {
-                    Text(
-                        text = item.value,
-                        color = valueColor,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        style = TextStyle(shadow = ViewfinderTextShadow),
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        softWrap = false
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = item.value,
+                            color = valueColor,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            style = TextStyle(shadow = ViewfinderTextShadow),
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                        if (item.isManual) ManualDot(Modifier.padding(start = 4.dp))
+                    }
                     Text(
                         text = item.label,
                         color = labelColor,
@@ -276,5 +291,45 @@ private fun formatWhiteBalanceValue(state: CameraState): String {
         CameraMetadata.CONTROL_AWB_MODE_OFF -> "${state.awbTemperature}K"
         CameraMetadata.CONTROL_AWB_MODE_AUTO -> measuredValue ?: stringResource(R.string.camera_focus_auto)
         else -> measuredValue ?: stringResource(R.string.unknown)
+    }
+}
+
+/** Marks a value set by hand. */
+@Composable
+private fun ManualDot(modifier: Modifier = Modifier) {
+    Box(modifier.size(5.dp).background(ModeAmber, CircleShape))
+}
+
+/**
+ * The values set by hand while the manual panel is closed: plain numbers with an amber dot, centred on the
+ * picture's bottom edge like the active-setting marks on its top edge. A tap opens the panel at that value.
+ */
+@Composable
+internal fun ManualValuesLine(
+    state: CameraState,
+    onValueClick: (CameraParameter) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val items = cameraParameterItems(state).filter { it.isManual && it.value != null }
+    if (items.isEmpty()) return
+    val textStyle = TextStyle(shadow = ViewfinderTextShadow, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, color = Color.White)
+    Row(
+        modifier = modifier.height(TopEdgeLineHeight),
+        horizontalArrangement = Arrangement.spacedBy(20.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        items.forEach { item ->
+            Row(
+                modifier = Modifier
+                    .height(TopEdgeLineHeight)
+                    .clickable(role = Role.Button) { onValueClick(item.parameter) },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // ISO alone is a bare number, so it keeps its name; the others read by their unit.
+                val text = if (item.parameter == CameraParameter.ISO) "${item.label} ${item.value}" else item.value!!
+                Text(text, style = textStyle, maxLines = 1, softWrap = false)
+                ManualDot(Modifier.padding(start = 4.dp))
+            }
+        }
     }
 }
