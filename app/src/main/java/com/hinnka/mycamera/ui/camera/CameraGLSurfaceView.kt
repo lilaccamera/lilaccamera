@@ -477,6 +477,9 @@ class CameraGLSurfaceView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        // super has stopped the GL thread, so the queued release below never runs; stop the
+        // stabilization session here or it keeps every EIS frame and the gyro alive.
+        renderer.setRenderingPaused(true)
         PLog.d(TAG, "onDetachedFromWindow")
 
         // 通知 Surface 销毁
