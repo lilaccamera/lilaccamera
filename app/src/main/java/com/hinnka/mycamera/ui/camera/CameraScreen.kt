@@ -2608,14 +2608,14 @@ fun CaptureButton(
                 if (isPaused) Color.White.copy(alpha = 0.8f)
                 else Color.Red.copy(alpha = pulseAlpha)
             }
-            else -> Color.White.copy(alpha = 0.32f)
+            else -> CameraControlsLayoutDefaults.LineColor
         }
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .border(
-                    width = 1.dp,
+                    width = CameraControlsLayoutDefaults.LineWidth,
                     color = ringColor,
                     shape = CircleShape
                 )
@@ -2624,9 +2624,9 @@ fun CaptureButton(
         // Center shutter surface
         val centerPadding by animateDpAsState(
             targetValue = when {
-                captureMode == CaptureMode.VIDEO && isVideoRecording -> 19.dp
+                captureMode == CaptureMode.VIDEO && isVideoRecording -> 21.dp
                 progressRingCount > 0 -> CaptureProgressRingDefaults.contentPadding(progressRingCount)
-                else -> 2.dp
+                else -> CameraControlsLayoutDefaults.LineWidth + CameraControlsLayoutDefaults.LineGap
             },
             animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow),
             label = "centerPadding"

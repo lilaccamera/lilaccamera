@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -12,10 +13,11 @@ import androidx.compose.ui.unit.dp
 internal object CameraControlsLayoutDefaults {
     val ParameterBarHeight = 48.dp
     val ZoomBarHeight = 32.dp
-    val CaptureButtonSize = 72.dp
+    val CaptureButtonSize = 80.dp
     val SideButtonSize = 48.dp
     val ModeSwitcherHeight = 36.dp
-    val ModeSwitcherSpacing = 30.dp
+    // The larger shutter grows into this gap, so the controls' total height and the viewfinder sums stay the same.
+    val ModeSwitcherSpacing = 22.dp
     val BottomPadding = 8.dp
     val CaptureClearance = 8.dp
     val BarSpacing = 4.dp
@@ -24,6 +26,10 @@ internal object CameraControlsLayoutDefaults {
     // Footer grid: side controls centred 40 dp from the screen edges, columns 70 dp apart.
     val SideMargin = 16.dp
     val ColumnPitch = 70.dp
+    // Every framed footer control: a 2 dp line, a 2 dp gap, then the face.
+    val LineWidth = 2.dp
+    val LineGap = 2.dp
+    val LineColor = Color(0xFFC9C7BF)
 
     val ModeAreaHeight = ModeSwitcherSpacing + ModeSwitcherHeight + BottomPadding
     val XpanViewfinderClearance = ViewfinderModeSpacing + ModeSwitcherHeight + BottomPadding

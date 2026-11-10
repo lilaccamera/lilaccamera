@@ -18,7 +18,8 @@ import com.hinnka.mycamera.ui.theme.accentContentColor
 internal object CaptureProgressRingDefaults {
     val StrokeWidth = 3.dp
     val OutlineWidth = 1.dp
-    val OuterInset = 1.dp
+    // Just inside the shutter's 2 dp ring.
+    val OuterInset = 2.dp
     val Gap = 1.dp
     val RingSpacing = StrokeWidth + OutlineWidth * 2 + Gap
 
