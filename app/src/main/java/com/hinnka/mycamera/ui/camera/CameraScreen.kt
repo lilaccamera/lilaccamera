@@ -1697,6 +1697,9 @@ fun CameraScreen(
                 onLooksBoundsChanged = { bounds ->
                     filterButtonBounds = bounds
                 },
+                onQuickSettingsClick = {
+                    activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
+                },
                 zoomCollar = if (!isXpan && activePanel == ActivePanel.NONE) {
                     { fold ->
                         ZoomCollar(
@@ -2195,6 +2198,7 @@ private fun Controls(
     isXpan: Boolean,
     onLooksClick: () -> Unit,
     onLooksBoundsChanged: (Rect) -> Unit,
+    onQuickSettingsClick: () -> Unit,
     zoomCollar: (@Composable (fold: () -> Float) -> Unit)?,
     sideControlInset: Dp?,
     modifier: Modifier = Modifier.fillMaxSize()
@@ -2399,6 +2403,32 @@ private fun Controls(
                             modifier = Modifier
                                 .size(26.dp)
                                 .graphicsLayer { rotationZ = switchSpin.value }
+                        )
+                    }
+                }
+
+                // Quick settings mirror Looks on the left column; like the top bar's gear, not while recording.
+                if (!state.videoRecordingState.isRecording && !state.videoRecordingState.isProcessing) {
+                    PhysicalButton(
+                        onClick = onQuickSettingsClick,
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
+                            .offset(y = -LooksRise)
+                            .size(CameraControlsLayoutDefaults.SideButtonSize)
+                            .graphicsLayer {
+                                translationY = -10.dp.toPx() * line.side
+                                alpha = 1f - line.side
+                            }
+                            .autoRotate(),
+                        shape = RoundedCornerShape(ThumbnailCorner),
+                        backgroundColor = Color.Transparent
+                    ) {
+                        Icon(
+                            imageVector = AppIcons.Sliders,
+                            contentDescription = stringResource(R.string.quick_settings),
+                            tint = CameraControlsLayoutDefaults.LineColor,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }

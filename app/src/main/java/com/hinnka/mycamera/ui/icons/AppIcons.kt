@@ -380,6 +380,16 @@ object AppIcons {
                 "M8 3v18M16 3v18M4 7h2M4 12h2M4 17h2M18 7h2M18 12h2M18 17h2"
         ).also { _film = it }
 
+    // Three slider lines with hollow knobs; the lines stop at each knob, so the icon has no fill to show on a picture.
+    val Sliders: ImageVector
+        get() = _sliders ?: lineIcon(
+            "AppIcons.Sliders",
+            "M3 6h3.6M11.4 6h9.6M3 12h10.6M18.4 12h2.6M3 18h1.6M9.4 18h11.6" +
+                "M11.4 6a2.4 2.4 0 1 0 -4.8 0a2.4 2.4 0 1 0 4.8 0" +
+                "M18.4 12a2.4 2.4 0 1 0 -4.8 0a2.4 2.4 0 1 0 4.8 0" +
+                "M9.4 18a2.4 2.4 0 1 0 -4.8 0a2.4 2.4 0 1 0 4.8 0"
+        ).also { _sliders = it }
+
     private fun lineIcon(name: String, pathData: String): ImageVector = ImageVector.Builder(
         name = name,
         defaultWidth = 24f.dp,
@@ -1682,6 +1692,7 @@ private var _moonStars: ImageVector? = null
 private var _user: ImageVector? = null
 private var _movieCamera: ImageVector? = null
 private var _film: ImageVector? = null
+private var _sliders: ImageVector? = null
 private var _checkBox: ImageVector? = null
 private var _checkBoxOutlineBlank: ImageVector? = null
 private var _chevronRight: ImageVector? = null
