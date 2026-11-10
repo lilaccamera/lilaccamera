@@ -2,7 +2,6 @@ package com.hinnka.mycamera.preview
 
 import android.content.Context
 import android.graphics.Bitmap
-import com.hinnka.mycamera.utils.OrientationObserver
 import android.graphics.RectF
 import android.graphics.Matrix
 import android.os.SystemClock
@@ -151,6 +150,8 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
         detectEyeTarget: Boolean,
         createFaceMask: Boolean,
         trackPortraitFace: Boolean = false,
+        /** Clockwise turn that makes faces in [frame] upright, from the phone's rotation. */
+        uprightRotationDegrees: Int = 0,
     ): Boolean {
         val detectorPathAvailable =
             (detectEyeTarget || createFaceMask || trackPortraitFace) && !detectorInitializationFailed
@@ -175,6 +176,7 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
                     detectEyeTarget = detectEyeTarget,
                     createFaceMask = createFaceMask,
                     trackPortraitFace = trackPortraitFace,
+                    uprightRotationDegrees = uprightRotationDegrees,
                 )
             }
             return true
@@ -186,30 +188,33 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
 
     /**
      * BlazeFace only finds upright faces, and the viewfinder frame is drawn for a phone held upright: with
-     * the phone sideways faces lie on their side in it. The frame is turned by the phone's rotation, then
-     * the other way if nothing is found (the turn the picture needs depends on the camera), and the
-     * detections are mapped back to the frame as drawn.
+     * the phone sideways faces lie on their side in it. The frame is turned [rotation] degrees clockwise
+     * so faces stand upright, and the detections are mapped back to the frame as drawn.
      */
-    private fun detectUpright(detector: BlazeFaceDetector, bitmap: Bitmap): List<BlazeFaceDetector.Detection> {
+    private fun detectUpright(
+        detector: BlazeFaceDetector,
+        bitmap: Bitmap,
+        rotation: Int,
+    ): List<BlazeFaceDetector.Detection> {
         uprightDetections = emptyMap()
-        val deviceRotation = Math.floorMod(OrientationObserver.captureRotationDegrees.toInt(), 360)
-        if (deviceRotation == 0) return detector.detect(bitmap)
-        for (rotation in listOf(deviceRotation, (360 - deviceRotation) % 360).distinct()) {
-            val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
-            val upright = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-            try {
-                val found = detector.detect(upright)
-                if (found.isNotEmpty()) {
-                    val mapped = found.map { unrotate(it, rotation) }
-                    uprightDetections = mapped.zip(found).toMap()
-                    return mapped
-                }
-            } finally {
-                if (upright !== bitmap) upright.recycle()
-            }
+        if (rotation != lastUprightRotation) {
+            lastUprightRotation = rotation
+            PLog.d(TAG, "Face detection turns the viewfinder frame by $rotation degrees")
         }
-        return emptyList()
+        if (rotation == 0) return detector.detect(bitmap)
+        val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
+        val upright = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        try {
+            val found = detector.detect(upright)
+            val mapped = found.map { unrotate(it, rotation) }
+            uprightDetections = mapped.zip(found).toMap()
+            return mapped
+        } finally {
+            if (upright !== bitmap) upright.recycle()
+        }
     }
+
+    private var lastUprightRotation = 0
 
     /** Each mapped-back detection of the current frame with the upright one it came from (detector thread). */
     private var uprightDetections: Map<BlazeFaceDetector.Detection, BlazeFaceDetector.Detection> = emptyMap()
@@ -248,13 +253,14 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
         detectEyeTarget: Boolean,
         createFaceMask: Boolean,
         trackPortraitFace: Boolean,
+        uprightRotationDegrees: Int,
     ) {
         var frameFinished = false
         try {
             if (released.get()) return
             val detector = getOrCreateDetector() ?: return
             val detections = try {
-                detectUpright(detector, bitmap)
+                detectUpright(detector, bitmap, uprightRotationDegrees)
             } catch (error: RuntimeException) {
                 PLog.e(TAG, "BlazeFace eye focus inference failed", error)
                 onError?.invoke(error)

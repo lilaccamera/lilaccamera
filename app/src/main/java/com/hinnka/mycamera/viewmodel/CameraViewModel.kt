@@ -4580,6 +4580,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * Clockwise turn that stands faces in the viewfinder frame upright: the phone's rotation, for the back
+     * and the front camera alike (on the XZ1 Compact the opposite turn lost the face on the front camera).
+     */
+    private fun previewFaceUprightRotation(): Int =
+        Math.floorMod(OrientationObserver.captureRotationDegrees.toInt(), 360)
+
     private fun capturePreviewThumbnailRotation(): Float {
         val deviceRotation = OrientationObserver.captureRotationDegrees.toInt()
         val lensFacing = cameraController.getLensFacing()
@@ -4678,6 +4685,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 detectEyeTarget = acceptsEyeFocus,
                 createFaceMask = acceptsPortraitMask,
                 trackPortraitFace = acceptsPortraitFace,
+                uprightRotationDegrees = previewFaceUprightRotation(),
             )
         ) {
             frame.bitmap.recycle()
