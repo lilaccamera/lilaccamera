@@ -1583,9 +1583,39 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     var showEnhancedStabilizationUnavailableDialog by mutableStateOf(false)
         private set
 
+    var showVideoHeatStopDialog by mutableStateOf(false)
+        private set
+    /** The reading that reached its limit and stopped the recording; null when Android's thermal status did. */
+    var videoHeatStop by mutableStateOf<CameraHeat.Gauge?>(null)
+        private set
+    /** Live phone temperature while the stop dialog is open (the camera sensor can't be read with the camera off). */
+    var videoHeatPhone by mutableStateOf<CameraHeat.Gauge?>(null)
+        private set
+    private var videoHeatJob: Job? = null
+    private var videoHeatClosedSurface: SurfaceTexture? = null
+
     init {
         viewModelScope.launch {
             userPreferencesRepository.flow { it.saveLocation }.collect { applyLocationTracking(it) }
+        }
+        cameraController.onVideoStoppedForHeat = { gauge ->
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                videoHeatStop = gauge
+                showVideoHeatStopDialog = true
+                videoHeatJob?.cancel()
+                videoHeatJob = viewModelScope.launch {
+                    launch {
+                        // Close the camera only once the video file is finished, so the phone can cool down.
+                        cameraController.state.first { !it.videoRecordingState.isProcessing }
+                        videoHeatClosedSurface = currentSurfaceTexture
+                        closeCamera()
+                    }
+                    while (true) {
+                        videoHeatPhone = withContext(Dispatchers.IO) { CameraHeat.readPhone(getApplication()) }
+                        delay(1000)
+                    }
+                }
+            }
         }
         cameraController.onEnhancedStabilizationUnavailable = { fallback ->
             viewModelScope.launch(Dispatchers.Main.immediate) {
@@ -2214,6 +2244,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         showEnhancedStabilizationUnavailableDialog = false
     }
 
+    fun dismissVideoHeatStopDialog() {
+        showVideoHeatStopDialog = false
+        videoHeatJob?.cancel()
+        videoHeatJob = null
+        videoHeatPhone = null
+        val surface = videoHeatClosedSurface
+        videoHeatClosedSurface = null
+        if (surface != null && !state.value.isPreviewActive) openCamera(surface)
+    }
+
     fun getAvailableRawLutList(context: Context, logCurve: TransferCurve): List<String> {
         try {
             val files = logCurve.rawFolder?.let { context.assets.list(it) }
@@ -2562,6 +2602,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 关闭相机
      */
     fun closeCamera(surfaceTexture: SurfaceTexture? = null) {
+        // A preview surface destroyed while the heat dialog keeps the camera off must not be reopened later.
+        if (surfaceTexture != null && surfaceTexture === videoHeatClosedSurface) videoHeatClosedSurface = null
         if (surfaceTexture != null && currentSurfaceTexture !== surfaceTexture) {
             PLog.d(
                 TAG,
@@ -6507,6 +6549,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     override fun onCleared() {
         super.onCleared()
         cameraController.onEnhancedStabilizationUnavailable = null
+        cameraController.onVideoStoppedForHeat = null
+        videoHeatJob?.cancel()
         cameraReopenJob?.cancel()
         cameraErrorRecoveryJob?.cancel()
         previewEyeFocusProcessor.close()

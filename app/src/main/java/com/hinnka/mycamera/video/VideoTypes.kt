@@ -1,5 +1,6 @@
 package com.hinnka.mycamera.video
 
+import com.hinnka.mycamera.camera.CameraHeat
 import android.graphics.Rect
 import android.os.Environment
 import android.util.Size
@@ -197,7 +198,11 @@ data class VideoRecordingState(
     val isRecording: Boolean = false,
     val isPaused: Boolean = false,
     val isProcessing: Boolean = false,
-    val elapsedMs: Long = 0L
+    val elapsedMs: Long = 0L,
+    /** Set once the phone gets hot during this recording; stays set so the warning does not flicker. */
+    val isHot: Boolean = false,
+    /** The heat reading closest to its stop point while hot; null when only Android's thermal status said so. */
+    val heatGauge: CameraHeat.Gauge? = null
 ) {
     fun shouldAttachCameraInput(): Boolean {
         return isRecording && !isPaused && !isProcessing

@@ -387,6 +387,8 @@ class Camera2Controller(private val context: Context) {
     val videoRecorder = VideoRecorder(context, realtimeStabilizationCoordinator)
     var onEnhancedStabilizationUnavailable: ((EnhancedStabilizationFallback) -> Unit)? = null
     var onVideoSaved: ((Uri?) -> Unit)? = null
+    /** The recording was saved and stopped because the phone got too hot; the reading that reached its limit, if any. */
+    var onVideoStoppedForHeat: ((CameraHeat.Gauge?) -> Unit)? = null
     private var previousVideoStabilizationMode = VideoStabilizationMode.OIS
     private val enhancedStabilizationUnavailableCameraIds =
         ConcurrentHashMap.newKeySet<String>()
@@ -402,16 +404,34 @@ class Camera2Controller(private val context: Context) {
     private var videoRecordingStartElapsedMs: Long = 0L
     private var videoRecordingPausedMs: Long = 0L
     private var videoRecordingPauseStartElapsedMs: Long = 0L
+    private var lastHeatCheckElapsedMs: Long = 0L
     private val videoRecordingTicker = object : Runnable {
         override fun run() {
-            val recordingState = _state.value.videoRecordingState
+            var recordingState = _state.value.videoRecordingState
             if (!recordingState.isRecording) return
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastHeatCheckElapsedMs >= 1000L) {
+                lastHeatCheckElapsedMs = now
+                val heat = CameraHeat.read(context)
+                if (heat.level == CameraHeat.Level.STOP) {
+                    PLog.w(TAG, "Stopping video recording: too hot, $heat")
+                    stopVideoRecording()
+                    onVideoStoppedForHeat?.invoke(heat.closest?.takeIf { it.fraction >= 1f })
+                    return
+                }
+                if (heat.level == CameraHeat.Level.WARN && !recordingState.isHot) {
+                    PLog.w(TAG, "Video recording hot warning: $heat")
+                }
+                val isHot = recordingState.isHot || heat.level == CameraHeat.Level.WARN
+                recordingState = recordingState.copy(isHot = isHot, heatGauge = heat.closest.takeIf { isHot })
+            }
             if (recordingState.isPaused) {
+                _state.value = _state.value.copy(videoRecordingState = recordingState)
                 cameraHandler?.postDelayed(this, 250)
                 return
             }
             val elapsed =
-                (SystemClock.elapsedRealtime() - videoRecordingStartElapsedMs - videoRecordingPausedMs).coerceAtLeast(
+                (now - videoRecordingStartElapsedMs - videoRecordingPausedMs).coerceAtLeast(
                     0L
                 )
             _state.value = _state.value.copy(
@@ -7553,6 +7573,25 @@ class Camera2Controller(private val context: Context) {
                 context.getString(com.hinnka.mycamera.R.string.camera_video_fps_unavailable),
                 false,
             )
+            return
+        }
+
+        val startHeat = CameraHeat.read(context)
+        if (startHeat.level == CameraHeat.Level.STOP) {
+            PLog.w(TAG, "Not starting video recording: too hot, $startHeat")
+            val stopGauge = startHeat.closest?.takeIf { it.fraction >= 1f }
+            val message = if (stopGauge != null) {
+                context.getString(
+                    com.hinnka.mycamera.R.string.video_too_hot_to_start,
+                    context.getString(stopGauge.source.label),
+                    stopGauge.nowC
+                )
+            } else {
+                context.getString(com.hinnka.mycamera.R.string.video_too_hot_to_start_no_temp)
+            }
+            Handler(Looper.getMainLooper()).post {
+                android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+            }
             return
         }
 

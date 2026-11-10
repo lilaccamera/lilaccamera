@@ -20,8 +20,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.ui.theme.AccentColor
@@ -34,12 +39,15 @@ import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.video.VideoResolutionPreset
 import com.hinnka.mycamera.video.VideoStabilizationMode
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.hinnka.mycamera.camera.CameraHeat
 
 @Composable
 fun CameraTopBar(
     captureMode: CaptureMode,
     isRecording: Boolean,
     recordingElapsedMs: Long,
+    recordingIsHot: Boolean = false,
+    recordingHeatGauge: CameraHeat.Gauge? = null,
     flashMode: Int,
     onFlashToggle: () -> Unit,
     timerSeconds: Int,
@@ -61,6 +69,8 @@ fun CameraTopBar(
         VideoTopBar(
             isRecording = isRecording,
             recordingElapsedMs = recordingElapsedMs,
+            recordingIsHot = recordingIsHot,
+            recordingHeatGauge = recordingHeatGauge,
             videoConfig = videoConfig,
             videoCapabilities = videoCapabilities,
             onVideoTorchToggle = onVideoTorchToggle,
@@ -161,6 +171,8 @@ fun CameraTopBar(
 private fun VideoTopBar(
     isRecording: Boolean,
     recordingElapsedMs: Long,
+    recordingIsHot: Boolean,
+    recordingHeatGauge: CameraHeat.Gauge?,
     videoConfig: VideoConfig,
     videoCapabilities: VideoCapabilities,
     onVideoTorchToggle: () -> Unit,
@@ -181,6 +193,8 @@ private fun VideoTopBar(
         if (isRecording) {
             RecordingHud(
                 elapsedMs = recordingElapsedMs,
+                isHot = recordingIsHot,
+                heatGauge = recordingHeatGauge,
                 videoConfig = videoConfig
             )
         } else {
@@ -369,9 +383,85 @@ private fun videoStabilizationModeLabel(mode: VideoStabilizationMode): String {
     }
 }
 
+private val HeatWarningColor = Color(0xFFFF8A3D)
+private val HeatStopColor = Color(0xFFFF5449)
+
+/** Thermometer drawn in two colours: the outline and the reading inside it. */
+@Composable
+internal fun HeatThermometer(outlineColor: Color, readingColor: Color, modifier: Modifier = Modifier) {
+    Box(modifier) {
+        Icon(AppIcons.ThermometerOutline, contentDescription = null, tint = outlineColor, modifier = Modifier.matchParentSize())
+        Icon(AppIcons.ThermometerReading, contentDescription = null, tint = readingColor, modifier = Modifier.matchParentSize())
+    }
+}
+
+/**
+ * Heat now, a bar filling from the warning point to the stop point, and the stop limit.
+ * The bar is [barWidth] wide and centred, so it lines up under the recording timer above it.
+ */
+@Composable
+private fun HeatGauge(gauge: CameraHeat.Gauge?, barWidth: Dp, modifier: Modifier = Modifier) {
+    val color = if ((gauge?.fraction ?: 0f) >= 2f / 3f) HeatStopColor else HeatWarningColor
+    val textStyle = MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold)
+    val description = gauge?.let {
+        stringResource(R.string.video_heat_gauge_description, stringResource(it.source.label), it.nowC, it.limitC)
+    } ?: stringResource(R.string.video_heat_warning_no_temp)
+    Row(
+        modifier = modifier.semantics(mergeDescendants = true) { contentDescription = description },
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (gauge == null) {
+            HeatThermometer(outlineColor = Color.White, readingColor = color, modifier = Modifier.size(22.dp))
+            Text(stringResource(R.string.video_heat_warning_no_temp), color = color, style = textStyle)
+            return@Row
+        }
+        // Equal-width sides keep the bar centred under the timer.
+        Row(
+            modifier = Modifier.width(HeatGaugeSideWidth),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            HeatThermometer(outlineColor = Color.White, readingColor = color, modifier = Modifier.size(22.dp))
+            Text(stringResource(R.string.video_heat_degrees, gauge.nowC), color = color, style = textStyle)
+        }
+        Box(
+            Modifier
+                .width(barWidth)
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color.White.copy(alpha = 0.18f))
+        ) {
+            Box(
+                Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(gauge.fraction.coerceIn(0.06f, 1f))
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(color)
+            )
+        }
+        Row(
+            modifier = Modifier.width(HeatGaugeSideWidth),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(Color.White))
+            Text(
+                stringResource(R.string.video_heat_degrees, gauge.limitC),
+                color = Color.White.copy(alpha = 0.8f),
+                style = textStyle.copy(fontWeight = FontWeight.Normal)
+            )
+        }
+    }
+}
+
+private val HeatGaugeSideWidth = 80.dp
+
 @Composable
 private fun RecordingHud(
     elapsedMs: Long,
+    isHot: Boolean,
+    heatGauge: CameraHeat.Gauge?,
     videoConfig: VideoConfig,
     modifier: Modifier = Modifier
 ) {
@@ -385,14 +475,21 @@ private fun RecordingHud(
         ),
         label = "recDotAlpha"
     )
+    val density = LocalDensity.current
+    var timerWidth by remember { mutableStateOf(0.dp) }
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Surface(
+            modifier = Modifier.onSizeChanged { timerWidth = with(density) { it.width.toDp() } },
             color = Color.Black.copy(alpha = 0.5f),
             shape = RoundedCornerShape(20.dp),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+            border = when {
+                !isHot -> BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+                (heatGauge?.fraction ?: 0f) >= 2f / 3f -> BorderStroke(1.5.dp, HeatStopColor)
+                else -> BorderStroke(1.5.dp, HeatWarningColor)
+            }
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -417,7 +514,9 @@ private fun RecordingHud(
             }
         }
 
-        Row(
+        if (isHot) {
+            HeatGauge(heatGauge, barWidth = timerWidth, modifier = Modifier.padding(top = 4.dp))
+        } else Row(
             modifier = Modifier.padding(top = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically

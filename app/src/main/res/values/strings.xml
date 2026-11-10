@@ -1285,6 +1285,18 @@
     <string name="settings_language_chinese_hong_kong" translatable="false">繁體中文（香港）</string>
     <string name="settings_language_chinese_traditional" translatable="false">繁體中文（台灣）</string>
     <string name="eis_plus_unavailable_title">EIS+ unavailable</string>
+    <string name="video_heat_warning_no_temp">Phone hot</string>
+    <string name="video_heat_degrees">%1$d °C</string>
+    <string name="video_heat_gauge_description">%1$s %2$d °C. Recording stops at %3$d °C.</string>
+    <string name="video_heat_stopped_title">Recording stopped</string>
+    <string name="video_heat_reached">%1$s reached %2$d °C</string>
+    <string name="video_heat_now">%1$s now %2$d °C</string>
+    <string name="video_heat_stopped_message">Your video is saved. The camera is off so the phone can cool down.</string>
+    <string name="video_heat_back_to_camera">Back to camera</string>
+    <string name="video_too_hot_to_start">%1$s at %2$d °C: too hot to record. Let the phone cool down.</string>
+    <string name="heat_source_camera">Camera</string>
+    <string name="heat_source_battery">Battery</string>
+    <string name="video_too_hot_to_start_no_temp">Phone too hot to record. Let it cool down.</string>
     <string name="eis_plus_unavailable_message">This device cannot disable its built-in camera stabilization. EIS+ has been turned off to avoid unstable video caused by double stabilization.</string>
     <string name="settings_video_nr_level_description">Set hardware noise reduction for video preview and recording independently of photos.</string>
     <string name="settings_video_edge_level_description">Set hardware sharpening for video preview and recording independently of photos.</string>
