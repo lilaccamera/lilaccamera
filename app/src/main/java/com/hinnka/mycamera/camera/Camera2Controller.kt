@@ -5419,9 +5419,14 @@ class Camera2Controller(private val context: Context) {
 
     private fun applyOisDataMode(builder: CaptureRequest.Builder, enabled: Boolean) {
         if (!isCaptureRequestKeyAvailable(CaptureRequest.STATISTICS_OIS_DATA_MODE.name)) return
+        // A listed request key does not mean ON is supported; HALs without OIS samples reject
+        // the whole request, which ends in a camera error.
+        val onSupported = getActiveOpenCameraCharacteristics()
+            ?.get(CameraCharacteristics.STATISTICS_INFO_AVAILABLE_OIS_DATA_MODES)
+            ?.contains(CaptureRequest.STATISTICS_OIS_DATA_MODE_ON) == true
         builder.set(
             CaptureRequest.STATISTICS_OIS_DATA_MODE,
-            if (enabled) {
+            if (enabled && onSupported) {
                 CaptureRequest.STATISTICS_OIS_DATA_MODE_ON
             } else {
                 CaptureRequest.STATISTICS_OIS_DATA_MODE_OFF
