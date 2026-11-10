@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -2251,6 +2252,8 @@ private fun Controls(
                             // The capture fly-in lands on the photo, inside the frame.
                             onGalleryThumbnailBoundsChanged(coordinates.boundsInRoot().deflate(thumbnailPhotoInsetPx))
                         }
+                        // After the bounds above, so making room for the mode list does not move the fly-in target.
+                        .graphicsLayer { makeRoom(line.side, -1f) }
                         .autoRotate()
                 ) {
                     GalleryThumbnail(
@@ -2346,6 +2349,7 @@ private fun Controls(
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
                             .padding(end = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
+                            .graphicsLayer { makeRoom(line.side, 1f) }
                             .size(CameraControlsLayoutDefaults.SideButtonSize)
                             .autoRotate()
                             .border(CameraControlsLayoutDefaults.LineWidth, CameraControlsLayoutDefaults.LineColor, switchShape),
@@ -2367,6 +2371,14 @@ private fun Controls(
             }
         }
     }
+}
+
+/** While the mode list opens, a side control slides 44 dp outward, shrinks a little and fades. */
+private fun GraphicsLayerScope.makeRoom(side: Float, direction: Float) {
+    translationX = direction * 44.dp.toPx() * side
+    scaleX = 1f - 0.12f * side
+    scaleY = scaleX
+    alpha = 1f - side
 }
 
 // Half a turn that swings about 12 % past and settles (back easing, c = 1.9).

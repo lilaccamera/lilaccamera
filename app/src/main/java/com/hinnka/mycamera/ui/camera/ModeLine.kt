@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -128,6 +129,8 @@ internal class ModeLineState(initial: CameraShootingMode) {
     val lift = Animatable(0f)
 
     val shownMode: CameraShootingMode get() = shootingModeAt(shown)
+    /** How far the side controls have made room; they move first, while the list opens. */
+    val side: Float get() = smoothstep((lift.value / 0.7f).coerceAtMost(1f))
 
     internal var posJob: Job? = null
     internal var closeJob: Job? = null
@@ -260,8 +263,21 @@ internal fun ModeLine(
             val cx = size.width / 2
             val cy = size.height / 2
             val unit = SPACING.dp.toPx()
-            // Ridges along the bottom edge, four per mode, travel with the list.
             val bottom = cy + (CameraControlsLayoutDefaults.ModeZoneHeight / 2 + CameraControlsLayoutDefaults.BottomPadding).toPx()
+            // A soft backdrop instead of a band of its own: it only shows over a picture reaching the footer.
+            val backdropTop = cy - 110.dp.toPx()
+            drawRect(
+                Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    0.45f to Color.Black.copy(alpha = 0.72f),
+                    startY = backdropTop,
+                    endY = bottom
+                ),
+                topLeft = Offset(0f, backdropTop),
+                size = Size(size.width, bottom + 48.dp.toPx() - backdropTop),
+                alpha = lift
+            )
+            // Ridges along the bottom edge, four per mode, travel with the list.
             for (k in 0 until 24) {
                 val offsetDp = (k / 4f - 0.5f - state.pos) * SPACING
                 val fade = (1f - (offsetDp / 185f).let { it * it }).coerceIn(0f, 1f)
