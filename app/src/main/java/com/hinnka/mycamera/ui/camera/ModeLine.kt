@@ -67,7 +67,8 @@ import kotlin.math.sign
 import kotlin.math.sin
 import kotlin.random.Random
 
-// Positions on the mode dial. Night and Portrait are listed but cannot be selected yet.
+// Positions on the mode dial. Night and Portrait are listed but cannot be selected yet. Without Pro (the
+// front camera has no RAW) Night and Portrait move up one place, next to Photo.
 private const val NIGHT = 0
 private const val PORTRAIT = 1
 private const val PRO = 2
@@ -79,7 +80,11 @@ private const val TRAVEL = 44f           // dp of finger travel per mode: one sl
 private const val SWIPE_START = 16f      // dp of mostly sideways push before the list moves
 private const val TAP_SLOP = 12f         // dp a neighbour tap may move
 private const val FLICK = 0.35f          // dp per ms
-private const val RESISTANCE = 0.3f      // past Pro and Video
+private const val RESISTANCE = 0.3f      // past the first selectable mode and Video
+private const val BUZZ_GAP = 60L         // ms of stillness between pulses; the vibrator runs pulses that come closer into one
+
+// The work-in-progress note is shown this often per app run; after that the dim marks and the end bar say it.
+private var wipToastsLeft = 2
 
 private val ModeAmber = Color(0xFFEF9F27)
 private val AutoGreen = Color(0xFF5DCAA5)
@@ -106,8 +111,8 @@ private fun latch(r: Float): Float {
     return n + t - 0.8f * sin(2f * PI.toFloat() * t) / (2f * PI.toFloat())
 }
 
-private fun resist(p: Float) = when {
-    p < PRO -> PRO + (p - PRO) * RESISTANCE
+private fun resist(p: Float, lo: Int) = when {
+    p < lo -> lo + (p - lo) * RESISTANCE
     p > VIDEO -> VIDEO + (p - VIDEO) * RESISTANCE
     else -> p
 }
@@ -136,6 +141,7 @@ internal class ModeLineState(initial: CameraShootingMode) {
     internal var closeJob: Job? = null
     internal var pastEnd = false
     internal var wipSaid = false
+    internal var buzzFreeAt = 0L
 }
 
 /**
@@ -163,7 +169,10 @@ internal fun ModeLine(
     val soundEnabled by preferenceValue { it.shutterSoundEnabled }
     val currentEnabled by rememberUpdatedState(enabled)
     val currentRecording by rememberUpdatedState(recording)
-    val currentProAvailable by rememberUpdatedState(proAvailable)
+    // The first mode the dial can land on, and where each mark sits.
+    val lo = if (proAvailable) PRO else PHOTO
+    val currentLo by rememberUpdatedState(lo)
+    fun slotOf(i: Int) = if (!proAvailable && i < PRO) i + 1 else i
     val currentOnSelect by rememberUpdatedState(onSelect)
 
     // A mode change from elsewhere (the front camera has no Pro, for example) moves the dial silently.
@@ -179,19 +188,33 @@ internal fun ModeLine(
 
     fun say(text: Int) = Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
 
-    fun setPos(p: Float) {
-        state.pos = p
-        val over = p < PRO - 0.08f || p > VIDEO + 0.08f
-        if (over && !state.pastEnd) vibration.vibrate()
-        state.pastEnd = over
-        if (p < PRO - 0.15f && !state.wipSaid) {
-            state.wipSaid = true
+    fun sayWip() {
+        state.wipSaid = true
+        if (wipToastsLeft > 0) {
+            wipToastsLeft--
             say(R.string.capture_mode_wip)
         }
-        val detent = p.roundToInt().coerceIn(PRO, VIDEO)
+    }
+
+    // A fast swipe skips pulses rather than queue them into one long buzz.
+    fun buzz(ms: Long) {
+        val now = SystemClock.uptimeMillis()
+        if (now < state.buzzFreeAt) return
+        state.buzzFreeAt = now + ms + BUZZ_GAP
+        vibration.vibrate(ms)
+    }
+
+    fun setPos(p: Float) {
+        state.pos = p
+        val first = currentLo
+        val over = p < first - 0.08f || p > VIDEO + 0.08f
+        if (over && !state.pastEnd) buzz(50L)
+        state.pastEnd = over
+        if (p < first - 0.15f && !state.wipSaid) sayWip()
+        val detent = p.roundToInt().coerceIn(first, VIDEO)
         if (detent != state.shown) {
             state.shown = detent
-            vibration.vibrate(VibrationHelper.LIGHT_TICK_MS)
+            buzz(VibrationHelper.LIGHT_TICK_MS)
             if (soundEnabled) click.play()
         }
     }
@@ -220,12 +243,6 @@ internal fun ModeLine(
     fun settleMs(target: Int) = (160 + 70 * abs(target - state.pos)).toInt()
 
     fun commit(target: Int, closeAfterMs: Long) {
-        if (target == PRO && !currentProAvailable) {
-            // The Pro dialog explains why; the dial goes back to the mode in use.
-            currentOnSelect(CameraShootingMode.PROFESSIONAL)
-            roll(state.mode, settleMs(state.mode)) { close(closeAfterMs) }
-            return
-        }
         if (target != state.mode) {
             state.mode = target
             currentOnSelect(shootingModeAt(target))
@@ -237,14 +254,12 @@ internal fun ModeLine(
         val k = sign(x).toInt()
         val target = state.mode + k
         if (abs(abs(x) - SPACING) >= 28f || target !in NIGHT..VIDEO) return
-        when {
-            target < PRO -> say(R.string.capture_mode_wip)
-            target == PRO && !currentProAvailable -> currentOnSelect(CameraShootingMode.PROFESSIONAL)
-            else -> {
-                // The whole list plays out, which also shows that it can be swiped.
-                open()
-                roll(target, 380) { commit(target, 420) }
-            }
+        if (target < currentLo) {
+            sayWip()
+        } else {
+            // The whole list plays out, which also shows that it can be swiped.
+            open()
+            roll(target, 380) { commit(target, 420) }
         }
     }
 
@@ -287,8 +302,8 @@ internal fun ModeLine(
                     strokeWidth = 1.5.dp.toPx(), alpha = lift * 0.8f * fade
                 )
             }
-            // End bars just outside Pro and Video: the list stops there.
-            for (end in floatArrayOf(PRO - 0.5f, VIDEO + 0.62f)) {
+            // End bars just outside the first selectable mode and Video: the list stops there.
+            for (end in floatArrayOf(lo - 0.5f, VIDEO + 0.62f)) {
                 val x = cx + (end - state.pos) * unit
                 drawRoundRect(
                     EndBarColor,
@@ -356,7 +371,7 @@ internal fun ModeLine(
                             }
                             // Consuming the swipe also cancels the shutter's tap and long press.
                             change.consume()
-                            setPos(resist(latch(p0 - (dx - shift) / travel)))
+                            setPos(resist(latch(p0 - (dx - shift) / travel), currentLo))
                         }
                         state.nudge = 0f
                         if (swiping) {
@@ -372,8 +387,8 @@ internal fun ModeLine(
                                     (state.pos + v * 220f / TRAVEL).roundToInt()
                                 }
                             }
-                            if (target < PRO && !state.wipSaid) say(R.string.capture_mode_wip)
-                            target = target.coerceIn(PRO, VIDEO)
+                            if (target < currentLo && !state.wipSaid) sayWip()
+                            target = target.coerceIn(currentLo, VIDEO)
                             roll(target, settleMs(target)) { commit(target, 260) }
                         } else if (!ignored && !onShutter && currentEnabled &&
                             hypot(dx, dy) / density <= TAP_SLOP
@@ -393,22 +408,24 @@ internal fun ModeLine(
             else -> 1f
         }
         for (i in NIGHT..VIDEO) {
-            val neighbour = abs(i - state.mode) == 1 && enabled
-            val unavailable = i < PRO || (i == PRO && !proAvailable)
+            if (i == PRO && !proAvailable) continue
+            val slot = slotOf(i)
+            val neighbour = abs(slot - state.mode) == 1 && enabled
+            val unavailable = slot < lo
             Box(
                 modifier = Modifier
                     .offset {
                         val lift = state.lift.value
-                        val k = i - state.mode
-                        val listX = (i - state.pos) * SPACING
+                        val k = slot - state.mode
+                        val listX = (slot - state.pos) * SPACING
                         val closedX = if (abs(k) == 1) k * SPACING else listX
                         IntOffset(lerp(closedX, listX, lift).dp.roundToPx(), 0)
                     }
                     .graphicsLayer {
                         val lift = state.lift.value
-                        val closedAlpha = if (abs(i - state.mode) == 1) 0.6f else 0f
+                        val closedAlpha = if (abs(slot - state.mode) == 1) 0.6f else 0f
                         // Hidden while it passes behind the shutter.
-                        val openAlpha = ((abs(i - state.pos) * SPACING - 52f) / 18f).coerceIn(0f, 1f)
+                        val openAlpha = ((abs(slot - state.pos) * SPACING - 52f) / 18f).coerceIn(0f, 1f)
                         alpha = lerp(closedAlpha, openAlpha, lift) * (if (unavailable) 0.4f else 1f) * dim
                     }
                     .clearAndSetSemantics {
@@ -416,7 +433,7 @@ internal fun ModeLine(
                             role = Role.Button
                             contentDescription = names[i]
                             onClick {
-                                tapNeighbour((i - state.mode) * SPACING)
+                                tapNeighbour((slot - state.mode) * SPACING)
                                 true
                             }
                         }
