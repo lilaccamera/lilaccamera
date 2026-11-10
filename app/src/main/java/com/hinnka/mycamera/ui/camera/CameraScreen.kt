@@ -2192,7 +2192,7 @@ private fun Controls(
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterStart)
-                        .padding(start = sideControlInset ?: 32.dp)
+                        .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
                         .onGloballyPositioned { coordinates ->
                             onGalleryThumbnailBoundsChanged(coordinates.boundsInRoot())
                         }
@@ -2264,7 +2264,7 @@ private fun Controls(
                         onClick = { viewModel.captureVideoFrame() },
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
-                            .padding(end = sideControlInset ?: 40.dp)
+                            .padding(end = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
                             .size(CameraControlsLayoutDefaults.SideButtonSize)
                             .autoRotate()
                     ) {
@@ -2285,8 +2285,9 @@ private fun Controls(
                             }
                         },
                         modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .padding(start = 100.dp)
+                            .align(Alignment.Center)
+                            // One column left of the shutter.
+                            .offset(x = -CameraControlsLayoutDefaults.ColumnPitch)
                             .size(48.dp)
                             .autoRotate()
                     ) {
@@ -2306,7 +2307,7 @@ private fun Controls(
                         },
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
-                            .padding(end = sideControlInset ?: 40.dp)
+                            .padding(end = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
                             .size(CameraControlsLayoutDefaults.SideButtonSize)
                             .autoRotate(),
                         shape = CircleShape

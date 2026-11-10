@@ -21,6 +21,10 @@ internal object CameraControlsLayoutDefaults {
     val BarSpacing = 4.dp
     val ViewfinderModeSpacing = 12.dp
 
+    // Footer grid: side controls centred 40 dp from the screen edges, columns 70 dp apart.
+    val SideMargin = 16.dp
+    val ColumnPitch = 70.dp
+
     val ModeAreaHeight = ModeSwitcherSpacing + ModeSwitcherHeight + BottomPadding
     val XpanViewfinderClearance = ViewfinderModeSpacing + ModeSwitcherHeight + BottomPadding
     val CaptureAreaHeight = CaptureButtonSize + ModeAreaHeight
