@@ -484,7 +484,7 @@ private fun PresetManagementItem(
 }
 
 @Composable
-private fun presetDisplayName(preset: CameraPreset): String {
+internal fun presetDisplayName(preset: CameraPreset): String {
     return when (preset.id) {
         "builtin_default" -> stringResource(R.string.default_text)
         "builtin_hasselblad_natural" -> stringResource(R.string.preset_builtin_hasselblad_natural)
