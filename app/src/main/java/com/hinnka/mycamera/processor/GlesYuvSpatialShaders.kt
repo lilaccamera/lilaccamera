@@ -283,23 +283,6 @@ internal object GlesYuvSpatialShaders {
         }
     """.trimIndent()
 
-    /** Normalize native-grid samples before interpolation: merge confidence is not image alpha. */
-    val lanczosOutput = buildLanczosOutput("""
-        vec3 lanczosSource(ivec2 p) {
-            vec4 a = texelFetch(uAccumulator, clamp(p, ivec2(0), uInputSize - 1), 0);
-            return a.a > 1.0e-4 ? clamp(a.rgb / a.a, 0.0, 1.0) : vec3(0.0, 0.5, 0.5);
-        }
-    """.trimIndent())
-
-    val lanczosFrameOutput = buildLanczosOutput("""
-        vec3 lanczosSource(ivec2 p) {
-            p = clamp(p, ivec2(0), uInputSize - 1);
-            float y = texelFetch(uCurrentY, p, 0).r;
-            vec2 cbcr = texelFetch(uCurrentCbCr, p / 2, 0).rg;
-            return vec3(y, cbcr);
-        }
-    """.trimIndent())
-
     /**
      * Brightens a gamma-encoded colour by uOutputGain in linear light. The lift rolls off towards
      * white (gain at black, 1 at white) and scales all channels alike, so hues and white stay put.
@@ -317,6 +300,23 @@ internal object GlesYuvSpatialShaders {
             return pow(linear * (lifted / peak), vec3(1.0 / 2.2));
         }
     """.trimIndent()
+
+    /** Normalize native-grid samples before interpolation: merge confidence is not image alpha. */
+    val lanczosOutput = buildLanczosOutput("""
+        vec3 lanczosSource(ivec2 p) {
+            vec4 a = texelFetch(uAccumulator, clamp(p, ivec2(0), uInputSize - 1), 0);
+            return a.a > 1.0e-4 ? clamp(a.rgb / a.a, 0.0, 1.0) : vec3(0.0, 0.5, 0.5);
+        }
+    """.trimIndent())
+
+    val lanczosFrameOutput = buildLanczosOutput("""
+        vec3 lanczosSource(ivec2 p) {
+            p = clamp(p, ivec2(0), uInputSize - 1);
+            float y = texelFetch(uCurrentY, p, 0).r;
+            vec2 cbcr = texelFetch(uCurrentCbCr, p / 2, 0).rg;
+            return vec3(y, cbcr);
+        }
+    """.trimIndent())
 
     private fun buildLanczosOutput(source: String) = """
         #version 300 es
