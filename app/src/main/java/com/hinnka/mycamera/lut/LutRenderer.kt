@@ -198,6 +198,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     fun setPortraitFace(face: com.hinnka.mycamera.preview.PortraitFace?) {
         portraitBlurGl.target = face
     }
+
+    fun setPortraitAperture(aperture: Float) {
+        portraitBlurGl.setAperture(aperture)
+    }
     private val highlightDiffusionGl = HighlightDiffusionGl(TAG)
     private val previewLiteEffects = PreviewLiteEffectsGl(TAG)
     private val toneBase = ToneBaseGl(TAG)

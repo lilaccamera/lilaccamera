@@ -42,6 +42,7 @@
     <string name="camera_parameter_focus" translatable="false">AF</string>
     <string name="camera_parameter_focus_auto">Auto</string>
     <string name="camera_parameter_white_balance" translatable="false">AWB</string>
+    <string name="camera_parameter_aperture" translatable="false">Av</string>
     <string name="camera_parameter_auto" translatable="false">A</string>
     <string name="camera_parameter_hyperfocal_mark" translatable="false">H</string>
 

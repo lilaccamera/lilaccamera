@@ -272,6 +272,12 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         requestRender()
     }
 
+    /** The Portrait aperture (f-number) the viewfinder blur follows. */
+    fun setPortraitAperture(aperture: Float) {
+        renderer.setPortraitAperture(aperture)
+        requestRender()
+    }
+
     fun updateEyeFocusTiming(timing: EyeFocusProcessingTiming) {
         renderer.updateEyeFocusTiming(timing)
     }
