@@ -1367,7 +1367,7 @@ class Camera2Controller(private val context: Context) {
 
             // 独立测光会主动改变曝光，期间保留用户选定的 AF 点，直到重新点按或解锁。
             // 其余状态在对焦后持续监测曝光变化和焦距跳变。
-            if (_state.value.isAutoFocus && isFocusLockedWaitingForSceneChange && _state.value.meteringPoint == null) {
+            if (_state.value.isAutoFocus && isFocusLockedWaitingForSceneChange && _state.value.meteringPoint == null && !shutterKeyHold) {
                 // 对焦锁定后前几帧镜头还在微调，跳过不检测
                 if (focusLockSettleFrames > 0) {
                     focusLockSettleFrames--
@@ -6413,6 +6413,8 @@ class Camera2Controller(private val context: Context) {
         try {
             val point = if (mode == MeteringMode.HIGHLIGHT_PRIORITY && highlightPointInitialized) {
                 highlightPointSmoothedX to highlightPointSmoothedY
+            } else if (mode == MeteringMode.CENTER_WEIGHTED) {
+                0.5f to 0.5f  // centre-weighted stays centred; a tap only focuses
             } else {
                 currentState.meteringReferencePoint ?: (0.5f to 0.5f)
             }
@@ -6992,9 +6994,9 @@ class Camera2Controller(private val context: Context) {
 
     private fun recordFocusLockExposure(result: CaptureResult) {
         updateFocusLockSceneReference(result)
+        sceneExposureReferencePending = true
         isFocusLockedWaitingForSceneChange = true
         focusLockSettleFrames = FOCUS_LOCK_SETTLE_FRAMES
-        sceneExposureReferencePending = true
         sceneChangeFrameCount = 0
     }
 
@@ -7062,16 +7064,22 @@ class Camera2Controller(private val context: Context) {
         )
     }
 
-    fun lockFocusOnPoint(x: Float, y: Float, viewWidth: Int, viewHeight: Int) {
-        if (viewWidth <= 0 || viewHeight <= 0) return
-        PLog.d(TAG, "Lock focus on point: x=$x y=$y w=$viewWidth h=$viewHeight")
-        focusOnNormalizedPoint(
-            normX = x / viewWidth,
-            normY = y / viewHeight,
-            source = FocusPointSource.MANUAL,
-            lockFocus = true,
-            previewViewAspectRatio = viewWidth.toFloat() / viewHeight,
-        )
+    // A half-pressed camera key holds focus and exposure, like a camera's shutter button with AE lock.
+    private var shutterKeyHold = false
+
+    fun setShutterKeyHold(held: Boolean) {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { setShutterKeyHold(held) }
+            return
+        }
+        shutterKeyHold = held
+        val aeLockAvailable = getActiveOpenCameraCharacteristics()
+            ?.get(CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE) == true
+        previewRequestBuilder?.apply {
+            if (aeLockAvailable) set(CaptureRequest.CONTROL_AE_LOCK, held)
+            updatePreview()
+        }
     }
 
     /** 拖动中更新 AF 区域，松手后扫描一次；整个过程保持独立 AE 区域。 */

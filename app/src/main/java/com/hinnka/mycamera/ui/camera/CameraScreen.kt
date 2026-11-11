@@ -86,6 +86,7 @@ import com.hinnka.mycamera.camera.DeviceQuirks
 import com.hinnka.mycamera.camera.MultiFrameConfig
 import com.hinnka.mycamera.camera.FocusPointSource
 import com.hinnka.mycamera.camera.LensType
+import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.camera.PhotoCaptureProgress
 import com.hinnka.mycamera.data.CaptureButtonStyle
 import com.hinnka.mycamera.data.DevelopAnimationStyle
@@ -1438,8 +1439,10 @@ fun CameraScreen(
                             colorRecipeParams = previewRecipeParamsOverride ?: currentRecipeParams,
                             focusPoint = state.focusPoint,
                             meteringPoint = state.meteringPoint,
-                            canMoveMeteringPoint = state.supportsPointMetering &&
+                            // Only Spot metering's circle can be pulled off the focus frame.
+                            canMoveMeteringPoint = state.supportsPointMetering && state.meteringMode == MeteringMode.SPOT &&
                                 !state.isCapturing && activePanel == ActivePanel.NONE,
+                            meteringCircleMode = if (state.supportsPointMetering) state.meteringMode else MeteringMode.SYSTEM_DEFAULT,
                             onMeteringPointMove = viewModel::moveMeteringPoint,
                             onFocusPointMove = viewModel::moveFocusPoint,
                             onMeteringPointMerge = viewModel::mergeMeteringPoint,
@@ -1465,20 +1468,16 @@ fun CameraScreen(
                                 showParameterRuler = false
                                 scrubRulerShown = false
                                 if (activePanel == ActivePanel.SETTINGS) activePanel = ActivePanel.NONE
-                                if (state.isFocusLocked) {
-                                    viewModel.unlockFocus()
-                                } else if (activePanel != ActivePanel.NONE) {
+                                if (activePanel != ActivePanel.NONE) {
                                     activePanel = ActivePanel.NONE
                                 } else {
                                     viewModel.focusOnPoint(x, y, w, h)
                                 }
                             },
-                            onLongPress = { x, y, w, h ->
-                                if (activePanel != ActivePanel.NONE) {
-                                    activePanel = ActivePanel.NONE
-                                } else {
-                                    viewModel.lockFocusOnPoint(x, y, w, h)
-                                }
+                            // No focus lock on the picture, as on a Sony camera: the camera key's half-press holds
+                            // focus and exposure, and manual values are the lasting lock.
+                            onLongPress = { _, _, _, _ ->
+                                if (activePanel != ActivePanel.NONE) activePanel = ActivePanel.NONE
                             },
                             onHistogramUpdated = { viewModel.handleHistogramUpdate(it) },
                             onMeteringUpdated = { w, l -> viewModel.handleMeteringUpdate(w, l) },

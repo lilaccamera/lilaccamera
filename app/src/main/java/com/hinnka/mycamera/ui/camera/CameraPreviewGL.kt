@@ -64,6 +64,7 @@ fun CameraPreviewGL(
     isFocusing: Boolean,
     focusSuccess: Boolean?,
     fixedFocus: Boolean = false,
+    meteringCircleMode: MeteringMode = MeteringMode.SYSTEM_DEFAULT,
     meteringMode: MeteringMode = MeteringMode.SYSTEM_DEFAULT,
     onSurfaceTextureReady: (SurfaceTexture) -> Unit,
     onSurfaceDestroyed: (SurfaceTexture?) -> Unit,
@@ -350,6 +351,7 @@ fun CameraPreviewGL(
                 isFocusing = isFocusing,
                 focusSuccess = focusSuccess,
                 fixedFocus = fixedFocus,
+                meteringMode = meteringCircleMode,
                 modifier = Modifier.fillMaxSize()
             )
         }

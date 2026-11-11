@@ -4102,10 +4102,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.mergeMeteringPoint()
     }
 
-    fun lockFocusOnPoint(x: Float, y: Float, viewWidth: Int, viewHeight: Int) {
-        cameraController.lockFocusOnPoint(x, y, viewWidth, viewHeight)
-    }
-
     fun unlockFocus() {
         cameraController.unlockFocus()
     }
@@ -4120,8 +4116,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         shutterKeyFocusHeld = true
         val point = s.focusPoint
         when {
-            // A point the user tapped is already locked; keep it.
-            point != null && s.focusPointSource == FocusPointSource.MANUAL && s.isFocusLocked ->
+            // A point the user tapped holds, as a camera's focus area does.
+            point != null && s.focusPointSource == FocusPointSource.MANUAL ->
                 shutterKeyOwnsFocusLock = false
             point != null && s.focusPointSource == FocusPointSource.EYE -> {
                 cameraController.focusOnNormalizedPoint(point.first, point.second, FocusPointSource.EYE, lockFocus = true)
@@ -4132,11 +4128,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 shutterKeyOwnsFocusLock = true
             }
         }
+        cameraController.setShutterKeyHold(true)
     }
 
     fun onShutterKeyHalfRelease() {
         if (!shutterKeyFocusHeld) return
         shutterKeyFocusHeld = false
+        cameraController.setShutterKeyHold(false)
         if (shutterKeyOwnsFocusLock) {
             shutterKeyOwnsFocusLock = false
             unlockFocus()

@@ -2,42 +2,32 @@ package com.hinnka.mycamera.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.drag
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material3.Icon
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.FocusPointSource
+import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.utils.VibrationHelper
 import kotlinx.coroutines.delay
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 /**
  * 对焦指示器
@@ -56,6 +46,7 @@ fun FocusIndicator(
     focusSuccess: Boolean?,
     // A fixed-focus camera (most front cameras): a tap only sets exposure, so only its circle shows.
     fixedFocus: Boolean = false,
+    meteringMode: MeteringMode = MeteringMode.SYSTEM_DEFAULT,
     modifier: Modifier = Modifier
 ) {
     var visible by remember { mutableStateOf(position != null) }
@@ -128,6 +119,7 @@ fun FocusIndicator(
     // Once focus has settled the mark fades, as on a camera; a locked or split mark stays to show it.
     var faded by remember { mutableStateOf(false) }
     LaunchedEffect(position, focusSuccess, isFocusLocked, isSeparated) {
+        if (position == null) return@LaunchedEffect  // cleared: keep fading, never flash back
         faded = false
         if (!isTapMark || (focusSuccess == null && !fixedFocus) || isFocusLocked || isSeparated) return@LaunchedEffect
         delay(1500)
@@ -144,11 +136,29 @@ fun FocusIndicator(
         }
     }
 
-    val displayPosition = position ?: Pair(0f, 0f)
-    val density = LocalDensity.current
+    // While the mark fades out after the point is cleared it stays where it was.
+    val lastPosition = remember { arrayOf(Pair(0.5f, 0.5f)) }
+    if (position != null) lastPosition[0] = position
+    val displayPosition = position ?: lastPosition[0]
+
+    // Metering circles, as on a Sony camera: Spot's sits in the centre until a tap moves it with the focus
+    // frame, and stays; Centre-weighted's is fixed in the centre. The other modes show none.
+    val circleCenter = when (meteringMode) {
+        MeteringMode.SPOT -> meteringPosition ?: position?.takeIf { source == FocusPointSource.MANUAL } ?: (0.5f to 0.5f)
+        MeteringMode.CENTER_WEIGHTED -> 0.5f to 0.5f
+        else -> null
+    }
+    if (circleCenter != null) {
+        Canvas(modifier.fillMaxSize()) {
+            val center = Offset(circleCenter.first * size.width, circleCenter.second * size.height)
+            val radius = SpotCircleRadius.toPx()
+            drawCircle(Color.Black.copy(alpha = 0.3f), radius, center, style = Stroke(3.dp.toPx()))
+            drawCircle(Color.White, radius, center, style = Stroke(TapFrameLine.toPx()))
+        }
+    }
 
     AnimatedVisibility(visible = visible, modifier = modifier.fillMaxSize()) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize()) {
             Canvas(
                 modifier = Modifier.fillMaxSize()
                     .pointerInput(canMoveMeteringPoint, source, position != null) {
@@ -308,64 +318,26 @@ fun FocusIndicator(
                     )
                 }
 
-                if (source == FocusPointSource.MANUAL && (canMoveMeteringPoint || isSeparated || fixedFocus)) {
+                if (isSeparated) {
                     val point = meteringPosition ?: displayPosition
                     val center = Offset(point.first * size.width, point.second * size.height)
-                    val radius = 11.dp.toPx()
-                    drawCircle(
-                        color = Color.White.copy(alpha = alpha * tapMarkAlpha),
-                        radius = radius,
-                        center = center,
-                        style = Stroke(width = 1.5.dp.toPx()),
-                    )
-                    if (isSeparated) {
-                        fun labelTopLeft(center: Offset, radius: Float, width: Int, height: Int): Offset {
-                            val below = center.y + radius + 5.dp.toPx()
-                            val top = if (below + height <= size.height) below
-                                else center.y - radius - 5.dp.toPx() - height
-                            return Offset(
-                                (center.x - width / 2f).coerceIn(0f, (size.width - width).coerceAtLeast(0f)),
-                                top.coerceIn(0f, (size.height - height).coerceAtLeast(0f)),
-                            )
-                        }
-                        drawText(
-                            focusLabel,
-                            topLeft = labelTopLeft(Offset(x, y), halfSize, focusLabel.size.width, focusLabel.size.height),
-                        )
-                        drawText(
-                            meteringLabel,
-                            topLeft = labelTopLeft(center, radius, meteringLabel.size.width, meteringLabel.size.height),
+                    val radius = SpotCircleRadius.toPx()
+                    fun labelTopLeft(center: Offset, radius: Float, width: Int, height: Int): Offset {
+                        val below = center.y + radius + 5.dp.toPx()
+                        val top = if (below + height <= size.height) below
+                            else center.y - radius - 5.dp.toPx() - height
+                        return Offset(
+                            (center.x - width / 2f).coerceIn(0f, (size.width - width).coerceAtLeast(0f)),
+                            top.coerceIn(0f, (size.height - height).coerceAtLeast(0f)),
                         )
                     }
-                }
-            }
-
-            if (source == FocusPointSource.MANUAL && isFocusLocked && position != null) {
-                val badgeSize = 24.dp
-                val badgeSizePx = with(density) { badgeSize.toPx() }
-                val focusHalfSizePx = with(density) { (TapFrameSize / 2).toPx() }
-                val maxWidthPx = constraints.maxWidth.toFloat()
-                val maxHeightPx = constraints.maxHeight.toFloat()
-                val offsetX = (displayPosition.first * maxWidthPx + focusHalfSizePx - badgeSizePx * 0.55f)
-                    .coerceIn(0f, (maxWidthPx - badgeSizePx).coerceAtLeast(0f))
-                val offsetY = (displayPosition.second * maxHeightPx - focusHalfSizePx - badgeSizePx * 0.45f)
-                    .coerceIn(0f, (maxHeightPx - badgeSizePx).coerceAtLeast(0f))
-                val badgeColor = color.copy(alpha = alpha.coerceAtLeast(0.75f))
-
-                Box(
-                    modifier = Modifier
-                        .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
-                        .size(badgeSize)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.55f))
-                        .border(1.dp, badgeColor, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Lock,
-                        contentDescription = null,
-                        tint = badgeColor,
-                        modifier = Modifier.size(14.dp)
+                    drawText(
+                        focusLabel,
+                        topLeft = labelTopLeft(Offset(x, y), halfSize, focusLabel.size.width, focusLabel.size.height),
+                    )
+                    drawText(
+                        meteringLabel,
+                        topLeft = labelTopLeft(center, radius, meteringLabel.size.width, meteringLabel.size.height),
                     )
                 }
             }
@@ -375,5 +347,6 @@ fun FocusIndicator(
 
 private val TapFrameSize = 42.dp
 private val TapFrameLine = 1.25.dp
+private val SpotCircleRadius = 11.dp
 // The bright green of a Sony camera's in-focus frame.
 private val FocusGreen = Color(0xFF3FE03F)
