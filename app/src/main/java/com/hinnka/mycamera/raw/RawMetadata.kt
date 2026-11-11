@@ -8,6 +8,7 @@ import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.RggbChannelVector
 import android.util.Log
 import android.util.Rational
+import com.hinnka.mycamera.camera.LilacLensShading
 import com.hinnka.mycamera.camera.readMetadataOrNull
 import com.hinnka.mycamera.camera.readMetadataOrThrow
 import com.hinnka.mycamera.processor.CalibratedRawNoiseProfile
@@ -475,9 +476,15 @@ data class RawMetadata(
             // 6. 获取镜头阴影校正
             val shadingMap = captureResult.get(CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
             var lensShadingMap: FloatArray? = null
+            var lensShadingGrid: FloatArray? = null
             var shadingWidth = 0
             var shadingHeight = 0
-            if (shadingMap != null) {
+            if (LilacLensShading.appliesTo(characteristics, shadingMap)) {
+                lensShadingMap = LilacLensShading.GAINS.copyOf()
+                lensShadingGrid = LilacLensShading.dngGrid(width, height)
+                shadingWidth = LilacLensShading.COLUMNS
+                shadingHeight = LilacLensShading.ROWS
+            } else if (shadingMap != null) {
                 shadingWidth = shadingMap.columnCount
                 shadingHeight = shadingMap.rowCount
                 lensShadingMap = FloatArray(shadingWidth * shadingHeight * 4)
@@ -541,6 +548,7 @@ data class RawMetadata(
                 lensShadingMap = lensShadingMap,
                 lensShadingMapWidth = shadingWidth,
                 lensShadingMapHeight = shadingHeight,
+                lensShadingMapGrid = lensShadingGrid,
                 postRawSensitivityBoost = postRawSensitivityBoost,
                 baselineExposure = 0f,
                 channelNoiseProfile = channelNoiseProfile,

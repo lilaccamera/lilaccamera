@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.SystemClock
 import com.hinnka.mycamera.camera.readMetadataOrThrow
 import com.hinnka.mycamera.camera.CaptureInfo
+import com.hinnka.mycamera.camera.LilacLensShading
 import com.hinnka.mycamera.raw.DngNoiseProfile
 import com.hinnka.mycamera.raw.DngProfileGainTableMap
 import com.hinnka.mycamera.raw.DngCameraRawProfileXmp
@@ -587,6 +588,7 @@ object SuperResolutionDngWriter {
         val samplesPerPixel = imageLayout.samplesPerPixel
         val opcodeList2 = if (isCfa && !pixelsIncludeLensShadingCorrection) {
             buildOpcodeList2(
+                characteristics = characteristics,
                 captureResult = captureResult,
                 cfaPattern = cfaPattern,
                 geometry = geometry,
@@ -1143,30 +1145,36 @@ object SuperResolutionDngWriter {
     }
 
     private fun buildOpcodeList2(
+        characteristics: CameraCharacteristics,
         captureResult: CaptureResult,
         cfaPattern: Int,
         geometry: DngGeometry,
         physicalRawCrop: RawPhysicalCrop?,
     ): ByteArray? {
-        val lensShadingMap = captureResult.get(CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
+        val cameraShadingMap = captureResult.get(CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
+        val useLilacMap = LilacLensShading.appliesTo(characteristics, cameraShadingMap)
+        val mapWidth = if (useLilacMap) LilacLensShading.COLUMNS else cameraShadingMap?.columnCount ?: 0
+        val mapHeight = if (useLilacMap) LilacLensShading.ROWS else cameraShadingMap?.rowCount ?: 0
         val dim = RawCfaCorrection.repeatPatternDim(cfaPattern)
         val encodedOpcodes = mutableListOf<ByteArray>()
-        if (lensShadingMap != null && lensShadingMap.columnCount > 0 && lensShadingMap.rowCount > 0) {
-            val originalGains = FloatArray(
-                lensShadingMap.columnCount * lensShadingMap.rowCount * 4,
-            ).also { lensShadingMap.copyGainFactors(it, 0) }
+        if (mapWidth > 0 && mapHeight > 0) {
+            val originalGains = if (useLilacMap) {
+                LilacLensShading.GAINS
+            } else {
+                FloatArray(mapWidth * mapHeight * 4).also { cameraShadingMap!!.copyGainFactors(it, 0) }
+            }
             val gains = physicalRawCrop?.cropLensShadingMap(
                 source = originalGains,
-                mapWidth = lensShadingMap.columnCount,
-                mapHeight = lensShadingMap.rowCount,
+                mapWidth = mapWidth,
+                mapHeight = mapHeight,
             ) ?: originalGains
             for (top in 0 until dim[0]) {
                 for (left in 0 until dim[1]) {
                     val channel = RawCfaCorrection.camera2LensShadingChannelIndexForPixel(cfaPattern, left, top)
                     encodedOpcodes += buildGainMapOpcode(
                         gains = gains,
-                        mapWidth = lensShadingMap.columnCount,
-                        mapHeight = lensShadingMap.rowCount,
+                        mapWidth = mapWidth,
+                        mapHeight = mapHeight,
                         channel = channel,
                         top = top,
                         left = left,
