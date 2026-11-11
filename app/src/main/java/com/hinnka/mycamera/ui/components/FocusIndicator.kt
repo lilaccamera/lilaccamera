@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -33,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.FocusPointSource
+import com.hinnka.mycamera.utils.VibrationHelper
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -52,6 +54,8 @@ fun FocusIndicator(
     isFocusLocked: Boolean = false,
     isFocusing: Boolean,
     focusSuccess: Boolean?,
+    // A fixed-focus camera (most front cameras): a tap only sets exposure, so only its circle shows.
+    fixedFocus: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     var visible by remember { mutableStateOf(position != null) }
@@ -76,6 +80,7 @@ fun FocusIndicator(
         targetValue = when {
             isSeparated -> 1f
             isFocusing -> 1f
+            fixedFocus && position != null -> 1f
             source == FocusPointSource.EYE && position != null -> 0.9f
             isFocusLocked && focusSuccess != false -> 0.9f
             focusSuccess == true -> 0.8f
@@ -87,19 +92,48 @@ fun FocusIndicator(
         label = "focusAlpha"
     )
 
-    // 聚焦动画
+    // A tap mark works like a Sony camera's focus frame: white while focusing, green with a light tick
+    // once focus locks, a white blink on a miss; it appears a little large and settles as focus locks.
+    val isTapMark = source != FocusPointSource.EYE
     val scale by animateFloatAsState(
-        targetValue = if (focusSuccess == true) 0.8f else 1f,
-        animationSpec = tween(300),
+        targetValue = when {
+            isTapMark -> if (focusSuccess == true) 1f else 1.25f
+            focusSuccess == true -> 0.8f
+            else -> 1f
+        },
+        animationSpec = if (isTapMark) tween(220, easing = CubicBezierEasing(0.3f, 1.35f, 0.5f, 1f)) else tween(300),
         label = "focusScale"
     )
-    
+
     // 颜色
-    val color = when (focusSuccess) {
-        true -> Color.Green
-        false -> Color.Red
-        else -> if (source == FocusPointSource.EYE) Color(0xFF64D8FF) else Color.White
+    val color = when {
+        isTapMark -> if (focusSuccess == true) FocusGreen else Color.White
+        focusSuccess == true -> Color.Green
+        focusSuccess == false -> Color.Red
+        else -> Color(0xFF64D8FF)
     }
+
+    val context = LocalContext.current
+    val vibration = remember(context) { VibrationHelper(context) }
+    var blinkOff by remember { mutableStateOf(false) }
+    LaunchedEffect(focusSuccess) {
+        blinkOff = false
+        if (!isTapMark || currentFocusPosition == null) return@LaunchedEffect
+        when (focusSuccess) {
+            true -> vibration.vibrate(VibrationHelper.LIGHT_TICK_MS)
+            false -> repeat(3) { blinkOff = true; delay(120); blinkOff = false; delay(120) }
+            null -> Unit
+        }
+    }
+    // Once focus has settled the mark fades, as on a camera; a locked or split mark stays to show it.
+    var faded by remember { mutableStateOf(false) }
+    LaunchedEffect(position, focusSuccess, isFocusLocked, isSeparated) {
+        faded = false
+        if (!isTapMark || (focusSuccess == null && !fixedFocus) || isFocusLocked || isSeparated) return@LaunchedEffect
+        delay(1500)
+        faded = true
+    }
+    val tapMarkAlpha by animateFloatAsState(if (isTapMark && faded) 0f else 1f, tween(300), label = "focusFade")
 
     LaunchedEffect(position) {
         if (position != null) {
@@ -123,7 +157,7 @@ fun FocusIndicator(
                         }
                         val hitRadius = 24.dp.toPx()
                         val circleRadius = 11.dp.toPx()
-                        val focusHalfSize = 30.dp.toPx()
+                        val focusHalfSize = (TapFrameSize / 2).toPx()
                         val focusHitHalfSize = 38.dp.toPx()
                         val mergeRadius = 16.dp.toPx()
                         awaitEachGesture {
@@ -200,75 +234,86 @@ fun FocusIndicator(
             ) {
                 val x = displayPosition.first * size.width
                 val y = displayPosition.second * size.height
-                val boxSize = (if (source == FocusPointSource.EYE) 24.dp else 60.dp).toPx() * scale
+                val boxSize = (if (source == FocusPointSource.EYE) 24.dp else TapFrameSize).toPx() * scale
                 val halfSize = boxSize / 2
-                val cornerLength = (if (source == FocusPointSource.EYE) 6.dp else 15.dp).toPx()
-                val strokeWidth = (if (source == FocusPointSource.EYE) 1.5.dp else 2.dp).toPx()
+                val cornerLength = 6.dp.toPx()
+                val strokeWidth = 1.5.dp.toPx()
 
-                val drawColor = color.copy(alpha = alpha)
+                val markAlpha = alpha * tapMarkAlpha * (if (blinkOff) 0.15f else 1f)
+                val drawColor = color.copy(alpha = markAlpha)
 
-                // 左上角
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x - halfSize, y - halfSize),
-                    end = Offset(x - halfSize + cornerLength, y - halfSize),
-                    strokeWidth = strokeWidth
-                )
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x - halfSize, y - halfSize),
-                    end = Offset(x - halfSize, y - halfSize + cornerLength),
-                    strokeWidth = strokeWidth
-                )
+                if (isTapMark && fixedFocus) {
+                    // No focus frame: there is nothing to focus.
+                } else if (isTapMark) {
+                    val topLeft = Offset(x - halfSize, y - halfSize)
+                    val frame = androidx.compose.ui.geometry.Size(boxSize, boxSize)
+                    // A soft dark edge keeps the thin line readable on bright scenes.
+                    drawRect(Color.Black.copy(alpha = 0.3f * markAlpha), topLeft, frame, style = Stroke(3.dp.toPx()))
+                    drawRect(drawColor, topLeft, frame, style = Stroke(TapFrameLine.toPx()))
+                } else {
+                    // 左上角
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x - halfSize, y - halfSize),
+                        end = Offset(x - halfSize + cornerLength, y - halfSize),
+                        strokeWidth = strokeWidth
+                    )
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x - halfSize, y - halfSize),
+                        end = Offset(x - halfSize, y - halfSize + cornerLength),
+                        strokeWidth = strokeWidth
+                    )
 
-                // 右上角
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x + halfSize, y - halfSize),
-                    end = Offset(x + halfSize - cornerLength, y - halfSize),
-                    strokeWidth = strokeWidth
-                )
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x + halfSize, y - halfSize),
-                    end = Offset(x + halfSize, y - halfSize + cornerLength),
-                    strokeWidth = strokeWidth
-                )
+                    // 右上角
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x + halfSize, y - halfSize),
+                        end = Offset(x + halfSize - cornerLength, y - halfSize),
+                        strokeWidth = strokeWidth
+                    )
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x + halfSize, y - halfSize),
+                        end = Offset(x + halfSize, y - halfSize + cornerLength),
+                        strokeWidth = strokeWidth
+                    )
 
-                // 左下角
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x - halfSize, y + halfSize),
-                    end = Offset(x - halfSize + cornerLength, y + halfSize),
-                    strokeWidth = strokeWidth
-                )
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x - halfSize, y + halfSize),
-                    end = Offset(x - halfSize, y + halfSize - cornerLength),
-                    strokeWidth = strokeWidth
-                )
+                    // 左下角
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x - halfSize, y + halfSize),
+                        end = Offset(x - halfSize + cornerLength, y + halfSize),
+                        strokeWidth = strokeWidth
+                    )
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x - halfSize, y + halfSize),
+                        end = Offset(x - halfSize, y + halfSize - cornerLength),
+                        strokeWidth = strokeWidth
+                    )
 
-                // 右下角
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x + halfSize, y + halfSize),
-                    end = Offset(x + halfSize - cornerLength, y + halfSize),
-                    strokeWidth = strokeWidth
-                )
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x + halfSize, y + halfSize),
-                    end = Offset(x + halfSize, y + halfSize - cornerLength),
-                    strokeWidth = strokeWidth
-                )
+                    // 右下角
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x + halfSize, y + halfSize),
+                        end = Offset(x + halfSize - cornerLength, y + halfSize),
+                        strokeWidth = strokeWidth
+                    )
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x + halfSize, y + halfSize),
+                        end = Offset(x + halfSize, y + halfSize - cornerLength),
+                        strokeWidth = strokeWidth
+                    )
+                }
 
-                if (source == FocusPointSource.MANUAL && (canMoveMeteringPoint || isSeparated)) {
+                if (source == FocusPointSource.MANUAL && (canMoveMeteringPoint || isSeparated || fixedFocus)) {
                     val point = meteringPosition ?: displayPosition
                     val center = Offset(point.first * size.width, point.second * size.height)
                     val radius = 11.dp.toPx()
                     drawCircle(
-                        color = Color.White.copy(alpha = alpha),
+                        color = Color.White.copy(alpha = alpha * tapMarkAlpha),
                         radius = radius,
                         center = center,
                         style = Stroke(width = 1.5.dp.toPx()),
@@ -298,7 +343,7 @@ fun FocusIndicator(
             if (source == FocusPointSource.MANUAL && isFocusLocked && position != null) {
                 val badgeSize = 24.dp
                 val badgeSizePx = with(density) { badgeSize.toPx() }
-                val focusHalfSizePx = with(density) { 30.dp.toPx() }
+                val focusHalfSizePx = with(density) { (TapFrameSize / 2).toPx() }
                 val maxWidthPx = constraints.maxWidth.toFloat()
                 val maxHeightPx = constraints.maxHeight.toFloat()
                 val offsetX = (displayPosition.first * maxWidthPx + focusHalfSizePx - badgeSizePx * 0.55f)
@@ -327,3 +372,8 @@ fun FocusIndicator(
         }
     }
 }
+
+private val TapFrameSize = 42.dp
+private val TapFrameLine = 1.25.dp
+// The bright green of a Sony camera's in-focus frame.
+private val FocusGreen = Color(0xFF3FE03F)

@@ -63,6 +63,7 @@ fun CameraPreviewGL(
     isFocusLocked: Boolean = false,
     isFocusing: Boolean,
     focusSuccess: Boolean?,
+    fixedFocus: Boolean = false,
     meteringMode: MeteringMode = MeteringMode.SYSTEM_DEFAULT,
     onSurfaceTextureReady: (SurfaceTexture) -> Unit,
     onSurfaceDestroyed: (SurfaceTexture?) -> Unit,
@@ -348,6 +349,7 @@ fun CameraPreviewGL(
                 isFocusLocked = isFocusLocked,
                 isFocusing = isFocusing,
                 focusSuccess = focusSuccess,
+                fixedFocus = fixedFocus,
                 modifier = Modifier.fillMaxSize()
             )
         }

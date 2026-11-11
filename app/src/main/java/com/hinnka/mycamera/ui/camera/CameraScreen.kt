@@ -1447,6 +1447,7 @@ fun CameraScreen(
                             isFocusLocked = state.isFocusLocked,
                             isFocusing = state.isFocusing,
                             focusSuccess = state.focusSuccess,
+                            fixedFocus = !state.supportsPointAutoFocus,
                             meteringMode = state.effectiveMeteringMode,
                             onSurfaceTextureReady = { surfaceTexture ->
                                 previewSurfaceTexture = surfaceTexture
