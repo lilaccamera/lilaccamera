@@ -152,6 +152,9 @@ private val ControlsArrivalEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
 // The controls rise and fade in once per app start, not again after the gallery or a mode switch.
 private var controlsArrivalPlayed = false
+// Whether the manual values show, per shooting mode, for this app run: Pro opens with them, the others
+// without, and a swipe that hides or shows them is remembered until the app restarts.
+private val manualControlsShownByMode = mutableMapOf<CameraShootingMode, Boolean>()
 private const val ZoomStopAnimationCompletionThreshold = 0.001f
 private const val RawCaptureTapDebounceMillis = 1000L
 private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
@@ -395,7 +398,20 @@ fun CameraScreen(
     var showParameterRuler by remember(state.captureMode, state.useRaw) { mutableStateOf(false) }
     // Vertical swipes on the picture: up shows the manual values on its bottom edge, down drops the
     // everyday quick settings onto its top edge. Each swipe first closes what the other one opened.
-    var manualControlsShown by rememberSaveable { mutableStateOf(false) }
+    val manualControlsMode = when {
+        state.captureMode == CaptureMode.VIDEO -> CameraShootingMode.VIDEO
+        state.isPortraitMode -> CameraShootingMode.PORTRAIT
+        state.useRaw && state.isRawSupported -> CameraShootingMode.PROFESSIONAL
+        else -> CameraShootingMode.PHOTO
+    }
+    var manualControlsShown by remember(manualControlsMode) {
+        mutableStateOf(
+            manualControlsShownByMode[manualControlsMode] ?: (manualControlsMode == CameraShootingMode.PROFESSIONAL)
+        )
+    }
+    LaunchedEffect(manualControlsMode, manualControlsShown) {
+        manualControlsShownByMode[manualControlsMode] = manualControlsShown
+    }
     var everydayRowShown by remember { mutableStateOf(false) }
     // A value set by hand (EV, ISO, shutter, focus, white balance) stays visible while the panel is closed,
     // as a compact line of just those values, so a shot is never taken with a fixed value nobody can see.
@@ -1412,15 +1428,11 @@ fun CameraScreen(
                                 viewModel.closeCamera(surfaceTexture)
                             },
                             onTap = { x, y, w, h ->
-                                // Quick settings and the everyday row close and the tap still focuses;
-                                // other panels only close.
+                                // Quick settings and the everyday row close and the tap still focuses; the manual
+                                // values and their ruler stay (only a swipe down hides them). Other panels only close.
                                 everydayRowShown = false
                                 if (activePanel == ActivePanel.SETTINGS) activePanel = ActivePanel.NONE
-                                if (manualControlsShown && !isXpan) {
-                                    // The open manual panel closes, ruler included, without focusing.
-                                    manualControlsShown = false
-                                    showParameterRuler = false
-                                } else if (state.isFocusLocked) {
+                                if (state.isFocusLocked) {
                                     viewModel.unlockFocus()
                                 } else if (activePanel != ActivePanel.NONE) {
                                     activePanel = ActivePanel.NONE

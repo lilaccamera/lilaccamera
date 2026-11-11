@@ -124,9 +124,10 @@ internal fun cameraParameterItems(state: CameraState): List<CameraParameterItem>
             stringResource(R.string.camera_parameter_focus),
             when {
                 focusManual -> formatFocusDistance(state.focusDistance)
-                // No reported distance while focusing automatically: say so rather than show infinity.
-                liveFocus <= 0f -> stringResource(R.string.camera_parameter_focus_auto)
-                else -> formatFocusDistance(liveFocus)
+                // Locked by a tap or long press: the distance it locked at.
+                state.isFocusLocked && liveFocus > 0f -> formatFocusDistance(liveFocus)
+                // Focusing on its own: a moving distance says little, so it reads Auto.
+                else -> stringResource(R.string.camera_parameter_focus_auto)
             },
             isEnabled = state.minimumFocusDistance > 0f,
             isManual = focusManual
