@@ -306,7 +306,8 @@ class Camera2Controller(private val context: Context) {
     // lilac raw19 shim: serves full-res RAW only when the same request also targets a full-size JPEG; the JPEG is discarded
     private var rawCompanionJpegReader: ImageReader? = null
     // lilac front camera, low-light YUV stills: the same slot holds a small discarded JPEG (see frontStillJpegReader)
-    private var frontStillJpegActive = false
+    var frontStillJpegActive = false
+        private set
     private var frontStillJpegStallNs = 0L
     private val ambientLightReader = AmbientLightReader(context)
 

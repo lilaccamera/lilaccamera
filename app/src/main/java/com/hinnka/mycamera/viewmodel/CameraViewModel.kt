@@ -1854,7 +1854,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        cameraController.onPreviewStreamActive = { active -> glSurfaceView?.setCameraStreamActive(active) }
+        cameraController.onPreviewStreamActive = { active ->
+            glSurfaceView?.setCameraStreamActive(active)
+            // An "Accurate" front session's photos lose the viewfinder's cast; show the viewfinder that way too.
+            if (active) glSurfaceView?.setCastFixEnabled(cameraController.frontStillJpegActive)
+        }
 
         cameraController.onCameraError = { code, message, canRetry ->
             // 只记录错误日志，不在这里重试打开相机
