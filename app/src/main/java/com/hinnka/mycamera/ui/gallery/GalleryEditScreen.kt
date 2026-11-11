@@ -125,6 +125,8 @@ import com.hinnka.mycamera.lut.VideoLutEffect
 import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.ui.camera.autoRotate
+import com.hinnka.mycamera.ui.camera.NoteLineState
+import com.hinnka.mycamera.ui.camera.NoteLine
 import com.hinnka.mycamera.ui.components.RawEditPanelContentMode
 import me.saket.telephoto.zoomable.DoubleClickToZoomListener
 import com.hinnka.mycamera.ui.icons.AppIcons
@@ -400,6 +402,11 @@ fun GalleryEditScreen(
     var groupPath by rememberSaveable { mutableStateOf("") }
     // The setting whose explanation card is open.
     var explainKey by remember { mutableStateOf<String?>(null) }
+    // Short notes that explain a press, in the camera's guide pill, where the explanation card sits.
+    val noteLine = remember { NoteLineState() }
+    LaunchedEffect(noteLine.serial) {
+        if (noteLine.shown) explainKey = null
+    }
     // Taps on the value row: the last one, to tell a double tap, and a second tap's card waiting out that window.
     var lastTapKey by remember { mutableStateOf<String?>(null) }
     var lastTapAt by remember { mutableLongStateOf(0L) }
@@ -634,7 +641,7 @@ fun GalleryEditScreen(
     // AI denoise was switched on while its model is missing; applied once the model is installed.
     var pendingAiDenoise by remember { mutableStateOf(false) }
     val showAiDenoiseFailure = {
-        Toast.makeText(context, context.getString(R.string.ai_denoise_failed), Toast.LENGTH_SHORT).show()
+        noteLine.say(R.string.ai_denoise_failed)
     }
     val startAiDenoise = {
         viewModel.applyAiDenoise(photo = currentEditSourcePhoto) { success ->
@@ -778,7 +785,7 @@ fun GalleryEditScreen(
     // Sets the focus at a place on screen, mapped onto the photo, and renders the blur once.
     fun placeFocus(position: Offset) {
         if (currentPortraitQuick) {
-            Toast.makeText(context, R.string.editor_quick_focus_hint, Toast.LENGTH_SHORT).show()
+            noteLine.say(R.string.editor_quick_focus_hint)
             return
         }
         val b = contentBounds?.takeIf { it.width > 0f && it.height > 0f } ?: return
@@ -1491,7 +1498,7 @@ fun GalleryEditScreen(
                             viewModel.restoreFocusPoint(openFocus?.first as? Float, openFocus?.second as? Float)
                         },
                         EditorChoice(pointText, AppIcons.FocusCenteredLine, focusMoved) {
-                            if (!focusMoved) Toast.makeText(context, R.string.editor_focus_tap_hint, Toast.LENGTH_SHORT).show()
+                            if (!focusMoved) noteLine.say(R.string.editor_focus_tap_hint)
                         },
                     )
                     EditorSetting.Bokeh -> listOf(
@@ -1615,8 +1622,8 @@ fun GalleryEditScreen(
                     fullView = false,
                     saving = isSaving,
                     onCancel = ::requestLeave,
-                    onUndo = { Toast.makeText(context, R.string.editor_undo_later, Toast.LENGTH_SHORT).show() },
-                    onRedo = { Toast.makeText(context, R.string.editor_undo_later, Toast.LENGTH_SHORT).show() },
+                    onUndo = { noteLine.say(R.string.editor_undo_later) },
+                    onRedo = { noteLine.say(R.string.editor_undo_later) },
                     onFullView = { fullView = true },
                     onCompare = { showOrigin = it },
                     onSave = {
@@ -1871,7 +1878,7 @@ fun GalleryEditScreen(
                                 val live = item.key == "intensity" || s?.kind == SettingKind.Recipe
                                 when {
                                     item.group -> Unit
-                                    !live && holding -> Toast.makeText(context, R.string.editor_compare_one_unavailable, Toast.LENGTH_SHORT).show()
+                                    !live && holding -> noteLine.say(R.string.editor_compare_one_unavailable)
                                     !live -> Unit
                                     holding -> {
                                         val recipe = editPhotoRecipeParams ?: editLutRecipeParams
@@ -1910,6 +1917,13 @@ fun GalleryEditScreen(
                     }
                 }
             }
+
+            NoteLine(
+                state = noteLine,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
+            )
 
             if (showDiscardDialog) {
                 EditorDiscardDialog(

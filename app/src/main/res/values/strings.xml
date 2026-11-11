@@ -1901,7 +1901,7 @@
     <string name="editor_explain_ai_denoise">Use neural network to reconstruct image details. Downloads its model the first time.</string>
     <string name="editor_look_also_sets">The look also sets %1$s to %2$s.</string>
     <string name="editor_explain_intensity">How strongly the look is applied.</string>
-    <string name="editor_compare_one_unavailable">This one re-renders the photo, so it can\'t be held to compare. Hold Compare at the top instead.</string>
+    <string name="editor_compare_one_unavailable">Re-renders the photo: hold Compare instead</string>
     <string name="editor_aperture">Aperture</string>
     <string name="editor_focus">Focus</string>
     <string name="editor_bokeh">Bokeh</string>
@@ -1918,7 +1918,7 @@
     <string name="editor_subject">Subject</string>
     <string name="editor_quick_keeps_subject">Quick keeps the subject sharp</string>
     <string name="editor_use_depth">Use Depth</string>
-    <string name="editor_quick_focus_hint">Quick keeps the subject sharp. Choose Depth to focus elsewhere.</string>
+    <string name="editor_quick_focus_hint">Quick keeps the subject sharp; use Depth</string>
     <string name="editor_blur_subject">Blur · finding the subject</string>
     <string name="editor_blur_depth">Blur · estimating depth</string>
     <string name="editor_blur_render">Blur · rendering</string>
