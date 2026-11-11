@@ -31,6 +31,18 @@ object PortraitBlurMetadata {
 
     fun quickBlur(metadata: com.hinnka.mycamera.gallery.MediaMetadata?): Boolean? =
         metadata?.customProperties?.get(QUICK_KEY)?.toBooleanStrictOrNull()
+
+    /** The photo's own depth of field, −10 (shallow) to 10 (deep); none (0) is the automatic one. */
+    const val DEPTH_OF_FIELD_KEY = "lilac.portrait.depthOfField"
+
+    fun depthOfField(metadata: com.hinnka.mycamera.gallery.MediaMetadata?): Int? =
+        metadata?.customProperties?.get(DEPTH_OF_FIELD_KEY)?.toIntOrNull()?.coerceIn(-10, 10)
+
+    /** How much a depth of field widens the automatic in-focus range: ¼ at −10, 1 at 0, 3 at 10. */
+    fun focalWidthScale(depthOfField: Int?): Float {
+        val d = (depthOfField ?: 0).coerceIn(-10, 10) / 10f
+        return if (d <= 0f) Math.pow(0.25, -d.toDouble()).toFloat() else Math.pow(3.0, d.toDouble()).toFloat()
+    }
 }
 
 class DepthBokehProcessor(
@@ -70,6 +82,7 @@ class DepthBokehProcessor(
         aperture: Float,
         bokehStyle: BokehStyle = BokehStyle.DEFAULT,
         quickBlur: Boolean? = null,
+        focalWidthScale: Float = 1f,
         onStage: (BokehStage) -> Unit = {},
         onMaps: (SubjectMask, RelativeDepthMap?) -> Unit = { _, _ -> },
         onRenderStart: () -> Unit = {},
@@ -185,6 +198,7 @@ class DepthBokehProcessor(
                 focusOnSubject = quickBlur || focusMask >= 0.5f,
                 // The quick blur's depth is the cut-out itself, so only it keeps the subject's own range.
                 focalRangeFromPoint = !quickBlur,
+                focalWidthScale = focalWidthScale,
             )
             result = bokehResult
         }

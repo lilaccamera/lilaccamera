@@ -32,6 +32,9 @@ internal enum class SettingKind {
 
     /** A choice among a few options, shown as chips. */
     Choice,
+
+    /** The background blur's depth of field: renders once, when the finger lifts. */
+    DepthOfField,
 }
 
 /** The aperture ring's stops, with Off (0) as the last stop past f/16. */
@@ -92,6 +95,7 @@ internal enum class EditorSetting(
     AiDenoise(EditorSection.Detail, SettingKind.AiDenoise, R.string.editor_ai_denoise, R.string.editor_explain_ai_denoise, "aiDenoise", glyph = EditorGlyph.AiDenoise),
 
     Aperture(EditorSection.Portrait, SettingKind.Aperture, R.string.editor_aperture, R.string.editor_explain_aperture, "aperture"),
+    DepthOfField(EditorSection.Portrait, SettingKind.DepthOfField, R.string.editor_depth_of_field, R.string.editor_explain_depth_of_field, "depthOfField", glyph = EditorGlyph.DepthOfField),
     Focus(EditorSection.Portrait, SettingKind.Choice, R.string.editor_focus, R.string.editor_explain_focus, "focus"),
     Bokeh(EditorSection.Portrait, SettingKind.Choice, R.string.editor_bokeh, R.string.editor_explain_bokeh, "bokeh"),
     // Quick or Depth; also an on/off switch for the blur, next to the aperture.
@@ -138,6 +142,7 @@ internal enum class EditorSetting(
             kind == SettingKind.RawTone -> (-10..10).map { it / 10f }
             kind == SettingKind.Denoise -> (0..20).map { it / 10f }
             kind == SettingKind.Aperture -> ApertureStops
+            kind == SettingKind.DepthOfField -> (-10..10).map { it.toFloat() }
             else -> emptyList()
         }
 
@@ -148,7 +153,7 @@ internal enum class EditorSetting(
     /** The value in the units the user sees: EV for exposure, the app's −10..10 or 0..10 scale otherwise. */
     fun display(value: Float): Float = when {
         param != null -> param.toDisplayValue(value)
-        this == RawExposure || kind == SettingKind.Denoise -> value
+        this == RawExposure || kind == SettingKind.Denoise || kind == SettingKind.DepthOfField -> value
         else -> value * 10f
     }
 

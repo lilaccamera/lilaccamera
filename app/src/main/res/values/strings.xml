@@ -1947,4 +1947,11 @@
     <string name="editor_explain_frame">Add a decorative frame and watermark to the photo. Tap the chosen frame again to edit it.</string>
     <string name="editor_explain_preset">A saved set of look, adjustments and frame. Copy and Paste carry these edits to another photo.</string>
     <string name="editor_explain_live_photo">Apply the look and adjustments to the moving part of this Live Photo too.</string>
+    <string name="editor_depth_of_field">Depth of field</string>
+    <string name="editor_auto">Auto</string>
+    <string name="editor_shallow">Shallow</string>
+    <string name="editor_deep">Deep</string>
+    <string name="editor_shallow_value">Shallow %1$d</string>
+    <string name="editor_deep_value">Deep %1$d</string>
+    <string name="editor_explain_depth_of_field">How much around the focus stays sharp: Shallow keeps a thin slice sharp, Deep keeps more in focus. Auto picks it from the depth at the focus point. The aperture sets how strong the blur is.</string>
 </resources>

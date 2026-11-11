@@ -25,7 +25,7 @@ import kotlin.math.sqrt
 internal enum class EditorGlyph {
     Contrast, Highlights, Shadows, Whites, Blacks, Tonality, Fade, Vignette, Sharpness, Bloom, Halation, SoftLight,
     Temp, Tint, Saturation, Vibrance, Clarity, NoiseReduction, ColorNoise, AiDenoise,
-    Grain, Flash, Bleach, Fringe, Noise
+    Grain, Flash, Bleach, Fringe, Noise, DepthOfField
 }
 
 private const val BOX = "M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-12a3 3 0 0 1 3 -3z"
@@ -259,6 +259,14 @@ internal fun editorGlyph(glyph: EditorGlyph, k: Float, color: Color): ImageVecto
             sparkle(18f, 18f, 2f) + sparkle(18f, 6f, 2f) + sparkle(9f, 12f, 4.5f + 1.5f * k1.coerceAtLeast(0f)),
             LINE_STROKE
         )
+        // Depth of field: a sharp band between two blurred zones, thinner when shallow, wider when deep.
+        EditorGlyph.DepthOfField -> {
+            val half = 4.5f + 3.5f * k1
+            fill("M3.9 3.9H20.1V${f1(12 - half)}H3.9z")
+            fill("M3.9 ${f1(12 + half)}H20.1V20.1H3.9z")
+            line(BOX)
+            line("M3 ${f1(12 - half)}H21M3 ${f1(12 + half)}H21")
+        }
         // Soft light: a circle whose hatched half spreads across it.
         EditorGlyph.SoftLight -> {
             val x = 12f - 4f * k1.coerceAtLeast(0f)

@@ -152,6 +152,7 @@ class OglBokehProcessor {
         bokehStyle: BokehStyle = BokehStyle.DEFAULT,
         focusOnSubject: Boolean = true,
         focalRangeFromPoint: Boolean = false,
+        focalWidthScale: Float = 1f,
     ): Bitmap? {
         val startedAtMs = SystemClock.elapsedRealtime()
         try {
@@ -168,7 +169,7 @@ class OglBokehProcessor {
             // the subject (the subject itself stays sharp through its mask): the subject's whole depth range
             // reaches far into the background when the cut-out strays, and then the background barely blurs.
             val focalRange = (if (focusOnSubject && !focalRangeFromPoint) LensBlurFocalRange.forSubject(depthMap, subjectMask) else null)
-                ?: LensBlurFocalRange.forPoint(depthMap, focusX, focusY)
+                ?: LensBlurFocalRange.forPoint(depthMap, focusX, focusY, focalWidthScale)
             // PSF banks are first read by the scatter and layer interiors by the
             // layered depth: both are built on CPU workers while the GPU starts.
             val banks = layout.domains.map { domain ->

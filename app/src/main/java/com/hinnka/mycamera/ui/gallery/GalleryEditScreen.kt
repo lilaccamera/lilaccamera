@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.ImageBitmap
 import com.hinnka.mycamera.processor.BokehStage
+import com.hinnka.mycamera.processor.PortraitBlurMetadata
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -417,6 +418,8 @@ fun GalleryEditScreen(
     // Portrait: the aperture while the ruler moves (rendered once, on release), the photo's place on screen
     // inside the zoomable view, and the focus ring while a finger drags it.
     var apertureDrag by remember { mutableStateOf<Float?>(null) }
+    // The depth of field while its ruler moves (rendered once, on release).
+    var dofDrag by remember { mutableStateOf<Float?>(null) }
     var contentBounds by remember { mutableStateOf<Rect?>(null) }
     var ringGrab by remember { mutableStateOf(false) }
     var ringDrag by remember { mutableStateOf<Offset?>(null) }
@@ -669,6 +672,7 @@ fun GalleryEditScreen(
     // appears and goes at once rather than with the next unrelated recomposition.
     val applyEffectsToVideo by viewModel.editApplyEffectsToVideo.collectAsState()
     val editPortraitQuick by viewModel.editPortraitQuick.collectAsState()
+    val editDepthOfField by viewModel.editDepthOfField.collectAsState()
     val changedKeys = remember(
         editLutId, editPhotoRecipeParams, editFrameId, applyEffectsToVideo, editSharpening, editNoiseReduction,
         editChromaNoiseReduction, editAiDenoiseEnabled, editRawExposureCompensation, editRawAutoExposure,
@@ -679,7 +683,7 @@ fun GalleryEditScreen(
         editRawToneMappingParameters, editRawSpectralFilmStock, editRawSpectralFilmPrint, editRawSpectralFilmCDensityGain,
         editRawSpectralFilmMDensityGain, editRawSpectralFilmYDensityGain, editRawFotufilmDocument, editComputationalAperture,
         editBokehStyle, editFocusX, editFocusY, editCropRect, editCropAspectOption, editRotationDegrees,
-        editStraightenDegrees, editMirrorHorizontal, editPortraitQuick,
+        editStraightenDegrees, editMirrorHorizontal, editPortraitQuick, editDepthOfField,
     ) { viewModel.editChangedKeys() }
     val openIntensity = viewModel.editOpenValue("lutIntensity") as? Float ?: 1f
     val categoryOrder by preferenceValue { it.categoryOrder }
@@ -749,7 +753,8 @@ fun GalleryEditScreen(
     // The preview at each of BlurPreview.LEVELS, made on the CPU whenever the photo, the focus or the mode
     // changes; the strength in use comes first so the preview shows at once, the rest follow for scrolling.
     var blurLayers by remember { mutableStateOf<List<ImageBitmap?>>(emptyList()) }
-    LaunchedEffect(portraitOpen, sharpBase, blurMaps, ringDrag, editFocusX, editFocusY, portraitQuick) {
+    val previewDepthOfField = dofDrag?.roundToInt() ?: editDepthOfField
+    LaunchedEffect(portraitOpen, sharpBase, blurMaps, ringDrag, editFocusX, editFocusY, portraitQuick, previewDepthOfField) {
         val base = sharpBase
         val maps = blurMaps?.takeIf { it.photoId == currentEditSourcePhoto.id }
         if (!portraitOpen || base == null || maps == null) {
@@ -773,6 +778,7 @@ fun GalleryEditScreen(
                 focusX = focus.first,
                 focusY = focus.second,
                 quick = portraitQuick,
+                widthScale = PortraitBlurMetadata.focalWidthScale(previewDepthOfField),
             )
         }
         val layers = MutableList<ImageBitmap?>(BlurPreview.LEVELS.size) { null }
@@ -1358,7 +1364,7 @@ fun GalleryEditScreen(
                 if (
                     layers.isNotEmpty() && previewBounds != null && portraitOpen && !fullView &&
                     (previewStrength > 0f || apertureScroll != null) &&
-                    (awaitingBlur || apertureDrag != null || apertureScroll != null || ringDrag != null)
+                    (awaitingBlur || apertureDrag != null || apertureScroll != null || ringDrag != null || dofDrag != null)
                 ) {
                     val levels = BlurPreview.LEVELS
                     val upper = levels.indexOfFirst { it >= previewStrength }.let { if (it < 0) levels.lastIndex else it }
@@ -1404,12 +1410,14 @@ fun GalleryEditScreen(
                     EditorSetting.ColorNoise -> editChromaNoiseReduction
                     EditorSetting.AiDenoise -> if (editAiDenoiseEnabled) 1f else 0f
                     EditorSetting.Aperture -> apertureDrag ?: editComputationalAperture ?: 0f
+                    EditorSetting.DepthOfField -> dofDrag ?: (editDepthOfField ?: 0).toFloat()
                     EditorSetting.Focus, EditorSetting.Bokeh, EditorSetting.Depth -> 0f
                     else -> s.param!!.getValue(effectiveRecipe)
                 }
 
                 // Where a setting's reset returns: its value when the editor opened.
                 fun openValue(s: EditorSetting): Float {
+                    if (s == EditorSetting.DepthOfField) return ((viewModel.editOpenValue(s.key) as? Int) ?: 0).toFloat()
                     val open = viewModel.editOpenValue(s.key) as? Float ?: s.param?.defaultValue ?: 0f
                     // A shot's own aperture lands on the nearest stop of the ring.
                     return if (s.kind == SettingKind.Aperture && open !in ApertureStops) {
@@ -1430,6 +1438,7 @@ fun GalleryEditScreen(
                         EditorSetting.ColorNoise -> viewModel.setChromaNoiseReduction(v)
                         // The aperture only moves the ruler; the blur renders once, on release.
                         EditorSetting.Aperture -> apertureDrag = v
+                        EditorSetting.DepthOfField -> dofDrag = v
                         else -> s.param?.let { param ->
                             val recipe = editPhotoRecipeParams ?: editLutRecipeParams
                             // The effects go through their own group, as they always have: it also clears the
@@ -1452,6 +1461,10 @@ fun GalleryEditScreen(
                                 if (success) requestRawPreviewRefresh()
                             }
                         s.kind == SettingKind.Denoise -> viewModel.refreshPhotonDenoiseBase(currentEditSourcePhoto)
+                        s.kind == SettingKind.DepthOfField -> dofDrag?.let { v ->
+                            dofDrag = null
+                            viewModel.setDepthOfField(v.roundToInt())
+                        }
                         s.kind == SettingKind.Aperture -> apertureDrag?.let { v ->
                             apertureDrag = null
                             viewModel.setComputationalAperture(v.takeIf { it > 0f })
@@ -1553,12 +1566,28 @@ fun GalleryEditScreen(
                 }
 
                 val settings = if (group == null) {
+                    // Depth of field acts on the depth map; Quick has none.
                     EditorSetting.forSection(section, isRaw, currentPhoto.isVideo)
+                        .filterNot { it == EditorSetting.DepthOfField && quick }
                 } else {
                     emptyList()
                 }
                 val groups = if (group == null) EditorGroup.forSection(section, isRaw) else emptyList()
                 val offText = stringResource(R.string.editor_off)
+                val autoText = stringResource(R.string.editor_auto)
+                val shallowText = stringResource(R.string.editor_shallow)
+                val deepText = stringResource(R.string.editor_deep)
+                val shallowValue = stringResource(R.string.editor_shallow_value)
+                val deepValue = stringResource(R.string.editor_deep_value)
+                // Lower keeps less in focus, higher more; words say which way, as signs alone did not.
+                fun depthOfFieldText(v: Float): String {
+                    val n = v.roundToInt()
+                    return when {
+                        n < 0 -> shallowValue.format(-n)
+                        n > 0 -> deepValue.format(n)
+                        else -> autoText
+                    }
+                }
                 val subjectText = stringResource(R.string.editor_subject)
                 val onText = stringResource(R.string.editor_on)
                 val values = when {
@@ -1600,6 +1629,7 @@ fun GalleryEditScreen(
                             name = stringResource(s.label),
                             value = when {
                                 s.kind == SettingKind.Aperture -> if (v > 0f) "f/${formatAperture(v)}" else offText
+                                s.kind == SettingKind.DepthOfField -> depthOfFieldText(v)
                                 s == EditorSetting.Focus && quick -> subjectText
                                 s == EditorSetting.Depth && blurOff -> offText
                                 s.kind == SettingKind.Choice -> choiceOptions(s).firstOrNull { it.selected }?.label.orEmpty()
@@ -1770,7 +1800,8 @@ fun GalleryEditScreen(
                             }
                         }
                         // With the blur Off its options have nothing to act on: say so, and offer to turn it on.
-                        selectedSetting?.kind == SettingKind.Choice && selectedSetting != EditorSetting.Depth && blurOff -> PortraitNote(
+                        (selectedSetting?.kind == SettingKind.Choice && selectedSetting != EditorSetting.Depth ||
+                            selectedSetting == EditorSetting.DepthOfField) && blurOff -> PortraitNote(
                             text = stringResource(R.string.editor_blur_off),
                             action = stringResource(R.string.editor_turn_on),
                             onAction = ::turnBlurOn
@@ -1808,7 +1839,18 @@ fun GalleryEditScreen(
                                 values = steps,
                                 value = settingValue(selectedSetting),
                                 start = start,
-                                label = { if (aperture && it == 0f) offText else selectedSetting.tickLabel(it) },
+                                label = {
+                                    when {
+                                        aperture && it == 0f -> offText
+                                        selectedSetting.kind == SettingKind.DepthOfField -> when (it) {
+                                            0f -> autoText
+                                            -10f -> shallowText
+                                            10f -> deepText
+                                            else -> "${abs(it.roundToInt())}"
+                                        }
+                                        else -> selectedSetting.tickLabel(it)
+                                    }
+                                },
                                 stops = aperture,
                                 onScroll = { if (aperture) apertureScroll = it },
                                 onChange = { setSetting(selectedSetting, it) },

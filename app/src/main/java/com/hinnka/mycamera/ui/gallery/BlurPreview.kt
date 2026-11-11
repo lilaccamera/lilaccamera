@@ -44,6 +44,7 @@ internal object BlurPreview {
         focusX: Float,
         focusY: Float,
         quick: Boolean,
+        widthScale: Float = 1f,
     ): Prepared {
         val scale = min(1f, MAX_EDGE.toFloat() / max(base.width, base.height))
         val w = max(1, (base.width * scale).roundToInt())
@@ -62,7 +63,8 @@ internal object BlurPreview {
             if (quick || depth == null) return 1f - mask.sample(sx, sy)
             val distance = abs(sampleDepth(depth, sx, sy) - focusDepth)
             // The renderer ramps the blur in over a wide depth range; a steep ramp looked stronger than it.
-            val byDepth = ((distance - 0.05f) / 0.5f).coerceIn(0f, 1f)
+            // A chosen depth of field widens or narrows the sharp slice and its ramp, as in the renderer.
+            val byDepth = ((distance - 0.05f * widthScale) / (0.5f * widthScale)).coerceIn(0f, 1f)
             return if (subjectFocus) byDepth * (1f - mask.sample(sx, sy)) else byDepth
         }
 

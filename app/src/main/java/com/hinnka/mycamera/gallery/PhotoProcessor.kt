@@ -426,6 +426,7 @@ class PhotoProcessor(
                     aperture,
                     BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
                     quickBlur = PortraitBlurMetadata.quickBlur(metadata),
+                    focalWidthScale = PortraitBlurMetadata.focalWidthScale(PortraitBlurMetadata.depthOfField(metadata)),
                 )
                 photoId?.let { id -> GalleryManager.saveBokehPhoto(context, id, sdrBitmap) }
             }
@@ -439,6 +440,7 @@ class PhotoProcessor(
                     aperture,
                     BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
                     quickBlur = PortraitBlurMetadata.quickBlur(metadata),
+                    focalWidthScale = PortraitBlurMetadata.focalWidthScale(PortraitBlurMetadata.depthOfField(metadata)),
                 )
             }
         }
@@ -862,7 +864,8 @@ class PhotoProcessor(
                     context, photoId, b,
                     metadata.focusPointX, metadata.focusPointY, aperture,
                     BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
-                    quickBlur = PortraitBlurMetadata.quickBlur(metadata)
+                    quickBlur = PortraitBlurMetadata.quickBlur(metadata),
+                    focalWidthScale = PortraitBlurMetadata.focalWidthScale(PortraitBlurMetadata.depthOfField(metadata))
                 )
                 photoId?.let { photoId -> GalleryManager.saveBokehPhoto(context, photoId, b) }
             }
@@ -912,7 +915,8 @@ class PhotoProcessor(
                     context, photoId, result,
                     metadata.focusPointX, metadata.focusPointY, aperture,
                     BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
-                    quickBlur = PortraitBlurMetadata.quickBlur(metadata)
+                    quickBlur = PortraitBlurMetadata.quickBlur(metadata),
+                    focalWidthScale = PortraitBlurMetadata.focalWidthScale(PortraitBlurMetadata.depthOfField(metadata))
                 )
                 photoId?.let { photoId -> GalleryManager.saveBokehPhoto(context, photoId, result) }
             }

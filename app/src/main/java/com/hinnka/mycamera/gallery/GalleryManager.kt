@@ -2164,6 +2164,9 @@ object GalleryManager {
             aperture,
             BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
             quickBlur = com.hinnka.mycamera.processor.PortraitBlurMetadata.quickBlur(metadata),
+            focalWidthScale = com.hinnka.mycamera.processor.PortraitBlurMetadata.focalWidthScale(
+                com.hinnka.mycamera.processor.PortraitBlurMetadata.depthOfField(metadata)
+            ),
         )
         saveBokehPhoto(context, photoId, bokeh)
         return bokeh

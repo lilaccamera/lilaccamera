@@ -101,7 +101,7 @@ internal enum class EditorSection(@StringRes val label: Int, val keys: Set<Strin
     Color(R.string.editor_section_color),
     Effects(R.string.editor_section_effects),
     Detail(R.string.editor_section_detail),
-    Portrait(R.string.editor_section_portrait, setOf("aperture", "bokeh", "focus", "depth"), gap = true),
+    Portrait(R.string.editor_section_portrait, setOf("aperture", "bokeh", "focus", "depth", "depthOfField"), gap = true),
     Crop(R.string.editor_section_crop, setOf("crop", "cropRatio", "rotation", "straighten", "mirror"));
 
     val icon: ImageVector

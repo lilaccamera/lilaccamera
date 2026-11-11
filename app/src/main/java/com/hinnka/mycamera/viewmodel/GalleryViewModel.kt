@@ -641,6 +641,16 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     /** The photo's own Quick (true) or Depth (false) blur; null follows the camera's setting. */
     val editPortraitQuick = MutableStateFlow<Boolean?>(null)
 
+    /** The photo's own depth of field, −10 (shallow) to 10 (deep); null is the automatic one. */
+    val editDepthOfField = MutableStateFlow<Int?>(null)
+
+    fun setDepthOfField(value: Int?) {
+        val v = value?.takeIf { it != 0 }
+        if (editDepthOfField.value == v) return
+        editDepthOfField.value = v
+        updateBokehPhoto()
+    }
+
     fun setPortraitQuick(quick: Boolean?) {
         if (editPortraitQuick.value == quick) return
         editPortraitQuick.value = quick
@@ -657,13 +667,15 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         val changed = editComputationalAperture.value != open["aperture"] ||
             editBokehStyle.value != open["bokeh"] ||
             (editFocusPointX.value to editFocusPointY.value) != focus ||
-            editPortraitQuick.value != open["depth"]
+            editPortraitQuick.value != open["depth"] ||
+            editDepthOfField.value != open["depthOfField"]
         if (!changed) return
         editComputationalAperture.value = open["aperture"] as? Float
         (open["bokeh"] as? BokehStyle)?.let { editBokehStyle.value = it }
         editFocusPointX.value = focus?.first as? Float
         editFocusPointY.value = focus?.second as? Float
         editPortraitQuick.value = open["depth"] as? Boolean
+        editDepthOfField.value = open["depthOfField"] as? Int
         updateBokehPhoto()
     }
 
@@ -753,6 +765,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                             aperture,
                             editBokehStyle.value,
                             quickBlur = editPortraitQuick.value,
+                            focalWidthScale = PortraitBlurMetadata.focalWidthScale(editDepthOfField.value),
                             onStage = ::onBlurStage,
                             onMaps = { mask, depth ->
                                 // A Quick render brings no depth map: keep the one a Depth render left.
@@ -2336,6 +2349,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     BokehStyle.fromPersistedName(metadata.computationalBokehStyle)
                 }
                 editPortraitQuick.value = PortraitBlurMetadata.quickBlur(metadata)
+                editDepthOfField.value = PortraitBlurMetadata.depthOfField(metadata)?.takeIf { it != 0 }
                 editFocusPointX.value = metadata.focusPointX
                 editFocusPointY.value = metadata.focusPointY
             }
@@ -2382,6 +2396,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 editComputationalAperture.value = null
                 editBokehStyle.value = BokehStyle.NATURAL
                 editPortraitQuick.value = null
+                editDepthOfField.value = null
                 editFocusPointX.value = null
                 editFocusPointY.value = null
                 restoreCropEditState(targetPhoto, null)
@@ -2468,6 +2483,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             "aperture" to editComputationalAperture.value,
             "bokeh" to editBokehStyle.value,
             "depth" to editPortraitQuick.value,
+            "depthOfField" to editDepthOfField.value,
             "focus" to (editFocusPointX.value to editFocusPointY.value),
             "crop" to editCropRect.value?.let { RectF(it) },
             "cropRatio" to editCropAspectOption.value,
@@ -4185,6 +4201,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                             }
                             remove(PortraitBlurMetadata.QUICK_KEY)
                             editPortraitQuick.value?.let { put(PortraitBlurMetadata.QUICK_KEY, it.toString()) }
+                            remove(PortraitBlurMetadata.DEPTH_OF_FIELD_KEY)
+                            editDepthOfField.value?.let { put(PortraitBlurMetadata.DEPTH_OF_FIELD_KEY, it.toString()) }
                         },
                         colorRecipeParams = editPhotoRecipeParams.value,
                         sharpening = editSharpening.value,
