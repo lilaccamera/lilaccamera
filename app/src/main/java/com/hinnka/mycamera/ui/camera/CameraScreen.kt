@@ -152,6 +152,9 @@ private val ControlsArrivalEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
 // The controls rise and fade in once per app start, not again after the gallery or a mode switch.
 private var controlsArrivalPlayed = false
+// Whether the manual values show, per shooting mode, for this app run: Pro opens with them, the others
+// without, and a swipe that hides or shows them is remembered until the app restarts.
+private val manualControlsShownByMode = mutableMapOf<CameraShootingMode, Boolean>()
 private const val ZoomStopAnimationCompletionThreshold = 0.001f
 private const val RawCaptureTapDebounceMillis = 1000L
 private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
@@ -233,16 +236,6 @@ private fun PanelDismissPreviewOverlay(
     )
 }
 
-private fun CameraParameter.defaultResetValue(): Float {
-    return when (this) {
-        CameraParameter.EXPOSURE_COMPENSATION -> 0f
-        CameraParameter.SHUTTER_SPEED -> DefaultShutterSpeedNs
-        CameraParameter.ISO -> DefaultIso
-        CameraParameter.FOCUS -> DefaultFocusDistance
-        CameraParameter.WHITE_BALANCE -> DefaultAwbTemperature
-    }
-}
-
 @Composable
 fun CameraScreen(
     viewModel: CameraViewModel,
@@ -275,6 +268,7 @@ fun CameraScreen(
     val portraitIntroSeen by preferenceValue { it.portraitIntroSeen }
     val portraitDepthReminderSeen by preferenceValue { it.portraitDepthReminderSeen }
     val proGuideSeen by preferenceValue { it.proGuideSeen }
+    val basicsGuideSeen by preferenceValue { it.basicsGuideSeen }
     val portraitBokehStyle by preferenceValue { BokehStyle.fromPersistedName(it.portraitBokehStyle) }
     val eyeFocusEnabled by preferenceValue { it.eyeFocusEnabled }
     val keepScreenOn by preferenceValue { it.keepScreenOn }
@@ -393,9 +387,41 @@ fun CameraScreen(
     var activePanel by remember { mutableStateOf(ActivePanel.NONE) }
     var selectedParameter by remember { mutableStateOf(CameraParameter.EXPOSURE_COMPENSATION) }
     var showParameterRuler by remember(state.captureMode, state.useRaw) { mutableStateOf(false) }
+    // The mode dial's state lives here so the manual values can give way while its list is open.
+    val modeLine = remember {
+        ModeLineState(
+            when {
+                state.captureMode == CaptureMode.VIDEO -> CameraShootingMode.VIDEO
+                state.useRaw && state.isRawSupported -> CameraShootingMode.PROFESSIONAL
+                state.isPortraitMode -> CameraShootingMode.PORTRAIT
+                else -> CameraShootingMode.PHOTO
+            },
+            state.isRawSupported
+        )
+    }
     // Vertical swipes on the picture: up shows the manual values on its bottom edge, down drops the
     // everyday quick settings onto its top edge. Each swipe first closes what the other one opened.
-    var manualControlsShown by rememberSaveable { mutableStateOf(false) }
+    // Keyed by the mode chosen on the dial, not the one the camera reports: the camera only reports the
+    // new mode once it has reloaded, which would bring the old mode's values back for a moment.
+    val manualControlsMode = modeLine.shownMode
+    var manualControlsShown by remember(manualControlsMode) {
+        mutableStateOf(
+            manualControlsShownByMode[manualControlsMode] ?: (manualControlsMode == CameraShootingMode.PROFESSIONAL)
+        )
+    }
+    LaunchedEffect(manualControlsMode, manualControlsShown) {
+        manualControlsShownByMode[manualControlsMode] = manualControlsShown
+    }
+    // A sideways drag on a value shows its ruler while dragging and for a moment after.
+    val rulerScrub = remember { RulerScrub() }
+    var scrubRulerShown by remember { mutableStateOf(false) }
+    LaunchedEffect(rulerScrub.active) {
+        if (rulerScrub.active) scrubRulerShown = true else {
+            delay(700)
+            scrubRulerShown = false
+        }
+    }
+    var lastValueTap by remember { mutableStateOf<Pair<CameraParameter, Long>?>(null) }
     var everydayRowShown by remember { mutableStateOf(false) }
     // A value set by hand (EV, ISO, shutter, focus, white balance) stays visible while the panel is closed,
     // as a compact line of just those values, so a shot is never taken with a fixed value nobody can see.
@@ -1015,11 +1041,31 @@ fun CameraScreen(
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
-        val onParameterClick: (CameraParameter) -> Unit = { parameter ->
-            val wasSelected = selectedParameter == parameter
-            selectedParameter = parameter
-            showParameterRuler = !wasSelected || !showParameterRuler
+        val setParameterAuto: (CameraParameter) -> Unit = { parameter ->
+            when (parameter) {
+                CameraParameter.EXPOSURE_COMPENSATION -> viewModel.setExposureCompensation(0)
+                CameraParameter.SHUTTER_SPEED -> viewModel.setShutterSpeedAuto(true)
+                CameraParameter.ISO -> viewModel.setIsoAuto(true)
+                CameraParameter.FOCUS -> viewModel.setAutoFocus(true)
+                CameraParameter.WHITE_BALANCE ->
+                    viewModel.setAwbMode(android.hardware.camera2.CameraMetadata.CONTROL_AWB_MODE_AUTO)
+            }
         }
+        // A tap toggles the value's ruler at once; a second tap on it within 320 ms puts it back to auto.
+        val onParameterClick: (CameraParameter) -> Unit = { parameter ->
+            val now = android.os.SystemClock.uptimeMillis()
+            val last = lastValueTap
+            if (last != null && last.first == parameter && now - last.second < 320L) {
+                lastValueTap = null
+                setParameterAuto(parameter)
+            } else {
+                lastValueTap = parameter to now
+                val wasSelected = selectedParameter == parameter
+                selectedParameter = parameter
+                showParameterRuler = !wasSelected || !showParameterRuler
+            }
+        }
+        val rulerShown = showParameterRuler || scrubRulerShown
         LaunchedEffect(showParameterRuler) {
             if (!showParameterRuler) {
                 parameterRulerBounds = null
@@ -1140,10 +1186,10 @@ fun CameraScreen(
                     else -> true
                 },
                 valueStep = state.getExposureCompensationStep(),
-                resetValue = selectedParameter.defaultResetValue(),
                 showHyperfocalButton = selectedParameter == CameraParameter.FOCUS && state.minimumFocusDistance > 0f,
                 hyperfocalEnabled = state.isHyperfocalFocusEnabled,
-                hyperfocalDistanceMeters = state.hyperfocalDistanceMeters,
+                onSetAuto = { setParameterAuto(selectedParameter) },
+                scrub = rulerScrub,
                 onHyperfocalToggle = { enabled ->
                     viewModel.setHyperfocalFocusEnabled(enabled)
                 },
@@ -1184,7 +1230,9 @@ fun CameraScreen(
             CameraParameterBar(
                 state = state,
                 selectedParameter = activeParameter,
-                onParameterClick = onParameterClick
+                onParameterClick = onParameterClick,
+                scrub = rulerScrub,
+                onScrubStart = { parameter -> selectedParameter = parameter }
             )
         }
 
@@ -1313,7 +1361,8 @@ fun CameraScreen(
                                                     !afterLongPress &&
                                                     !state.videoRecordingState.isRecording &&
                                                     !viewModel.showPortraitIntro &&
-                                                    !viewModel.showProGuide
+                                                    !viewModel.showProGuide &&
+                                                    !viewModel.showBasicsGuide
                                                 ) {
                                                     verticalTracking = true
                                                 }
@@ -1412,15 +1461,13 @@ fun CameraScreen(
                                 viewModel.closeCamera(surfaceTexture)
                             },
                             onTap = { x, y, w, h ->
-                                // Quick settings and the everyday row close and the tap still focuses;
-                                // other panels only close.
+                                // Quick settings, the everyday row and an open ruler close and the tap still focuses;
+                                // the manual values stay (only a swipe down hides them). Other panels only close.
                                 everydayRowShown = false
+                                showParameterRuler = false
+                                scrubRulerShown = false
                                 if (activePanel == ActivePanel.SETTINGS) activePanel = ActivePanel.NONE
-                                if (manualControlsShown && !isXpan) {
-                                    // The open manual panel closes, ruler included, without focusing.
-                                    manualControlsShown = false
-                                    showParameterRuler = false
-                                } else if (state.isFocusLocked) {
+                                if (state.isFocusLocked) {
                                     viewModel.unlockFocus()
                                 } else if (activePanel != ActivePanel.NONE) {
                                     activePanel = ActivePanel.NONE
@@ -1729,6 +1776,7 @@ fun CameraScreen(
                 onLooksBoundsChanged = { bounds ->
                     filterButtonBounds = bounds
                 },
+                modeLine = modeLine,
                 onQuickSettingsClick = {
                     activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
                 },
@@ -1951,6 +1999,19 @@ fun CameraScreen(
                     modifier = guidePillPlacement
                 )
             }
+            // Photo mode offers the camera basics the same way, on every launch until opened once.
+            val photoMode = state.captureMode == CaptureMode.PHOTO && !proMode && !state.isPortraitMode
+            if (
+                photoMode && !basicsGuideSeen && guidePillBottom != null &&
+                activePanel == ActivePanel.NONE && !viewModel.showBasicsGuide
+            ) {
+                ModeGuidePill(
+                    icon = AppIcons.InfoLine,
+                    text = stringResource(R.string.basics_guide_pill),
+                    onClick = { viewModel.showBasicsHelp() },
+                    modifier = guidePillPlacement
+                )
+            }
 
             CameraBottomControlsLayout(
                 viewfinderBottom = viewfinderTop + cardHeight,
@@ -1963,7 +2024,9 @@ fun CameraScreen(
                     },
                 parameterRuler = {
                     AnimatedVisibility(
-                        visible = showParameterRuler,
+                        visible = rulerShown,
+                        // Gives way with the footer while the mode list is open.
+                        modifier = Modifier.graphicsLayer { alpha = 1f - modeLine.side },
                         enter = expandVertically(
                             animationSpec = tween(220, easing = FastOutSlowInEasing),
                             expandFrom = Alignment.Bottom
@@ -1979,7 +2042,7 @@ fun CameraScreen(
                                 .onGloballyPositioned { coordinates ->
                                     // Only while it shows: during its exit animation it keeps reporting its
                                     // full rectangle, which would leave swipes there ignored after it has gone.
-                                    parameterRulerBounds = coordinates.boundsInRoot().takeIf { showParameterRuler }
+                                    parameterRulerBounds = coordinates.boundsInRoot().takeIf { rulerShown }
                                 }
                         )
                     }
@@ -1990,6 +2053,8 @@ fun CameraScreen(
                         Box(
                             Modifier
                                 .onGloballyPositioned { parameterBarTop = it.boundsInRoot().top }
+                                // Gives way with the footer while the mode list is open.
+                                .graphicsLayer { alpha = 1f - modeLine.side }
                                 .pointerInput(Unit) {
                                     var dragged = 0f
                                     detectVerticalDragGestures(
@@ -2009,7 +2074,7 @@ fun CameraScreen(
                                 enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 3 },
                                 exit = fadeOut(tween(150)) + slideOutVertically(tween(150)) { it / 3 }
                             ) {
-                                parameterBar(selectedParameter.takeIf { showParameterRuler }, onParameterClick)
+                                parameterBar(selectedParameter.takeIf { rulerShown }, onParameterClick)
                             }
                             // Closed: only the values set by hand; a tap opens the panel at that value.
                             AnimatedVisibility(
@@ -2114,6 +2179,7 @@ fun CameraScreen(
             onPortraitBokehStyleChange = viewModel::setPortraitBokehStyle,
             onPortraitHelp = viewModel::showPortraitHelp,
             onProHelp = viewModel::showProHelp,
+            onBasicsHelp = viewModel::showBasicsHelp,
             onOpenSettingsAt = onOpenSettingsAt,
             multiFrameCount = jpgMultiFrameCount,
             onMultiFrameCountChange = { viewModel.setJpgMultiFrameDenoiseFrameCountAndEnable(it) },
@@ -2190,6 +2256,10 @@ fun CameraScreen(
 
         if (viewModel.showProGuide) {
             ProGuide(onDismiss = viewModel::dismissProGuide)
+        }
+
+        if (viewModel.showBasicsGuide) {
+            BasicsGuide(onDismiss = viewModel::dismissBasicsGuide)
         }
 
         // During navigation measurement or window resizing, the viewport can be
@@ -2436,6 +2506,7 @@ private fun Controls(
     onLooksClick: () -> Unit,
     onLooksBoundsChanged: (Rect) -> Unit,
     onQuickSettingsClick: () -> Unit,
+    modeLine: ModeLineState,
     zoomCollar: (@Composable (fold: () -> Float) -> Unit)?,
     sideControlInset: Dp?,
     modifier: Modifier = Modifier.fillMaxSize()
@@ -2464,7 +2535,7 @@ private fun Controls(
                 state.isPortraitMode -> CameraShootingMode.PORTRAIT
                 else -> CameraShootingMode.PHOTO
             }
-            val line = remember { ModeLineState(shootingMode, state.isRawSupported) }
+            val line = modeLine
             if (!isXpan) Spacer(Modifier.height(CameraControlsLayoutDefaults.CollarRise))
             Box(
                 modifier = Modifier

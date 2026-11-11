@@ -1,5 +1,7 @@
 package com.hinnka.mycamera.ui.camera
 
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.draw.alpha
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -105,18 +107,24 @@ internal fun BoxScope.PortraitGuide(
 ) {
     val context = LocalContext.current
     ModeGuide(
-        steps = listOf(
-            GuideStep(AppIcons.User, R.string.portrait_guide_faces_title, R.string.portrait_guide_faces),
-            GuideStep(AppIcons.ApertureLine, R.string.portrait_guide_blur_title, R.string.portrait_guide_blur) {
-                DepthModelStatus(quickBlur = quickBlur, onUseDepth = onUseDepth, onDownload = { DepthModelManager.download(context) })
-            },
-            GuideStep(AppIcons.ScissorsLine, R.string.portrait_guide_subject_title, R.string.portrait_guide_subject),
-            GuideStep(AppIcons.Sliders, R.string.portrait_guide_edit_title, R.string.portrait_guide_edit),
-        ),
+        steps = portraitGuideSteps {
+            DepthModelStatus(quickBlur = quickBlur, onUseDepth = onUseDepth, onDownload = { DepthModelManager.download(context) })
+        },
         startStep = startStep,
         onDismiss = onDismiss,
     )
 }
+
+internal fun portraitGuideSteps(blurExtra: @Composable () -> Unit) = listOf(
+    GuideStep(AppIcons.User, R.string.portrait_guide_faces_title, R.string.portrait_guide_faces),
+    GuideStep(AppIcons.ApertureLine, R.string.portrait_guide_blur_title, R.string.portrait_guide_blur, blurExtra),
+    GuideStep(AppIcons.ScissorsLine, R.string.portrait_guide_subject_title, R.string.portrait_guide_subject),
+    GuideStep(AppIcons.Sliders, R.string.portrait_guide_edit_title, R.string.portrait_guide_edit),
+)
+
+/** Every guide's steps, for sizing: all guides share one height, that of the tallest step of any of them. */
+private fun allGuideSteps() = basicsGuideSteps() + proGuideSteps() +
+    portraitGuideSteps { DepthModelStatus(quickBlur = true, onUseDepth = {}, onDownload = {}) }
 
 /**
  * A mode explained as short steps in a sheet from the bottom, one step per page with dots, Back and
@@ -165,33 +173,17 @@ internal fun BoxScope.ModeGuide(
                 Icon(AppIcons.CloseLine, contentDescription = stringResource(R.string.close), tint = GuideDim, modifier = Modifier.size(20.dp))
             }
         }
-        // A fixed height, so moving between steps never makes the sheet jump.
-        // Pages start at the top, so each step's icon sits at the same height whatever its text length.
-        HorizontalPager(
-            state = pager,
-            modifier = Modifier.fillMaxWidth().height(204.dp).padding(end = 10.dp),
-            verticalAlignment = Alignment.Top
-        ) { page ->
-            val step = steps[page]
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                Icon(step.icon, contentDescription = null, tint = CameraControlsLayoutDefaults.LineColor, modifier = Modifier.size(40.dp))
-                Spacer(Modifier.height(10.dp))
-                Text(stringResource(step.title), color = GuideText, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    stringResource(step.text),
-                    color = GuideDim,
-                    fontSize = 13.sp,
-                    lineHeight = 1.4.em,
-                    // Icon and title are centred; the sentences read better from a straight left edge.
-                    textAlign = TextAlign.Start,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                step.extra?.let { extra ->
-                    Spacer(Modifier.height(12.dp))
-                    extra()
-                }
-            }
+        // As tall as the tallest step of any guide, measured from invisible copies: every guide has the same
+        // height, which fits its content, and moving between steps never makes the sheet jump. Pages start at
+        // the top, so each step's icon sits at the same height whatever its text length.
+        val measured = remember { allGuideSteps() }
+        Box(Modifier.fillMaxWidth().padding(end = 10.dp)) {
+            measured.forEach { step -> GuideStepPage(step, Modifier.alpha(0f).clearAndSetSemantics { }) }
+            HorizontalPager(
+                state = pager,
+                modifier = Modifier.matchParentSize(),
+                verticalAlignment = Alignment.Top
+            ) { page -> GuideStepPage(steps[page]) }
         }
         Row(Modifier.fillMaxWidth().padding(end = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             val first = pager.currentPage == 0
@@ -268,5 +260,30 @@ private fun GuideButton(text: String, enabled: Boolean, outlined: Boolean = fals
             fontSize = 13.5.sp,
             fontWeight = FontWeight.Medium
         )
+    }
+}
+
+/** One step of a guide: its icon and title centred, its sentences below. */
+@Composable
+private fun GuideStepPage(step: GuideStep, modifier: Modifier = Modifier) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier.fillMaxWidth()) {
+        Icon(step.icon, contentDescription = null, tint = CameraControlsLayoutDefaults.LineColor, modifier = Modifier.size(40.dp))
+        Spacer(Modifier.height(10.dp))
+        Text(stringResource(step.title), color = GuideText, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(14.dp))
+        Text(
+            stringResource(step.text),
+            color = GuideDim,
+            fontSize = 13.sp,
+            lineHeight = 1.4.em,
+            // Icon and title are centred; the sentences read better from a straight left edge.
+            textAlign = TextAlign.Start,
+            // Wide side margins keep the lines short and the page calm.
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)
+        )
+        step.extra?.let { extra ->
+            Spacer(Modifier.height(12.dp))
+            extra()
+        }
     }
 }
