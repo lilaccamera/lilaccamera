@@ -1857,11 +1857,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.onPreviewStreamActive = { active ->
             glSurfaceView?.setCameraStreamActive(active)
             // An "Accurate" front session's photos lose the viewfinder's cast; show the viewfinder that way too.
-            if (active) {
-                glSurfaceView?.setCastFixEnabled(
-                    cameraController.frontStillJpegActive && com.hinnka.mycamera.lut.PreviewCastFixGl.switchedOn
-                )
-            }
+            if (active) glSurfaceView?.setCastFixEnabled(cameraController.frontStillJpegActive)
         }
 
         cameraController.onCameraError = { code, message, canRetry ->
