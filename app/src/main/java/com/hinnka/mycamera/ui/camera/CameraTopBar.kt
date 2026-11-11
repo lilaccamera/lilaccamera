@@ -227,7 +227,7 @@ private fun formatRecordingDuration(elapsedMs: Long): String {
 
 /** A 2 dp line icon in white, with a dark copy one dp lower that keeps it readable on a bright picture. */
 @Composable
-private fun ShadowedLineIcon(icon: ImageVector, size: Dp) {
+internal fun ShadowedLineIcon(icon: ImageVector, size: Dp) {
     Box {
         Icon(icon, null, tint = Color.Black.copy(alpha = 0.5f), modifier = Modifier.offset(y = 1.dp).size(size))
         Icon(icon, null, tint = Color.White, modifier = Modifier.size(size))
