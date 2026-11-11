@@ -275,10 +275,10 @@ class GlesYuvStacker(
     }
     private val logFrameWeights = weightDiagnostics == "log" || weightDiagnostics == "off"
     private val rejectionDisabled = weightDiagnostics == "off"
-    // Debug builds only, off by default while it is tried out: `adb shell setprop debug.photon.yuv_stack.noise measured`
-    // widens the motion check's noise model by the noise measured on each frame; unset keeps the fixed model.
-    private val measuredNoiseEnabled = RawStackRuntimeDebug.enabled &&
-        SystemPropertiesUtil.get("debug.photon.yuv_stack.noise")?.trim()?.lowercase() == "measured"
+    // The motion check's noise model is widened by the noise measured on each frame. Debug builds can compare
+    // against the old fixed model with `adb shell setprop debug.photon.yuv_stack.noise fixed`.
+    private val measuredNoiseEnabled = !(RawStackRuntimeDebug.enabled &&
+        SystemPropertiesUtil.get("debug.photon.yuv_stack.noise")?.trim()?.lowercase() == "fixed")
     // The reference frame counts fully; each other frame adds its mean merge weight.
     private var mergedWeightSum = 1.0
 
