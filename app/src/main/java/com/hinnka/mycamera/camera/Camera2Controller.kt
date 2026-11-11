@@ -924,6 +924,8 @@ class Camera2Controller(private val context: Context) {
             maxOf(exposureNs, frameDurationNs ?: 0L, 1L)
         }
         var progressStarted = false
+        var firstStartTimestamp = 0L
+        var startedFrames = 0
         val callback = object : CameraCaptureSession.CaptureCallback() {
             override fun onCaptureStarted(
                 session: CameraCaptureSession,
@@ -948,6 +950,19 @@ class Camera2Controller(private val context: Context) {
                         estimatedDurationNs = estimatedDurationNs,
                     )
                     _state.update { it.copy(photoCaptureProgress = progress) }
+                }
+                // The ring shows how long to hold still, so once frames arrive it follows their real spacing:
+                // the camera may report no exposure (lilac front) or wait between frames for a JPEG.
+                startedFrames++
+                if (startedFrames == 1) firstStartTimestamp = timestamp
+                if (startedFrames >= 2 && progressStarted && activePhotoCapture === shot) {
+                    val measuredNs = (timestamp - firstStartTimestamp) / (startedFrames - 1) * requests.size
+                    _state.update { s ->
+                        val current = s.photoCaptureProgress
+                        if (current?.captureId != shot.id ||
+                            abs(measuredNs - current.estimatedDurationNs) < current.estimatedDurationNs / 20
+                        ) s else s.copy(photoCaptureProgress = current.copy(estimatedDurationNs = measuredNs))
+                    }
                 }
             }
 

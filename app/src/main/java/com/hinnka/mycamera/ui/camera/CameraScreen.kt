@@ -3305,14 +3305,16 @@ private const val SeeThroughFaceAlpha = 0.3f
 
 @Composable
 private fun rememberPhotoCaptureProgress(progress: PhotoCaptureProgress?): State<Float> {
-    val fraction = remember(progress) {
+    // Keyed on the shot, not the estimate: when the estimate is corrected mid-burst the ring slows down or speeds
+    // up, it never runs backwards.
+    val fraction = remember(progress?.captureId) {
         mutableFloatStateOf(progress?.fractionAt(SystemClock.elapsedRealtimeNanos()) ?: 0f)
     }
     LaunchedEffect(progress) {
         if (progress == null) return@LaunchedEffect
         while (isActive && fraction.floatValue < 1f) {
             withFrameNanos {
-                fraction.floatValue = progress.fractionAt(SystemClock.elapsedRealtimeNanos())
+                fraction.floatValue = maxOf(fraction.floatValue, progress.fractionAt(SystemClock.elapsedRealtimeNanos()))
             }
         }
     }
