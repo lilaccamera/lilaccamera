@@ -427,7 +427,7 @@ class Camera2Controller(private val context: Context) {
                 recordingState = recordingState.copy(isHot = isHot, heatGauge = heat.closest.takeIf { isHot })
             }
             if (recordingState.isPaused) {
-                _state.value = _state.value.copy(videoRecordingState = recordingState)
+                _state.update { s -> s.copy(videoRecordingState = recordingState) }
                 cameraHandler?.postDelayed(this, 250)
                 return
             }
@@ -435,9 +435,9 @@ class Camera2Controller(private val context: Context) {
                 (now - videoRecordingStartElapsedMs - videoRecordingPausedMs).coerceAtLeast(
                     0L
                 )
-            _state.value = _state.value.copy(
+            _state.update { s -> s.copy(
                 videoRecordingState = recordingState.copy(elapsedMs = elapsed)
-            )
+            ) }
             cameraHandler?.postDelayed(this, 250)
         }
     }
@@ -1349,7 +1349,7 @@ class Camera2Controller(private val context: Context) {
                 when (afState) {
                     CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED -> {
                         logFocusTerminalResult(result, afState)
-                        _state.value = _state.value.copy(isFocusing = false, focusSuccess = true)
+                        _state.update { s -> s.copy(isFocusing = false, focusSuccess = true) }
                         // 只在首次锁定时记录一次，后续 AF 狩猎重新锁定不再覆盖
                         if (!_state.value.isFocusLocked && !isFocusLockedWaitingForSceneChange) {
                             recordFocusLockExposure(result)
@@ -1358,7 +1358,7 @@ class Camera2Controller(private val context: Context) {
 
                     CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED -> {
                         logFocusTerminalResult(result, afState)
-                        _state.value = _state.value.copy(isFocusing = false, focusSuccess = false)
+                        _state.update { s -> s.copy(isFocusing = false, focusSuccess = false) }
                         if (!_state.value.isFocusLocked && !isFocusLockedWaitingForSceneChange) {
                             recordFocusLockExposure(result)
                         }
@@ -1456,7 +1456,7 @@ class Camera2Controller(private val context: Context) {
 
             // 关键修复：只在自动曝光模式下更新 ISO 和快门速度
             // 手动模式下保持用户设置不变（因为预览使用的是限制后的曝光时间，不是用户设置的值）
-            _state.value = _state.value.copy(
+            _state.update { s -> s.copy(
                 iso = if (isAutoExposure && _state.value.isIsoAuto) actualIso ?: _state.value.iso else _state.value.iso,
                 shutterSpeed = if (isAutoExposure && _state.value.isShutterSpeedAuto) actualExposureTimeNs
                     ?: _state.value.shutterSpeed else _state.value.shutterSpeed,
@@ -1475,7 +1475,7 @@ class Camera2Controller(private val context: Context) {
                 physicalAperture = aperture ?: _state.value.physicalAperture,
                 // 手动对焦保留用户目标值，避免镜头移动中的回报值改变后续拍摄和预览请求。
                 focusDistance = if (_state.value.isAutoFocus) focusDistance else _state.value.focusDistance
-            )
+            ) }
             pendingRetainedAwbTemperature?.let { temperature ->
                 if (canAdjustManualWhiteBalance(whiteBalanceResult)) {
                     setAwbTemperature(temperature)
@@ -1930,7 +1930,7 @@ class Camera2Controller(private val context: Context) {
         pendingContinuousBurstCapture = null
         isMultiFrameTorchCaptureActive = false
         isContinuousBurstTorchActive = false
-        _state.value = _state.value.copy(isCapturing = false, burstCapturing = false)
+        _state.update { s -> s.copy(isCapturing = false, burstCapturing = false) }
         resetPreviewAfterCapture()
     }
 
@@ -2201,11 +2201,11 @@ class Camera2Controller(private val context: Context) {
 
         PLog.i(TAG, "选择默认摄像头: ${defaultCamera?.cameraId}, 类型: ${defaultCamera?.lensType}")
 
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             availableCameras = cameras,
             currentCameraId = defaultCamera?.cameraId ?: "",
             currentLensType = defaultCamera?.lensType ?: LensType.BACK_MAIN
-        )
+        ) }
     }
 
     fun refreshCameraList() {
@@ -2374,24 +2374,15 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun setCameraInactive(resetVideoState: Boolean = true) {
-        _state.value = if (resetVideoState) {
-            _state.value.copy(
+        _state.update { s ->
+            s.copy(
                 isPreviewActive = false,
                 isCapturing = false,
                 actualAwbTemperature = null,
                 actualAwbTint = null,
                 actualAwbGains = null,
                 canAdjustWhiteBalance = false,
-                videoRecordingState = VideoRecordingState()
-            )
-        } else {
-            _state.value.copy(
-                isPreviewActive = false,
-                isCapturing = false,
-                actualAwbTemperature = null,
-                actualAwbTint = null,
-                actualAwbGains = null,
-                canAdjustWhiteBalance = false
+                videoRecordingState = if (resetVideoState) VideoRecordingState() else s.videoRecordingState
             )
         }
     }
@@ -2532,14 +2523,14 @@ class Camera2Controller(private val context: Context) {
             availableAfModes =
                 focusCharacteristics.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
         }
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             minimumFocusDistance = minimumFocusDistance,
             supportsPointAutoFocus = supportsPointAutoFocus(
                 minimumFocusDistance = minimumFocusDistance,
                 maxRegions = maxAfRegions,
                 afModes = availableAfModes,
             ),
-        )
+        ) }
     }
 
     private fun supportsPointAutoFocus(
@@ -2615,7 +2606,7 @@ class Camera2Controller(private val context: Context) {
         val resolvedConfig = enhancedFallbackMode?.let { fallbackMode ->
             snapshot.config.copy(stabilizationMode = fallbackMode)
         } ?: snapshot.config
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoConfig = resolvedConfig,
             videoCapabilities = snapshot.capabilities,
             currentPreviewSize = if (_state.value.captureMode == CaptureMode.VIDEO) {
@@ -2623,7 +2614,7 @@ class Camera2Controller(private val context: Context) {
             } else {
                 _state.value.currentPreviewSize
             }
-        )
+        ) }
         if (enhancedFallbackMode != null) {
             previousVideoStabilizationMode = enhancedFallbackMode
             notifyEnhancedStabilizationUnavailable(
@@ -2870,9 +2861,9 @@ class Camera2Controller(private val context: Context) {
                         TAG,
                         "Disabling photo preview stabilization: current camera is unsupported"
                     )
-                    _state.value = _state.value.copy(
+                    _state.update { s -> s.copy(
                         photoPreviewStabilizationEnabled = false
-                    )
+                    ) }
                     notifyEnhancedStabilizationUnavailable(
                         EnhancedStabilizationFallback.PhotoPreview
                     )
@@ -3129,10 +3120,10 @@ class Camera2Controller(private val context: Context) {
                         ?.contains(ColorSpace.Named.DISPLAY_P3) == true
                 } else false
 
-                _state.value = _state.value.copy(
+                _state.update { s -> s.copy(
                     isP3Supported = isP3Supported,
                     currentCaptureSize = captureSize
-                )
+                ) }
 
                 val readerMaxImages = resolveImageReaderMaxImages()
                 imageReaderMaxImages = readerMaxImages
@@ -3201,7 +3192,7 @@ class Camera2Controller(private val context: Context) {
                 safeCloseImageReader(rawCompanionJpegReader)
                 rawCompanionJpegReader = null
                 activeHighResolutionCaptureProfile = null
-                _state.value = _state.value.copy(isP3Supported = false)
+                _state.update { s -> s.copy(isP3Supported = false) }
             }
 
             if (surfaceTexture == null) {
@@ -3296,7 +3287,7 @@ class Camera2Controller(private val context: Context) {
 
                     // 通知上层
                     onCameraError?.invoke(error, errorMessage, canRetry)
-                    _state.value = _state.value.copy(isCapturing = false)
+                    _state.update { s -> s.copy(isCapturing = false) }
                 }
 
                 override fun onClosed(camera: CameraDevice) {
@@ -3315,7 +3306,7 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun updateHistogram(histogram: IntArray) {
-        _state.value = _state.value.copy(histogram = histogram)
+        _state.update { s -> s.copy(histogram = histogram) }
     }
 
     fun calculateAutoMetering(totalWeight: Double, weightedSumLuminance: Double) {
@@ -3408,7 +3399,7 @@ class Camera2Controller(private val context: Context) {
                         "iso=${currentState.iso}->$newIso",
                 )
                 // 更新状态
-                _state.value = currentState.copy(iso = newIso, shutterSpeed = newShutter)
+                _state.update { s -> s.copy(iso = newIso, shutterSpeed = newShutter) }
 
                 // 关键修复：检查相机和会话是否仍然有效
                 val device = cameraDevice
@@ -3851,9 +3842,9 @@ class Camera2Controller(private val context: Context) {
                         "${state.videoConfig.fps.fps}; fallback=$fallbackMode"
                 )
                 previousVideoStabilizationMode = fallbackMode
-                _state.value = state.copy(
+                _state.update { s -> s.copy(
                     videoConfig = state.videoConfig.copy(stabilizationMode = fallbackMode)
-                )
+                ) }
                 refreshVideoCapabilities()
                 previousVideoStabilizationMode =
                     _state.value.videoConfig.stabilizationMode
@@ -3872,7 +3863,7 @@ class Camera2Controller(private val context: Context) {
             state.captureMode == CaptureMode.PHOTO &&
                 state.photoPreviewStabilizationEnabled -> {
                 PLog.e(TAG, "Disabling photo preview stabilization: $reason")
-                _state.value = state.copy(photoPreviewStabilizationEnabled = false)
+                _state.update { s -> s.copy(photoPreviewStabilizationEnabled = false) }
                 refreshVideoCapabilities()
                 notifyEnhancedStabilizationUnavailable(
                     EnhancedStabilizationFallback.PhotoPreview
@@ -4144,12 +4135,12 @@ class Camera2Controller(private val context: Context) {
             ImageFormat.RAW_SENSOR, ImageFormat.RAW10 -> {
                 isRawSupported = getCameraCharacteristicsOrNull(key.physicalCameraId, "RAW output support")
                     ?.let { resolveRawCaptureOutput(it, key.physicalCameraId) } != null
-                _state.value = _state.value.copy(isRawSupported = isRawSupported)
+                _state.update { s -> s.copy(isRawSupported = isRawSupported) }
             }
 
             ImageFormat.YCBCR_P010 -> {
                 isP010Supported = false
-                _state.value = _state.value.copy(isP010Supported = false)
+                _state.update { s -> s.copy(isP010Supported = false) }
             }
         }
     }
@@ -4234,7 +4225,7 @@ class Camera2Controller(private val context: Context) {
                 }
             }
 
-            _state.value = _state.value.copy(isPreviewActive = true)
+            _state.update { s -> s.copy(isPreviewActive = true) }
             PLog.d(TAG, "Preview started")
 
         } catch (e: CameraAccessException) {
@@ -4742,7 +4733,7 @@ class Camera2Controller(private val context: Context) {
         builder.set(CaptureRequest.CONTROL_AF_MODE, afMode)
 
         if (_state.value.currentAfMode != afMode) {
-            _state.value = _state.value.copy(currentAfMode = afMode)
+            _state.update { s -> s.copy(currentAfMode = afMode) }
         }
     }
 
@@ -4765,7 +4756,7 @@ class Camera2Controller(private val context: Context) {
         builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, clampedDistance)
 
         if (_state.value.currentAfMode != CaptureRequest.CONTROL_AF_MODE_OFF) {
-            _state.value = _state.value.copy(currentAfMode = CaptureRequest.CONTROL_AF_MODE_OFF)
+            _state.update { s -> s.copy(currentAfMode = CaptureRequest.CONTROL_AF_MODE_OFF) }
         }
     }
 
@@ -5713,7 +5704,7 @@ class Camera2Controller(private val context: Context) {
     fun setNRLevel(level: Int) {
         val normalizedLevel = NoiseReductionLevel.normalize(level)
         nrLevel = normalizedLevel
-        _state.value = _state.value.copy(nrLevel = normalizedLevel)
+        _state.update { s -> s.copy(nrLevel = normalizedLevel) }
     }
 
     fun setVideoImageQualitySettings(nrLevel: Int, edgeLevel: Int) {
@@ -5754,7 +5745,7 @@ class Camera2Controller(private val context: Context) {
         val updatedState = previousState.copy(vendorCaptureSettingsByLens = settingsByLens)
         val updatedVendorSessionValues = forcedVendorSessionParameterValues(updatedState)
 
-        _state.value = updatedState
+        _state.update { s -> s.copy(vendorCaptureSettingsByLens = settingsByLens) }
         PLog.d(TAG, "Vendor capture lens settings count: ${settingsByLens.settingsByLensId.size}")
 
         val shouldRecreateSession =
@@ -5801,7 +5792,7 @@ class Camera2Controller(private val context: Context) {
         val updatedState = previousState.copy(customVendorKeySettings = settings)
         val updatedSessionKeys = customVendorSessionParameterKeys(updatedState)
 
-        _state.value = updatedState
+        _state.update { s -> s.copy(customVendorKeySettings = settings) }
         PLog.d(TAG, "Custom vendor key count: ${settings.keys.size}")
 
         val shouldRecreateSession =
@@ -5859,7 +5850,7 @@ class Camera2Controller(private val context: Context) {
 
     fun setRawMinShutterSpeedNs(value: Long) {
         val resolvedValue = value.coerceAtLeast(0L)
-        _state.value = _state.value.copy(rawMinShutterSpeedNs = resolvedValue)
+        _state.update { s -> s.copy(rawMinShutterSpeedNs = resolvedValue) }
         PLog.d(TAG, "RAW 最低快门速度: $resolvedValue ns")
     }
 
@@ -5867,19 +5858,19 @@ class Camera2Controller(private val context: Context) {
      * 设置虚化模拟光圈大小
      */
     fun setAperture(value: Float) {
-        _state.value = _state.value.copy(virtualAperture = value)
+        _state.update { s -> s.copy(virtualAperture = value) }
         PLog.d(TAG, "设置虚拟光圈: $value")
     }
 
     fun setPortraitMode(enabled: Boolean) {
-        _state.value = _state.value.copy(isPortraitMode = enabled)
+        _state.update { s -> s.copy(isPortraitMode = enabled) }
     }
 
     /**
      * 启用/禁用虚拟光圈控制
      */
     fun setVirtualApertureEnabled(enabled: Boolean) {
-        _state.value = _state.value.copy(isVirtualApertureEnabled = enabled)
+        _state.update { s -> s.copy(isVirtualApertureEnabled = enabled) }
         PLog.d(TAG, "虚拟光圈开关: $enabled")
     }
 
@@ -5948,11 +5939,11 @@ class Camera2Controller(private val context: Context) {
 
         targetCamera?.let { cam ->
             PLog.d(TAG, "Switching to lens: $lensType, cameraId: ${cam.cameraId}")
-            _state.value = _state.value.copy(
+            _state.update { s -> s.copy(
                 currentCameraId = cam.cameraId,
                 currentLensType = cam.lensType,
                 zoomRatio = 1f
-            )
+            ) }
         } ?: PLog.w(TAG, "Camera with lens type $lensType not found")
     }
 
@@ -5965,11 +5956,11 @@ class Camera2Controller(private val context: Context) {
 
         targetCamera?.let { cam ->
             PLog.d(TAG, "Switching to camera ID: $cameraId")
-            _state.value = _state.value.copy(
+            _state.update { s -> s.copy(
                 currentCameraId = cam.cameraId,
                 currentLensType = cam.lensType,
                 zoomRatio = 1f
-            )
+            ) }
         } ?: PLog.w(TAG, "Camera with ID $cameraId not found")
     }
 
@@ -6043,7 +6034,7 @@ class Camera2Controller(private val context: Context) {
             (ln(restoredIso.toDouble() / settings.iso) +
                 ln(restoredShutter.toDouble() / settings.shutterSpeedNs)) / ln(2.0)
         } else 0.0
-        _state.value = current.copy(
+        _state.update { s -> s.copy(
             exposureCompensation = compensation,
             exposureBias = if (isoAuto || shutterAuto) {
                 compensation * evStep
@@ -6052,7 +6043,7 @@ class Camera2Controller(private val context: Context) {
             iso = restoredIso,
             isShutterSpeedAuto = shutterAuto,
             shutterSpeed = restoredShutter,
-        )
+        ) }
         setAutoFocus(settings.isAutoFocus || current.minimumFocusDistance <= 0f)
         if (!settings.isAutoFocus) setFocusDistance(settings.focusDistance)
         if (settings.isHyperfocalFocusEnabled) setHyperfocalFocusEnabled(true)
@@ -6076,7 +6067,7 @@ class Camera2Controller(private val context: Context) {
         val evStep = _state.value.getExposureCompensationStep()
         val clampedValue = value.coerceIn(range.lower, range.upper)
         val exposureBias = clampedValue * evStep
-        _state.value = _state.value.copy(exposureCompensation = clampedValue, exposureBias = exposureBias)
+        _state.update { s -> s.copy(exposureCompensation = clampedValue, exposureBias = exposureBias) }
 
         previewRequestBuilder?.apply {
             // 使用统一的曝光设置方法，确保与闪光灯模式正确配合
@@ -6107,11 +6098,11 @@ class Camera2Controller(private val context: Context) {
             sliderBias
         }
 
-        _state.value = currentState.copy(
+        _state.update { s -> s.copy(
             iso = clampedValue,
             isIsoAuto = false,
             exposureBias = newBias
-        )
+        ) }
 
         previewRequestBuilder?.apply {
             applyExposureSettings(this, _state.value, false)
@@ -6143,11 +6134,11 @@ class Camera2Controller(private val context: Context) {
             sliderBias
         }
 
-        _state.value = currentState.copy(
+        _state.update { s -> s.copy(
             shutterSpeed = clampedValue,
             isShutterSpeedAuto = false,
             exposureBias = newBias
-        )
+        ) }
 
         previewRequestBuilder?.apply {
             applyExposureSettings(this, _state.value, false)
@@ -6158,7 +6149,7 @@ class Camera2Controller(private val context: Context) {
     /* ... flash mode ... */
 
     fun setFlashMode(value: Int) {
-        _state.value = _state.value.copy(flashMode = value)
+        _state.update { s -> s.copy(flashMode = value) }
 
         previewRequestBuilder?.apply {
             // 预览不发送预闪触发器；支持 ON_ALWAYS_FLASH 时由 AE 模式保留闪光会话配置，
@@ -6180,11 +6171,11 @@ class Camera2Controller(private val context: Context) {
         val evStep = currentState.getExposureCompensationStep()
         val sliderBias = currentState.exposureCompensation * evStep
 
-        _state.value = currentState.copy(
+        _state.update { s -> s.copy(
             isIsoAuto = enabled,
             isShutterSpeedAuto = enabled,
             exposureBias = if (enabled) sliderBias else currentState.exposureBias
-        )
+        ) }
 
         previewRequestBuilder?.apply {
             applyExposureSettings(this, _state.value, false)
@@ -6204,10 +6195,10 @@ class Camera2Controller(private val context: Context) {
         val isAutoOrSemi = enabled || currentState.isShutterSpeedAuto
         val exposureBias = if (isAutoOrSemi) sliderBias else currentState.exposureBias
 
-        _state.value = currentState.copy(
+        _state.update { s -> s.copy(
             isIsoAuto = enabled,
             exposureBias = exposureBias
-        )
+        ) }
         previewRequestBuilder?.apply {
             applyExposureSettings(this, _state.value, false)
             updatePreview()
@@ -6226,10 +6217,10 @@ class Camera2Controller(private val context: Context) {
         val isAutoOrSemi = enabled || currentState.isIsoAuto
         val exposureBias = if (isAutoOrSemi) sliderBias else currentState.exposureBias
 
-        _state.value = currentState.copy(
+        _state.update { s -> s.copy(
             isShutterSpeedAuto = enabled,
             exposureBias = exposureBias
-        )
+        ) }
         previewRequestBuilder?.apply {
             applyExposureSettings(this, _state.value, false)
             updatePreview()
@@ -6251,10 +6242,10 @@ class Camera2Controller(private val context: Context) {
             val snapshot = lastWhiteBalanceResult
             if (!canAdjustManualWhiteBalance(snapshot)) {
                 PLog.w(TAG, "Manual white balance ignored: current CCT or gains/transform result is unavailable")
-                _state.value = _state.value.copy(
+                _state.update { s -> s.copy(
                     awbMode = CameraMetadata.CONTROL_AWB_MODE_AUTO,
                     canAdjustWhiteBalance = false
-                )
+                ) }
                 previewRequestBuilder?.apply {
                     applyWhiteBalanceSettings(this, _state.value, false)
                     updatePreview()
@@ -6272,10 +6263,10 @@ class Camera2Controller(private val context: Context) {
             val anchor = createManualWhiteBalanceAnchor(snapshot, initialTemperature)
             if (anchor == null) {
                 PLog.w(TAG, "Manual white balance ignored: failed to freeze current white balance result")
-                _state.value = _state.value.copy(
+                _state.update { s -> s.copy(
                     awbMode = CameraMetadata.CONTROL_AWB_MODE_AUTO,
                     canAdjustWhiteBalance = false
-                )
+                ) }
                 previewRequestBuilder?.apply {
                     applyWhiteBalanceSettings(this, _state.value, false)
                     updatePreview()
@@ -6283,14 +6274,14 @@ class Camera2Controller(private val context: Context) {
                 return
             }
             manualWhiteBalanceAnchor = anchor
-            _state.value = _state.value.copy(
+            _state.update { s -> s.copy(
                 awbMode = CameraMetadata.CONTROL_AWB_MODE_OFF,
                 awbTemperature = initialTemperature,
                 canAdjustWhiteBalance = true
-            )
+            ) }
         } else {
             manualWhiteBalanceAnchor = null
-            _state.value = _state.value.copy(awbMode = normalizedMode)
+            _state.update { s -> s.copy(awbMode = normalizedMode) }
         }
 
         previewRequestBuilder?.apply {
@@ -6323,11 +6314,11 @@ class Camera2Controller(private val context: Context) {
 
         pendingRetainedAwbTemperature = null
 
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             awbTemperature = clampedKelvin,
             awbMode = CameraMetadata.CONTROL_AWB_MODE_OFF,
             canAdjustWhiteBalance = true
-        )
+        ) }
 
         previewRequestBuilder?.apply {
             applyWhiteBalanceSettings(this, _state.value, false)
@@ -6348,7 +6339,7 @@ class Camera2Controller(private val context: Context) {
             handler.post { setMeteringMode(mode) }
             return
         }
-        _state.value = _state.value.copy(meteringMode = mode, meteringPoint = null)
+        _state.update { s -> s.copy(meteringMode = mode, meteringPoint = null) }
         if (mode == MeteringMode.HIGHLIGHT_PRIORITY) {
             highlightPointInitialized = false
             lastSentHighlightPointX = -1f
@@ -6495,7 +6486,7 @@ class Camera2Controller(private val context: Context) {
             currentState.focusPointSource != FocusPointSource.MANUAL) return
         val point = normX.coerceIn(0f, 1f) to normY.coerceIn(0f, 1f)
         pointMeteringViewAspectRatio = viewAspectRatio
-        _state.value = currentState.copy(meteringPoint = point)
+        _state.update { s -> s.copy(meteringPoint = point) }
         if (currentState.meteringPoint == null) {
             PLog.d(TAG, "Separate metering point: focus=${currentState.focusPoint} metering=$point")
         }
@@ -6511,7 +6502,7 @@ class Camera2Controller(private val context: Context) {
         }
         val currentState = _state.value
         if (isCaptureFocusFrozen || currentState.isCapturing || currentState.meteringPoint == null) return
-        _state.value = currentState.copy(meteringPoint = null)
+        _state.update { s -> s.copy(meteringPoint = null) }
         applyMeteringRegions()
         updatePreview()
         PLog.d(TAG, "Merge metering point into focus=${currentState.focusPoint}")
@@ -6699,7 +6690,7 @@ class Camera2Controller(private val context: Context) {
             return
         }
         val requestedRatio = sanitizeZoomRatio(ratio)
-        _state.value = _state.value.copy(zoomRatio = requestedRatio)
+        _state.update { s -> s.copy(zoomRatio = requestedRatio) }
         val builder = previewRequestBuilder ?: return
         val openCameraId = activeOpenCameraId.takeIf { it.isNotEmpty() } ?: return
 
@@ -6711,7 +6702,7 @@ class Camera2Controller(private val context: Context) {
             val maxSupportedZoom = zoomRatioRange?.upper ?: maxZoom
             val clampedRatio = requestedRatio.coerceIn(minZoom, maxSupportedZoom)
 
-            _state.value = _state.value.copy(zoomRatio = clampedRatio)
+            _state.update { s -> s.copy(zoomRatio = clampedRatio) }
             if (recreateSessionForPhysicalZoomIfNeeded(_state.value)) {
                 PLog.d(TAG, "setZoomRatio: $ratio -> $clampedRatio (physical output session recreated)")
                 return
@@ -6784,12 +6775,12 @@ class Camera2Controller(private val context: Context) {
         }
         clearHyperfocalFocusMemory()
         clearPointFocusState()
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             isAutoFocus = auto,
             isHyperfocalFocusEnabled = false,
             hyperfocalDistanceMeters = 0f,
             isFocusLocked = false
-        )
+        ) }
         if (!isCaptureFocusFrozen) {
             previewRequestBuilder?.apply {
                 clearCustomAfRegions(this)
@@ -6816,12 +6807,12 @@ class Camera2Controller(private val context: Context) {
 
         val clampedDistance = distance.coerceIn(0f, minFocusDistance)
         clearHyperfocalFocusMemory()
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             focusDistance = clampedDistance,
             isHyperfocalFocusEnabled = false,
             hyperfocalDistanceMeters = 0f,
             isFocusLocked = false
-        )
+        ) }
 
         if (!_state.value.isAutoFocus && !isCaptureFocusFrozen) {
             previewRequestBuilder?.apply {
@@ -6882,13 +6873,13 @@ class Camera2Controller(private val context: Context) {
 
         val clampedFocusDistance = result.focusDistanceDiopters.coerceIn(0f, minFocusDistance)
         clearPointFocusState()
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             isAutoFocus = false,
             focusDistance = clampedFocusDistance,
             isHyperfocalFocusEnabled = true,
             hyperfocalDistanceMeters = result.distanceMeters,
             isFocusLocked = false
-        )
+        ) }
 
         if (updatePreview && !isCaptureFocusFrozen) {
             previewRequestBuilder?.apply {
@@ -6917,13 +6908,13 @@ class Camera2Controller(private val context: Context) {
 
         clearHyperfocalFocusMemory()
         clearPointFocusState()
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             isAutoFocus = restoreAutoFocus,
             focusDistance = restoreFocusDistance,
             isHyperfocalFocusEnabled = false,
             hyperfocalDistanceMeters = 0f,
             isFocusLocked = false
-        )
+        ) }
 
         if (updatePreview && !isCaptureFocusFrozen) {
             previewRequestBuilder?.apply {
@@ -7046,14 +7037,14 @@ class Camera2Controller(private val context: Context) {
         focusLockSettleFrames = 0
         eyeTargetLastSeenElapsedMs = 0L
         pointAfTriggerPending = false
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             focusPoint = null,
             meteringPoint = null,
             focusPointSource = FocusPointSource.MANUAL,
             isFocusLocked = false,
             isFocusing = false,
             focusSuccess = null
-        )
+        ) }
     }
 
     /**
@@ -7085,10 +7076,10 @@ class Camera2Controller(private val context: Context) {
             if (aeLockAvailable) set(CaptureRequest.CONTROL_AE_LOCK, held)
             updatePreview()
         }
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             shutterKeyHeld = held,
             exposureHeld = held && aeLockAvailable && _state.value.isAutoExposure,
-        )
+        ) }
     }
 
     /** Focuses again on the tapped point (a half-press after a miss), keeping the exposure point as it is. */
@@ -7193,14 +7184,14 @@ class Camera2Controller(private val context: Context) {
             }
 
             // 存储UI坐标用于显示对焦框
-            _state.value = _state.value.copy(
+            _state.update { s -> s.copy(
                 focusPoint = Pair(normalizedX, normalizedY),
                 meteringPoint = if (preserveMeteringPoint) _state.value.meteringPoint else null,
                 focusPointSource = source,
                 isFocusLocked = lockFocus,
                 isFocusing = triggerFocus,
                 focusSuccess = null
-            )
+            ) }
             // AF 区域保持为可见画面的 10%，避免 SCALER_CROP_REGION 变焦后区域相对画面膨胀。
             val afRect = PreviewMeteringMapper.buildCenteredRegion(
                 mapping = mapping,
@@ -7230,19 +7221,19 @@ class Camera2Controller(private val context: Context) {
                 applyMeteringRegions()
             }
             val afMode = CaptureRequest.CONTROL_AF_MODE_AUTO
-            _state.value = _state.value.copy(currentAfMode = afMode)
+            _state.update { s -> s.copy(currentAfMode = afMode) }
             if (!triggerFocus) {
                 updatePreview()
             } else if (!submitOneShotAfTrigger(afMode, "point focus")) {
                 PLog.w(TAG, "Unable to submit point-focus AF trigger")
-                _state.value = _state.value.copy(isFocusing = false, focusSuccess = false)
+                _state.update { s -> s.copy(isFocusing = false, focusSuccess = false) }
             }
 
             // 对焦后通过场景变化检测自动恢复连续对焦（不再使用固定延迟）
 
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to focus", e)
-            _state.value = _state.value.copy(isFocusing = false, focusSuccess = false)
+            _state.update { s -> s.copy(isFocusing = false, focusSuccess = false) }
         }
     }
 
@@ -7263,11 +7254,11 @@ class Camera2Controller(private val context: Context) {
             return
         }
         eyeTargetLastSeenElapsedMs = SystemClock.elapsedRealtime()
-        _state.value = currentState.copy(
+        _state.update { s -> s.copy(
             focusPoint = Pair(normX.coerceIn(0f, 1f), normY.coerceIn(0f, 1f)),
             focusPointSource = FocusPointSource.EYE,
             isFocusLocked = false,
-        )
+        ) }
     }
 
     fun cancelEyeFocus(reason: String) {
@@ -7307,7 +7298,7 @@ class Camera2Controller(private val context: Context) {
      * 设置画面比例
      */
     fun setAspectRatio(ratio: AspectRatio) {
-        _state.value = _state.value.copy(aspectRatio = ratio)
+        _state.update { s -> s.copy(aspectRatio = ratio) }
     }
 
     /**
@@ -7317,12 +7308,12 @@ class Camera2Controller(private val context: Context) {
     // them must not restart the camera.
     fun setLutEnabled(enabled: Boolean) {
         if (_state.value.lutEnabled == enabled) return
-        _state.value = _state.value.copy(lutEnabled = enabled)
+        _state.update { s -> s.copy(lutEnabled = enabled) }
     }
 
     fun setLogLutActive(isLogLut: Boolean) {
         if (_state.value.isLogLutActive == isLogLut) return
-        _state.value = _state.value.copy(isLogLutActive = isLogLut)
+        _state.update { s -> s.copy(isLogLutActive = isLogLut) }
     }
 
     fun setCaptureMode(mode: CaptureMode) {
@@ -7332,24 +7323,24 @@ class Camera2Controller(private val context: Context) {
         ) {
             return
         }
-        val nextVideoConfig = if (mode == CaptureMode.VIDEO) {
-            _state.value.videoConfig
-        } else {
-            _state.value.videoConfig.copy(logProfile = VideoLogProfile.OFF)
-        }
-        val nextState = _state.value.copy(
-            captureMode = mode,
-            videoConfig = nextVideoConfig,
-            countdownValue = 0,
-            isCapturingLivePhoto = false
-        ).let { state ->
-            if (mode == CaptureMode.VIDEO) {
-                state.copy(shutterSpeed = coerceManualShutterSpeed(state, state.shutterSpeed))
-            } else {
-                state
+        _state.update { current ->
+            current.copy(
+                captureMode = mode,
+                videoConfig = if (mode == CaptureMode.VIDEO) {
+                    current.videoConfig
+                } else {
+                    current.videoConfig.copy(logProfile = VideoLogProfile.OFF)
+                },
+                countdownValue = 0,
+                isCapturingLivePhoto = false
+            ).let { state ->
+                if (mode == CaptureMode.VIDEO) {
+                    state.copy(shutterSpeed = coerceManualShutterSpeed(state, state.shutterSpeed))
+                } else {
+                    state
+                }
             }
         }
-        _state.value = nextState
         if (mode == CaptureMode.VIDEO) {
             livePhotoRecorder.stopRecording()
             refreshVideoCapabilities()
@@ -7362,10 +7353,10 @@ class Camera2Controller(private val context: Context) {
                 ?: _state.value.currentCameraId
             val photoPreviewSize = getCameraCharacteristicsOrNull(photoCameraId, "photo preview size")
                 ?.let { CameraUtils.getFixedPreviewSize(it, _state.value.aspectRatio) }
-            _state.value = _state.value.copy(
+            _state.update { s -> s.copy(
                 videoRecordingState = VideoRecordingState(),
                 currentPreviewSize = photoPreviewSize ?: _state.value.currentPreviewSize,
-            )
+            ) }
             if (_state.value.useLivePhoto) {
                 livePhotoRecorder.startRecording()
             }
@@ -7376,21 +7367,21 @@ class Camera2Controller(private val context: Context) {
 
     fun setVideoResolution(resolution: VideoResolutionPreset) {
         val currentConfig = _state.value.videoConfig
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoConfig = currentConfig.copy(
                 resolution = resolution,
             )
-        )
+        ) }
         refreshVideoCapabilities()
     }
 
     fun setVideoFps(fps: VideoFpsPreset) {
         val currentConfig = _state.value.videoConfig
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoConfig = currentConfig.copy(
                 fps = fps,
             )
-        )
+        ) }
         refreshVideoCapabilities()
         previewRequestBuilder?.apply {
             applyBaseCameraSettings(this, isCapture = false)
@@ -7413,15 +7404,15 @@ class Camera2Controller(private val context: Context) {
                 resolutionBeforeOpenGate ?: currentConfig.resolution
             else -> currentConfig.resolution
         }
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoConfig = currentConfig.copy(aspectRatio = aspectRatio, resolution = resolution)
-        )
+        ) }
         refreshVideoCapabilities()
     }
 
     fun setVideoLogLutMode(mode: VideoLogLutMode) {
         if (_state.value.videoRecordingState.isRecording || _state.value.videoRecordingState.isProcessing) return
-        _state.value = _state.value.copy(videoConfig = _state.value.videoConfig.copy(logLutMode = mode))
+        _state.update { s -> s.copy(videoConfig = _state.value.videoConfig.copy(logLutMode = mode)) }
     }
 
     fun setVideoLogProfile(logProfile: VideoLogProfile) {
@@ -7431,7 +7422,7 @@ class Camera2Controller(private val context: Context) {
         } else {
             VideoLogProfile.OFF
         }
-        _state.value = _state.value.copy(videoConfig = _state.value.videoConfig.copy(logProfile = resolvedProfile))
+        _state.update { s -> s.copy(videoConfig = _state.value.videoConfig.copy(logProfile = resolvedProfile)) }
         refreshVideoCapabilities()
         val appliedProfile = _state.value.videoConfig.logProfile
         if (previousProfile != appliedProfile || logProfile != appliedProfile) {
@@ -7470,11 +7461,11 @@ class Camera2Controller(private val context: Context) {
                 previousVideoStabilizationMode = mode
             }
         }
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoConfig = previousConfig.copy(
                 stabilizationMode = mode,
             )
-        )
+        ) }
         refreshVideoCapabilities()
         val resolvedConfig = _state.value.videoConfig
         if (
@@ -7517,37 +7508,37 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun setVideoBitrate(bitrate: VideoBitratePreset) {
-        _state.value = _state.value.copy(videoConfig = _state.value.videoConfig.copy(bitrate = bitrate))
+        _state.update { s -> s.copy(videoConfig = _state.value.videoConfig.copy(bitrate = bitrate)) }
         refreshVideoCapabilities()
     }
 
     fun setVideoCodec(codec: com.hinnka.mycamera.video.VideoCodec) {
-        _state.value = _state.value.copy(videoConfig = _state.value.videoConfig.copy(codec = codec))
+        _state.update { s -> s.copy(videoConfig = _state.value.videoConfig.copy(codec = codec)) }
         refreshVideoCapabilities()
     }
 
     fun setVideoAudioInputId(audioInputId: String) {
         val normalizedAudioInputId = audioInputId.ifBlank { VIDEO_AUDIO_INPUT_AUTO }
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoConfig = _state.value.videoConfig.copy(audioInputId = normalizedAudioInputId)
-        )
+        ) }
         videoRecorder.setPreferredAudioInputId(normalizedAudioInputId)
     }
 
     fun setVideoEnhancedStabilizationStrength(strength: Float) {
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoConfig = _state.value.videoConfig.copy(
                 enhancedStabilizationStrength = normalizeStabilizationStrength(strength)
             )
-        )
+        ) }
     }
 
     fun setVideoEnhancedStabilizationLookahead(lookahead: Int) {
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoConfig = _state.value.videoConfig.copy(
                 enhancedStabilizationLookahead = normalizeStabilizationLookahead(lookahead)
             )
-        )
+        ) }
     }
 
     fun setExternalLensStabilizationConfig(config: ExternalLensStabilizationConfig) {
@@ -7557,14 +7548,14 @@ class Camera2Controller(private val context: Context) {
     /** Caps the Photo-mode (YUV) capture size of the back cameras; 0 = full sensor size. RAW is always full size. */
     fun setPhotoResolutionCapMp(megapixels: Int) {
         if (_state.value.photoResolutionCapMp == megapixels) return
-        _state.value = _state.value.copy(photoResolutionCapMp = megapixels)
+        _state.update { s -> s.copy(photoResolutionCapMp = megapixels) }
         if (!isFrontCameraOpen()) restartForPhotoResolutionCap(megapixels)
     }
 
     /** Caps the front camera's Photo-mode capture size; 0 = full sensor size. */
     fun setFrontPhotoResolutionCapMp(megapixels: Int) {
         if (_state.value.frontPhotoResolutionCapMp == megapixels) return
-        _state.value = _state.value.copy(frontPhotoResolutionCapMp = megapixels)
+        _state.update { s -> s.copy(frontPhotoResolutionCapMp = megapixels) }
         if (isFrontCameraOpen()) restartForPhotoResolutionCap(megapixels)
     }
 
@@ -7592,9 +7583,9 @@ class Camera2Controller(private val context: Context) {
             !realtimeStabilizationCoordinator.isCurrentCameraSupported
         ) {
             if (_state.value.photoPreviewStabilizationEnabled) {
-                _state.value = _state.value.copy(
+                _state.update { s -> s.copy(
                     photoPreviewStabilizationEnabled = false
-                )
+                ) }
             }
             PLog.e(TAG, "Photo preview stabilization rejected: current camera is unsupported")
             notifyEnhancedStabilizationUnavailable(
@@ -7603,7 +7594,7 @@ class Camera2Controller(private val context: Context) {
             return
         }
         if (_state.value.photoPreviewStabilizationEnabled == enabled) return
-        _state.value = _state.value.copy(photoPreviewStabilizationEnabled = enabled)
+        _state.update { s -> s.copy(photoPreviewStabilizationEnabled = enabled) }
         if (_state.value.captureMode == CaptureMode.PHOTO &&
             cameraDevice != null && previewSurface != null
         ) {
@@ -7617,20 +7608,20 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun setVideoRecordingPath(recordingPath: VideoRecordingPath, recordingTreeUri: String? = null) {
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoConfig = _state.value.videoConfig.copy(
                 recordingPath = recordingPath,
                 recordingTreeUri = recordingTreeUri?.takeIf { it.isNotBlank() }
             )
-        )
+        ) }
     }
 
     fun setVideoTorchEnabled(enabled: Boolean) {
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoConfig = _state.value.videoConfig.copy(
                 torchEnabled = enabled && _state.value.videoCapabilities.supportsTorch
             )
-        )
+        ) }
         previewRequestBuilder?.apply {
             applyBaseCameraSettings(this, isCapture = false)
             updatePreview()
@@ -7639,16 +7630,16 @@ class Camera2Controller(private val context: Context) {
 
     fun setVideoLensLockEnabled(enabled: Boolean) {
         if (_state.value.videoConfig.lensLockEnabled == enabled) return
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoConfig = _state.value.videoConfig.copy(lensLockEnabled = enabled)
-        )
+        ) }
     }
 
     fun setVideoWhiteBalanceLockEnabled(enabled: Boolean) {
         if (_state.value.videoConfig.whiteBalanceLockEnabled == enabled) return
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoConfig = _state.value.videoConfig.copy(whiteBalanceLockEnabled = enabled)
-        )
+        ) }
         previewRequestBuilder?.apply {
             applyWhiteBalanceSettings(this, _state.value, isCapture = false)
             updatePreview()
@@ -7767,7 +7758,7 @@ class Camera2Controller(private val context: Context) {
         ) { uri ->
             PLog.i(TAG, "Video saved: $uri")
             val completeRecording = Runnable {
-                _state.value = _state.value.copy(videoRecordingState = VideoRecordingState())
+                _state.update { s -> s.copy(videoRecordingState = VideoRecordingState()) }
                 if (cameraDevice != null && previewSurface != null) {
                     createPreviewSession(openGeneration = cameraOpenGeneration)
                 }
@@ -7778,9 +7769,9 @@ class Camera2Controller(private val context: Context) {
         if (!started) {
             return
         }
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoRecordingState = VideoRecordingState(isRecording = true, elapsedMs = 0L)
-        )
+        ) }
         videoRecordingPausedMs = 0L
         createPreviewSession(openGeneration = cameraOpenGeneration)
     }
@@ -7858,9 +7849,9 @@ class Camera2Controller(private val context: Context) {
             updateDedicatedVideoRepeatingTarget(includeVideoSurface = false)
         }
         videoRecordingPauseStartElapsedMs = SystemClock.elapsedRealtime()
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoRecordingState = _state.value.videoRecordingState.copy(isPaused = true)
-        )
+        ) }
     }
 
     fun resumeVideoRecording() {
@@ -7873,9 +7864,9 @@ class Camera2Controller(private val context: Context) {
         }
         videoRecorder.resumeRecording()
         videoRecordingPausedMs += SystemClock.elapsedRealtime() - videoRecordingPauseStartElapsedMs
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoRecordingState = _state.value.videoRecordingState.copy(isPaused = false)
-        )
+        ) }
     }
 
     fun stopVideoRecording() {
@@ -7884,13 +7875,13 @@ class Camera2Controller(private val context: Context) {
         videoCaptureStatsFrames = 0
         videoCaptureStatsFirstTimestampNs = 0L
         stopVideoRecordingTicker()
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             videoRecordingState = _state.value.videoRecordingState.copy(
                 isRecording = false,
                 isPaused = false,
                 isProcessing = videoRecorder.usesDedicatedCameraInput
             )
-        )
+        ) }
         if (videoRecorder.usesDedicatedCameraInput && !_state.value.videoRecordingState.isPaused) {
             updateDedicatedVideoRepeatingTarget(includeVideoSurface = false)
         } else {
@@ -7971,111 +7962,111 @@ class Camera2Controller(private val context: Context) {
      * 设置延时拍摄秒数
      */
     fun setTimerSeconds(seconds: Int) {
-        _state.value = _state.value.copy(timerSeconds = seconds)
+        _state.update { s -> s.copy(timerSeconds = seconds) }
     }
 
     /**
      * 设置倒计时值（用于UI显示）
      */
     fun setCountdownValue(value: Int) {
-        _state.value = _state.value.copy(countdownValue = value)
+        _state.update { s -> s.copy(countdownValue = value) }
     }
 
     /**
      * 设置是否显示网格线
      */
     fun setShowGrid(show: Boolean) {
-        _state.value = _state.value.copy(showGrid = show)
+        _state.update { s -> s.copy(showGrid = show) }
     }
 
     fun setGridStyle(style: GridStyle) {
-        _state.value = _state.value.copy(gridStyle = style)
+        _state.update { s -> s.copy(gridStyle = style) }
     }
 
     fun setRawCfaCorrectionModes(modes: Map<String, String>) {
-        _state.value = _state.value.copy(rawCfaCorrectionModes = modes.toMap())
+        _state.update { s -> s.copy(rawCfaCorrectionModes = modes.toMap()) }
     }
 
     fun setMultiFrameOutputScale(outputScale: Float?) {
         val currentState = _state.value
         val normalizedScale = outputScale?.let(MultiFrameConfig::normalizeOutputScale)
-        _state.value = currentState.copy(
+        _state.update { s -> s.copy(
             multiFrameOutputScale = normalizedScale,
-        )
+        ) }
     }
 
     fun setUseMultipleExposure(useMultipleExposure: Boolean) {
-        _state.value = _state.value.copy(useMultipleExposure = useMultipleExposure)
+        _state.update { s -> s.copy(useMultipleExposure = useMultipleExposure) }
     }
 
     fun onHdrBracketFramesCollected() {
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             hdrBracketCapturing = false,
             hdrBracketFrameCount = 0
-        )
+        ) }
     }
 
     fun setJpgMultiFrameDenoiseFrameCount(frameCount: Int) {
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             jpgMultiFrameDenoiseFrameCount = MultiFrameConfig.normalizeDenoiseFrameCount(frameCount),
-        )
+        ) }
     }
 
     fun setHdrPlusMergeMode(mode: MgcRawMaxMode) {
         val currentState = _state.value
-        _state.value = currentState.copy(
+        _state.update { s -> s.copy(
             hdrPlusMergeMode = mode,
             hdrPlusBracketExposureEnabled = currentState.hdrPlusBracketExposureEnabled &&
                 mode.supportsBracketExposure,
-        )
+        ) }
     }
 
     fun setHdrPlusFrameCount(frameCount: Int) {
         val currentState = _state.value
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             hdrPlusFrameCount = MultiFrameConfig.normalizeHdrPlusFrameCount(
                 frameCount,
                 bracketExposureEnabled = currentState.hdrPlusMergeMode.supportsBracketExposure &&
                     currentState.hdrPlusBracketExposureEnabled,
             ),
-        )
+        ) }
     }
 
     fun setUseJpgMaxHdrComposition(enabled: Boolean) {
-        _state.value = _state.value.copy(useJpgMaxHdrComposition = enabled)
+        _state.update { s -> s.copy(useJpgMaxHdrComposition = enabled) }
     }
 
     fun setHdrPlusBracketExposureEnabled(enabled: Boolean) {
         val currentState = _state.value
         val bracketExposureEnabled = enabled && currentState.hdrPlusMergeMode.supportsBracketExposure
-        _state.value = currentState.copy(
+        _state.update { s -> s.copy(
             hdrPlusBracketExposureEnabled = bracketExposureEnabled,
             hdrPlusFrameCount = MultiFrameConfig.normalizeHdrPlusFrameCount(
                 currentState.hdrPlusFrameCount,
                 bracketExposureEnabled = bracketExposureEnabled,
             ),
-        )
+        ) }
     }
 
     fun setHdrPlusLongFrameExposureEv(value: Float) {
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             hdrPlusLongFrameExposureEv = MultiFrameConfig.normalizeLongFrameExposureEv(value),
-        )
+        ) }
     }
 
     fun setHdrPlusShortFrameExposureEv(value: Float) {
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             hdrPlusShortFrameExposureEv = MultiFrameConfig.normalizeShortFrameExposureEv(value),
-        )
+        ) }
     }
 
 
     fun setCapturingLivePhoto(enabled: Boolean) {
-        _state.value = _state.value.copy(isCapturingLivePhoto = enabled)
+        _state.update { s -> s.copy(isCapturingLivePhoto = enabled) }
     }
 
     fun setApplyUltraHDR(enabled: Boolean) {
-        _state.value = _state.value.copy(applyUltraHDR = enabled)
+        _state.update { s -> s.copy(applyUltraHDR = enabled) }
     }
 
 // ==================== 拍照 ====================
@@ -8223,7 +8214,7 @@ class Camera2Controller(private val context: Context) {
                 onPlayShutterSound?.invoke()
             }
 
-            _state.value = _state.value.copy(isCapturing = true)
+            _state.update { s -> s.copy(isCapturing = true) }
 
             // 只有在【自动曝光 + 单次闪光】时才使用预闪流程
             // 手动曝光模式下，AE_PRECAPTURE_TRIGGER 不生效（因为 AE_MODE=OFF），直接拍照
@@ -8236,7 +8227,7 @@ class Camera2Controller(private val context: Context) {
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to capture", e)
             PLog.e(TAG, "拍照失败", e)
-            _state.value = _state.value.copy(isCapturing = false)
+            _state.update { s -> s.copy(isCapturing = false) }
             burstGyroRecorder.stop()
             resetPreviewAfterCapture()
         }
@@ -8257,11 +8248,11 @@ class Camera2Controller(private val context: Context) {
         )
         val evOffsets = buildHdrBracketEvOffsets(normalizedZeroEvFrameCount)
         val hdrFrameCount = evOffsets.size
-        _state.value = _state.value.copy(
+        _state.update { s -> s.copy(
             isCapturing = true,
             hdrBracketCapturing = true,
             hdrBracketFrameCount = hdrFrameCount
-        )
+        ) }
 
         try {
             if (playShutterSound && !_state.value.useLivePhoto) {
@@ -8305,11 +8296,11 @@ class Camera2Controller(private val context: Context) {
             submitPhotoCapture(shot, session, requests, baseExposureResult)
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to capture HDR bracket", e)
-            _state.value = _state.value.copy(
+            _state.update { s -> s.copy(
                 isCapturing = false,
                 hdrBracketCapturing = false,
                 hdrBracketFrameCount = 0
-            )
+            ) }
             burstGyroRecorder.stop()
             onHdrBracketCaptureFailed?.invoke()
             resetPreviewAfterCapture()
@@ -8799,7 +8790,7 @@ class Camera2Controller(private val context: Context) {
             if (shouldUseJpgMaxHdrCapture(currentState, isRawCapture)) {
                 val session = captureSession ?: run {
                     PLog.e(TAG, "Failed to capture JPGmax bracket: capture session unavailable")
-                    _state.value = _state.value.copy(isCapturing = false)
+                    _state.update { s -> s.copy(isCapturing = false) }
                     onHdrBracketCaptureFailed?.invoke()
                     resetPreviewAfterCapture()
                     return
@@ -8992,7 +8983,7 @@ class Camera2Controller(private val context: Context) {
             }
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to perform capture", e)
-            _state.value = _state.value.copy(isCapturing = false)
+            _state.update { s -> s.copy(isCapturing = false) }
             burstGyroRecorder.stop()
             resetPreviewAfterCapture()
         }
@@ -9282,7 +9273,7 @@ class Camera2Controller(private val context: Context) {
             } else if (!keepVideoRecording && !_state.value.videoRecordingState.isProcessing) {
                 videoRecorder.forceStop()
                 stopVideoRecordingTicker()
-                _state.value = _state.value.copy(videoRecordingState = VideoRecordingState())
+                _state.update { s -> s.copy(videoRecordingState = VideoRecordingState()) }
             }
             val videoStateAfterStopRequest = _state.value.videoRecordingState
             if (videoStateAfterStopRequest.isProcessing) {
@@ -9294,17 +9285,19 @@ class Camera2Controller(private val context: Context) {
             cameraDevice = null
             clearCameraCapabilityCache()
 
-            _state.value = if (keepVideoRecording) {
-                _state.value.copy(isPreviewActive = false)
-            } else {
-                _state.value.copy(
-                    isPreviewActive = false,
-                    videoRecordingState = if (videoStateAfterStopRequest.isProcessing) {
-                        videoStateAfterStopRequest
-                    } else {
-                        VideoRecordingState()
-                    }
-                )
+            _state.update { s ->
+                if (keepVideoRecording) {
+                    s.copy(isPreviewActive = false)
+                } else {
+                    s.copy(
+                        isPreviewActive = false,
+                        videoRecordingState = if (videoStateAfterStopRequest.isProcessing) {
+                            videoStateAfterStopRequest
+                        } else {
+                            VideoRecordingState()
+                        }
+                    )
+                }
             }
 
             // 停止 Live Photo 录制，释放旧环境下的 EGL 资源
@@ -9592,7 +9585,7 @@ class Camera2Controller(private val context: Context) {
      * 设置是否启用 Live Photo
      */
     fun setUseLivePhoto(enabled: Boolean) {
-        _state.value = _state.value.copy(useLivePhoto = enabled)
+        _state.update { s -> s.copy(useLivePhoto = enabled) }
         if (enabled && _state.value.captureMode == CaptureMode.PHOTO) {
             livePhotoRecorder.startRecording()
         } else {
@@ -9601,16 +9594,16 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun setUseP010(enabled: Boolean) {
-        _state.value = _state.value.copy(useP010 = enabled)
+        _state.update { s -> s.copy(useP010 = enabled) }
     }
 
     fun setUseP3ColorSpace(enabled: Boolean) {
-        _state.value = _state.value.copy(useP3ColorSpace = enabled)
+        _state.update { s -> s.copy(useP3ColorSpace = enabled) }
     }
 
     fun setLocation(latitude: Double?, longitude: Double?) {
         PLog.d(TAG, "setLocation: $latitude, $longitude")
-        _state.value = _state.value.copy(latitude = latitude, longitude = longitude)
+        _state.update { s -> s.copy(latitude = latitude, longitude = longitude) }
     }
 
     /**
@@ -9741,7 +9734,7 @@ class Camera2Controller(private val context: Context) {
             failPhotoCapture(shot, "continuous burst submission failed")
             PLog.e(TAG, "Failed to start hardware burst capture", e)
             burstCapturing = false
-            _state.value = _state.value.copy(burstCapturing = false, isCapturing = false)
+            _state.update { s -> s.copy(burstCapturing = false, isCapturing = false) }
             resetPreviewAfterCapture()
         }
     }
