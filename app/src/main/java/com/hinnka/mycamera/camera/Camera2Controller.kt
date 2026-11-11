@@ -549,6 +549,8 @@ class Camera2Controller(private val context: Context) {
 
     // 场景变化检测：用于替代固定延迟恢复连续对焦
     private var isFocusLockedWaitingForSceneChange = false
+    // A tap that moves the metering region changes exposure itself; the scene reference waits until AE settles.
+    private var sceneExposureReferencePending = false
     // Results already in flight when a point-focus trigger is sent still report the previous lock.
     private var pointAfTriggerPending = false
     private var focusLockedReferenceIso: Int = 0
@@ -1375,8 +1377,15 @@ class Camera2Controller(private val context: Context) {
                     val currentFocusDistance = result.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: 0f
                     var sceneChanged = false
 
+                    if (sceneExposureReferencePending &&
+                        result.get(CaptureResult.CONTROL_AE_STATE) != CaptureResult.CONTROL_AE_STATE_SEARCHING
+                    ) {
+                        updateFocusLockSceneReference(result)
+                        sceneExposureReferencePending = false
+                    }
+
                     // 1. 曝光变化检测
-                    if (focusLockedReferenceIso > 0 && focusLockedReferenceExposureNs > 0 &&
+                    if (!sceneExposureReferencePending && focusLockedReferenceIso > 0 && focusLockedReferenceExposureNs > 0 &&
                         currentIso > 0 && currentExposure > 0L
                     ) {
                         val refProduct = focusLockedReferenceIso.toDouble() * focusLockedReferenceExposureNs.toDouble()
@@ -1409,6 +1418,7 @@ class Camera2Controller(private val context: Context) {
                         } else {
                             sceneChangeFrameCount++
                             if (sceneChangeFrameCount >= SCENE_CHANGE_CONFIRM_FRAMES) {
+                                PLog.d(TAG, "Scene changed: tap focus released")
                                 restoreContinuousAf()
                             }
                         }
@@ -6984,6 +6994,7 @@ class Camera2Controller(private val context: Context) {
         updateFocusLockSceneReference(result)
         isFocusLockedWaitingForSceneChange = true
         focusLockSettleFrames = FOCUS_LOCK_SETTLE_FRAMES
+        sceneExposureReferencePending = true
         sceneChangeFrameCount = 0
     }
 
