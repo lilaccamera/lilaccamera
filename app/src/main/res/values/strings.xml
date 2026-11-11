@@ -1954,6 +1954,15 @@
     <string name="editor_flip">Flip</string>
     <string name="editor_turn">Turn</string>
     <string name="editor_turn_needs_shape">Turn swaps a fixed shape, such as 4:3 to 3:4. Pick one first</string>
+    <string name="editor_curve_point">Point</string>
+    <string name="editor_curve_delete">Delete point</string>
+    <string name="editor_curve_all">All</string>
+    <string name="editor_curve_hint">Tap the photo to add a point. Drag a point to move it</string>
+    <string name="editor_curve_select_point">Tap a point on the curve first</string>
+    <string name="editor_curve_two_points">The two end points stay: drag them instead</string>
+    <string name="editor_curve_no_room">A point is already there: drag it instead</string>
+    <string name="editor_curve_nothing_to_reset">The curves are as they were when the photo opened</string>
+    <string name="editor_explain_curve">Bends the tones: raise a point to brighten those tones, lower it to darken them. R, G and B tint them.</string>
     <string name="editor_crop_tap_hint">Drag the frame\'s corners, or inside it to move it</string>
     <string name="editor_explain_crop_ratio">The frame\'s shape. Original keeps the photo\'s own shape, Free lets every edge move, and Turn swaps a shape between portrait and landscape.</string>
     <string name="editor_explain_straighten">Tilts the photo to level a horizon, up to 45° each way. The frame stays inside the photo.</string>

@@ -125,6 +125,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.VideoFrameProcessor
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.AspectRatioFrameLayout
+import com.hinnka.mycamera.lut.CurveUtils
 import com.hinnka.mycamera.lut.VideoLutEffect
 import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.video.VideoLogProfile
@@ -437,6 +438,12 @@ fun GalleryEditScreen(
     var pendingPhotoTap by remember { mutableStateOf<Job?>(null) }
     val cropView = section == EditorSection.Crop && currentPhoto?.isVideo != true
     var isZoomed by remember { mutableStateOf(false) }
+    // Curve: the channel being edited, its selected point, and the points while a finger drags one (the recipe
+    // changes once, when the finger lifts).
+    var curveChannel by rememberSaveable { mutableStateOf(CurveChannel.MASTER) }
+    var curveSelected by remember { mutableStateOf<Int?>(null) }
+    var curveDrag by remember { mutableStateOf<List<Pair<Float, Float>>?>(null) }
+    val curveOpen = groupPath.substringAfterLast("/") == EditorGroup.Curve.name
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     val scope = rememberCoroutineScope()
     val isBaselineLutEditSheetVisible = showBaselineLutEditSheet && baselineLutEditId != null
@@ -822,6 +829,10 @@ fun GalleryEditScreen(
         )
     }
 
+    fun setCurve(channel: CurveChannel, points: List<Pair<Float, Float>>?) {
+        viewModel.setPhotoRecipeParams((editPhotoRecipeParams ?: editLutRecipeParams).withCurve(channel, points))
+    }
+
     fun leaveEditor() {
         viewModel.exitEditMode()
         onBack()
@@ -1200,6 +1211,70 @@ fun GalleryEditScreen(
                             }
                         }
                     }
+                    .pointerInput(curveOpen, fullView) {
+                        if (!curveOpen || fullView || currentPhoto.isVideo) return@pointerInput
+                        val grabRadius = CURVE_GRAB_DP.dp.toPx()
+                        val inset = CURVE_INSET_DP.dp.toPx()
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            val box = curveBox(contentBounds, size.width.toFloat(), size.height.toFloat(), inset)
+                                ?: return@awaitEachGesture
+                            val channel = curveChannel
+                            val points = curvePoints(editPhotoRecipeParams ?: editLutRecipeParams, channel)
+                            val slop = viewConfiguration.touchSlop
+                            val index = nearestCurvePoint(points, box, down.position, grabRadius)
+                            if (index < 0) {
+                                // Empty space: a still tap adds a point where it lifts; a move or a second finger
+                                // is the photo's pan or zoom.
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    if (event.changes.size > 1) return@awaitEachGesture
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+                                    if ((change.position - down.position).getDistance() > slop) return@awaitEachGesture
+                                    if (change.pressed) continue
+                                    val x = (change.position.x - box.left) / box.width
+                                    val y = (1f - (change.position.y - box.top) / box.height).coerceIn(0f, 1f)
+                                    when {
+                                        x !in 0.02f..0.98f -> noteLine.say(R.string.editor_curve_hint)
+                                        points.any { abs(it.first - x) < 0.04f } -> noteLine.say(R.string.editor_curve_no_room)
+                                        else -> {
+                                            val added = (points + (x to y)).sortedBy { it.first }
+                                            setCurve(channel, added)
+                                            curveSelected = added.indexOfFirst { it.first == x }
+                                        }
+                                    }
+                                    return@awaitEachGesture
+                                }
+                            }
+                            // A press on a point is the point's: it is selected, and a drag moves it, slower than
+                            // the finger so the finger doesn't hide it.
+                            ringGrab = true
+                            down.consume()
+                            curveSelected = index
+                            val origin = points[index]
+                            var moved = false
+                            try {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    if (event.changes.size > 1) return@awaitEachGesture  // a second finger: no move
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+                                    change.consume()
+                                    if (!change.pressed) break
+                                    val delta = change.position - down.position
+                                    if (!moved && delta.getDistance() <= slop) continue
+                                    moved = true
+                                    val current = curveDrag ?: points
+                                    val x = safeCoerceX(origin.first + delta.x / box.width * CURVE_DRAG_SENSITIVITY, index, current)
+                                    val y = (origin.second - delta.y / box.height * CURVE_DRAG_SENSITIVITY).coerceIn(0f, 1f)
+                                    curveDrag = current.toMutableList().also { it[index] = x to y }
+                                }
+                                curveDrag?.let { setCurve(channel, it) }
+                            } finally {
+                                ringGrab = false
+                                curveDrag = null
+                            }
+                        }
+                    }
                     .pointerInput(currentPhoto.isVideo) {
                         if (!currentPhoto.isVideo) awaitPointerEventScope {
                             while (true) {
@@ -1252,13 +1327,18 @@ fun GalleryEditScreen(
                                                         fullView -> fullView = false
                                                         section == EditorSection.Portrait -> placeFocus(tapAt)
                                                         section == EditorSection.Crop -> noteLine.say(R.string.editor_crop_tap_hint)
+                                                        // In Curve a tap adds a point (the curve's own handler).
+                                                        groupPath.substringAfterLast("/") == EditorGroup.Curve.name -> Unit
                                                         else -> fullView = true
                                                     }
                                                 }
                                             }
                                         } else {
-                                            // 确认为长按：显示原图. Not in Crop: there a held finger is about to drag the frame.
-                                            if (section != EditorSection.Crop) showOrigin = true
+                                            // 确认为长按：显示原图. Not in Crop or Curve: there a held finger is about to
+                                            // drag the frame or add a point.
+                                            if (section != EditorSection.Crop && groupPath.substringAfterLast("/") != EditorGroup.Curve.name) {
+                                                showOrigin = true
+                                            }
                                             // 继续监控直到手指抬起，或者变成多指（开始缩放）
                                             while (true) {
                                                 val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -1410,6 +1490,20 @@ fun GalleryEditScreen(
                             off = (apertureDrag ?: editComputationalAperture ?: 0f) <= 0f
                         )
                     }
+                }
+
+                if (curveOpen && !fullView && !currentPhoto.isVideo) {
+                    val recipe = editPhotoRecipeParams ?: editLutRecipeParams
+                    val points = curveDrag ?: curvePoints(recipe, curveChannel)
+                    CurveOverlay(
+                        contentBounds = contentBounds,
+                        points = points,
+                        channel = curveChannel,
+                        // The other channels that bend the tones, faint behind the one being edited.
+                        others = CurveChannel.entries.filter { it != curveChannel }
+                            .mapNotNull { c -> recipe.getCurvePoints(c)?.let { c to it } },
+                        selected = curveSelected?.takeIf { it < points.size },
+                    )
                 }
             }
 
@@ -1667,7 +1761,36 @@ fun GalleryEditScreen(
                 }
                 fun straightenText(v: Float) = String.format(Locale.ROOT, "%.1f", v).removeSuffix(".0") + "°"
 
+                // Curve: each channel against its curve when the editor opened.
+                val openCurves = viewModel.editOpenValue("recipe.curves")
+                fun curveChanged(c: CurveChannel): Boolean =
+                    effectiveRecipe.getCurvePoints(c)?.toList() != (openCurves as? List<*>)?.getOrNull(c.ordinal)
+                val curveNow = curvePoints(effectiveRecipe, curveChannel)
+                val curvePoint = curveSelected?.let { curveNow.getOrNull(it) }
+                fun deleteCurvePoint() {
+                    when {
+                        curvePoint == null -> noteLine.say(R.string.editor_curve_select_point)
+                        curveNow.size <= 2 -> noteLine.say(R.string.editor_curve_two_points)
+                        else -> {
+                            setCurve(curveChannel, curveNow - curvePoint)
+                            curveSelected = null
+                        }
+                    }
+                }
+
                 val values = when {
+                    group == EditorGroup.Curve -> listOf(
+                        EditorValue(
+                            "curvePoint", stringResource(R.string.editor_curve_point),
+                            curvePoint?.let { (x, y) -> "${(x * 255).roundToInt()} → ${(y * 255).roundToInt()}" } ?: "—",
+                            AppIcons.CircleDotLine, curveChanged(curveChannel)
+                        ),
+                        // Acts on a tap, as Rotate does; never the selected control.
+                        EditorValue(
+                            "curveDelete", stringResource(R.string.editor_curve_delete), if (curvePoint != null) "✕" else "—",
+                            AppIcons.CloseLine, dimmed = curvePoint == null || curveNow.size <= 2
+                        ),
+                    )
                     group != null -> emptyList()
                     section == EditorSection.Crop -> listOf(
                         EditorValue(
@@ -1760,7 +1883,7 @@ fun GalleryEditScreen(
                         )
                     }
                 }
-                val selectable = values.filterNot { it.group || it.key == "rotation" || it.key == "mirror" }
+                val selectable = values.filterNot { it.group || it.key in setOf("rotation", "mirror", "curveDelete") }
                 val selectedKey = selectable.firstOrNull { it.key == selections[levelKey] }?.key ?: selectable.firstOrNull()?.key
                 val selectedSetting = settings.firstOrNull { it.key == selectedKey }
 
@@ -1848,6 +1971,14 @@ fun GalleryEditScreen(
                             .align(Alignment.BottomCenter)
                             .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
                     )
+                } else if (explainKey == "curvePoint") {
+                    EditorExplanationCard(
+                        name = stringResource(R.string.editor_group_curve),
+                        text = stringResource(R.string.editor_explain_curve),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
+                    )
                 } else if (explainKey != null && section == EditorSection.Crop) {
                     EditorExplanationCard(
                         name = stringResource(if (explainKey == "straighten") R.string.crop_straighten else R.string.editor_ratio),
@@ -1892,6 +2023,7 @@ fun GalleryEditScreen(
                         .height(EDITOR_CONTROL_DP.dp)
                 ) {
                     when {
+                        group == EditorGroup.Curve -> EditorControlHint(stringResource(R.string.editor_curve_hint))
                         group != null -> EditorControlHint(
                             stringResource(R.string.editor_section_not_built, stringResource(group.label))
                         )
@@ -2205,6 +2337,10 @@ fun GalleryEditScreen(
                                         explainKey = null
                                         viewModel.toggleEditHorizontalMirror()
                                     }
+                                    item.key == "curveDelete" -> {
+                                        explainKey = null
+                                        deleteCurvePoint()
+                                    }
                                     // A double tap returns the setting to where it was when the editor opened.
                                     doubleTap -> {
                                         explainKey = null
@@ -2220,6 +2356,19 @@ fun GalleryEditScreen(
                                         }
                                         if (item.key == "cropRatio") restoreCropRatio()
                                         if (item.key == "straighten") viewModel.setStraightenDegrees(openStraighten)
+                                        // The selected point only: back onto the channel's curve as it was when the
+                                        // editor opened, at the same input.
+                                        if (item.key == "curvePoint") {
+                                            val i = curveSelected?.takeIf { it < curveNow.size }
+                                            if (i == null) {
+                                                noteLine.say(R.string.editor_curve_select_point)
+                                            } else {
+                                                val x = curveNow[i].first
+                                                val lut = CurveUtils.evaluateCurve(openCurve(openCurves, curveChannel)?.toFloatArray())
+                                                val y = lut[(x * (CurveUtils.LUT_SIZE - 1)).roundToInt()]
+                                                setCurve(curveChannel, curveNow.toMutableList().also { it[i] = x to y })
+                                            }
+                                        }
                                         if (item.key == "intensity") {
                                             viewModel.setPhotoRecipeParams(
                                                 RecipeParam.LUT_INTENSITY.setValue(editPhotoRecipeParams ?: editLutRecipeParams, openIntensity)
@@ -2243,8 +2392,17 @@ fun GalleryEditScreen(
                                 val s = settings.firstOrNull { it.key == item.key }
                                 val live = item.key == "intensity" || s?.kind == SettingKind.Recipe
                                 when {
-                                    item.group -> Unit
+                                    item.group || item.key == "curveDelete" -> Unit
                                     section == EditorSection.Crop -> heldCrop = item.key.takeIf { holding }
+                                    item.key == "curvePoint" && holding -> {
+                                        val recipe = editPhotoRecipeParams ?: editLutRecipeParams
+                                        heldRecipe = recipe
+                                        viewModel.setPhotoRecipeParams(recipe.withCurve(curveChannel, openCurve(openCurves, curveChannel)))
+                                    }
+                                    item.key == "curvePoint" -> heldRecipe?.let {
+                                        heldRecipe = null
+                                        viewModel.setPhotoRecipeParams(it)
+                                    }
                                     !live && holding -> noteLine.say(R.string.editor_compare_one_unavailable)
                                     !live -> Unit
                                     holding -> {
@@ -2276,10 +2434,37 @@ fun GalleryEditScreen(
                             }
                         )
                     } else {
+                        val curve = group == EditorGroup.Curve
                         EditorGroupRow(
                             title = stringResource(group.label),
                             parentTitle = groupStack.getOrNull(groupStack.size - 2)?.let { stringResource(it.label) },
-                            onBack = { groupPath = groupStack.dropLast(1).joinToString("/") { it.name } }
+                            onBack = { groupPath = groupStack.dropLast(1).joinToString("/") { it.name } },
+                            // Reset: all four curves back to where they were when the editor opened.
+                            onReset = if (!curve) null else {
+                                {
+                                    if (CurveChannel.entries.none(::curveChanged)) {
+                                        noteLine.say(R.string.editor_curve_nothing_to_reset)
+                                    } else {
+                                        viewModel.setPhotoRecipeParams(
+                                            CurveChannel.entries.fold(effectiveRecipe) { r, c -> r.withCurve(c, openCurve(openCurves, c)) }
+                                        )
+                                        curveSelected = null
+                                    }
+                                }
+                            },
+                            picker = if (!curve) null else {
+                                {
+                                    listOf(
+                                        CurveChannel.MASTER to stringResource(R.string.editor_curve_all),
+                                        CurveChannel.RED to "R", CurveChannel.GREEN to "G", CurveChannel.BLUE to "B",
+                                    ).forEach { (c, label) ->
+                                        CurveChannelChip(label, c, c == curveChannel, curveChanged(c)) {
+                                            curveChannel = c
+                                            curveSelected = null
+                                        }
+                                    }
+                                }
+                            }
                         )
                     }
                 }
