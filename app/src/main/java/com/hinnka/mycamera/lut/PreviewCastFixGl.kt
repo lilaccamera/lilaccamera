@@ -18,7 +18,7 @@ import kotlin.math.pow
  * Sony's still processing; preview requests cannot, it would cap them near 4 frames per second).
  *
  * About twice a second a small copy of the plain viewfinder frame is measured with the photos' own [ShadowCastFix],
- * and the fix, plus a brightness boost for the longer still exposure, is baked into a 33-cube colour table that
+ * and the fix, plus a fixed brightness boost for the longer still exposure, is baked into a 33-cube colour table that
  * the colour pass samples once per pixel. Plain ("Original") preview captures skip it, so it never measures itself.
  */
 internal class PreviewCastFixGl {
@@ -51,9 +51,8 @@ internal class PreviewCastFixGl {
                     val w = frame.width
                     val params = ShadowCastFix.estimate(w, frame.height) { y, rows, out -> frame.getPixels(out, 0, w, 0, y, w, rows) }
                     if (params != null) {
-                        val boost = 1f + (MAX_BOOST - 1f) * params.floorWeight
-                        if (estimates++ % LOG_EVERY == 0) PLog.d(TAG, "$params boost=%.2f".format(boost))
-                        pending = bake(params, boost)
+                        if (estimates++ % LOG_EVERY == 0) PLog.d(TAG, "$params boost=$BOOST")
+                        pending = bake(params, BOOST)
                         onReady()
                     }
                 } catch (e: Exception) {
@@ -132,8 +131,11 @@ internal class PreviewCastFixGl {
         val switchedOn: Boolean
             get() = BuildConfig.DEBUG && SystemPropertiesUtil.get("debug.lilac.previewcastfix")?.trim() == "on"
 
-        /** Photo brightness over the cast-fixed viewfinder at 1 lux, linear: L* 23 / 12 in the mid-tones, 44 / 24 at the top. */
-        const val MAX_BOOST = 3f
+        /**
+         * Fixed, small: the photos are about 3x brighter than the cast-fixed viewfinder at 1 lux (linear, L* 23 against
+         * 12 in the mid-tones), but not at all at about 14 lux, and a boost that followed the scene jumped.
+         */
+        private const val BOOST = 1.5f
 
         /** Width of the viewfinder copy that is measured; the cast fix measures stills at 250 px too. */
         const val SAMPLE_LONG_EDGE = 250
