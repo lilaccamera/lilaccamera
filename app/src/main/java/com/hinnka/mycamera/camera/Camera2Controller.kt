@@ -25,6 +25,7 @@ import android.util.Size
 import android.view.Surface
 import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
+import com.hinnka.mycamera.BuildConfig
 import com.hinnka.mycamera.raw.ColorSpace as RawColorSpace
 import com.hinnka.mycamera.raw.DngSdkColorSpec
 import com.hinnka.mycamera.raw.RawEnginePreviewSource
@@ -33,6 +34,7 @@ import com.hinnka.mycamera.raw.RawColorCalibrationMode
 import com.hinnka.mycamera.raw.RawColorCalibrationPolicy
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.RawProcessor
+import com.hinnka.mycamera.utils.SystemPropertiesUtil
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -5057,7 +5059,10 @@ class Camera2Controller(private val context: Context) {
         state: CameraState,
         isCapture: Boolean
     ) {
-        val requestedMode = state.awbMode
+        // Debug builds: `adb shell setprop debug.lilac.awbmode <CONTROL_AWB_MODE>` forces one of the camera's
+        // presets, to test whether a fixed white balance keeps the front camera's dim blacks consistent.
+        val forcedMode = if (BuildConfig.DEBUG) SystemPropertiesUtil.get("debug.lilac.awbmode")?.trim()?.toIntOrNull() else null
+        val requestedMode = forcedMode ?: state.awbMode
         val awbMode = if (availableAwbModes.isEmpty() || requestedMode in availableAwbModes) {
             requestedMode
         } else {
