@@ -127,6 +127,13 @@ internal enum class EditorSetting(
             else -> AppIcons.AdjustmentsLine  // drawn settings use their glyph instead
         }
 
+    /** Whether a change to it starts heavy GPU work (a RAW develop, a blur, AI denoise, noise reduction). */
+    fun startsGpuWork(isRaw: Boolean): Boolean = when (kind) {
+        SettingKind.RawTone, SettingKind.Denoise, SettingKind.AiDenoise, SettingKind.Aperture, SettingKind.DepthOfField -> true
+        SettingKind.Choice -> section == EditorSection.Portrait
+        else -> false
+    }
+
     fun shownFor(isRaw: Boolean, isVideo: Boolean): Boolean =
         !(rawOnly && !isRaw) && !(jpegOnly && isRaw) && !(this == AiDenoise && isVideo)
 

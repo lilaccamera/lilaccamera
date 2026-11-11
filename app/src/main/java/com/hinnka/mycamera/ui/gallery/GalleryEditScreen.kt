@@ -125,6 +125,9 @@ import androidx.media3.common.Player
 import androidx.media3.common.VideoFrameProcessor
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.AspectRatioFrameLayout
+import com.hinnka.mycamera.raw.RawDemosaicProcessor
+import com.hinnka.mycamera.raw.RawDevelopStage
+import com.hinnka.mycamera.ui.camera.ModeAmber
 import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.lut.CurveUtils
 import com.hinnka.mycamera.lut.VideoLutEffect
@@ -160,6 +163,12 @@ private data class EmbeddedDngProfileUiState(
 
 private data class PreviewRenderSignature(
     val photoId: String,
+    /** RAW: the quick preview develop the photo renders on, until Save develops it in full. */
+    val rawPreviewBase: Bitmap?,
+    /** The preview's long edge: 2048, or 4096 with the HD preview. */
+    val maxEdge: Int,
+    /** The edit chain's small copy (AI denoise, blur, noise reduction) the photo renders on while editing. */
+    val editChainBase: Bitmap?,
     val editCropRect: RectF?,
     val refreshKey: Long,
     val editLutId: String?,
@@ -400,6 +409,10 @@ fun GalleryEditScreen(
         }
         ?: embeddedDngProfileUiState.defaultProfileId
 
+    // The editor's small, unsaved UI state in one object: the screen's main lambda may take at most 255 values.
+    val ui = remember(editSourcePhoto?.id) { EditorUiState() }
+    // HD preview: the editor previews at full size (slower, exactly what Save gives) instead of small copies.
+    val hdPreview by preferenceValue { it.editorHdPreview }
     var showOrigin by remember { mutableStateOf(false) }
 
     // 编辑标签页状态
@@ -418,9 +431,6 @@ fun GalleryEditScreen(
         if (noteLine.shown) explainKey = null
     }
     // Taps on the value row: the last one, to tell a double tap, and a second tap's card waiting out that window.
-    var lastTapKey by remember { mutableStateOf<String?>(null) }
-    var lastTapAt by remember { mutableLongStateOf(0L) }
-    var pendingCard by remember { mutableStateOf<Job?>(null) }
     // Portrait: the aperture while the ruler moves (rendered once, on release), the photo's place on screen
     // inside the zoomable view, and the focus ring while a finger drags it.
     var apertureDrag by remember { mutableStateOf<Float?>(null) }
@@ -430,22 +440,20 @@ fun GalleryEditScreen(
     var ringGrab by remember { mutableStateOf(false) }
     var ringDrag by remember { mutableStateOf<Offset?>(null) }
     // The recipe as it was when a long press on one setting began, to put back when it ends.
-    var heldRecipe by remember { mutableStateOf<ColorRecipeParams?>(null) }
     // The Crop value held down: the photo shows without that one change, and without the frame.
-    var heldCrop by remember { mutableStateOf<String?>(null) }
     var showDiscardDialog by remember { mutableStateOf(false) }
     var fingerOnPhoto by remember { mutableStateOf(false) }
     var fingerOnRuler by remember { mutableStateOf(false) }
-    var pendingPhotoTap by remember { mutableStateOf<Job?>(null) }
+    // Heavy work (a blur, a RAW develop) starts only once the user pauses: tell the view model about touches.
+    LaunchedEffect(fingerOnPhoto, fingerOnRuler) {
+        viewModel.noteEditorInteraction(fingerOnPhoto || fingerOnRuler)
+    }
     val cropView = section == EditorSection.Crop && currentPhoto?.isVideo != true
     var isZoomed by remember { mutableStateOf(false) }
     // Curve: the channel being edited, its selected point, and the points while a finger drags one (the recipe
     // changes once, when the finger lifts).
     var curveChannel by rememberSaveable { mutableStateOf(CurveChannel.MASTER) }
-    var curveSelected by remember { mutableStateOf<Int?>(null) }
-    var curveDrag by remember { mutableStateOf<List<Pair<Float, Float>>?>(null) }
     // Light › RAW › Profile: the imported DCP a long press asked to delete.
-    var deleteDcpAsk by remember { mutableStateOf<DcpInfo?>(null) }
     val curveOpen = groupPath.substringAfterLast("/") == EditorGroup.Curve.name
     // Mixer, Grading and Calibration: the colour, range or primary picked in each.
     var mixerPick by rememberSaveable { mutableIntStateOf(1) }
@@ -456,6 +464,9 @@ fun GalleryEditScreen(
     val isBaselineLutEditSheetVisible = showBaselineLutEditSheet && baselineLutEditId != null
 
     var previewRenderRequestId by remember { mutableLongStateOf(0L) }
+    // RAW: the edit state developed at half size, the photo's base while editing; Save develops it in full.
+    // The edit chain's small copy (AI denoise, blur, JPEG noise reduction), the base on screen while editing.
+    val editChainBase by viewModel.editChainBase.collectAsState()
     val shouldCalculateImageHistogram = isBaselineLutEditSheetVisible
 
     fun currentPreviewSignature(fast: Boolean = false): PreviewRenderSignature? {
@@ -464,6 +475,9 @@ fun GalleryEditScreen(
         val inCrop = section == EditorSection.Crop
         return PreviewRenderSignature(
             photoId = photo.id,
+            rawPreviewBase = ui.rawPreviewBase,
+            maxEdge = if (hdPreview) 4096 else 2048,
+            editChainBase = editChainBase,
             editCropRect = if (inCrop) null else editCropRect,
             refreshKey = refreshKey,
             editLutId = editLutId,
@@ -519,12 +533,9 @@ fun GalleryEditScreen(
 
     // RAW: this session's renders, small, by the edit state they show. Going back to one (an engine tried before)
     // shows it at once while the RAW develops again behind it, so looks can be compared without waiting.
-    val rawLooks = remember(editSourcePhoto?.id) { mutableListOf<Pair<Map<String, Any?>, Bitmap>>() }
     // The RAW state the photo's files were last developed from; null: as the editor opened.
-    var developedRaw by remember(editSourcePhoto?.id) { mutableStateOf<Map<String, Any?>?>(null) }
-    var rawLookShown by remember(editSourcePhoto?.id) { mutableStateOf(false) }
-    fun rawLook(state: Map<String, Any?>): Bitmap? = rawLooks.firstOrNull { it.first == state }?.second
-    fun rawDeveloped(): Boolean = viewModel.editRawState() == (developedRaw ?: viewModel.editRawState(open = true))
+    fun rawLook(state: Map<String, Any?>): Bitmap? = ui.rawLooks.firstOrNull { it.first == state }?.second
+    fun rawDeveloped(): Boolean = viewModel.editRawState() == (ui.developedRaw ?: viewModel.editRawState(open = true))
 
     suspend fun renderPreview(
         photo: MediaData,
@@ -543,6 +554,7 @@ fun GalleryEditScreen(
                 ignoreTurn = isCropPreview,
                 // Portrait shows the photo without its frame, so the focus ring lands on the photo itself.
                 ignoreFrame = isCropPreview || section == EditorSection.Portrait,
+                bitmap = (editChainBase ?: ui.rawPreviewBase.takeIf { isRaw }).takeIf { !showOrigin },
                 maxEdge = maxEdge
             )
         }
@@ -626,7 +638,9 @@ fun GalleryEditScreen(
             .conflate()
             .debounce(250)
             .collectLatest {
-                renderPreview(photo, maxEdge = 4096, cancelStaleResult = true)
+                // 2048 px is about three screens' worth on this phone: sharp for a 2x zoom, a quarter of the
+                // GPU work of 4096. Only the screen uses it; the saved edit is rendered from the files.
+                renderPreview(photo, maxEdge = if (hdPreview) 4096 else 2048, cancelStaleResult = true)
             }
     }
 
@@ -676,14 +690,8 @@ fun GalleryEditScreen(
     val showAiDenoiseFailure = {
         noteLine.say(R.string.ai_denoise_failed)
     }
-    val startAiDenoise = {
-        viewModel.applyAiDenoise(photo = currentEditSourcePhoto) { success ->
-            if (!success) {
-                viewModel.setAiDenoiseEnabled(false)
-                showAiDenoiseFailure()
-            }
-        }
-    }
+    // While editing, AI denoise runs on the small copy (the edit chain); Save runs it on the whole photo.
+    val startAiDenoise = { viewModel.setAiDenoiseEnabled(true) }
     LaunchedEffect(aiDenoiseModelState, pendingAiDenoise) {
         if (aiDenoiseModelState is AiDenoiseModelState.Ready && pendingAiDenoise) {
             pendingAiDenoise = false
@@ -744,6 +752,23 @@ fun GalleryEditScreen(
 
     // A blur was asked for and its result isn't on screen yet: from the render's start until the preview
     // has reloaded with it.
+    // The edit chain: AI denoise, the blur and JPEG noise reduction on a small copy while editing (see
+    // updateEditChain); its result is the photo's base on screen.
+    val editChainBusy by viewModel.editChainBusy.collectAsState()
+    val waitingForPause by viewModel.waitingForPause.collectAsState()
+    var noiseReleased by remember(editSourcePhoto?.id) {
+        mutableStateOf((viewModel.editOpenValue("noiseReduction") as? Float ?: 0f) to (viewModel.editOpenValue("chromaNoiseReduction") as? Float ?: 0f))
+    }
+    LaunchedEffect(
+        editSourcePhoto?.id, ui.rawPreviewBase, editAiDenoiseEnabled, editComputationalAperture, editFocusX, editFocusY,
+        editBokehStyle, editPortraitQuick, editDepthOfField, noiseReleased, hdPreview,
+    ) {
+        val photo = editSourcePhoto ?: return@LaunchedEffect
+        if (photo.isVideo) return@LaunchedEffect
+        viewModel.updateEditChain(
+            photo, ui.rawPreviewBase.takeIf { isRaw }, noiseReleased.first, noiseReleased.second, fullSize = hdPreview,
+        )
+    }
     var awaitingBlur by remember { mutableStateOf(false) }
     LaunchedEffect(isBokehProcessing, isLoadingPreview) {
         if (isBokehProcessing) awaitingBlur = true else if (!isLoadingPreview) awaitingBlur = false
@@ -880,11 +905,39 @@ fun GalleryEditScreen(
     val previewSourceHeight = previewBitmap?.height?.takeIf { it > 0 }
         ?: currentPhoto.height.takeIf { it > 0 }
     var pendingRawPreviewRefresh by remember(currentEditSourcePhoto.id) { mutableStateOf(false) }
+    // Save is developing the RAW in full before the edit saves.
     // How long the last develop with each engine took in this session, for the status line's estimate.
-    val rawDevelopMs = remember { mutableStateMapOf<String, Long>() }
+    // The RAW develop's stages as they pass, timed per kind (preview or full) and engine for the next estimate.
+    val developStage by remember { RawDemosaicProcessor.getInstance().developStage }.collectAsState()
+    LaunchedEffect(developStage) {
+        val now = SystemClock.uptimeMillis()
+        ui.lastStage?.let { ui.rawStageMs[ui.stageKind + it.name] = now - ui.stageStartedAt }
+        if (ui.lastStage == null && developStage != null) {
+            ui.developStartedAt = now
+            val full = ui.savingRaw || viewModel.refreshingPhotos.contains(currentEditSourcePhoto.id)
+            ui.stageKind = "${if (full) "full" else "preview"}:${viewModel.editRawRenderingEngine.value.name}:"
+        }
+        ui.lastStage = developStage
+        ui.stageStartedAt = now
+    }
+
     var pendingPhotonPgtmRegeneration by remember(currentEditSourcePhoto.id) { mutableStateOf(false) }
     var pendingRawRefreshToast by remember(currentEditSourcePhoto.id) { mutableStateOf(false) }
     val isRefreshingRawPreview = viewModel.refreshingPhotos.contains(currentEditSourcePhoto.id)
+
+    // One heavy GPU job at a time: while a blur, a RAW develop, AI denoise or noise reduction runs, a press that
+    // would start another says which is running and does nothing.
+    fun gpuBusyNote(): Int? = when {
+        isBokehProcessing -> R.string.editor_busy_blur
+        developStage != null || viewModel.refreshingPhotos.contains(currentEditSourcePhoto.id) -> R.string.editor_busy_raw
+        isAiDenoising -> R.string.editor_busy_ai
+        isPhotonDenoising -> R.string.editor_busy_noise
+        else -> null
+    }
+    fun blockedByGpu(): Boolean = gpuBusyNote()?.let { noteLine.say(it); true } ?: false
+    fun placeFocusIfFree(position: Offset) {
+        if (!blockedByGpu()) placeFocus(position)
+    }
 
     fun refreshRawPreview(
         showResultToast: Boolean = false,
@@ -900,8 +953,9 @@ fun GalleryEditScreen(
             forceRegeneratePhotonPgtm = forceRegeneratePhotonPgtm,
         ) { success ->
             if (success) {
-                developedRaw = requested
-                rawDevelopMs[engineAtStart] = SystemClock.uptimeMillis() - startedAt
+                ui.developedRaw = requested
+                ui.rawDevelopMs["full:$engineAtStart"] = SystemClock.uptimeMillis() - startedAt
+                ui.rawPreviewBase = null
             }
             if (showResultToast) {
                 Toast.makeText(
@@ -913,11 +967,51 @@ fun GalleryEditScreen(
         }
     }
 
+    // The quick preview develop: one at a time; changes made meanwhile develop once more when it ends.
+    fun developRawPreview() {
+        if (ui.previewDeveloping) {
+            ui.previewAgain = true
+            return
+        }
+        ui.previewDeveloping = true
+        val photo = currentEditSourcePhoto
+        scope.launch {
+            // A develop holds the GPU for seconds: it waits until the user pauses, then takes the settings as
+            // they are by then.
+            viewModel.awaitEditorPause()
+            ui.previewAgain = false
+            val state = viewModel.editRawState()
+            val meta = viewModel.editRawPreviewMetadata(photo)
+            val engineAtStart = viewModel.editRawRenderingEngine.value.name
+            val startedAt = SystemClock.uptimeMillis()
+            val bitmap = GalleryManager.developRawPreview(context, photo.id, meta, halfSize = !hdPreview)
+            if (bitmap != null) {
+                ui.rawPreviewBase = bitmap
+                ui.developedRaw = state
+                ui.rawDevelopMs[engineAtStart] = SystemClock.uptimeMillis() - startedAt
+            }
+            ui.previewDeveloping = false
+            if (ui.previewAgain) {
+                ui.previewAgain = false
+                developRawPreview()
+            }
+        }
+    }
+
     fun requestRawPreviewRefresh(
         showResultToast: Boolean = false,
         forceRegeneratePhotonPgtm: Boolean = false,
     ) {
         if (!isRaw) return
+        // While editing, a RAW change develops the quick preview; Re-render writes the edits and develops in full.
+        if (viewModel.deferEditWrites && !forceRegeneratePhotonPgtm) {
+            developRawPreview()
+            return
+        }
+        if (viewModel.rawEditsPending) {
+            viewModel.writeRawEdits(currentEditSourcePhoto) { requestRawPreviewRefresh(showResultToast, forceRegeneratePhotonPgtm) }
+            return
+        }
         if (viewModel.refreshingPhotos.contains(currentEditSourcePhoto.id)) {
             pendingPhotonPgtmRegeneration = pendingPhotonPgtmRegeneration || forceRegeneratePhotonPgtm
             pendingRawRefreshToast = pendingRawRefreshToast || showResultToast
@@ -944,26 +1038,30 @@ fun GalleryEditScreen(
         }
     }
 
-    val rawBusy = isRefreshingRawPreview || pendingRawPreviewRefresh
+    val rawBusy = isRefreshingRawPreview || pendingRawPreviewRefresh || ui.previewDeveloping || ui.previewAgain
+    // Switching HD develops the waiting RAW changes again at the other size.
+    LaunchedEffect(hdPreview) {
+        if (isRaw && viewModel.rawEditsPending) developRawPreview()
+    }
     // A RAW state seen before shows its earlier look at once; the develop behind it replaces it when done.
-    LaunchedEffect(editState, developedRaw, rawBusy) {
+    LaunchedEffect(editState, ui.developedRaw, rawBusy) {
         if (!isRaw) return@LaunchedEffect
         val look = rawLook(editState)
-        rawLookShown = look != null && !rawDeveloped()
-        if (rawLookShown) previewBitmap = look
+        ui.rawLookShown = look != null && !rawDeveloped()
+        if (ui.rawLookShown) previewBitmap = look
     }
     // Once the photo shows its current state, a small copy is kept (the last six).
-    LaunchedEffect(previewBitmap, isLoadingPreview, rawBusy, editState, developedRaw) {
+    LaunchedEffect(previewBitmap, isLoadingPreview, rawBusy, editChainBusy, editState, ui.developedRaw) {
         val shown = previewBitmap ?: return@LaunchedEffect
-        if (!isRaw || rawBusy || isLoadingPreview || showOrigin || !rawDeveloped()) return@LaunchedEffect
+        if (!isRaw || rawBusy || editChainBusy || isLoadingPreview || showOrigin || !rawDeveloped()) return@LaunchedEffect
         if (section == EditorSection.Crop || section == EditorSection.Portrait) return@LaunchedEffect
         if (rawLook(editState) != null) return@LaunchedEffect
         val scale = 1440f / max(shown.width, shown.height)
         val small = if (scale >= 1f) shown else withContext(Dispatchers.Default) {
             Bitmap.createScaledBitmap(shown, (shown.width * scale).roundToInt(), (shown.height * scale).roundToInt(), true)
         }
-        rawLooks.add(0, editState to small)
-        while (rawLooks.size > 6) rawLooks.removeAt(rawLooks.lastIndex)
+        ui.rawLooks.add(0, editState to small)
+        while (ui.rawLooks.size > 6) ui.rawLooks.removeAt(ui.rawLooks.lastIndex)
     }
 
     Scaffold(
@@ -1257,7 +1355,7 @@ fun GalleryEditScreen(
                                     ringDrag = position
                                 }
                                 // One render, when the finger lifts.
-                                placeFocus(position)
+                                placeFocusIfFree(position)
                             } finally {
                                 ringGrab = false
                                 ringDrag = null
@@ -1293,7 +1391,7 @@ fun GalleryEditScreen(
                                         else -> {
                                             val added = (points + (x to y)).sortedBy { it.first }
                                             setCurve(channel, added)
-                                            curveSelected = added.indexOfFirst { it.first == x }
+                                            ui.curveSelected = added.indexOfFirst { it.first == x }
                                         }
                                     }
                                     return@awaitEachGesture
@@ -1303,7 +1401,7 @@ fun GalleryEditScreen(
                             // the finger so the finger doesn't hide it.
                             ringGrab = true
                             down.consume()
-                            curveSelected = index
+                            ui.curveSelected = index
                             val origin = points[index]
                             var moved = false
                             try {
@@ -1316,15 +1414,15 @@ fun GalleryEditScreen(
                                     val delta = change.position - down.position
                                     if (!moved && delta.getDistance() <= slop) continue
                                     moved = true
-                                    val current = curveDrag ?: points
+                                    val current = ui.curveDrag ?: points
                                     val x = safeCoerceX(origin.first + delta.x / box.width * CURVE_DRAG_SENSITIVITY, index, current)
                                     val y = (origin.second - delta.y / box.height * CURVE_DRAG_SENSITIVITY).coerceIn(0f, 1f)
-                                    curveDrag = current.toMutableList().also { it[index] = x to y }
+                                    ui.curveDrag = current.toMutableList().also { it[index] = x to y }
                                 }
-                                curveDrag?.let { setCurve(channel, it) }
+                                ui.curveDrag?.let { setCurve(channel, it) }
                             } finally {
                                 ringGrab = false
-                                curveDrag = null
+                                ui.curveDrag = null
                             }
                         }
                     }
@@ -1336,8 +1434,8 @@ fun GalleryEditScreen(
                                 if (downEvent.type == PointerEventType.Press && downEvent.changes.size == 1 && !ringGrab) {
                                     // A press while a tap waits out the double-tap window is the double tap's
                                     // second half: the zoom handles it, and the waiting tap is dropped.
-                                    val secondTap = pendingPhotoTap?.isActive == true
-                                    pendingPhotoTap?.cancel()
+                                    val secondTap = ui.pendingPhotoTap?.isActive == true
+                                    ui.pendingPhotoTap?.cancel()
                                     val touchSlop = viewConfiguration.touchSlop
                                     val initialPosition = downEvent.changes[0].position
                                     val longPressTimeout = viewConfiguration.longPressTimeoutMillis
@@ -1372,13 +1470,13 @@ fun GalleryEditScreen(
                                         if (upEvent != null) {
                                             if (!secondTap) {
                                                 val tapAt = upEvent!!.changes[0].position
-                                                pendingPhotoTap = scope.launch {
+                                                ui.pendingPhotoTap = scope.launch {
                                                     delay(300)
                                                     // A tap opens full view, and a tap in full view comes back. In
                                                     // Portrait a tap sets the focus instead; full view is the edge icon.
                                                     when {
                                                         fullView -> fullView = false
-                                                        section == EditorSection.Portrait -> placeFocus(tapAt)
+                                                        section == EditorSection.Portrait -> placeFocusIfFree(tapAt)
                                                         section == EditorSection.Crop -> noteLine.say(R.string.editor_crop_tap_hint)
                                                         // In Curve a tap adds a point (the curve's own handler).
                                                         groupPath.substringAfterLast("/") == EditorGroup.Curve.name -> Unit
@@ -1423,7 +1521,7 @@ fun GalleryEditScreen(
                     } else {
                         CircularProgressIndicator(color = Color.White)
                     }
-                } else if (cropView && cropPreviewBitmap != null) {
+                } else if (cropView && (cropPreviewBitmap ?: editChainBase ?: ui.rawPreviewBase) != null) {
                     val geometryBaseWidth = currentEditSourcePhoto.metadata?.width?.takeIf { it > 0 }
                         ?: currentEditSourcePhoto.width.coerceAtLeast(1)
                     val geometryBaseHeight = currentEditSourcePhoto.metadata?.height?.takeIf { it > 0 }
@@ -1474,14 +1572,16 @@ fun GalleryEditScreen(
                         pixelAspect = effectiveCropAspectRatio
                     )
                     // A held value shows the photo without that one change (the frame hides, it no longer fits).
-                    val heldTurn = heldCrop == "rotation"
-                    val heldFlip = heldCrop == "mirror"
+                    val heldTurn = ui.heldCrop == "rotation"
+                    val heldFlip = ui.heldCrop == "mirror"
                     CropOverlay(
-                        bitmap = cropPreviewBitmap,
+                        // Until Crop's own render (look included) is ready, the uncropped picture already in
+                        // memory, so Crop never waits behind a blur or a develop.
+                        bitmap = cropPreviewBitmap ?: editChainBase ?: ui.rawPreviewBase,
                         cropRect = editCropRect ?: cropBounds,
                         cropAspectRatio = cropAspectRatio,
                         straightenDegrees = when {
-                            heldCrop == "straighten" -> 0f
+                            ui.heldCrop == "straighten" -> 0f
                             heldFlip -> -editStraightenDegrees  // flipping also mirrored the angle
                             else -> editStraightenDegrees
                         },
@@ -1492,7 +1592,7 @@ fun GalleryEditScreen(
                         contentPadding = 24.dp,
                         rotationDegrees = if (heldTurn) 0 else editRotationDegrees,
                         mirrorHorizontal = editMirrorHorizontal && !heldFlip,
-                        showFrame = heldCrop == null,
+                        showFrame = ui.heldCrop == null,
                         modifier = previewMediaModifier
                     )
                 } else {
@@ -1547,7 +1647,7 @@ fun GalleryEditScreen(
 
                 if (curveOpen && !fullView && !currentPhoto.isVideo) {
                     val recipe = editPhotoRecipeParams ?: editLutRecipeParams
-                    val points = curveDrag ?: curvePoints(recipe, curveChannel)
+                    val points = ui.curveDrag ?: curvePoints(recipe, curveChannel)
                     CurveOverlay(
                         contentBounds = contentBounds,
                         free = curveFree,
@@ -1556,7 +1656,7 @@ fun GalleryEditScreen(
                         // The other channels that bend the tones, faint behind the one being edited.
                         others = CurveChannel.entries.filter { it != curveChannel }
                             .mapNotNull { c -> recipe.getCurvePoints(c)?.let { c to it } },
-                        selected = curveSelected?.takeIf { it < points.size },
+                        selected = ui.curveSelected?.takeIf { it < points.size },
                     )
                 }
             }
@@ -1628,7 +1728,8 @@ fun GalleryEditScreen(
                             viewModel.persistCurrentRawEditMetadata(currentEditSourcePhoto) { success ->
                                 if (success) requestRawPreviewRefresh()
                             }
-                        s.kind == SettingKind.Denoise -> viewModel.refreshPhotonDenoiseBase(currentEditSourcePhoto)
+                        // JPEG noise reduction: the edit chain denoises its small copy with the released strengths.
+                        s.kind == SettingKind.Denoise -> noiseReleased = editNoiseReduction to editChromaNoiseReduction
                         s.kind == SettingKind.DepthOfField -> dofDrag?.let { v ->
                             dofDrag = null
                             viewModel.setDepthOfField(v.roundToInt())
@@ -1642,17 +1743,9 @@ fun GalleryEditScreen(
 
                 fun setAiDenoise(enabled: Boolean) {
                     if (isAiDenoising || enabled == editAiDenoiseEnabled) return
-                    viewModel.setAiDenoiseEnabled(enabled)
-                    if (enabled) {
-                        if (AiDenoiseModelManager.isInstalled(context)) startAiDenoise() else pendingAiDenoise = true
-                    } else {
-                        viewModel.resetAiDenoise(photo = currentEditSourcePhoto) { success ->
-                            if (!success) {
-                                viewModel.setAiDenoiseEnabled(true)
-                                showAiDenoiseFailure()
-                            }
-                        }
-                    }
+                    // The model is downloaded (or imported) the first time AI denoise is switched on.
+                    if (enabled && !AiDenoiseModelManager.isInstalled(context)) pendingAiDenoise = true
+                    else viewModel.setAiDenoiseEnabled(enabled)
                 }
 
                 val faceText = stringResource(R.string.editor_face)
@@ -1761,7 +1854,7 @@ fun GalleryEditScreen(
                             noteLine.say(R.string.editor_rerendering)
                         },
                         importDcp = { rawDcpLauncher.launch(arrayOf("*/*")) },
-                        deleteDcp = { deleteDcpAsk = it },
+                        deleteDcp = { ui.deleteDcpAsk = it },
                     )
                 } else {
                     null
@@ -1874,14 +1967,14 @@ fun GalleryEditScreen(
                 fun curveChanged(c: CurveChannel): Boolean =
                     effectiveRecipe.getCurvePoints(c)?.toList() != (openCurves as? List<*>)?.getOrNull(c.ordinal)
                 val curveNow = curvePoints(effectiveRecipe, curveChannel)
-                val curvePoint = curveSelected?.let { curveNow.getOrNull(it) }
+                val curvePoint = ui.curveSelected?.let { curveNow.getOrNull(it) }
                 fun deleteCurvePoint() {
                     when {
                         curvePoint == null -> noteLine.say(R.string.editor_curve_select_point)
                         curveNow.size <= 2 -> noteLine.say(R.string.editor_curve_two_points)
                         else -> {
                             setCurve(curveChannel, curveNow - curvePoint)
-                            curveSelected = null
+                            ui.curveSelected = null
                         }
                     }
                 }
@@ -2024,7 +2117,13 @@ fun GalleryEditScreen(
                 EditorEdgeIcons(
                     busy = fingerOnPhoto || fingerOnRuler,
                     rendering = isLoadingPreview || isBokehProcessing || isPhotonDenoising ||
-                        isRefreshingRawPreview || isAiDenoising || isSaving,
+                        isRefreshingRawPreview || isAiDenoising || isSaving || rawBusy || editChainBusy,
+                    hd = hdPreview,
+                    onHd = onHd@{
+                        if (blockedByGpu()) return@onHd
+                        viewModel.setEditorHdPreview(!hdPreview)
+                        noteLine.say(if (hdPreview) R.string.editor_hd_off else R.string.editor_hd_on)
+                    },
                     undoAvailable = false,
                     redoAvailable = false,
                     fullView = false,
@@ -2038,13 +2137,53 @@ fun GalleryEditScreen(
                         val currentLut = availableLuts.find { it.id == editLutId }
                         if (currentLut?.isVip == true && !isPurchased) {
                             viewModel.showPaymentDialog = true
+                        } else if (isRefreshingRawPreview) {
+                            noteLine.say(R.string.editor_raw_busy)
                         } else {
                             isSaving = true
-                            viewModel.saveEditMetadata(currentPhoto) { success ->
-                                isSaving = false
-                                if (success) {
-                                    onBack()
+                            // AI denoise, the blur and noise reduction run at full size and write their files,
+                            // then the edit saves.
+                            fun saveEdits(rawDeveloped: Boolean = false) {
+                                ui.savingRaw = false
+                                viewModel.commitEditChain(currentEditSourcePhoto, rawDeveloped) { committed ->
+                                    if (!committed) {
+                                        isSaving = false
+                                        showAiDenoiseFailure()
+                                        return@commitEditChain
+                                    }
+                                    viewModel.saveEditMetadata(currentPhoto) { success ->
+                                        isSaving = false
+                                        if (success) {
+                                            onBack()
+                                        } else {
+                                            // Still editing: changes go back to the small copies until the next Save.
+                                            viewModel.deferEditWrites = true
+                                        }
+                                    }
                                 }
+                            }
+                            // RAW changes are written now and the RAW developed in full, then the edit saves.
+                            if (isRaw && viewModel.rawEditsPending) {
+                                ui.savingRaw = true
+                                viewModel.writeRawEdits(currentEditSourcePhoto) { written ->
+                                    if (!written) {
+                                        isSaving = false
+                                        ui.savingRaw = false
+                                        noteLine.say(R.string.editor_raw_save_failed)
+                                    } else {
+                                        viewModel.refreshRawPreview(currentEditSourcePhoto) { developed ->
+                                            if (developed) {
+                                                saveEdits(rawDeveloped = true)
+                                            } else {
+                                                isSaving = false
+                                                ui.savingRaw = false
+                                                noteLine.say(R.string.editor_raw_save_failed)
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                saveEdits()
                             }
                         }
                     },
@@ -2062,26 +2201,53 @@ fun GalleryEditScreen(
                         ?: if (blurProgress?.stage == BokehStage.Depth) 15 else null
                     if (seconds != null && seconds >= 1) stringResource(R.string.editor_about_seconds, text, seconds) else text
                 }
-                // What the RAW develop is doing, the same way: with which engine, and how long it took last time.
+                // What the RAW develop is doing, the same way: which of its six stages, and how long is left, from
+                // the stage times of the last develop of the same kind with the same engine.
                 val engineName = rawRenderingEngineName(editRawColorEngine)
-                val rawStatus = if (isRaw && rawBusy) {
-                    val text = if (rawLookShown) stringResource(R.string.editor_raw_earlier, engineName)
-                    else stringResource(R.string.editor_raw_developing, engineName)
-                    val seconds = rawDevelopMs[editRawColorEngine.name]?.let { ((it + 500) / 1000).toInt() }
-                    if (seconds != null && seconds >= 1) stringResource(R.string.editor_about_seconds, text, seconds) else text
-                } else {
-                    null
+                val stage = developStage.takeIf { isRaw && (rawBusy || ui.savingRaw) }
+                val rawStatus = when {
+                    stage != null -> {
+                        val full = ui.savingRaw || isRefreshingRawPreview
+                        val kind = stringResource(
+                            when {
+                                ui.savingRaw -> R.string.editor_raw_kind_saving
+                                full || hdPreview -> R.string.editor_raw_kind_full
+                                ui.rawLookShown -> R.string.editor_raw_kind_earlier
+                                else -> R.string.editor_raw_kind_preview
+                            }
+                        )
+                        val label = when (stage) {
+                            RawDevelopStage.Reading -> stringResource(R.string.editor_raw_stage_reading)
+                            RawDevelopStage.Demosaic -> stringResource(R.string.editor_raw_stage_demosaic)
+                            RawDevelopStage.ToneMap -> stringResource(R.string.editor_raw_stage_tone)
+                            RawDevelopStage.NoiseReduction -> stringResource(R.string.editor_raw_stage_noise)
+                            RawDevelopStage.Look -> stringResource(R.string.editor_raw_stage_look, engineName)
+                            RawDevelopStage.Finishing -> stringResource(R.string.editor_raw_stage_finishing)
+                        }
+                        // The step and what it does; the wheel in the top row shows it is working. (A bar from the last
+                        // develop's times jumped: a kept RAW skips the first, slowest step.)
+                        stringResource(R.string.editor_raw_status, kind, stage.ordinal + 1, RawDevelopStage.entries.size, label)
+                    }
+                    isRaw && ui.savingRaw -> stringResource(R.string.editor_raw_saving)
+                    isAiDenoising -> stringResource(
+                        if (isSaving) R.string.editor_saving_ai else R.string.editor_ai_preview,
+                        (aiDenoiseProgress * 100).roundToInt(),
+                    )
+                    isPhotonDenoising -> stringResource(if (isSaving) R.string.editor_saving_noise else R.string.editor_noise_preview)
+                    waitingForPause -> stringResource(R.string.editor_waiting_pause)
+                    isRaw && rawBusy && ui.rawLookShown -> stringResource(R.string.editor_raw_earlier, engineName)
+                    isRaw && rawBusy -> stringResource(R.string.editor_raw_developing, engineName)
+                    else -> null
                 }
                 (blurStatus ?: rawStatus)?.let { status ->
-                    Text(
-                        text = status,
-                        color = LilacText,
-                        fontSize = 12.sp,
-                        style = LilacTextStyle,
+                    Column(
                         modifier = Modifier
                             .align(Alignment.TopCenter)
-                            .padding(top = EDITOR_EDGE_DP.dp)
-                    )
+                            .padding(top = EDITOR_EDGE_DP.dp, start = 16.dp, end = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(text = status, color = LilacText, fontSize = 12.sp, style = LilacTextStyle)
+                    }
                 }
 
                 // The explanation of the selected setting, on a second tap on it.
@@ -2508,6 +2674,24 @@ fun GalleryEditScreen(
                         )
                         else -> EditorControlHint(stringResource(R.string.editor_not_built))
                     }
+                    // A control that would start a second GPU job is held while one runs: a touch says why.
+                    val busyNote = gpuBusyNote()
+                    if (busyNote != null && (selectedRawItem != null || selectedSetting?.startsGpuWork(isRaw) == true)) {
+                        Box(
+                            Modifier
+                                .matchParentSize()
+                                .pointerInput(busyNote) {
+                                    awaitEachGesture {
+                                        awaitFirstDown(requireUnconsumed = false).consume()
+                                        noteLine.say(busyNote)
+                                        do {
+                                            val event = awaitPointerEvent()
+                                            event.changes.forEach { it.consume() }
+                                        } while (event.changes.any { it.pressed })
+                                    }
+                                }
+                        )
+                    }
                 }
 
                 // The tool block: the settings of the current level above the path row. It lightens one step for
@@ -2534,10 +2718,10 @@ fun GalleryEditScreen(
                             selectedKey = selectedKey,
                             onClick = { item ->
                                 val now = SystemClock.uptimeMillis()
-                                val doubleTap = item.key == lastTapKey && now - lastTapAt < DOUBLE_TAP_MS
-                                lastTapKey = item.key
-                                lastTapAt = if (doubleTap) 0L else now
-                                pendingCard?.cancel()
+                                val doubleTap = item.key == ui.lastTapKey && now - ui.lastTapAt < DOUBLE_TAP_MS
+                                ui.lastTapKey = item.key
+                                ui.lastTapAt = if (doubleTap) 0L else now
+                                ui.pendingCard?.cancel()
                                 when {
                                     item.group -> {
                                         // The colour groups say what they work on as they open: they look alike.
@@ -2559,6 +2743,9 @@ fun GalleryEditScreen(
                                         deleteCurvePoint()
                                     }
                                     // A double tap returns the setting to where it was when the editor opened.
+                                    doubleTap && (rawItems.any { it.key == item.key } ||
+                                        settings.firstOrNull { it.key == item.key }?.startsGpuWork(isRaw) == true) &&
+                                        blockedByGpu() -> explainKey = null
                                     doubleTap -> {
                                         explainKey = null
                                         settings.firstOrNull { it.key == item.key }?.let { s ->
@@ -2578,7 +2765,7 @@ fun GalleryEditScreen(
                                         // The selected point only: back onto the channel's curve as it was when the
                                         // editor opened, at the same input.
                                         if (item.key == "curvePoint") {
-                                            val i = curveSelected?.takeIf { it < curveNow.size }
+                                            val i = ui.curveSelected?.takeIf { it < curveNow.size }
                                             if (i == null) {
                                                 noteLine.say(R.string.editor_curve_select_point)
                                             } else {
@@ -2596,7 +2783,7 @@ fun GalleryEditScreen(
                                     }
                                     // A second, single tap on the selected setting opens or closes its explanation,
                                     // once it can't be the first half of a double tap any more.
-                                    item.key == selectedKey -> pendingCard = scope.launch {
+                                    item.key == selectedKey -> ui.pendingCard = scope.launch {
                                         delay(DOUBLE_TAP_MS)
                                         explainKey = if (explainKey == item.key) null else item.key
                                     }
@@ -2612,38 +2799,38 @@ fun GalleryEditScreen(
                                 val live = item.key == "intensity" || s?.kind == SettingKind.Recipe
                                 when {
                                     item.group || item.key == "curveDelete" -> Unit
-                                    section == EditorSection.Crop -> heldCrop = item.key.takeIf { holding }
+                                    section == EditorSection.Crop -> ui.heldCrop = item.key.takeIf { holding }
                                     groupValues.any { it.key == item.key } && holding -> {
                                         val v = groupValues.first { it.key == item.key }
                                         val recipe = editPhotoRecipeParams ?: editLutRecipeParams
-                                        heldRecipe = recipe
+                                        ui.heldRecipe = recipe
                                         viewModel.setPhotoRecipeParams(v.set(recipe, groupOpen(v)))
                                     }
-                                    groupValues.any { it.key == item.key } -> heldRecipe?.let {
-                                        heldRecipe = null
+                                    groupValues.any { it.key == item.key } -> ui.heldRecipe?.let {
+                                        ui.heldRecipe = null
                                         viewModel.setPhotoRecipeParams(it)
                                     }
                                     item.key == "curvePoint" && holding -> {
                                         val recipe = editPhotoRecipeParams ?: editLutRecipeParams
-                                        heldRecipe = recipe
+                                        ui.heldRecipe = recipe
                                         viewModel.setPhotoRecipeParams(recipe.withCurve(curveChannel, openCurve(openCurves, curveChannel)))
                                     }
-                                    item.key == "curvePoint" -> heldRecipe?.let {
-                                        heldRecipe = null
+                                    item.key == "curvePoint" -> ui.heldRecipe?.let {
+                                        ui.heldRecipe = null
                                         viewModel.setPhotoRecipeParams(it)
                                     }
                                     !live && holding -> noteLine.say(R.string.editor_compare_one_unavailable)
                                     !live -> Unit
                                     holding -> {
                                         val recipe = editPhotoRecipeParams ?: editLutRecipeParams
-                                        heldRecipe = recipe
+                                        ui.heldRecipe = recipe
                                         viewModel.setPhotoRecipeParams(
                                             if (s != null) s.param!!.setValue(recipe, openValue(s))
                                             else RecipeParam.LUT_INTENSITY.setValue(recipe, openIntensity)
                                         )
                                     }
-                                    else -> heldRecipe?.let {
-                                        heldRecipe = null
+                                    else -> ui.heldRecipe?.let {
+                                        ui.heldRecipe = null
                                         viewModel.setPhotoRecipeParams(it)
                                     }
                                 }
@@ -2679,13 +2866,15 @@ fun GalleryEditScreen(
                                             viewModel.setPhotoRecipeParams(
                                                 CurveChannel.entries.fold(effectiveRecipe) { r, c -> r.withCurve(c, openCurve(openCurves, c)) }
                                             )
-                                            curveSelected = null
+                                            ui.curveSelected = null
                                         }
                                     }
                                 }
                                 EditorGroup.Raw -> {
                                     {
-                                        if (EditorGroup.Raw.keys.none { it in changedKeys }) {
+                                        if (blockedByGpu()) {
+                                            Unit
+                                        } else if (EditorGroup.Raw.keys.none { it in changedKeys }) {
                                             noteLine.say(R.string.editor_raw_nothing_to_reset)
                                         } else {
                                             viewModel.restoreRawGroupToOpen()
@@ -2733,7 +2922,7 @@ fun GalleryEditScreen(
                                         ).forEach { (c, label) ->
                                             CurveChannelChip(label, c, c == curveChannel, curveChanged(c)) {
                                                 curveChannel = c
-                                                curveSelected = null
+                                                ui.curveSelected = null
                                             }
                                         }
                                     }
@@ -2752,15 +2941,15 @@ fun GalleryEditScreen(
                     .padding(bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
             )
 
-            deleteDcpAsk?.let { dcp ->
+            ui.deleteDcpAsk?.let { dcp ->
                 EditorDiscardDialog(
                     title = stringResource(R.string.editor_delete_dcp_title),
                     message = stringResource(R.string.editor_delete_dcp_message, dcp.getName()),
                     keepText = stringResource(R.string.cancel),
                     actionText = stringResource(R.string.delete),
-                    onKeep = { deleteDcpAsk = null },
+                    onKeep = { ui.deleteDcpAsk = null },
                     onDiscard = {
-                        deleteDcpAsk = null
+                        ui.deleteDcpAsk = null
                         val wasChosen = editRawDcpId == dcp.id
                         viewModel.deleteRawDcp(currentEditSourcePhoto, dcp.id) { success ->
                             noteLine.say(if (success) R.string.raw_dcp_delete_success else R.string.raw_dcp_delete_failed)
@@ -2787,15 +2976,10 @@ fun GalleryEditScreen(
 
             if (showDiscardDialog) {
                 EditorDiscardDialog(
-                    message = if (isRaw && changedKeys.any { it.startsWith("raw") }) {
-                        stringResource(R.string.editor_discard_message) + " " + stringResource(R.string.editor_discard_raw_saved)
-                    } else {
-                        stringResource(R.string.editor_discard_message)
-                    },
+                    message = stringResource(R.string.editor_discard_message),
                     onKeep = { showDiscardDialog = false },
                     onDiscard = {
                         showDiscardDialog = false
-                        viewModel.restorePortraitOnDiscard()
                         leaveEditor()
                     }
                 )

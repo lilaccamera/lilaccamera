@@ -49,6 +49,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -167,6 +171,8 @@ internal fun EditorEdgeIcons(
     onFullView: () -> Unit,
     onCompare: (Boolean) -> Unit,
     onSave: () -> Unit,
+    hd: Boolean = false,
+    onHd: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val fade by animateFloatAsState(if (busy) 0.12f else 1f, tween(200), label = "edgeIcons")
@@ -194,6 +200,22 @@ internal fun EditorEdgeIcons(
                     modifier = Modifier.size(17.dp).graphicsLayer { rotationZ = angle }
                 )
             }
+        }
+        // HD preview: amber while the editor previews at full size.
+        Box(
+            modifier = Modifier
+                .width(40.dp)
+                .fillMaxHeight()
+                .clickable(role = Role.Switch, onClick = onHd),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "HD",
+                color = if (hd) ModeAmber else LilacText,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                style = LilacTextStyle
+            )
         }
         EdgeIcon(
             if (fullView) AppIcons.MinimizeLine else AppIcons.MaximizeLine,
@@ -675,4 +697,44 @@ internal fun PortraitNote(text: String, action: String, onAction: () -> Unit) {
             horizontalPadding = 13.dp,
         )
     }
+}
+
+/**
+ * The editor's small UI state that isn't saved, in one object, so the screen's main lambda captures one value for
+ * all of it: Android rejects a method that takes more than 255.
+ */
+@androidx.compose.runtime.Stable
+internal class EditorUiState {
+    // Taps on the value row: the last one, to tell a double tap, and a second tap's card waiting out that window.
+    var lastTapKey by mutableStateOf<String?>(null)
+    var lastTapAt by mutableLongStateOf(0L)
+    var pendingCard by mutableStateOf<kotlinx.coroutines.Job?>(null)
+    // The recipe as it was when a long press on one setting began, to put back when it ends.
+    var heldRecipe by mutableStateOf<com.hinnka.mycamera.model.ColorRecipeParams?>(null)
+    // The Crop value held down: the photo shows without that one change, and without the frame.
+    var heldCrop by mutableStateOf<String?>(null)
+    var pendingPhotoTap by mutableStateOf<kotlinx.coroutines.Job?>(null)
+    // Curve: the selected point, and the points while a finger drags one.
+    var curveSelected by mutableStateOf<Int?>(null)
+    var curveDrag by mutableStateOf<List<Pair<Float, Float>>?>(null)
+    // Light › RAW › Profile: the imported DCP a long press asked to delete.
+    var deleteDcpAsk by mutableStateOf<com.hinnka.mycamera.raw.DcpInfo?>(null)
+    // RAW: the edit state developed at half size, the photo's base while editing; Save develops it in full.
+    var rawPreviewBase by mutableStateOf<android.graphics.Bitmap?>(null)
+    var previewDeveloping by mutableStateOf(false)
+    var previewAgain by mutableStateOf(false)
+    // Save is developing the RAW in full before the edit saves.
+    var savingRaw by mutableStateOf(false)
+    // RAW: this session's small renders by edit state, the state last developed (null: as opened), and whether an
+    // earlier look is on screen.
+    val rawLooks = mutableListOf<Pair<Map<String, Any?>, android.graphics.Bitmap>>()
+    var developedRaw by mutableStateOf<Map<String, Any?>?>(null)
+    var rawLookShown by mutableStateOf(false)
+    // Develop timings, for the status line's estimates: whole develops and stages, per kind and engine.
+    val rawDevelopMs = mutableStateMapOf<String, Long>()
+    val rawStageMs = mutableStateMapOf<String, Long>()
+    var developStartedAt by mutableLongStateOf(0L)
+    var stageStartedAt by mutableLongStateOf(0L)
+    var lastStage by mutableStateOf<com.hinnka.mycamera.raw.RawDevelopStage?>(null)
+    var stageKind by mutableStateOf("")
 }

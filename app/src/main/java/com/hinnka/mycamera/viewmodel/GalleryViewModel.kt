@@ -54,6 +54,7 @@ import com.hinnka.mycamera.ml.RelativeDepthMap
 import com.hinnka.mycamera.ml.RelativeDepthMapFile
 import com.hinnka.mycamera.ml.SubjectMask
 import com.hinnka.mycamera.processor.BokehStage
+import com.hinnka.mycamera.raw.RawDemosaicProcessor
 import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.raw.HncsFilmCurveMode
 import com.hinnka.mycamera.raw.HncsRenderIntent
@@ -121,6 +122,10 @@ private data class CopiedEditSettings(
 class GalleryViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
+        /** The long edge of the editor's in-memory copy for AI denoise, the blur and noise reduction. */
+        const val EDIT_CHAIN_EDGE = 2048
+        /** How long the editor waits after the last touch before starting heavy work (a blur, a develop). */
+        const val EDITOR_IDLE_MS = 1000L
         private const val TAG = "GalleryViewModel"
         private const val FULL_QUALITY_PREVIEW_MAX_EDGE = 4096
         private const val HDR_DETAIL_MAX_BITMAP_BYTES = 80L * 1024L * 1024L
@@ -628,7 +633,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             }
             val bitmap = GalleryManager.loadOriginalBitmap(context, photo.id, 1600) ?: return@launch
             val mask = try {
-                editorGpuMutex.withLock {
+                editorGpu.light {
                     com.hinnka.mycamera.ml.SharedSubjectMaskEstimator.estimateMask(context, bitmap, depth)
                 }
             } finally {
@@ -754,10 +759,36 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * GL context, and the Adreno 540 faults ("gpu fault", then every later render fails) when a blur starts
      * while a preview is still rendering.
      */
-    private val editorGpuMutex = Mutex()
+    private val editorGpu = EditorGpuLock()
+
+    /** When the user last touched the photo or a ruler, and whether a finger is down: heavy work waits for a pause. */
+    @Volatile private var interacting = false
+    @Volatile private var lastInteractionAt = 0L
+
+    fun noteEditorInteraction(active: Boolean) {
+        interacting = active
+        lastInteractionAt = android.os.SystemClock.uptimeMillis()
+    }
+
+    /** Waits until no finger has been on the photo or a ruler for [EDITOR_IDLE_MS], before a heavy job starts. */
+    suspend fun awaitEditorPause() {
+        try {
+            while (interacting || android.os.SystemClock.uptimeMillis() - lastInteractionAt < EDITOR_IDLE_MS) {
+                _waitingForPause.value = true
+                delay(100)
+            }
+        } finally {
+            _waitingForPause.value = false
+        }
+    }
+    private val _waitingForPause = MutableStateFlow(false)
+    /** Heavy work is held back until the user pauses (shown under the edge icons). */
+    val waitingForPause = _waitingForPause.asStateFlow()
     @Volatile private var bokehRenderStarted = false
 
     private fun updateBokehPhoto() {
+        // While editing, the blur renders small in memory (updateEditChain); Save renders it in full.
+        if (deferEditWrites) return
         val running = bokehJob?.takeIf { it.isActive }
         if (running != null && bokehRenderStarted) {
             bokehRerunRequested = true
@@ -793,7 +824,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     }
                         ?: GalleryManager.loadBitmap(context, photoData.uri) ?: return@run
                     if (!isActive) return@run
-                    editorGpuMutex.withLock {
+                    editorGpu.heavy {
                         val bokeh = contentRepository.depthBokehProcessor.applyHighQualityBokeh(
                             context,
                             photoData.id,
@@ -847,6 +878,219 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         _editAiDenoiseEnabled.value = enabled
     }
 
+    /** The editor's HD preview: full size while editing instead of small copies; remembered for every photo. */
+    fun setEditorHdPreview(on: Boolean) = userPreferencesRepository.updateAsync { editorHdPreview = on }
+
+    /**
+     * While the editor is open, AI denoise, the Portrait blur and JPEG noise reduction run on a copy of at most
+     * [EDIT_CHAIN_EDGE] px in memory, in the order they stack (photo or RAW preview, AI denoise, blur, noise
+     * reduction); each step is kept until something before it changes. Null while the photo's own files show the
+     * edit, that is when none of them changed. Save runs them in full ([commitEditChain]).
+     */
+    val editChainBase = MutableStateFlow<Bitmap?>(null)
+    private val _editChainBusy = MutableStateFlow(false)
+    val editChainBusy = _editChainBusy.asStateFlow()
+    private var editChainJob: Job? = null
+    private val editChainSteps = HashMap<String, Pair<Any, Bitmap>>()
+
+    private fun openBlurKey(): List<Any?>? {
+        val open = editOpenState
+        val aperture = (open["aperture"] as? Float)?.takeIf { it > 0f } ?: return null
+        val focus = open["focus"] as? Pair<*, *>
+        return listOf(aperture, focus?.first, focus?.second, open["bokeh"], open["depth"], open["depthOfField"])
+    }
+
+    private fun currentBlurKey(): List<Any?>? {
+        val aperture = editComputationalAperture.value?.takeIf { it > 0f } ?: return null
+        return listOf(
+            aperture, editFocusPointX.value, editFocusPointY.value, editBokehStyle.value, editPortraitQuick.value,
+            editDepthOfField.value,
+        )
+    }
+
+    private fun noiseKey(isRaw: Boolean, luma: Float?, chroma: Float?): Pair<Float, Float>? {
+        if (isRaw) return null
+        val l = DenoiseStrength.clamp(luma ?: 0f)
+        val c = DenoiseStrength.clamp(chroma ?: 0f)
+        return (l to c).takeIf { l > 0f || c > 0f }
+    }
+
+    /**
+     * Rebuilds the screen's base when [rawPreview] (the RAW's quick develop, or null), AI denoise, the blur or the
+     * released JPEG noise reduction strengths change.
+     */
+    fun updateEditChain(
+        photo: MediaData,
+        rawPreview: Bitmap?,
+        noiseReduction: Float,
+        chromaNoiseReduction: Float,
+        fullSize: Boolean = false,
+    ) {
+        editChainJob?.cancel()
+        val open = editOpenState
+        val isRaw = isRawInGallery(photo.id)
+        val ai = editAiDenoiseEnabled.value
+        val aiOpen = open["aiDenoise"] as? Boolean ?: false
+        val blur = currentBlurKey()
+        val blurOpen = openBlurKey()
+        val noise = noiseKey(isRaw, noiseReduction, chromaNoiseReduction)
+        val noiseOpen = noiseKey(isRaw, open["noiseReduction"] as? Float, open["chromaNoiseReduction"] as? Float)
+        if (rawPreview == null && ai == aiOpen && blur == blurOpen && noise == noiseOpen) {
+            editChainBase.value = null
+            _editChainBusy.value = false
+            return
+        }
+        _editChainBusy.value = true
+        editChainJob = viewModelScope.launch(Dispatchers.IO) {
+            val context = getApplication<Application>()
+            val iso = (currentMediaMetadata ?: photo.metadata)?.iso
+            suspend fun step(name: String, key: Any, make: suspend () -> Bitmap?): Bitmap? {
+                editChainSteps[name]?.takeIf { it.first == key }?.let { return it.second }
+                val made = make() ?: return null
+                ensureActive()
+                editChainSteps[name] = key to made
+                return made
+            }
+            // The HD preview works at full size.
+            val edge = if (fullSize) Int.MAX_VALUE else EDIT_CHAIN_EDGE
+            fun small(b: Bitmap): Bitmap {
+                val scale = edge.toFloat() / maxOf(b.width, b.height)
+                return if (scale >= 1f) b
+                else Bitmap.createScaledBitmap(b, (b.width * scale).roundToInt(), (b.height * scale).roundToInt(), true)
+            }
+            // A step still as the photo opened, after nothing changed before it, comes from the photo's own file.
+            val unchangedSoFar = rawPreview == null
+            try {
+                var key: Any = listOf(rawPreview ?: "photo", edge)
+                var bitmap = step("source", key) {
+                    rawPreview?.let(::small) ?: GalleryManager.loadOriginalBitmap(context, photo.id, edge.takeIf { !fullSize })
+                } ?: return@launch
+                if (ai) {
+                    val fromFile = unchangedSoFar && aiOpen
+                    key = listOf(key, "ai")
+                    val input = bitmap
+                    bitmap = step("ai", key) {
+                        if (fromFile) {
+                            GalleryManager.loadBitmap(context, Uri.fromFile(GalleryManager.getAiDenoiseFile(context, photo.id)), edge.takeIf { !fullSize })
+                        } else {
+                            awaitEditorPause()
+                            _isAiDenoising.value = true
+                            _aiDenoiseProgress.value = 0f
+                            try {
+                                editorGpu.heavy {
+                                    com.hinnka.mycamera.ml.AiDenoiser.denoise(context, input) { _aiDenoiseProgress.value = it }
+                                }
+                            } finally {
+                                _isAiDenoising.value = false
+                            }
+                        }
+                    } ?: return@launch
+                }
+                if (blur != null) {
+                    val fromFile = unchangedSoFar && ai == aiOpen && blur == blurOpen
+                    key = listOf(key, blur)
+                    val input = bitmap
+                    bitmap = step("blur", key) {
+                        if (fromFile) {
+                            GalleryManager.loadBitmap(context, Uri.fromFile(GalleryManager.getBokehFile(context, photo.id)), edge.takeIf { !fullSize })
+                        } else {
+                            awaitEditorPause()
+                            _isBokehProcessing.value = true
+                            try {
+                                editorGpu.heavy {
+                                    contentRepository.depthBokehProcessor.applyHighQualityBokeh(
+                                        context, photo.id, input,
+                                        editFocusPointX.value, editFocusPointY.value, blur[0] as Float, editBokehStyle.value,
+                                        quickBlur = editPortraitQuick.value,
+                                        focalWidthScale = PortraitBlurMetadata.focalWidthScale(editDepthOfField.value),
+                                        onStage = ::onBlurStage,
+                                        onMaps = { mask, depth ->
+                                            val previous = blurMaps.value?.takeIf { it.photoId == photo.id }
+                                            blurMaps.value = BlurMaps(photo.id, mask, depth ?: previous?.depth)
+                                        },
+                                        onRenderStart = {},
+                                        photoLongEdge = (currentMediaMetadata ?: photo.metadata)
+                                            ?.let { maxOf(it.width, it.height) }?.takeIf { it > 0 }
+                                            ?: maxOf(photo.width, photo.height).takeIf { it > 0 },
+                                    )
+                                }
+                            } finally {
+                                onBlurStage(null)
+                                _isBokehProcessing.value = false
+                            }
+                        }
+                    } ?: return@launch
+                }
+                if (noise != null) {
+                    key = listOf(key, noise)
+                    val input = bitmap
+                    bitmap = step("noise", key) {
+                        awaitEditorPause()
+                        _isPhotonDenoising.value = true
+                        try {
+                            editorGpu.heavy {
+                                contentRepository.photoProcessor.denoiseBitmap(input, noise.first, noise.second, iso)
+                            }
+                        } finally {
+                            _isPhotonDenoising.value = false
+                        }
+                    } ?: return@launch
+                }
+                ensureActive()
+                editChainBase.value = bitmap
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                PLog.e(TAG, "Edit preview chain failed", e)
+            } finally {
+                if (editChainJob === coroutineContext[Job]) _editChainBusy.value = false
+            }
+        }
+    }
+
+    /**
+     * Save: AI denoise, the blur and JPEG noise reduction at full size, writing their files, for whatever changed
+     * since the editor opened or sits after a change ([sourceChanged]: the RAW was developed again). Then [onDone].
+     */
+    fun commitEditChain(photo: MediaData, sourceChanged: Boolean, onDone: (Boolean) -> Unit) {
+        val previewJob = editChainJob
+        previewJob?.cancel()
+        val open = editOpenState
+        val isRaw = isRawInGallery(photo.id)
+        val ai = editAiDenoiseEnabled.value
+        val aiOpen = open["aiDenoise"] as? Boolean ?: false
+        val aiChanged = ai != aiOpen || (ai && sourceChanged)
+        val blurChanged = currentBlurKey() != openBlurKey() || sourceChanged || aiChanged
+        val noise = noiseKey(isRaw, editNoiseReduction.value, editChromaNoiseReduction.value)
+        val noiseOpen = noiseKey(isRaw, open["noiseReduction"] as? Float, open["chromaNoiseReduction"] as? Float)
+        val noiseChanged = noise != null && (noise != noiseOpen || blurChanged)
+        deferEditWrites = false
+        viewModelScope.launch {
+            // A preview step still on the GPU finishes first: it can't stop halfway.
+            previewJob?.join()
+            suspend fun await(run: ((Boolean) -> Unit) -> Unit): Boolean =
+                kotlinx.coroutines.suspendCancellableCoroutine { c -> run { ok -> if (c.isActive) c.resume(ok) {} } }
+            val ok = when {
+                aiChanged && ai -> await { done -> applyAiDenoise(photo, done) }
+                aiChanged -> await { done -> resetAiDenoise(photo, done) }
+                else -> true
+            }
+            if (!ok) {
+                deferEditWrites = true
+                onDone(false)
+                return@launch
+            }
+            // AI denoise starts the blur itself when it ends; otherwise a changed blur starts here.
+            if (blurChanged && !aiChanged) updateBokehPhoto()
+            while (bokehJob?.isActive == true) bokehJob?.join()
+            if (noiseChanged) {
+                refreshPhotonDenoiseBase(photo)
+                photonDenoiseBaseJob?.join()
+            }
+            onDone(true)
+        }
+    }
+
     fun applyAiDenoise(photo: MediaData, onComplete: (Boolean) -> Unit) {
         if (_isAiDenoising.value) return
         _isAiDenoising.value = true
@@ -862,10 +1106,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     return@launch
                 }
 
-                // Runs on this IO thread without suspending: the GPU model is thread-bound.
+                // Runs on this IO thread without suspending: the GPU model is thread-bound. One editor GPU job
+                // at a time.
                 val denoised = try {
-                    com.hinnka.mycamera.ml.AiDenoiser.denoise(context, bitmap) { p ->
-                        _aiDenoiseProgress.value = p
+                    editorGpu.heavy {
+                        com.hinnka.mycamera.ml.AiDenoiser.denoise(context, bitmap) { p ->
+                            _aiDenoiseProgress.value = p
+                        }
                     }
                 } finally {
                     bitmap.recycle()
@@ -2302,6 +2549,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      */
     fun enterEditMode() {
         val targetPhoto = getCurrentPhoto() ?: return
+        deferEditWrites = true
+        rawEditsPending = false
         editVideoSourceProfile = null
         editVideoProfileDetected = false
         editVideoProfileOverride = null
@@ -2612,6 +2861,14 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      */
     fun exitEditMode() {
         isEditing = false
+        deferEditWrites = false
+        rawEditsPending = false
+        editChainJob?.cancel()
+        editChainSteps.clear()
+        editChainBase.value = null
+        _editChainBusy.value = false
+        // The RAW kept in memory for quick previews is only for this edit.
+        viewModelScope.launch { RawDemosaicProcessor.getInstance().clearPreviewDecodes() }
         editVideoSourceProfile = null
         editVideoProfileDetected = false
         editVideoProfileOverride = null
@@ -3126,10 +3383,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun persistRawEditMetadata(
-        mediaData: MediaData,
-        onComplete: ((Boolean) -> Unit)? = null,
-    ) {
+    /**
+     * The editor's RAW settings as they are now, to apply onto a photo's metadata: for writing them, or for the
+     * quick preview develop that writes nothing. [baselineRecipeParams] is the base look's recipe, when known.
+     */
+    private fun rawEditApplier(): (MediaMetadata, ColorRecipeParams?) -> MediaMetadata {
         val sharpening = editSharpening.value
         val noiseReduction = editNoiseReduction.value
         val chromaNoiseReduction = editChromaNoiseReduction.value
@@ -3161,6 +3419,81 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         val spectralFilmYDensityGain = editRawSpectralFilmYDensityGain.value
         val fotufilmDocument = editRawFotufilmDocument.value
 
+        return { current, baselineRecipeParams ->
+            current.copy(
+                sharpening = sharpening,
+                noiseReduction = noiseReduction,
+                chromaNoiseReduction = chromaNoiseReduction,
+                rawExposureCompensation = exposure,
+                rawAutoExposure = autoExposure,
+                rawHighlightsAdjustment = highlights,
+                rawShadowsAdjustment = shadows,
+                rawBlackPointCorrection = blackPoint,
+                rawWhitePointCorrection = whitePoint,
+                rawLensShadingCorrectionEnabled = lensShadingCorrectionEnabled,
+                rawBlackLevelMode = blackLevelMode,
+                rawCustomBlackLevel = customBlackLevel,
+                rawWhiteLevelMode = whiteLevelMode,
+                rawCustomWhiteLevel = customWhiteLevel,
+                rawCfaCorrectionMode = cfaCorrectionMode,
+                droMode = droMode,
+                rawDcpId = dcpId,
+                rawEmbeddedDngProfileId = embeddedDngProfileId,
+                rawHncsProfileId = hncsProfileId,
+                rawHncsRenderIntent = hncsRenderIntent,
+                rawHncsFilmCurveMode = hncsFilmCurveMode,
+                baselineTarget = baselineLutId?.let { BaselineColorCorrectionTarget.RAW },
+                baselineLutId = baselineLutId,
+                baselineColorRecipeParams = baselineRecipeParams,
+                rawRenderingEngine = rawColorEngine,
+                rawToneMappingParameters = rawToneMappingParameters,
+                spectralFilmStock = spectralFilmStock,
+                spectralFilmPrint = spectralFilmPrint,
+                spectralFilmCDensityGain = spectralFilmCDensityGain,
+                spectralFilmMDensityGain = spectralFilmMDensityGain,
+                spectralFilmYDensityGain = spectralFilmYDensityGain,
+                fotufilmDocument = FotufilmDocumentStorage.encode(fotufilmDocument)
+            )
+        }
+    }
+
+    /** While the editor is open, RAW changes only develop a quick preview; Save writes them ([writeRawEdits]). */
+    var deferEditWrites = false
+    var rawEditsPending by mutableStateOf(false)
+        private set
+
+    /** The photo's metadata with the editor's RAW settings, unsaved: what the quick preview develops. */
+    fun editRawPreviewMetadata(mediaData: MediaData): MediaMetadata =
+        rawEditApplier()(mediaData.metadata ?: currentMediaMetadata ?: MediaMetadata(), null)
+
+    /** Writes the editor's RAW settings to the photo (on Save, or before a forced re-render). */
+    fun writeRawEdits(mediaData: MediaData, onComplete: ((Boolean) -> Unit)? = null) {
+        rawEditsPending = false
+        writeRawEditMetadata(mediaData, onComplete)
+    }
+
+    private fun persistRawEditMetadata(
+        mediaData: MediaData,
+        onComplete: ((Boolean) -> Unit)? = null,
+    ) {
+        if (deferEditWrites) {
+            rawEditsPending = true
+            onComplete?.invoke(true)
+            return
+        }
+        writeRawEditMetadata(mediaData, onComplete)
+    }
+
+    private fun writeRawEditMetadata(
+        mediaData: MediaData,
+        onComplete: ((Boolean) -> Unit)? = null,
+    ) {
+        val apply = rawEditApplier()
+        val baselineLutId = editRawBaselineLutId.value
+        val droMode = editRawDROMode.value
+        val noiseReduction = editNoiseReduction.value
+        val chromaNoiseReduction = editChromaNoiseReduction.value
+        val rawToneMappingParameters = editRawToneMappingParameters.value.normalized()
         viewModelScope.launch {
             val context = getApplication<Application>()
             val baselineRecipeParams = loadRawBaselineRecipeParams(baselineLutId)
@@ -3170,42 +3503,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     "chromaNoise=$chromaNoiseReduction, " +
                     "profileToneMap=${rawToneMappingParameters.profileToneMapMode}"
             )
-            val updated = GalleryManager.updateMetadata(context, mediaData.id) { current ->
-                current.copy(
-                    sharpening = sharpening,
-                    noiseReduction = noiseReduction,
-                    chromaNoiseReduction = chromaNoiseReduction,
-                    rawExposureCompensation = exposure,
-                    rawAutoExposure = autoExposure,
-                    rawHighlightsAdjustment = highlights,
-                    rawShadowsAdjustment = shadows,
-                    rawBlackPointCorrection = blackPoint,
-                    rawWhitePointCorrection = whitePoint,
-                    rawLensShadingCorrectionEnabled = lensShadingCorrectionEnabled,
-                    rawBlackLevelMode = blackLevelMode,
-                    rawCustomBlackLevel = customBlackLevel,
-                    rawWhiteLevelMode = whiteLevelMode,
-                    rawCustomWhiteLevel = customWhiteLevel,
-                    rawCfaCorrectionMode = cfaCorrectionMode,
-                    droMode = droMode,
-                    rawDcpId = dcpId,
-                    rawEmbeddedDngProfileId = embeddedDngProfileId,
-                    rawHncsProfileId = hncsProfileId,
-                    rawHncsRenderIntent = hncsRenderIntent,
-                    rawHncsFilmCurveMode = hncsFilmCurveMode,
-                    baselineTarget = baselineLutId?.let { BaselineColorCorrectionTarget.RAW },
-                    baselineLutId = baselineLutId,
-                    baselineColorRecipeParams = baselineRecipeParams,
-                    rawRenderingEngine = rawColorEngine,
-                    rawToneMappingParameters = rawToneMappingParameters,
-                    spectralFilmStock = spectralFilmStock,
-                    spectralFilmPrint = spectralFilmPrint,
-                    spectralFilmCDensityGain = spectralFilmCDensityGain,
-                    spectralFilmMDensityGain = spectralFilmMDensityGain,
-                    spectralFilmYDensityGain = spectralFilmYDensityGain,
-                    fotufilmDocument = FotufilmDocumentStorage.encode(fotufilmDocument)
-                )
-            }
+            val updated = GalleryManager.updateMetadata(context, mediaData.id) { current -> apply(current, baselineRecipeParams) }
             withContext(Dispatchers.Main) {
                 if (updated != null) {
                     withContext(Dispatchers.IO) {
@@ -3746,11 +4044,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             try {
                 val metadata = currentMediaMetadata ?: photo.metadata ?: MediaMetadata()
                 val source = photonDenoiseSource(context, photo.id, metadata) ?: return@launch
-                val built = contentRepository.photoProcessor.updatePhotonDenoiseBase(
-                    context, photo.id, source, noiseReduction, chromaNoiseReduction,
-                    sensorIso = metadata.iso,
-                    onBuild = { _isPhotonDenoising.value = true },
-                )
+                val built = editorGpu.heavy {
+                    contentRepository.photoProcessor.updatePhotonDenoiseBase(
+                        context, photo.id, source, noiseReduction, chromaNoiseReduction,
+                        sensorIso = metadata.iso,
+                        onBuild = { _isPhotonDenoising.value = true },
+                    )
+                }
                 val strengths = noiseReduction to chromaNoiseReduction
                 val strengthsChanged = photonDenoiseEditStrengths.put(photo.id, strengths) != strengths
                 if (built || strengthsChanged) {
@@ -4018,7 +4318,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     val previewSharpening = if (applyBitmapSharpening) finalS else 0f
 
                     // 预览生成
-                    val result = editorGpuMutex.withLock {
+                    val result = editorGpu.light {
                         contentRepository.photoProcessor.processBitmap(
                             context, photo.id, currentBitmap, previewMetadata,
                             previewSharpening,

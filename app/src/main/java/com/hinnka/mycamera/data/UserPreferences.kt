@@ -196,7 +196,9 @@ class UserPreferences internal constructor(
     var saveLocation by bool("save_location", false)
     var useBuiltInAiService by bool("use_built_in_ai_service", false)
     var phantomSaveAsNew by bool("phantom_save_as_new", false)
-    var portraitQuickBlur by bool("portrait_quick_blur", true)  // 背景虚化：快速（无深度模型）或深度
+    var portraitQuickBlur by bool("portrait_quick_blur", true)
+    // Photo editor: preview everything at full size (slower, exactly what Save gives) instead of small copies.
+    var editorHdPreview by bool("editor_hd_preview", false)  // 背景虚化：快速（无深度模型）或深度
     // The Portrait guide was opened once; until then a pill offers it. A key of its own, so the pill also
     // shows once where only the earlier full-screen introduction was seen.
     var portraitIntroSeen by bool("portrait_guide_seen", false)
