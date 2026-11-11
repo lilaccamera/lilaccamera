@@ -585,31 +585,6 @@ fun GalleryEditScreen(
             ?: viewModel.getEditCustomProperties(photo.id)
     }
 
-    val rawDcpLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris ->
-        if (uris.isEmpty()) return@rememberLauncherForActivityResult
-        val photo = editSourcePhoto ?: return@rememberLauncherForActivityResult
-        scope.launch {
-            val importedDcps = viewModel.importRawDcps(uris)
-            val failedCount = uris.size - importedDcps.size
-            importedDcps.lastOrNull()?.let {
-                viewModel.saveRawDcpSelection(photo, it.id) {
-                    viewModel.refreshRawPreview(
-                        photo = photo,
-                    )
-                }
-            }
-            noteLine.say(
-                when {
-                    importedDcps.isEmpty() -> R.string.editor_dcp_import_failed
-                    failedCount > 0 -> R.string.editor_dcp_import_partial
-                    else -> R.string.editor_dcp_imported
-                }
-            )
-        }
-    }
-
     LaunchedEffect(editSourcePhoto?.id, refreshKey, isRaw) {
         val photo = editSourcePhoto ?: return@LaunchedEffect
         // RAW decoding is already the expensive source load. Running the fast JPEG-style pass
@@ -725,6 +700,11 @@ fun GalleryEditScreen(
         editStraightenDegrees, editMirrorHorizontal, editPortraitQuick, editDepthOfField,
     ) { viewModel.editStateKey() }
     val changedKeys = remember(editState) { viewModel.editChangedKeys() }
+    // Each finished change is one undo step: the state is recorded once no finger is on the photo or a ruler
+    // (a drag changes it many times) and no long press is comparing.
+    LaunchedEffect(editState, fingerOnPhoto, fingerOnRuler, ui.heldRecipe) {
+        if (!fingerOnPhoto && !fingerOnRuler && ui.heldRecipe == null) viewModel.recordEditStep()
+    }
     val openIntensity = viewModel.editOpenValue("lutIntensity") as? Float ?: 1f
     val categoryOrder by preferenceValue { it.categoryOrder }
     val allPresets by cameraViewModel.allPresets.collectAsState()
@@ -1029,6 +1009,70 @@ fun GalleryEditScreen(
             showResultToast = showResultToast,
             forceRegeneratePhotonPgtm = forceRegeneratePhotonPgtm,
         )
+    }
+
+    // Undo and Redo show where the change was: the section (and group) of a changed setting, unless one is in view.
+    fun showStepPlace(keys: Set<String>) {
+        val places = keys.mapNotNull { k ->
+            val g = EditorGroup.entries.firstOrNull { k in it.keys }
+            val s = g?.section ?: EditorSection.entries.firstOrNull { k in it.keys }
+                ?: EditorSetting.entries.firstOrNull { it.key == k }?.section ?: return@mapNotNull null
+            s to generateSequence(g) { it.parent }.toList().asReversed().joinToString("/") { it.name }
+        }
+        val shown = places.any { (s, path) ->
+            s == section && (groupPath == path || path.isNotEmpty() && groupPath.startsWith("$path/"))
+        }
+        if (shown) return
+        places.firstOrNull()?.let { (s, path) ->
+            section = s
+            groupPath = path
+        }
+    }
+
+    // Undo ([back]) and Redo: one finished change at a time.
+    fun stepHistory(back: Boolean) {
+        if (isSaving) return
+        viewModel.recordEditStep()
+        val keys = viewModel.editHistoryStepKeys(back)
+        if (keys == null) {
+            noteLine.say(if (back) R.string.editor_nothing_to_undo else R.string.editor_nothing_to_redo)
+            return
+        }
+        val heavy = setOf("aiDenoise", "aperture", "bokeh", "depth", "depthOfField", "focus", "noiseReduction", "chromaNoiseReduction")
+        if (keys.any { it in heavy || it.startsWith("raw") } && blockedByGpu(allowBlur = true)) return
+        val rawBefore = viewModel.editRawState()
+        viewModel.stepEditHistory(back)
+        ui.curveSelected = null
+        ui.curveDrag = null
+        explainKey = null
+        if (!isRaw) {
+            noiseReleased = viewModel.editNoiseReduction.value to viewModel.editChromaNoiseReduction.value
+        } else if (viewModel.editRawState() != rawBefore || "noiseReduction" in keys || "chromaNoiseReduction" in keys) {
+            viewModel.persistCurrentRawEditMetadata(currentEditSourcePhoto) { requestRawPreviewRefresh() }
+        }
+        showStepPlace(keys)
+    }
+
+    val rawDcpLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        val photo = editSourcePhoto ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            val importedDcps = viewModel.importRawDcps(uris)
+            val failedCount = uris.size - importedDcps.size
+            importedDcps.lastOrNull()?.let {
+                // The library copy is for every photo at once; choosing it for this photo is an edit like any other.
+                viewModel.saveRawDcpSelection(photo, it.id) { requestRawPreviewRefresh() }
+            }
+            noteLine.say(
+                when {
+                    importedDcps.isEmpty() -> R.string.editor_dcp_import_failed
+                    failedCount > 0 -> R.string.editor_dcp_import_partial
+                    else -> R.string.editor_dcp_imported
+                }
+            )
+        }
     }
 
     LaunchedEffect(isRefreshingRawPreview, pendingRawPreviewRefresh, currentEditSourcePhoto.id) {
@@ -2160,13 +2204,13 @@ fun GalleryEditScreen(
                         viewModel.setEditorHdPreview(!hdPreview)
                         noteLine.say(if (hdPreview) R.string.editor_hd_off else R.string.editor_hd_on)
                     },
-                    undoAvailable = false,
-                    redoAvailable = false,
+                    undoAvailable = viewModel.editHistoryIndex > 0,
+                    redoAvailable = viewModel.editHistoryIndex < viewModel.editHistoryLast,
                     fullView = false,
                     saving = isSaving,
                     onCancel = ::requestLeave,
-                    onUndo = { noteLine.say(R.string.editor_undo_later) },
-                    onRedo = { noteLine.say(R.string.editor_undo_later) },
+                    onUndo = { stepHistory(true) },
+                    onRedo = { stepHistory(false) },
                     onFullView = { fullView = true },
                     onCompare = { showOrigin = it },
                     onSave = {

@@ -2703,6 +2703,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
 
         editOpenState = editStateSnapshot()
+        resetEditHistory()
 
         // Resolve the source from the file before exposing the video effect to the player.
         val manualProfile = VideoColorMetadata.manualProfile(currentMediaMetadata?.customProperties)
@@ -2797,6 +2798,96 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         )
     }
 
+    // Undo and redo: the edit state after each finished change, the first entry as the editor opened. Each entry
+    // keeps the flows' own values (the snapshot map is rounded and per recipe value, so it only tells steps apart),
+    // the look-free recipe draft, and the applied preset.
+    private class EditStep(
+        val key: Map<String, Any?>,
+        val values: List<Any?>,
+        val draft: ColorRecipeParams,
+        val presetId: String?,
+        val presetState: Map<String, Any?>,
+    )
+
+    private val editHistory = ArrayList<EditStep>()
+    var editHistoryIndex by mutableIntStateOf(0)
+        private set
+    var editHistoryLast by mutableIntStateOf(0)
+        private set
+
+    // Every flow a step puts back; editStateSnapshot reads the same ones.
+    private val editHistoryFlows: List<MutableStateFlow<*>>
+        get() = listOf(
+            editLutId, editPhotoRecipeParams, editFrameId, editApplyEffectsToVideo, editSharpening, editNoiseReduction,
+            editChromaNoiseReduction, _editAiDenoiseEnabled, editRawExposureCompensation, editRawAutoExposure,
+            editRawHighlightsAdjustment, editRawShadowsAdjustment, editRawBlackPointCorrection,
+            editRawWhitePointCorrection, editRawLensShadingCorrectionEnabled, editRawDROMode, editRawBlackLevelMode,
+            editRawCustomBlackLevel, editRawWhiteLevelMode, editRawCustomWhiteLevel, editRawCfaCorrectionMode,
+            editRawDcpId, editRawEmbeddedDngProfileId, editRawHncsProfileId, editRawHncsRenderIntent,
+            editRawHncsFilmCurveMode, editRawBaselineLutId, editRawRenderingEngine, editRawToneMappingParameters,
+            editRawSpectralFilmStock, editRawSpectralFilmPrint, editRawSpectralFilmCDensityGain,
+            editRawSpectralFilmMDensityGain, editRawSpectralFilmYDensityGain, editRawFotufilmDocument,
+            editComputationalAperture, editBokehStyle, editFocusPointX, editFocusPointY, editCropRect,
+            editCropAspectOption, editRotationDegrees, editStraightenDegrees, editMirrorHorizontal, editPortraitQuick,
+            editDepthOfField,
+        )
+
+    // RectF and the recipe's curve arrays are mutable: a step keeps its own copies.
+    private fun copyEditValue(v: Any?): Any? = when (v) {
+        is RectF -> RectF(v)
+        is ColorRecipeParams -> v.deepCopy()
+        else -> v
+    }
+
+    private fun captureEditStep(key: Map<String, Any?> = editStateSnapshot()) = EditStep(
+        key, editHistoryFlows.map { copyEditValue(it.value) }, independentEditPhotoRecipeParams.deepCopy(),
+        appliedPresetId, appliedPresetState,
+    )
+
+    private fun resetEditHistory() {
+        editHistory.clear()
+        if (isEditing) editHistory.add(captureEditStep())
+        editHistoryIndex = 0
+        editHistoryLast = 0
+    }
+
+    /** Adds the current edit state as an undo step, unless it is the step already shown. */
+    fun recordEditStep() {
+        if (!isEditing || editHistory.isEmpty()) return
+        val key = editStateSnapshot()
+        if (key == editHistory[editHistoryIndex].key) return
+        while (editHistory.lastIndex > editHistoryIndex) editHistory.removeAt(editHistory.lastIndex)
+        editHistory.add(captureEditStep(key))
+        // shortcut: the oldest steps drop past 100 (a few KB each); make it a setting if anyone runs out.
+        if (editHistory.size > 100) editHistory.removeAt(0)
+        editHistoryIndex = editHistory.lastIndex
+        editHistoryLast = editHistory.lastIndex
+    }
+
+    /** The settings that Undo ([back]) or Redo would change, by snapshot key; null when there is no such step. */
+    fun editHistoryStepKeys(back: Boolean): Set<String>? {
+        val from = editHistory.getOrNull(editHistoryIndex) ?: return null
+        val to = editHistory.getOrNull(editHistoryIndex + if (back) -1 else 1) ?: return null
+        return from.key.keys.filterTo(LinkedHashSet()) { from.key[it] != to.key[it] }
+    }
+
+    /** Undo ([back]) or Redo: puts the edit state of the step before or after back. */
+    fun stepEditHistory(back: Boolean) {
+        val index = editHistoryIndex + if (back) -1 else 1
+        val step = editHistory.getOrNull(index) ?: return
+        // The index moves first, so the restored state reads as the current step and records nothing.
+        editHistoryIndex = index
+        val lutBefore = editLutId.value
+        editHistoryFlows.zip(step.values).forEach { (flow, v) ->
+            @Suppress("UNCHECKED_CAST")
+            (flow as MutableStateFlow<Any?>).value = copyEditValue(v)
+        }
+        independentEditPhotoRecipeParams = step.draft.deepCopy()
+        appliedPresetId = step.presetId
+        appliedPresetState = step.presetState
+        if (editLutId.value != lutBefore) reloadEditLutConfig()
+    }
+
     /** The whole edit state, by the keys of [editStateSnapshot]; equal maps mean the photo renders the same. */
     fun editStateKey(): Map<String, Any?> = editStateSnapshot()
 
@@ -2875,6 +2966,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      */
     fun exitEditMode() {
         isEditing = false
+        resetEditHistory()
         deferEditWrites = false
         rawEditsPending = false
         editChainJob?.cancel()
@@ -2998,11 +3090,16 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             ).deepCopy()
         }
         editLutId.value = lutId
+        reloadEditLutConfig()
+    }
+
+    // The look's LUT for the preview, loaded for the current look.
+    private fun reloadEditLutConfig() {
+        val lutId = editLutId.value
         if (lutId == null) {
             editLutConfig = null
             return
         }
-
         viewModelScope.launch {
             val config = withContext(Dispatchers.IO) {
                 contentRepository.lutManager.loadLut(lutId)

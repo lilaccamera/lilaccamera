@@ -1850,7 +1850,8 @@
     <string name="editor_compare">Compare (hold)</string>
     <string name="editor_undo">Undo</string>
     <string name="editor_redo">Redo</string>
-    <string name="editor_undo_later">Undo and redo arrive in a later update</string>
+    <string name="editor_nothing_to_undo">Nothing to undo</string>
+    <string name="editor_nothing_to_redo">Nothing to redo</string>
     <string name="editor_not_built">This arrives in a later update</string>
     <string name="editor_section_not_built">%1$s arrives in a later update</string>
     <string name="editor_discard_message">Your edits to this photo will be lost.</string>
@@ -1928,7 +1929,7 @@
     <string name="editor_raw_stage_look">applying %1$s</string>
     <string name="editor_raw_stage_finishing">finishing</string>
     <string name="editor_raw_save_failed">Couldn\'t develop the RAW; the photo wasn\'t saved</string>
-    <string name="editor_rerendering">Re-rendering the RAW photo</string>
+    <string name="editor_rerendering">Saving the RAW settings and re-rendering the RAW photo</string>
     <string name="editor_import_dcp">Import DCP</string>
     <string name="editor_dcp_imported">DCP profile imported and chosen</string>
     <string name="editor_dcp_import_partial">Some files weren\'t DCP profiles and were skipped</string>
@@ -2013,7 +2014,7 @@
     <string name="editor_paste_nothing">Copy edits on a photo first</string>
     <string name="editor_save_into_look">Save into look</string>
     <string name="editor_save_into_look_title">Save into %1$s?</string>
-    <string name="editor_save_into_look_message">The look keeps these adjustments from now on: every photo and the camera using it change.</string>
+    <string name="editor_save_into_look_message">The look keeps these adjustments from now on: every photo and the camera using it change. Undo and Cancel don\'t change this.</string>
     <string name="editor_saved_into_look">Saved into the look</string>
     <string name="editor_explain_look">The look (LUT) for this photo. A sideways swipe on the photo steps through your favourites. Long-press a look to manage it.</string>
     <string name="editor_explain_frame">Add a decorative frame and watermark to the photo. Tap the chosen frame again to edit it.</string>
