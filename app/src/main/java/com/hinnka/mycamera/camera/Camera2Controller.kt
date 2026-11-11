@@ -305,6 +305,7 @@ class Camera2Controller(private val context: Context) {
     private var rawCompanionJpegReader: ImageReader? = null
     // lilac front camera, low-light YUV stills: the same slot holds a small discarded JPEG (see frontStillJpegReader)
     private var frontStillJpegActive = false
+    private var frontStillJpegStallNs = 0L
     private val ambientLightReader = AmbientLightReader(context)
 
     // 降噪等级 (0=Off, 1=Fast, 2=High Quality, 3=ZSL, 4=Minimal)
@@ -921,7 +922,9 @@ class Camera2Controller(private val context: Context) {
             } else {
                 baseExposureResult?.get(CaptureResult.SENSOR_FRAME_DURATION)
             }
-            maxOf(exposureNs, frameDurationNs ?: 0L, 1L)
+            // a request that also targets a JPEG waits for the JPEG encoder between frames
+            val jpegStallNs = if (frontStillJpegActive) frontStillJpegStallNs else 0L
+            maxOf(exposureNs, frameDurationNs ?: 0L, jpegStallNs, 1L)
         }
         var progressStarted = false
         var firstStartTimestamp = 0L
@@ -1086,7 +1089,11 @@ class Camera2Controller(private val context: Context) {
         // any size works the same and is as slow; the smallest at least 640 wide keeps the encoder's work small
         val size = sizes.filter { it.width >= 640 }.minByOrNull { it.width.toLong() * it.height }
             ?: sizes.maxByOrNull { it.width.toLong() * it.height } ?: return null
-        PLog.i(TAG, "Front still JPEG on: ${size.width}x${size.height} beside the YUV stills, images dropped")
+        // measured on lilac: frames about 240 ms apart against an advertised 200 ms stall
+        frontStillJpegStallNs = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            ?.getOutputStallDuration(ImageFormat.JPEG, size)?.takeIf { it > 0L } ?: 200_000_000L
+        PLog.i(TAG, "Front still JPEG on: ${size.width}x${size.height} beside the YUV stills, images dropped, " +
+            "stall ${frontStillJpegStallNs / 1_000_000} ms")
         return ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 2).apply {
             setOnImageAvailableListener({ reader ->
                 while (true) {
