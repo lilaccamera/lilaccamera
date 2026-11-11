@@ -70,6 +70,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
     private val colorProgramCache = PreviewColorProgramCache()
     private val enginePreview = RawEnginePreviewGl()
+    private val castFix = PreviewCastFixGl()
+    private var castFixEnabled = false
     private val mgcEisHardwareBufferRenderer = MgcEisHardwareBufferRenderer(TAG)
     private val mgcEisYuvRenderer = MgcEisYuvRenderer(TAG)
 
@@ -609,6 +611,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         previewLiteEffects.reset()
         toneBase.reset()
         enginePreview.reset()
+        castFix.reset()
         mgcEisHardwareBufferRenderer.resetAfterContextLoss()
         mgcEisYuvRenderer.resetAfterContextLoss()
         cameraTextureId = 0
@@ -817,6 +820,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         params: com.hinnka.mycamera.model.ColorRecipeParams,
         enableVideoLog: Boolean,
         includeEnginePreview: Boolean = false,
+        includeCastFix: Boolean = false,
     ): ColorPassLocations? {
         val variant = PreviewColorShaderVariant.forPass(
             textureSource = textureSource,
@@ -826,7 +830,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             videoLogEnabled = enableVideoLog && videoLogProfile.isEnabled,
             previewLite = previewLiteEffectsEnabled,
         )
-        return colorProgramCache.get(variant.copy(includeEnginePreview = includeEnginePreview))
+        return colorProgramCache.get(variant.copy(includeEnginePreview = includeEnginePreview, includeCastFix = includeCastFix))
     }
 
     private fun drawColorPass(
@@ -848,6 +852,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         curveEnabled: Boolean,
         enableVideoLog: Boolean,
         toneBaseOnly: Boolean = false,
+        castFix: Boolean = false,
     ) {
         val shadowsHighlightsActive =
             ShadowsHighlightsShader.isActive(params.highlights, params.shadows)
@@ -906,6 +911,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         }
         colorProgramCache.bindLogInput(locations)
         enginePreview.bind(locations.uEnginePreviewLutLocation)
+        if (castFix) this.castFix.bind(locations.programId)
         if (shadowsHighlightsActive) {
             if (toneBaseOnly) {
                 toneBase.bindPlaceholders(locations.programId)
@@ -1183,6 +1189,14 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         val hasCreativeLayer = hasCreativeLayer()
         val hasDualLayer = hasBaselineLayer && hasCreativeLayer
         uploadPendingCurveTextures()
+        if (castFixEnabled) {
+            castFix.upload()
+            if (cameraFrameUpdated && castFix.wantsSample(SystemClock.elapsedRealtime())) {
+                capturePreviewFrame(PreviewCastFixGl.SAMPLE_LONG_EDGE, PreviewCaptureSource.Original) { frame ->
+                    castFix.estimate(frame) { onRequestRender?.invoke() }
+                }
+            }
+        }
         val requestedFbo = liveRecorder != null ||
             postProcessEffectEnabled ||
             clarityEnabled ||
@@ -1513,6 +1527,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     ) {
         val plan = if (suppressCameraEngine) null else enginePreviewPlan
         if (plan != null && !enginePreview.prepare(plan)) return
+        val castFixActive = !suppressCameraEngine && castFixEnabled && castFix.ready
         val baselineLayerAvailable = hasBaselineLayer() && !suppressBaselineLayer
         val creativeLayerAvailable = hasCreativeLayer() && !suppressCreativeLayer
         val useCreativeLayer = creativeLayerAvailable && (!preferBaselineLayer || !baselineLayerAvailable)
@@ -1556,6 +1571,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             params = layerParams,
             enableVideoLog = enableVideoLog,
             includeEnginePreview = plan != null,
+            includeCastFix = castFixActive,
         ) ?: return
         drawColorPass(
             locations = locations,
@@ -1575,6 +1591,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             curveTextureId = layerCurveTextureId,
             curveEnabled = layerCurveEnabled,
             enableVideoLog = enableVideoLog,
+            castFix = castFixActive,
         )
 
         // 测光和直方图（按需）
@@ -2483,6 +2500,13 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     @Synchronized
     fun setCameraStreamActive(active: Boolean) {
         cameraStreamToken = if (active) ++cameraStreamCounter else 0
+    }
+
+    /** GL thread. lilac front camera with "Accurate" colour: the viewfinder gets the photos' cast fix (see [PreviewCastFixGl]). */
+    fun setCastFixEnabled(enabled: Boolean) {
+        if (castFixEnabled == enabled) return
+        castFixEnabled = enabled
+        castFix.clear() // a new camera session starts from its own estimate
     }
 
     /**
@@ -3408,6 +3432,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         // 删除程序
         colorProgramCache.release()
         enginePreview.release()
+        castFix.release()
         GlUtils.deleteProgram(passthroughProgramId)
         passthroughProgramId = 0
         GlUtils.deleteProgram(copyProgramId)

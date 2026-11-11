@@ -1854,7 +1854,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        cameraController.onPreviewStreamActive = { active -> glSurfaceView?.setCameraStreamActive(active) }
+        cameraController.onPreviewStreamActive = { active ->
+            glSurfaceView?.setCameraStreamActive(active)
+            // An "Accurate" front session's photos lose the viewfinder's cast; show the viewfinder that way too.
+            if (active) glSurfaceView?.setCastFixEnabled(cameraController.frontStillJpegActive)
+        }
 
         cameraController.onCameraError = { code, message, canRetry ->
             // 只记录错误日志，不在这里重试打开相机
@@ -4683,6 +4687,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val thumbnail = rotatePreviewBitmapForCapture(bitmap, rotation)
                 settings.originalThumbnail = thumbnail
                 previewThumbnail = thumbnail
+                if (com.hinnka.mycamera.BuildConfig.DEBUG &&
+                    com.hinnka.mycamera.utils.SystemPropertiesUtil.get("debug.lilac.previewcolour.keep")?.trim() == "on"
+                ) {
+                    // Pairs the plain viewfinder frame with the still's uncorrected.jpg (debug.lilac.castfix.keep).
+                    val dir = File(getApplication<Application>().getExternalFilesDir(null), "previewcolour").apply { mkdirs() }
+                    val copy = thumbnail.copy(Bitmap.Config.ARGB_8888, false)
+                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        runCatching {
+                            File(dir, "${settings.photoId}.png").outputStream().use {
+                                copy.compress(Bitmap.CompressFormat.PNG, 100, it)
+                            }
+                        }.onFailure { PLog.w(TAG, "preview colour keep failed", it) }
+                        copy.recycle()
+                    }
+                }
             },
         )
     }

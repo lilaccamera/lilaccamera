@@ -21,6 +21,8 @@ internal data class PreviewColorShaderVariant(
     val includeVideoLog: Boolean = false,
     val includeSharpening: Boolean = false,
     val includeEnginePreview: Boolean = false,
+    /** lilac front camera "Accurate" viewfinder, see [PreviewCastFixGl]. */
+    val includeCastFix: Boolean = false,
     val includeChromaticAberration: Boolean = false,
     val includeColorRecipe: Boolean = true,
     /** Local Laplacian highlights / shadows from [ShadowsHighlightsShader]. */
