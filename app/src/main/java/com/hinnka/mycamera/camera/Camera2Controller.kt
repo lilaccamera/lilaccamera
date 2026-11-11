@@ -4267,7 +4267,7 @@ class Camera2Controller(private val context: Context) {
                 builder.set(CaptureRequest.CONTROL_AF_MODE, previousAfMode)
                 updatePreview()
             }, 1100)
-        }, 1500)
+        }, 200)
     }
 
     private fun imageFormatToString(format: Int): String {
