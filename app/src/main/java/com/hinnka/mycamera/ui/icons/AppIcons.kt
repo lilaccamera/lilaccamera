@@ -486,6 +486,13 @@ object AppIcons {
             "M20.042 16.045a9 9 0 0 0 -12.087 -12.087M5.637 5.635a9 9 0 1 0 12.725 12.73M3 3l18 18"
         )
     }
+    // A picture inside a border: a frame is added to the photo.
+    val FrameLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.FrameLine",
+            "M3 5a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2zM7 7h10v8h-10z"
+        )
+    }
     // Two overlapping frames: several shots in one picture.
     val MultiExposureLine: ImageVector by lazy {
         lineIcon(

@@ -1846,6 +1846,8 @@ fun CameraScreen(
                         add(TopEdgeMark(if (state.flashMode == 2) AppIcons.BulbLine else AppIcons.BoltLine))
                     }
                     if (useMultipleExposure) add(TopEdgeMark(AppIcons.MultiExposureLine))
+                    // Frames don't show on the live picture, so a mark says one will be added.
+                    if (viewModel.currentFrameId != null) add(TopEdgeMark(AppIcons.FrameLine))
                 }
             }
             val topEdgeHistogram = state.histogram.takeIf { isPhotoStyleMode && showHistogram }
