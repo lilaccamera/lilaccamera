@@ -32,6 +32,7 @@ import com.hinnka.mycamera.raw.RawCameraCalibration
 import com.hinnka.mycamera.raw.RawColorCalibrationMode
 import com.hinnka.mycamera.raw.RawColorCalibrationPolicy
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.utils.RawProcessor
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -4366,7 +4367,7 @@ class Camera2Controller(private val context: Context) {
         applyFlashSettings(builder, currentState, isCapture, useStillFlashTrigger)
 
         // 4. 变焦设置
-        applyZoomSettings(builder, currentState, isCapture)
+        applyZoomSettings(builder, currentState, isCapture, isRawCapture)
 
         // 5. 对焦设置
         applyFocusSettings(builder, currentState)
@@ -5313,6 +5314,7 @@ class Camera2Controller(private val context: Context) {
         builder: CaptureRequest.Builder,
         state: CameraState,
         isCapture: Boolean = false,
+        isRawCapture: Boolean = false,
     ) {
         val openCameraId = getActiveOpenCameraId()
         if (openCameraId.isEmpty()) return
@@ -5326,13 +5328,16 @@ class Camera2Controller(private val context: Context) {
             val userZoomRatio = state.zoomRatio.coerceIn(minZoom, maxSupportedZoom)
             val zoomRatio = userZoomRatio
             val activeRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+            // On lilac a cropped RAW still is sent through the camera's second image front-end, which the RAW
+            // shim cannot copy, and the shim is poisoned. Ask for the full sensor; the RAW is cropped in software.
+            val fullSensorRaw = IS_LILAC && isCapture && isRawCapture
 
             applyZoomRequestSettings(
                 builder = builder,
-                zoomRatio = zoomRatio,
+                zoomRatio = if (fullSensorRaw) 1f else zoomRatio,
                 activeRect = activeRect,
                 zoomRatioRange = zoomRatioRange,
-                resetCropAtUnitZoom = false
+                resetCropAtUnitZoom = fullSensorRaw
             )
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to apply zoom settings", e)
@@ -9413,6 +9418,12 @@ class Camera2Controller(private val context: Context) {
             var effectiveResult: CaptureResult? = effectivePhysicalCameraId
                 ?.let { physicalId -> result?.physicalCameraResults?.get(physicalId) }
                 ?: result
+            if (IS_LILAC && image.format == ImageFormat.RAW_SENSOR && result != null && shot.state.zoomRatio > 1f) {
+                // The request went out at the full sensor (applyZoomSettings); keep the framed crop for the RAW.
+                shot.characteristics?.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)?.let { activeRect ->
+                    RawProcessor.rememberFramedCrop(result.request, buildCenteredCropRegion(activeRect, shot.state.zoomRatio))
+                }
+            }
 
             // For RAW images, ensure characteristics match image dimensions to avoid DngCreator crash.
             // This is especially important for logical multi-camera devices where the RAW might come from a physical sub-camera.
