@@ -4438,11 +4438,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // The sideways swipe on the picture steps through the favourites; with fewer than two, through every look.
+    private val swipeLutList: List<LutInfo>
+        get() = selectableLutList.let { all -> all.filter { it.isFavorite }.takeIf { it.size >= 2 } ?: all }
+
     /**
      * 预览下一个滤镜（不切换）
      */
     fun peekNextLut(): LutInfo? {
-        val luts = selectableLutList
+        val luts = swipeLutList
         if (luts.isEmpty()) return null
         val currentIndex = luts.indexOfFirst { it.id == currentLutId.value }
         val nextIndex = if (currentIndex == -1 || currentIndex == luts.size - 1) 0 else currentIndex + 1
@@ -4453,7 +4457,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 预览上一个滤镜（不切换）
      */
     fun peekPreviousLut(): LutInfo? {
-        val luts = selectableLutList
+        val luts = swipeLutList
         if (luts.isEmpty()) return null
         val currentIndex = luts.indexOfFirst { it.id == currentLutId.value }
         val prevIndex = if (currentIndex <= 0) luts.size - 1 else currentIndex - 1
