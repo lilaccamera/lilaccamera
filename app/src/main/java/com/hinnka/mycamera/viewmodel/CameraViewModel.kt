@@ -3391,7 +3391,44 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         multipleExposure = multipleExposureState.enabled,
     )
 
+    /** True while the screen lights the face for a front camera shot. */
+    var screenFlashLit by mutableStateOf(false)
+        private set
+    private var screenFlashJob: Job? = null
+
     private fun submitPhotoCapture() {
+        if (!state.value.usesScreenFlash) return submitPhotoCaptureNow()
+        if (state.value.isCapturing || screenFlashJob?.isActive == true) return
+        screenFlashJob = viewModelScope.launch {
+            screenFlashLit = true
+            try {
+                awaitExposureSettled()
+                submitPhotoCaptureNow()
+                // The frames of the shot, a stack too, are taken until the capture sequence ends.
+                withTimeoutOrNull(2_000) { state.first { it.isCapturing } }
+                withTimeoutOrNull(30_000) { state.first { !it.isCapturing } }
+            } finally {
+                screenFlashLit = false
+            }
+        }
+    }
+
+    /** Waits for auto exposure to adapt to the screen light: 0.6 s at least, then until it stops changing, 1.5 s at most. */
+    private suspend fun awaitExposureSettled() {
+        fun brightness() = state.value.iso.toDouble() * state.value.shutterSpeed
+        delay(600)
+        var last = brightness()
+        var waited = 600L
+        while (waited < 1_500) {
+            delay(150)
+            waited += 150
+            val now = brightness()
+            if (abs(now - last) <= 0.03 * last) break
+            last = now
+        }
+    }
+
+    private fun submitPhotoCaptureNow() {
         val settings = snapshotCaptureSettings()
         cameraController.capture { id ->
             // Only Pro: a RAW capture beside a render got renders killed; Photo mode stacking never did.
@@ -4159,11 +4196,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleFlash() {
+        // The screen has no torch: on the front camera Flash is just off or on.
+        val front = state.value.getCurrentCameraInfo()?.lensType == LensType.FRONT
         cameraController.setFlashMode(
             when (state.value.flashMode) {
                 0 -> 1
-                1 -> 2
-                2 -> 0
+                1 -> if (front) 0 else 2
                 else -> 0
             }
         )

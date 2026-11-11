@@ -2,12 +2,22 @@ package com.hinnka.mycamera.ui.camera
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+
+/** True while the footer is white (front flash lights the face with it): its light ink turns dark. */
+internal val LocalLightFooter = compositionLocalOf { false }
+
+private val DarkFooterInk = Color(0xFF1F1F1F)
+
+/** This light ink colour, or near-black with the same opacity on a white footer. */
+@Composable
+internal fun Color.onFooter(): Color = if (LocalLightFooter.current) DarkFooterInk.copy(alpha = alpha) else this
 
 /** Shared dimensions keep preview placement and control measurement in agreement. */
 internal object CameraControlsLayoutDefaults {

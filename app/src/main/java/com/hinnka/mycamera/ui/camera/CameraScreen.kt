@@ -898,6 +898,18 @@ fun CameraScreen(
         }
     }
 
+    // Front flash: the screen is the light, so it runs at full backlight while the flash is on, and goes back after.
+    DisposableEffect(activity, state.usesScreenFlash) {
+        val window = activity?.window
+        if (state.usesScreenFlash && window != null) {
+            val before = window.attributes.screenBrightness
+            window.attributes = window.attributes.apply { screenBrightness = 1f }
+            onDispose { window.attributes = window.attributes.apply { screenBrightness = before } }
+        } else {
+            onDispose { }
+        }
+    }
+
     LaunchedEffect(previewTransitionToken) {
         if (previewTransitionToken == 0) return@LaunchedEffect
         delay(700)
@@ -1752,7 +1764,18 @@ fun CameraScreen(
         }
 
 
+        // Front flash: the footer turns white to start lighting the face while the picture is still framed.
+        // It follows the mode chosen on the dial, not the camera's report, which comes up to a second later:
+        // switching from Video to Photo shows the white footer at once, not the plain one in between.
+        val dialIsVideo = modeLine.mode == CameraShootingMode.VIDEO.dialIndex(modeLine.proAvailable)
+        val footerWhite by animateFloatAsState(
+            targetValue = if (state.flashMode == 1 && !dialIsVideo &&
+                state.getCurrentCameraInfo()?.lensType == LensType.FRONT) 1f else 0f,
+            animationSpec = tween(220),
+            label = "footerWhite"
+        )
         val controls = @Composable { modifier: Modifier ->
+          CompositionLocalProvider(LocalLightFooter provides (footerWhite > 0.5f)) {
             Controls(
                 state = state,
                 viewModel = viewModel,
@@ -1843,6 +1866,7 @@ fun CameraScreen(
                 },
                 modifier = modifier
             )
+          }
         }
 
         val quickSheetCover by animateFloatAsState(
@@ -1910,10 +1934,22 @@ fun CameraScreen(
                 }
             }
             val footerScrim by animateFloatAsState(
-                targetValue = if (liveUnderShutter || heldFrameUnderShutter) 1f else 0f,
+                targetValue = if ((liveUnderShutter || heldFrameUnderShutter) && footerWhite < 0.5f) 1f else 0f,
                 animationSpec = tween(220),
                 label = "footerScrim"
             )
+            if (footerWhite > 0f) {
+                // Everything under the picture; when the picture reaches the shutter, the shutter's zone over it.
+                val whiteHeight = maxOf(contentHeight - (viewfinderTop + cardHeight), CameraControlsLayoutDefaults.CaptureAreaHeight)
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(whiteHeight)
+                        .graphicsLayer { alpha = footerWhite * (1f - quickSheetCover) }
+                        .background(Color.White)
+                )
+            }
             if (footerScrim > 0f) {
                 Box(
                     modifier = Modifier
@@ -1944,8 +1980,8 @@ fun CameraScreen(
                 } else {
                     if (useLivePhoto) add(TopEdgeMark(AppIcons.LivePhotoLine))
                     if (state.timerSeconds > 0) add(TopEdgeMark(AppIcons.StopwatchLine, "${state.timerSeconds}s"))
-                    // The front camera has no flash, whatever the stored flash mode says.
-                    if (state.flashMode != 0 && state.videoCapabilities.supportsTorch) {
+                    // The front camera has no LED: only its screen flash shows, whatever else the flash mode says.
+                    if (state.usesScreenFlash || (state.flashMode != 0 && state.videoCapabilities.supportsTorch)) {
                         add(TopEdgeMark(if (state.flashMode == 2) AppIcons.BulbLine else AppIcons.BoltLine))
                     }
                     if (useMultipleExposure) {
@@ -2202,6 +2238,21 @@ fun CameraScreen(
                         .offset { IntOffset((bounds.left - origin.x).roundToInt(), (bounds.top - origin.y).roundToInt()) }
                         .size(with(density) { bounds.width.toDp() }, with(density) { bounds.height.toDp() })
                         .graphicsLayer { alpha = snapshotFlash.value }
+                        .background(Color.White)
+                )
+            }
+
+            // Front flash: the whole screen goes white while the shot is taken.
+            val screenFlash by animateFloatAsState(
+                targetValue = if (viewModel.screenFlashLit) 1f else 0f,
+                animationSpec = tween(if (viewModel.screenFlashLit) 150 else 200),
+                label = "screenFlash"
+            )
+            if (screenFlash > 0f) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { alpha = screenFlash }
                         .background(Color.White)
                 )
             }
@@ -2765,14 +2816,14 @@ private fun Controls(
                             .graphicsLayer { makeRoom(line.side, 1f) }
                             .size(CameraControlsLayoutDefaults.SideButtonSize)
                             .autoRotate()
-                            .border(CameraControlsLayoutDefaults.LineWidth, CameraControlsLayoutDefaults.LineColor, switchShape),
+                            .border(CameraControlsLayoutDefaults.LineWidth, CameraControlsLayoutDefaults.LineColor.onFooter(), switchShape),
                         shape = switchShape,
                         backgroundColor = Color.Transparent
                     ) {
                         Icon(
                             imageVector = AppIcons.TurningArrows,
                             contentDescription = stringResource(R.string.switch_camera),
-                            tint = CameraControlsLayoutDefaults.LineColor.copy(
+                            tint = CameraControlsLayoutDefaults.LineColor.onFooter().copy(
                                 alpha = if (state.videoRecordingState.isProcessing) 0.35f else 1f
                             ),
                             modifier = Modifier
@@ -2802,7 +2853,7 @@ private fun Controls(
                         Icon(
                             imageVector = AppIcons.Sliders,
                             contentDescription = stringResource(R.string.quick_settings),
-                            tint = CameraControlsLayoutDefaults.LineColor,
+                            tint = CameraControlsLayoutDefaults.LineColor.onFooter(),
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -2829,7 +2880,7 @@ private fun Controls(
                         Icon(
                             imageVector = AppIcons.Film,
                             contentDescription = stringResource(R.string.filters_panel),
-                            tint = CameraControlsLayoutDefaults.LineColor,
+                            tint = CameraControlsLayoutDefaults.LineColor.onFooter(),
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -2880,11 +2931,11 @@ private fun FramedFooterButton(
         modifier = modifier
             .size(CameraControlsLayoutDefaults.SideButtonSize)
             .autoRotate()
-            .border(CameraControlsLayoutDefaults.LineWidth, CameraControlsLayoutDefaults.LineColor, shape),
+            .border(CameraControlsLayoutDefaults.LineWidth, CameraControlsLayoutDefaults.LineColor.onFooter(), shape),
         shape = shape,
         backgroundColor = Color.Transparent
     ) {
-        Icon(icon, contentDescription = contentDescription, tint = CameraControlsLayoutDefaults.LineColor, modifier = Modifier.size(24.dp))
+        Icon(icon, contentDescription = contentDescription, tint = CameraControlsLayoutDefaults.LineColor.onFooter(), modifier = Modifier.size(24.dp))
     }
 }
 
@@ -2956,7 +3007,7 @@ private fun GalleryProcessingOverlay(
     ) {
         // Idle frame line; the processing states below draw their edge in its place.
         if (processing == null) {
-            Box(Modifier.matchParentSize().border(CameraControlsLayoutDefaults.LineWidth, CameraControlsLayoutDefaults.LineColor, thumbnailShape))
+            Box(Modifier.matchParentSize().border(CameraControlsLayoutDefaults.LineWidth, CameraControlsLayoutDefaults.LineColor.onFooter(), thumbnailShape))
         }
         if (processing == ThumbnailProcessing.PAUSED) {
             // The one state that needs the user (Resume), so the only one that covers the photo.
@@ -3172,7 +3223,7 @@ fun CaptureButton(
                 if (isPaused) Color.White.copy(alpha = 0.8f)
                 else Color.Red.copy(alpha = pulseAlpha)
             }
-            else -> CameraControlsLayoutDefaults.LineColor
+            else -> CameraControlsLayoutDefaults.LineColor.onFooter()
         }
 
         Box(
@@ -3259,7 +3310,7 @@ fun CaptureButton(
             Icon(
                 AppIcons.User,
                 contentDescription = null,
-                tint = CameraControlsLayoutDefaults.LineColor,
+                tint = CameraControlsLayoutDefaults.LineColor.onFooter(),
                 modifier = Modifier.align(Alignment.Center).size(36.dp)
             )
         }
@@ -3274,7 +3325,7 @@ fun CaptureButton(
         // A multiple exposure keeps its count ring through every shot; capture and busy rings would blank it.
         if (showBusy && !showActivityProgress && !showMultipleExposureProgress) {
             CaptureProgressRing(
-                color = Color.White.copy(alpha = rememberRawBusyPulse()),
+                color = Color.White.copy(alpha = rememberRawBusyPulse()).onFooter(),
                 startAngle = -90f,
                 sweepAngle = 360f,
                 modifier = Modifier.progressSemantics()

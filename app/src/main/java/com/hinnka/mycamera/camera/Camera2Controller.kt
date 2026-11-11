@@ -4912,7 +4912,9 @@ class Camera2Controller(private val context: Context) {
                     resolveSupportedAeMode(CaptureRequest.CONTROL_AE_MODE_ON)
                 } else {
                     when {
-                        state.flashMode == CameraMetadata.FLASH_MODE_SINGLE &&
+                        // The front camera's "flash on" is the screen: its requests stay in plain auto exposure.
+                        isFlashSupported &&
+                                state.flashMode == CameraMetadata.FLASH_MODE_SINGLE &&
                                 effectiveUseStillFlashAeMode ->
                             resolveStillFlashAeMode()
 

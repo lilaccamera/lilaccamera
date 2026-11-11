@@ -306,9 +306,10 @@ internal fun CameraTopSheet(
                     val ratios = AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios)
                     pendingAspect = ratios[(ratios.indexOf(shownAspect) + 1).mod(ratios.size)]
                 },
-                flashMode = flashMode,
+                // The front camera flashes with the screen: off or on, a torch left from the back camera counts as off.
+                flashMode = if (isFrontCamera && flashMode != 1) 0 else flashMode,
                 // Refreshed from the open camera's data in Photo mode too.
-                flashAvailable = videoCapabilities.supportsTorch,
+                flashAvailable = videoCapabilities.supportsTorch || isFrontCamera,
                 onFlashToggle = onFlashToggle,
                 itemModifier = itemModifier
             )
