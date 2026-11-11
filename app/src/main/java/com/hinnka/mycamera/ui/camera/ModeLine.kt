@@ -4,7 +4,6 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.SoundPool
 import android.os.SystemClock
-import android.widget.Toast
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOutCubic
 import androidx.compose.animation.core.animate
@@ -198,6 +197,8 @@ internal fun ModeLine(
     recording: Boolean,
     videoProcessing: Boolean,
     onSelect: (CameraShootingMode) -> Unit,
+    // Says why a press did nothing, on the note line.
+    say: (Int) -> Unit,
     modifier: Modifier = Modifier,
     // Drawn under the shutter in the mode zone; presses that start on it are its own.
     collar: (@Composable () -> Unit)? = null,
@@ -243,8 +244,6 @@ internal fun ModeLine(
         }
         follow(selectedIndex)
     }
-
-    fun say(text: Int) = Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
 
     fun sayWip() {
         state.wipSaid = true

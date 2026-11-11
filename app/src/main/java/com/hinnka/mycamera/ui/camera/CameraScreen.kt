@@ -320,6 +320,8 @@ fun CameraScreen(
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
     var captureButtonBounds by remember { mutableStateOf<Rect?>(null) }
+    val noteLine = remember { NoteLineState() }
+    val snapshotFlash = remember { Animatable(0f) }
     var parameterBarTop by remember { mutableStateOf<Float?>(null) }
     var parameterRulerBounds by remember { mutableStateOf<Rect?>(null) }
     var galleryThumbnailBounds by remember { mutableStateOf<Rect?>(null) }
@@ -517,9 +519,12 @@ fun CameraScreen(
         }
     }
 
+    val currentRecordingForNotes by rememberUpdatedState(state.videoRecordingState.isRecording)
     // 监听照片保存完成事件，立即刷新缩略图
     LaunchedEffect(Unit) {
         viewModel.imageSavedEvent.collect {
+            // While recording, the only photos saved are Snapshot's.
+            if (currentRecordingForNotes) noteLine.say(R.string.video_snapshot_saved)
             galleryViewModel.refreshLatestPhoto()
             MyCameraApplication.updateWidgets(context)
         }
@@ -1730,6 +1735,13 @@ fun CameraScreen(
                 },
                 onSwitchCameraClick = ::switchCameraWithPreviewTransition,
                 onCaptureModeSelected = ::selectShootingMode,
+                noteLine = noteLine,
+                onSnapshot = {
+                    scope.launch {
+                        snapshotFlash.snapTo(0.7f)
+                        snapshotFlash.animateTo(0f, tween(250))
+                    }
+                },
                 previewPending = !previewTransitionRevealing &&
                     (!hasPlayedInitialPreviewTransition || previewTransitionAwaitingResume),
                 onCaptureTap = {
@@ -1915,7 +1927,7 @@ fun CameraScreen(
                     TopEdgeLine(
                         marks = topEdgeMarks,
                         histogram = topEdgeHistogram,
-                        onClick = { if (!recordingLine) everydayRowShown = true },
+                        onClick = { if (recordingLine) noteLine.say(R.string.video_locked_while_recording) else everydayRowShown = true },
                         center = if (recordingLine) {
                             {
                                 RecordingPill(
@@ -1960,7 +1972,7 @@ fun CameraScreen(
             if (
                 state.isPortraitMode && state.captureMode == CaptureMode.PHOTO &&
                 (!portraitIntroSeen || showDepthReminder) &&
-                activePanel == ActivePanel.NONE && !viewModel.showPortraitIntro
+                activePanel == ActivePanel.NONE && !noteLine.shown && !viewModel.showPortraitIntro
             ) {
                 if (guidePillBottom != null) {
                     ModeGuidePill(
@@ -1983,7 +1995,7 @@ fun CameraScreen(
                 !state.isPortraitMode
             if (
                 proMode && !proGuideSeen && guidePillBottom != null &&
-                activePanel == ActivePanel.NONE && !viewModel.showProGuide
+                activePanel == ActivePanel.NONE && !noteLine.shown && !viewModel.showProGuide
             ) {
                 ModeGuidePill(
                     icon = AppIcons.InfoLine,
@@ -1996,7 +2008,7 @@ fun CameraScreen(
             val photoMode = state.captureMode == CaptureMode.PHOTO && !proMode && !state.isPortraitMode
             if (
                 photoMode && !basicsGuideSeen && guidePillBottom != null &&
-                activePanel == ActivePanel.NONE && !viewModel.showBasicsGuide
+                activePanel == ActivePanel.NONE && !noteLine.shown && !viewModel.showBasicsGuide
             ) {
                 ModeGuidePill(
                     icon = AppIcons.InfoLine,
@@ -2092,6 +2104,39 @@ fun CameraScreen(
                     controls(Modifier.fillMaxWidth())
                 }
             )
+
+            // Notes use the mode guides' pill, 8 dp above the zoom collar (or the manual values when they show),
+            // whatever the picture's shape, so a note sits in the same place in every mode and while recording.
+            val noteBottom = listOfNotNull(
+                captureButtonBounds?.top?.let { it - with(LocalDensity.current) { CameraControlsLayoutDefaults.CollarClearance.toPx() } },
+                parameterBarTop.takeIf { !isXpan && (manualControlsShown || anyManualValue) },
+            ).minOrNull()?.let { it - (cameraScreenBounds?.top ?: 0f) }
+            if (noteBottom != null) {
+                NoteLine(
+                    state = noteLine,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .layout { measurable, constraints ->
+                            val placeable = measurable.measure(constraints)
+                            layout(placeable.width, placeable.height) {
+                                placeable.place(0, (noteBottom - 8.dp.toPx()).roundToInt() - placeable.height)
+                            }
+                        }
+                )
+            }
+
+            // A short white flash over the picture when Snapshot takes a photo while recording.
+            if (snapshotFlash.value > 0f) previewBounds?.let { bounds ->
+                val origin = cameraScreenBounds?.topLeft ?: Offset.Zero
+                val density = LocalDensity.current
+                Box(
+                    Modifier
+                        .offset { IntOffset((bounds.left - origin.x).roundToInt(), (bounds.top - origin.y).roundToInt()) }
+                        .size(with(density) { bounds.width.toDp() }, with(density) { bounds.height.toDp() })
+                        .graphicsLayer { alpha = snapshotFlash.value }
+                        .background(Color.White)
+                )
+            }
         }
         val panelDismissBounds = if (isXpan) {
             viewfinderAreaBounds ?: previewBounds
@@ -2453,6 +2498,8 @@ private fun Controls(
     onCaptureButtonBoundsChanged: (Rect) -> Unit,
     onSwitchCameraClick: () -> Unit,
     onCaptureModeSelected: (CameraShootingMode) -> Unit,
+    noteLine: NoteLineState,
+    onSnapshot: () -> Unit,
     // The camera is not showing live frames yet or again: the shutter shows its busy look, as when it cannot shoot.
     previewPending: Boolean,
     onCaptureTap: () -> Unit,
@@ -2509,6 +2556,7 @@ private fun Controls(
                     recording = state.videoRecordingState.isRecording,
                     videoProcessing = state.videoRecordingState.isProcessing,
                     onSelect = onCaptureModeSelected,
+                    say = noteLine::say,
                     modifier = Modifier.matchParentSize(),
                     collar = zoomCollar?.let { collar -> @Composable { collar { line.fold } } }
                 ) { shutterModifier ->
@@ -2614,7 +2662,10 @@ private fun Controls(
                             .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
                     )
                     FramedFooterButton(
-                        onClick = { viewModel.captureVideoFrame() },
+                        onClick = {
+                            viewModel.captureVideoFrame()
+                            onSnapshot()
+                        },
                         icon = AppIcons.CameraLine,
                         contentDescription = stringResource(R.string.take_photo),
                         modifier = Modifier
