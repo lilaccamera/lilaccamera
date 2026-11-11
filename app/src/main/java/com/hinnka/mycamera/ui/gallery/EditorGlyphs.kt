@@ -200,7 +200,7 @@ internal fun editorGlyph(glyph: EditorGlyph, k: Float, color: Color): ImageVecto
         }
         // Colour noise: three colour circles that draw together as the colour noise goes.
         EditorGlyph.ColorNoise -> {
-            val d = 3.6f - 2f * k1.coerceAtLeast(0f)
+            val d = 3.6f - 0.8f * k1.coerceAtLeast(0f)  // a little, so the three circles stay recognisable
             line(
                 circle(12f, 12.5f - d, 4.6f) + circle(12f - d * 0.866f, 12.5f + d * 0.5f, 4.6f) +
                     circle(12f + d * 0.866f, 12.5f + d * 0.5f, 4.6f),
