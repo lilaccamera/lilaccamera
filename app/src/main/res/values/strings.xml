@@ -1183,7 +1183,7 @@
     <string name="basics_guide_zoom">Pull the ring above the shutter sideways to zoom. Tap W or T to step.</string>
     <string name="basics_guide_looks_title">Looks</string>
     <!-- Describes how looks are changed on the camera screen; update it when the looks panel changes. -->
-    <string name="basics_guide_looks">Swipe sideways on the picture to change the look, or tap the film button.</string>
+    <string name="basics_guide_looks">Swipe sideways on the picture to step through your favourite looks, or tap the film button for all of them.</string>
     <string name="pro_guide_raw_title">RAW</string>
     <string name="pro_guide_raw">Pro shoots RAW: the sensor\'s own data, before Sony\'s processing and noise reduction, so fine detail isn\'t smeared away.</string>
     <string name="pro_guide_merge_title">Merge frames</string>
