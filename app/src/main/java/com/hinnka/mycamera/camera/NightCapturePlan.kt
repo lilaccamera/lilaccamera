@@ -36,9 +36,7 @@ object NightCapturePlanner {
     private const val STEADY_ISO_CAP = 800
     private const val SHAKY_ISO_CAP = 1600
     private const val SHAKY_SHUTTER_NS = 1_000_000_000L / 20
-    // One stop under auto exposure, so a night scene still looks like night.
-    private const val NIGHT_EXPOSURE_FACTOR = 0.5
-    private const val MAX_BRIGHTEN_GAIN = 2f
+    private const val MAX_BRIGHTEN_GAIN = 3.5f
 
     /**
      * @param aeIso, aeExposureNs what auto exposure chose for the viewfinder.
@@ -54,7 +52,8 @@ object NightCapturePlanner {
         isoRange: Range<Int>,
         exposureRangeNs: Range<Long>?,
     ): NightCapturePlan {
-        val target = aeIso.toDouble() * aeExposureNs * NIGHT_EXPOSURE_FACTOR
+        // As bright as auto exposure.
+        val target = aeIso.toDouble() * aeExposureNs
         val steadyNs = BLUR_BUDGET_PX / (max(angularSpeedRadS, 1e-4f) * focalLengthPx) * NS_PER_S
         var shutter = steadyNs.toLong().coerceIn(MIN_SHUTTER_NS, MAX_SHUTTER_NS)
         // A brighter scene does not need the longest shutter: stop where the lowest ISO is enough.
@@ -64,8 +63,9 @@ object NightCapturePlanner {
         val isoCap = if (shutter < SHAKY_SHUTTER_NS) SHAKY_ISO_CAP else STEADY_ISO_CAP
         val iso = (target / shutter).roundToInt()
             .coerceIn(isoRange.lower, max(isoRange.lower, min(isoCap, isoRange.upper)))
-        // Brightening also lifts noise; more frames leave room for more (about one stop at 12 frames).
-        val maxGain = sqrt(frames / 3f).coerceIn(1f, MAX_BRIGHTEN_GAIN)
+        // Brightening lifts noise like a higher ISO would; merging N frames cuts it by about sqrt(N),
+        // so up to sqrt(N) the result is no noisier than one frame at the higher ISO (3.5x at 12 frames).
+        val maxGain = sqrt(frames.toFloat()).coerceIn(1f, MAX_BRIGHTEN_GAIN)
         val gain = (target / (iso.toDouble() * shutter)).toFloat().coerceIn(1f, maxGain)
         return NightCapturePlan(iso, shutter, gain)
     }
