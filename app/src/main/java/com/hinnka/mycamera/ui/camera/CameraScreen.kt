@@ -1451,6 +1451,8 @@ fun CameraScreen(
                             isFocusing = state.isFocusing,
                             focusSuccess = state.focusSuccess,
                             fixedFocus = !state.supportsPointAutoFocus,
+                            focusHeld = state.shutterKeyHeld,
+                            onFocusIdle = viewModel::unlockFocus,
                             meteringMode = state.effectiveMeteringMode,
                             onSurfaceTextureReady = { surfaceTexture ->
                                 previewSurfaceTexture = surfaceTexture
@@ -1896,6 +1898,8 @@ fun CameraScreen(
                     if (useMultipleExposure) add(TopEdgeMark(AppIcons.MultiExposureLine))
                     // Frames don't show on the live picture, so a mark says one will be added.
                     if (viewModel.currentFrameId != null) add(TopEdgeMark(AppIcons.FrameLine))
+                    // Exposure held by a half-pressed camera key, like a camera's AE lock mark.
+                    if (state.exposureHeld) add(TopEdgeMark(null, "AE-L", ModeAmber))
                 }
             }
             val topEdgeHistogram = state.histogram.takeIf { isPhotoStyleMode && showHistogram }

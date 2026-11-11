@@ -46,6 +46,10 @@ fun FocusIndicator(
     focusSuccess: Boolean?,
     // A fixed-focus camera (most front cameras): a tap only sets exposure, so only its circle shows.
     fixedFocus: Boolean = false,
+    // A half-pressed camera key: the mark stays until the key is let go.
+    held: Boolean = false,
+    // A tap point left untouched clears itself, so the next half-press starts from the centre again.
+    onIdle: () -> Unit = {},
     meteringMode: MeteringMode = MeteringMode.SYSTEM_DEFAULT,
     modifier: Modifier = Modifier
 ) {
@@ -116,12 +120,25 @@ fun FocusIndicator(
             null -> Unit
         }
     }
+    val currentOnIdle by rememberUpdatedState(onIdle)
+    // Focus and exposure pulled apart are a deliberate setting: only a new tap clears them.
+    LaunchedEffect(position, meteringPosition, focusSuccess, held, isFocusLocked) {
+        if (position == null || !isTapMark || held || isFocusLocked || isSeparated) return@LaunchedEffect
+        delay(TapPointIdleMs)
+        currentOnIdle()
+    }
+    // A half-press on a point already in focus shows it green at once, with the tick.
+    LaunchedEffect(held) {
+        if (held && isTapMark && focusSuccess == true && currentFocusPosition != null) {
+            vibration.vibrate(VibrationHelper.LIGHT_TICK_MS)
+        }
+    }
     // Once focus has settled the mark fades, as on a camera; a locked or split mark stays to show it.
     var faded by remember { mutableStateOf(false) }
-    LaunchedEffect(position, focusSuccess, isFocusLocked, isSeparated) {
+    LaunchedEffect(position, focusSuccess, isFocusLocked, isSeparated, held) {
         if (position == null) return@LaunchedEffect  // cleared: keep fading, never flash back
         faded = false
-        if (!isTapMark || (focusSuccess == null && !fixedFocus) || isFocusLocked || isSeparated) return@LaunchedEffect
+        if (!isTapMark || (focusSuccess == null && !fixedFocus) || isFocusLocked || isSeparated || held) return@LaunchedEffect
         delay(1500)
         faded = true
     }
@@ -348,5 +365,7 @@ fun FocusIndicator(
 private val TapFrameSize = 42.dp
 private val TapFrameLine = 1.25.dp
 private val SpotCircleRadius = 11.dp
+// 1.5 s until the frame fades, then 10 s more.
+private const val TapPointIdleMs = 11_500L
 // The bright green of a Sony camera's in-focus frame.
 private val FocusGreen = Color(0xFF3FE03F)

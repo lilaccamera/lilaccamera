@@ -7080,6 +7080,22 @@ class Camera2Controller(private val context: Context) {
             if (aeLockAvailable) set(CaptureRequest.CONTROL_AE_LOCK, held)
             updatePreview()
         }
+        _state.value = _state.value.copy(
+            shutterKeyHeld = held,
+            exposureHeld = held && aeLockAvailable && _state.value.isAutoExposure,
+        )
+    }
+
+    /** Focuses again on the tapped point (a half-press after a miss), keeping the exposure point as it is. */
+    fun refocusTapPoint() {
+        val point = _state.value.focusPoint?.takeIf { _state.value.focusPointSource == FocusPointSource.MANUAL } ?: return
+        focusOnNormalizedPoint(
+            normX = point.first,
+            normY = point.second,
+            source = FocusPointSource.MANUAL,
+            previewViewAspectRatio = pointMeteringViewAspectRatio,
+            preserveMeteringPoint = true,
+        )
     }
 
     /** 拖动中更新 AF 区域，松手后扫描一次；整个过程保持独立 AE 区域。 */

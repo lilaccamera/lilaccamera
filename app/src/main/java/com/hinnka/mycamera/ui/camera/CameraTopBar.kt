@@ -228,7 +228,7 @@ private fun formatRecordingDuration(elapsedMs: Long): String {
 }
 
 /** One active-setting mark on the top edge: a 20 dp line icon, with a short value after it if any. */
-internal data class TopEdgeMark(val icon: ImageVector?, val text: String? = null)
+internal data class TopEdgeMark(val icon: ImageVector?, val text: String? = null, val color: Color = Color.White)
 
 /**
  * The top edge of the picture while everything is closed: marks for settings that change how a shot is
@@ -258,7 +258,7 @@ internal fun TopEdgeLine(
                         Icon(icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
                     }
                 }
-                mark.text?.let { Text(it, style = textStyle, maxLines = 1) }
+                mark.text?.let { Text(it, style = textStyle.copy(color = mark.color), maxLines = 1) }
             }
         }
         if (histogram != null) {

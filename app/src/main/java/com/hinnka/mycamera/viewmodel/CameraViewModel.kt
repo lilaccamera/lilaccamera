@@ -4117,8 +4117,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val point = s.focusPoint
         when {
             // A point the user tapped holds, as a camera's focus area does.
-            point != null && s.focusPointSource == FocusPointSource.MANUAL ->
+            point != null && s.focusPointSource == FocusPointSource.MANUAL -> {
+                // As a camera's half-press does, try again where the last attempt missed.
+                if (s.focusSuccess == false) cameraController.refocusTapPoint()
                 shutterKeyOwnsFocusLock = false
+            }
             point != null && s.focusPointSource == FocusPointSource.EYE -> {
                 cameraController.focusOnNormalizedPoint(point.first, point.second, FocusPointSource.EYE, lockFocus = true)
                 shutterKeyOwnsFocusLock = true
