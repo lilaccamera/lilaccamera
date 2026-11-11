@@ -6,6 +6,7 @@ import com.hinnka.mycamera.ml.SubjectMask
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /**
@@ -94,9 +95,12 @@ internal object BlurPreview {
     fun layer(prepared: Prepared, strength: Float): Bitmap {
         val w = prepared.width
         val h = prepared.height
-        // The renderer's largest blur disc is about 2 % of the long edge at f/2; two box passes of radius r spread
-        // about as far as a disc of radius 2r, so r is half of that; more looked stronger than the render.
-        val radius = (MAX_EDGE * 0.01f * strength).roundToInt()
+        // Measured on the phone (background sharpness of this preview against the rendered blur, 2026-11-11):
+        // about 1.5x the radius the disc rule gave (1 % of the edge per unit) to f/2. Wider, the render's hard-edged
+        // discs outgrow these soft box passes (about 2x at f/1.8), so past f/2 the radius grows faster: with the
+        // strength to the power 1.5 (2 and 1.75 were too strong at f/1.2 on the phone, 1 too weak).
+        val gain = if (strength > 1f) strength.toDouble().pow(1.5).toFloat() else strength
+        val radius = (MAX_EDGE * 0.015f * gain).roundToInt()
         if (radius < 1) return Bitmap.createBitmap(prepared.sharp, w, h, Bitmap.Config.ARGB_8888)
         val blurred = boxBlur(boxBlur(prepared.sharp, w, h, radius), w, h, radius)
         val out = IntArray(w * h) { i -> mix(prepared.sharp[i], blurred[i], prepared.weight[i]) }

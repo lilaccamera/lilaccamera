@@ -155,6 +155,8 @@ class OglBokehProcessor {
         focalWidthScale: Float = 1f,
         /** For a smaller copy of a photo: the photo's own long edge, so the blur works at the photo's size. */
         photoLongEdge: Int? = null,
+        /** Asked between bands: true stops the render there (a newer blur replaced it). */
+        isCancelled: () -> Boolean = { false },
     ): Bitmap? {
         val startedAtMs = SystemClock.elapsedRealtime()
         try {
@@ -271,6 +273,7 @@ class OglBokehProcessor {
                 renderStrips(
                     targets, layout, params, style, nearBands, farBands, inputTex, guideTex, guideScale,
                     workingLod, workingWidth, workingHeight, nearTex, farTex, radiusScale, originalImage, linearInput,
+                    isCancelled,
                 )
                 release(guideTex)
                 val highlightTex = style?.let {
@@ -925,6 +928,7 @@ class OglBokehProcessor {
         radiusScale: Float,
         originalImage: Bitmap,
         linearInput: Boolean,
+        isCancelled: () -> Boolean = { false },
     ) {
         val stripPixels = width.toLong() * STRIP_ROWS
         val deltaBuffers = targets.map { target ->
@@ -992,6 +996,12 @@ class OglBokehProcessor {
                     )
                     // Submit each band on its own so the UI renderer is not queued behind a strip.
                     GlesGpuScheduler.yieldToUiRenderer()
+                    // A replaced blur stops here, with the GPU idle: the band ended in a barrier that waits for it
+                    // on this phone. The render's cleanup releases everything.
+                    if (isCancelled()) {
+                        GLES30.glFinish()
+                        throw java.util.concurrent.CancellationException("lens blur replaced by a newer one")
+                    }
                 }
             }
             store(nearBuffer, farBuffer, nearTex, farTex, width, stripRow, stripRows)

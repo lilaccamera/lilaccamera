@@ -88,6 +88,8 @@ class DepthBokehProcessor(
         onRenderStart: () -> Unit = {},
         /** For a smaller copy of the photo: the photo's own long edge (see OglBokehProcessor.applyBokeh). */
         photoLongEdge: Int? = null,
+        /** Asked between the render's bands: true stops it, and the photo comes back unblurred. */
+        isCancelled: () -> Boolean = { false },
     ): Bitmap = mutex.withLock {
         if (aperture > 16.0f || aperture <= 0f) {
             return originalImage
@@ -202,6 +204,7 @@ class DepthBokehProcessor(
                 focalRangeFromPoint = !quickBlur,
                 focalWidthScale = focalWidthScale,
                 photoLongEdge = photoLongEdge,
+                isCancelled = isCancelled,
             )
             result = bokehResult
         }

@@ -888,19 +888,27 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * edit, that is when none of them changed. Save runs them in full ([commitEditChain]).
      */
     val editChainBase = MutableStateFlow<Bitmap?>(null)
+    private val _blurPending = MutableStateFlow(false)
+    /** A blur is asked for and waiting for a pause or rendering: the screen shows the cheap blur meanwhile. */
+    val blurPending = _blurPending.asStateFlow()
     private val _editChainBusy = MutableStateFlow(false)
     val editChainBusy = _editChainBusy.asStateFlow()
     private var editChainJob: Job? = null
     private val editChainSteps = HashMap<String, Pair<Any, Bitmap>>()
 
-    private fun openBlurKey(): List<Any?>? {
+    /** The blur settings the chain's [editChainBase] was made with (null: no blur). */
+    @Volatile var editChainBlurKey: List<Any?>? = null
+        private set
+
+    /** The blur settings as the editor opened, and as they are now (null: no blur). */
+    fun openBlurKey(): List<Any?>? {
         val open = editOpenState
         val aperture = (open["aperture"] as? Float)?.takeIf { it > 0f } ?: return null
         val focus = open["focus"] as? Pair<*, *>
         return listOf(aperture, focus?.first, focus?.second, open["bokeh"], open["depth"], open["depthOfField"])
     }
 
-    private fun currentBlurKey(): List<Any?>? {
+    fun currentBlurKey(): List<Any?>? {
         val aperture = editComputationalAperture.value?.takeIf { it > 0f } ?: return null
         return listOf(
             aperture, editFocusPointX.value, editFocusPointY.value, editBokehStyle.value, editPortraitQuick.value,
@@ -942,6 +950,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
         _editChainBusy.value = true
         editChainJob = viewModelScope.launch(Dispatchers.IO) {
+            val chainJob = coroutineContext[Job]
             val context = getApplication<Application>()
             val iso = (currentMediaMetadata ?: photo.metadata)?.iso
             suspend fun step(name: String, key: Any, make: suspend () -> Bitmap?): Bitmap? {
@@ -994,9 +1003,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         if (fromFile) {
                             GalleryManager.loadBitmap(context, Uri.fromFile(GalleryManager.getBokehFile(context, photo.id)), edge.takeIf { !fullSize })
                         } else {
-                            awaitEditorPause()
-                            _isBokehProcessing.value = true
+                            _blurPending.value = true
                             try {
+                                awaitEditorPause()
+                                _isBokehProcessing.value = true
                                 editorGpu.heavy {
                                     contentRepository.depthBokehProcessor.applyHighQualityBokeh(
                                         context, photo.id, input,
@@ -1012,11 +1022,14 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                                         photoLongEdge = (currentMediaMetadata ?: photo.metadata)
                                             ?.let { maxOf(it.width, it.height) }?.takeIf { it > 0 }
                                             ?: maxOf(photo.width, photo.height).takeIf { it > 0 },
+                                        // A newer blur (another aperture, focus...) stops this one between bands.
+                                        isCancelled = { chainJob?.isCancelled == true },
                                     )
                                 }
                             } finally {
                                 onBlurStage(null)
                                 _isBokehProcessing.value = false
+                                _blurPending.value = false
                             }
                         }
                     } ?: return@launch
@@ -1037,6 +1050,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     } ?: return@launch
                 }
                 ensureActive()
+                editChainBlurKey = blur
                 editChainBase.value = bitmap
             } catch (e: CancellationException) {
                 throw e

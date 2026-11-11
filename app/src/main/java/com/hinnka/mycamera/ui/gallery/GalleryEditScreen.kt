@@ -544,6 +544,8 @@ fun GalleryEditScreen(
     ) {
         val requestId = ++previewRenderRequestId
         val isCropPreview = section == EditorSection.Crop
+        // The state this picture shows: a mode switch waits for a picture of the current state.
+        val renderedFor = currentPreviewSignature()
         val bitmap = withContext(Dispatchers.IO) {
             viewModel.getPreviewBitmap(
                 photo,
@@ -562,11 +564,13 @@ fun GalleryEditScreen(
             if (isCropPreview) {
                 if (section == EditorSection.Crop) {
                     cropPreviewBitmap = bitmap
+                    ui.cropFor = renderedFor
                 }
             } else if (isRaw && !rawDeveloped() && rawLook(viewModel.editStateKey()) != null) {
                 // An older develop finished while an earlier look is shown for the newer state: keep that look.
             } else {
                 previewBitmap = bitmap
+                ui.previewFor = renderedFor
             }
         }
         // The newest render ends the wait, also when it produced nothing, so the spinner can't stay on.
@@ -770,8 +774,9 @@ fun GalleryEditScreen(
         )
     }
     var awaitingBlur by remember { mutableStateOf(false) }
-    LaunchedEffect(isBokehProcessing, isLoadingPreview) {
-        if (isBokehProcessing) awaitingBlur = true else if (!isLoadingPreview) awaitingBlur = false
+    val blurPending by viewModel.blurPending.collectAsState()
+    LaunchedEffect(isBokehProcessing, blurPending, isLoadingPreview) {
+        if (isBokehProcessing || blurPending) awaitingBlur = true else if (!isLoadingPreview) awaitingBlur = false
     }
 
     // Portrait's cheap preview: the photo as edited but without the blur, small, loaded once per edit state
@@ -927,16 +932,18 @@ fun GalleryEditScreen(
 
     // One heavy GPU job at a time: while a blur, a RAW develop, AI denoise or noise reduction runs, a press that
     // would start another says which is running and does nothing.
-    fun gpuBusyNote(): Int? = when {
-        isBokehProcessing -> R.string.editor_busy_blur
+    // [allowBlur]: Portrait's own controls may change a blur still rendering; the newer one replaces it.
+    fun gpuBusyNote(allowBlur: Boolean = false): Int? = when {
+        isBokehProcessing && !allowBlur -> R.string.editor_busy_blur
         developStage != null || viewModel.refreshingPhotos.contains(currentEditSourcePhoto.id) -> R.string.editor_busy_raw
         isAiDenoising -> R.string.editor_busy_ai
         isPhotonDenoising -> R.string.editor_busy_noise
         else -> null
     }
-    fun blockedByGpu(): Boolean = gpuBusyNote()?.let { noteLine.say(it); true } ?: false
+    fun blockedByGpu(allowBlur: Boolean = false): Boolean =
+        gpuBusyNote(allowBlur)?.let { noteLine.say(it); true } ?: false
     fun placeFocusIfFree(position: Offset) {
-        if (!blockedByGpu()) placeFocus(position)
+        if (!blockedByGpu(allowBlur = true)) placeFocus(position)
     }
 
     fun refreshRawPreview(
@@ -1048,7 +1055,10 @@ fun GalleryEditScreen(
         if (!isRaw) return@LaunchedEffect
         val look = rawLook(editState)
         ui.rawLookShown = look != null && !rawDeveloped()
-        if (ui.rawLookShown) previewBitmap = look
+        if (ui.rawLookShown) {
+            previewBitmap = look
+            ui.previewFor = currentPreviewSignature()
+        }
     }
     // Once the photo shows its current state, a small copy is kept (the last six).
     LaunchedEffect(previewBitmap, isLoadingPreview, rawBusy, editChainBusy, editState, ui.developedRaw) {
@@ -1220,7 +1230,17 @@ fun GalleryEditScreen(
             } else {
                 3f / 4f
             }
-            val targetRect = if (cropView) {
+            // Switching to or from Crop shows the new view once its picture shows the current edit; until then
+            // the previous view stays, so an old picture never flashes up.
+            val currentSignature = currentPreviewSignature()
+            val viewReady = if (cropView) {
+                cropPreviewBitmap != null && ui.cropFor == currentSignature
+            } else {
+                previewBitmap != null && ui.previewFor == currentSignature
+            }
+            val showCrop = if (viewReady) cropView else ui.lastShownCrop && cropPreviewBitmap != null
+            SideEffect { ui.lastShownCrop = showCrop }
+            val targetRect = if (showCrop) {
                 EditorRect(0f, EDITOR_EDGE_DP, screenW, screenH - EDITOR_BLOCK_DP - EDITOR_CONTROL_DP - EDITOR_EDGE_DP)
             } else {
                 editorPhotoRect(photoAspect, screenW, screenH, fullView)
@@ -1521,7 +1541,7 @@ fun GalleryEditScreen(
                     } else {
                         CircularProgressIndicator(color = Color.White)
                     }
-                } else if (cropView && (cropPreviewBitmap ?: editChainBase ?: ui.rawPreviewBase) != null) {
+                } else if (showCrop && cropPreviewBitmap != null) {
                     val geometryBaseWidth = currentEditSourcePhoto.metadata?.width?.takeIf { it > 0 }
                         ?: currentEditSourcePhoto.width.coerceAtLeast(1)
                     val geometryBaseHeight = currentEditSourcePhoto.metadata?.height?.takeIf { it > 0 }
@@ -1575,9 +1595,7 @@ fun GalleryEditScreen(
                     val heldTurn = ui.heldCrop == "rotation"
                     val heldFlip = ui.heldCrop == "mirror"
                     CropOverlay(
-                        // Until Crop's own render (look included) is ready, the uncropped picture already in
-                        // memory, so Crop never waits behind a blur or a develop.
-                        bitmap = cropPreviewBitmap ?: editChainBase ?: ui.rawPreviewBase,
+                        bitmap = cropPreviewBitmap,
                         cropRect = editCropRect ?: cropBounds,
                         cropAspectRatio = cropAspectRatio,
                         straightenDegrees = when {
@@ -1610,15 +1628,31 @@ fun GalleryEditScreen(
 
                 LutSwipeIndicator(state = lutSwipeState)
 
+                // The blur on screen against the blur asked for: the picture's base is the chain's small copy (made
+                // with the chain's blur settings) or the photo's files (the settings it opened with). While they
+                // differ the cheap blur shows, from the frame a setting changes, so the old blur never flashes up.
+                val shownSignature = ui.previewFor as? PreviewRenderSignature
+                val shownBlur: Any? = when {
+                    shownSignature == null -> Unit
+                    shownSignature.editChainBase == null -> viewModel.openBlurKey()
+                    shownSignature.editChainBase === editChainBase -> viewModel.editChainBlurKey
+                    else -> Unit
+                }
+                val blurStale = portraitOpen && shownBlur != viewModel.currentBlurKey()
                 // Portrait: the cheap preview while the blur renders or a control is dragged, cross-fading between
                 // the two prepared strengths around the one wanted, so it feels like more steps than there are.
                 val previewBounds = contentBounds
                 val layers = blurLayers
-                if (
-                    layers.isNotEmpty() && previewBounds != null && portraitOpen && !fullView &&
-                    (previewStrength > 0f || apertureScroll != null) &&
-                    (awaitingBlur || apertureDrag != null || apertureScroll != null || ringDrag != null || dofDrag != null)
-                ) {
+                val cheapWanted = portraitOpen && !fullView && (previewStrength > 0f || apertureScroll != null) &&
+                    (awaitingBlur || blurStale || apertureDrag != null || apertureScroll != null || ringDrag != null || dofDrag != null)
+                // On at once; off only after the new blur has cross-faded in underneath (the picture's own fade
+                // takes about 200 ms), then fading out over it, so no moment shows the photo without a blur.
+                val cheapAlpha by animateFloatAsState(
+                    targetValue = if (cheapWanted) 1f else 0f,
+                    animationSpec = if (cheapWanted) snap() else tween(durationMillis = 300, delayMillis = 300),
+                    label = "cheapBlur",
+                )
+                if (layers.isNotEmpty() && previewBounds != null && portraitOpen && !fullView && cheapAlpha > 0f) {
                     val levels = BlurPreview.LEVELS
                     val upper = levels.indexOfFirst { it >= previewStrength }.let { if (it < 0) levels.lastIndex else it }
                     val lower = (upper - 1).coerceAtLeast(0)
@@ -1627,7 +1661,7 @@ fun GalleryEditScreen(
                     val over = layers[upper] ?: layers[lower]
                     val dstOffset = IntOffset(previewBounds.left.roundToInt(), previewBounds.top.roundToInt())
                     val dstSize = IntSize(previewBounds.width.roundToInt(), previewBounds.height.roundToInt())
-                    androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                    androidx.compose.foundation.Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = cheapAlpha }) {
                         under?.let { drawImage(it, dstOffset = dstOffset, dstSize = dstSize) }
                         if (over != null && over !== under) drawImage(over, dstOffset = dstOffset, dstSize = dstSize, alpha = t)
                     }
@@ -1731,10 +1765,12 @@ fun GalleryEditScreen(
                         // JPEG noise reduction: the edit chain denoises its small copy with the released strengths.
                         s.kind == SettingKind.Denoise -> noiseReleased = editNoiseReduction to editChromaNoiseReduction
                         s.kind == SettingKind.DepthOfField -> dofDrag?.let { v ->
+                            awaitingBlur = true  // the cheap blur stays until the new blur shows
                             dofDrag = null
                             viewModel.setDepthOfField(v.roundToInt())
                         }
                         s.kind == SettingKind.Aperture -> apertureDrag?.let { v ->
+                            awaitingBlur = true  // the cheap blur stays until the new blur shows
                             apertureDrag = null
                             viewModel.setComputationalAperture(v.takeIf { it > 0f })
                         }
@@ -2675,7 +2711,7 @@ fun GalleryEditScreen(
                         else -> EditorControlHint(stringResource(R.string.editor_not_built))
                     }
                     // A control that would start a second GPU job is held while one runs: a touch says why.
-                    val busyNote = gpuBusyNote()
+                    val busyNote = gpuBusyNote(allowBlur = section == EditorSection.Portrait)
                     if (busyNote != null && (selectedRawItem != null || selectedSetting?.startsGpuWork(isRaw) == true)) {
                         Box(
                             Modifier
@@ -2745,7 +2781,7 @@ fun GalleryEditScreen(
                                     // A double tap returns the setting to where it was when the editor opened.
                                     doubleTap && (rawItems.any { it.key == item.key } ||
                                         settings.firstOrNull { it.key == item.key }?.startsGpuWork(isRaw) == true) &&
-                                        blockedByGpu() -> explainKey = null
+                                        blockedByGpu(allowBlur = section == EditorSection.Portrait) -> explainKey = null
                                     doubleTap -> {
                                         explainKey = null
                                         settings.firstOrNull { it.key == item.key }?.let { s ->

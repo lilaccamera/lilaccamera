@@ -737,4 +737,9 @@ internal class EditorUiState {
     var stageStartedAt by mutableLongStateOf(0L)
     var lastStage by mutableStateOf<com.hinnka.mycamera.raw.RawDevelopStage?>(null)
     var stageKind by mutableStateOf("")
+    // The edit state the preview and Crop's picture show, and whether Crop's view was on screen last: a mode
+    // switch keeps the previous view until the new one's picture shows the current edit.
+    var previewFor by mutableStateOf<Any?>(null)
+    var cropFor by mutableStateOf<Any?>(null)
+    var lastShownCrop by mutableStateOf(false)
 }
