@@ -1087,6 +1087,14 @@ fun GalleryEditScreen(
             val photoY by animateFloatAsState(targetRect.y, photoMotion, label = "photoY")
             val photoW by animateFloatAsState(targetRect.w, photoMotion, label = "photoW")
             val photoH by animateFloatAsState(targetRect.h, photoMotion, label = "photoH")
+            // Curve: the part of the photo box clear of the edge icons above and the control layer below.
+            val curveFree = with(density) {
+                Rect(
+                    0f, (EDITOR_EDGE_DP - photoY).coerceAtLeast(0f).dp.toPx(), photoW.dp.toPx(),
+                    (screenH - EDITOR_BLOCK_DP - EDITOR_CONTROL_DP - photoY).coerceAtMost(photoH).dp.toPx()
+                )
+            }
+            val curveFreeNow by rememberUpdatedState(curveFree)
 
             Box(
                 modifier = Modifier
@@ -1217,7 +1225,7 @@ fun GalleryEditScreen(
                         val inset = CURVE_INSET_DP.dp.toPx()
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                            val box = curveBox(contentBounds, size.width.toFloat(), size.height.toFloat(), inset)
+                            val box = curveBox(contentBounds, curveFreeNow, inset)
                                 ?: return@awaitEachGesture
                             val channel = curveChannel
                             val points = curvePoints(editPhotoRecipeParams ?: editLutRecipeParams, channel)
@@ -1497,6 +1505,7 @@ fun GalleryEditScreen(
                     val points = curveDrag ?: curvePoints(recipe, curveChannel)
                     CurveOverlay(
                         contentBounds = contentBounds,
+                        free = curveFree,
                         points = points,
                         channel = curveChannel,
                         // The other channels that bend the tones, faint behind the one being edited.

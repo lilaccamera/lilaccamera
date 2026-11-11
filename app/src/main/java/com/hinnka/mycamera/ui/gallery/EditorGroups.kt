@@ -36,10 +36,13 @@ import com.hinnka.mycamera.ui.components.identityPoints
 import com.hinnka.mycamera.ui.components.parsePoints
 import com.hinnka.mycamera.ui.components.toFloatArray
 
-/** Curve: the curve's box on screen, the visible part of the photo with a margin, so no point sits on the screen edge. */
-internal fun curveBox(contentBounds: Rect?, width: Float, height: Float, inset: Float): Rect? {
+/**
+ * Curve: the curve's box on screen, the visible part of the photo inside [free] (clear of the edge icons and the
+ * control layer) with a margin, so every point can be reached and none sits on the screen edge.
+ */
+internal fun curveBox(contentBounds: Rect?, free: Rect, inset: Float): Rect? {
     val b = contentBounds?.takeIf { it.width > 0f && it.height > 0f } ?: return null
-    val visible = b.intersect(Rect(0f, 0f, width, height))
+    val visible = b.intersect(free)
     val box = Rect(visible.left + inset, visible.top + inset, visible.right - inset, visible.bottom - inset)
     return box.takeIf { it.width > 1f && it.height > 1f }
 }
@@ -81,13 +84,14 @@ internal fun nearestCurvePoint(points: List<Pair<Float, Float>>, box: Rect, posi
 @Composable
 internal fun CurveOverlay(
     contentBounds: Rect?,
+    free: Rect,
     points: List<Pair<Float, Float>>,
     channel: CurveChannel,
     others: List<Pair<CurveChannel, FloatArray>>,
     selected: Int?,
 ) {
     Canvas(Modifier.fillMaxSize()) {
-        val box = curveBox(contentBounds, size.width, size.height, CURVE_INSET_DP.dp.toPx()) ?: return@Canvas
+        val box = curveBox(contentBounds, free, CURVE_INSET_DP.dp.toPx()) ?: return@Canvas
         val shade = Color.Black.copy(alpha = 0.45f)
         val grid = Color.White.copy(alpha = 0.18f)
         for (i in 1..3) {
