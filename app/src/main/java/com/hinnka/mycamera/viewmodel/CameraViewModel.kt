@@ -3334,6 +3334,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         showProGuide = false
     }
 
+    /** The camera basics guide is open; it opens from the pill in Photo mode or the mode name in quick settings. */
+    var showBasicsGuide by mutableStateOf(false)
+        private set
+
+    /** Opens the camera basics guide; once opened, the pill that offers it no longer shows. */
+    fun showBasicsHelp() {
+        showBasicsGuide = true
+        userPreferencesRepository.updateAsync { basicsGuideSeen = true }
+    }
+
+    fun dismissBasicsGuide() {
+        showBasicsGuide = false
+    }
+
     private fun snapshotCaptureSettings() = CaptureSettingsSnapshot(
         state = snapshotCaptureState(),
         preferences = userPreferencesRepository.current,

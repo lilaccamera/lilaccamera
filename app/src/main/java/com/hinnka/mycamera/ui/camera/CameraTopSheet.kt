@@ -189,6 +189,8 @@ internal fun CameraTopSheet(
     onPortraitHelp: () -> Unit = {},
     // Opens the Pro guide from the mode name.
     onProHelp: () -> Unit = {},
+    // Opens the camera basics guide from the Photo mode name.
+    onBasicsHelp: () -> Unit = {},
     // Long press on a setting's name opens Settings at that setting.
     onOpenSettingsAt: (SettingsTarget) -> Unit = {},
     multiFrameCount: Int,
@@ -517,7 +519,7 @@ internal fun CameraTopSheet(
                         onGuide = when {
                             isPortraitMode -> onPortraitHelp
                             isProfessionalMode -> onProHelp
-                            else -> null
+                            else -> onBasicsHelp
                         }
                     ) {
                         if (isPortraitMode) {

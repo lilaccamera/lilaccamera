@@ -268,6 +268,7 @@ fun CameraScreen(
     val portraitIntroSeen by preferenceValue { it.portraitIntroSeen }
     val portraitDepthReminderSeen by preferenceValue { it.portraitDepthReminderSeen }
     val proGuideSeen by preferenceValue { it.proGuideSeen }
+    val basicsGuideSeen by preferenceValue { it.basicsGuideSeen }
     val portraitBokehStyle by preferenceValue { BokehStyle.fromPersistedName(it.portraitBokehStyle) }
     val eyeFocusEnabled by preferenceValue { it.eyeFocusEnabled }
     val keepScreenOn by preferenceValue { it.keepScreenOn }
@@ -1360,7 +1361,8 @@ fun CameraScreen(
                                                     !afterLongPress &&
                                                     !state.videoRecordingState.isRecording &&
                                                     !viewModel.showPortraitIntro &&
-                                                    !viewModel.showProGuide
+                                                    !viewModel.showProGuide &&
+                                                    !viewModel.showBasicsGuide
                                                 ) {
                                                     verticalTracking = true
                                                 }
@@ -1997,6 +1999,19 @@ fun CameraScreen(
                     modifier = guidePillPlacement
                 )
             }
+            // Photo mode offers the camera basics the same way, on every launch until opened once.
+            val photoMode = state.captureMode == CaptureMode.PHOTO && !proMode && !state.isPortraitMode
+            if (
+                photoMode && !basicsGuideSeen && guidePillBottom != null &&
+                activePanel == ActivePanel.NONE && !viewModel.showBasicsGuide
+            ) {
+                ModeGuidePill(
+                    icon = AppIcons.InfoLine,
+                    text = stringResource(R.string.basics_guide_pill),
+                    onClick = { viewModel.showBasicsHelp() },
+                    modifier = guidePillPlacement
+                )
+            }
 
             CameraBottomControlsLayout(
                 viewfinderBottom = viewfinderTop + cardHeight,
@@ -2164,6 +2179,7 @@ fun CameraScreen(
             onPortraitBokehStyleChange = viewModel::setPortraitBokehStyle,
             onPortraitHelp = viewModel::showPortraitHelp,
             onProHelp = viewModel::showProHelp,
+            onBasicsHelp = viewModel::showBasicsHelp,
             onOpenSettingsAt = onOpenSettingsAt,
             multiFrameCount = jpgMultiFrameCount,
             onMultiFrameCountChange = { viewModel.setJpgMultiFrameDenoiseFrameCountAndEnable(it) },
@@ -2240,6 +2256,10 @@ fun CameraScreen(
 
         if (viewModel.showProGuide) {
             ProGuide(onDismiss = viewModel::dismissProGuide)
+        }
+
+        if (viewModel.showBasicsGuide) {
+            BasicsGuide(onDismiss = viewModel::dismissBasicsGuide)
         }
 
         // During navigation measurement or window resizing, the viewport can be

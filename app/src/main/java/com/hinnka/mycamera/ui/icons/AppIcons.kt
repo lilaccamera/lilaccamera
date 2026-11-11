@@ -1254,6 +1254,18 @@ object AppIcons {
                 "M3 10h2M3 14h2M10 3v2M14 3v2M21 10h-2M21 14h-2M14 21v-2M10 21v-2"
         )
     }
+    // Camera basics guide: the gestures, drawn as arrows round the control they act on.
+    val ModeSwipeLine: ImageVector by lazy {
+        lineIcon("AppIcons.ModeSwipeLine", "M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0M2 12h3M19 12h3M4 10l-2 2l2 2M20 10l2 2l-2 2")
+    }
+    val SwipeDownLine: ImageVector by lazy { lineIcon("AppIcons.SwipeDownLine", "M5 3h14M12 7v13M7 15l5 5l5 -5") }
+    val SwipeUpLine: ImageVector by lazy { lineIcon("AppIcons.SwipeUpLine", "M5 21h14M12 17v-13M7 9l5 -5l5 5") }
+    val ZoomRingLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.ZoomRingLine",
+            "M8 16a4 4 0 1 0 8 0a4 4 0 1 0 -8 0M5 10a9 9 0 0 1 14 0M5 10l-.5 -3.5M5 10l3.4 -1M19 10l.5 -3.5M19 10l-3.4 -1"
+        )
+    }
     val StackLine: ImageVector by lazy { lineIcon("AppIcons.StackLine", "M12 4l-8 4l8 4l8 -4zM4 12l8 4l8 -4M4 16l8 4l8 -4") }
 
     val Photo: ImageVector
