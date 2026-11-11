@@ -165,6 +165,8 @@ internal fun LilacRuler(
     labelEvery: Int? = null,
     onTouch: (Boolean) -> Unit = {},
     onScroll: (Float?) -> Unit = {},
+    /** A colour under each tick, between the ticks and their labels (a hue ruler shows its colours). */
+    tickColor: ((Float) -> Color)? = null,
 ) {
     if (values.isEmpty()) return
     val context = LocalContext.current
@@ -291,6 +293,9 @@ internal fun LilacRuler(
                 values.forEachIndexed { i, v ->
                     val x = origin + i * stepPx
                     if (x < -30 * dp || x > trackPx + 30 * dp) return@forEachIndexed
+                    tickColor?.let {
+                        drawRect(it(v), topLeft = Offset(x - stepPx / 2f, 23f * dp), size = Size(stepPx, 3f * dp))
+                    }
                     val labelled = stops || i % labelStep == 0
                     val major = labelled || v == 0f
                     drawRect(

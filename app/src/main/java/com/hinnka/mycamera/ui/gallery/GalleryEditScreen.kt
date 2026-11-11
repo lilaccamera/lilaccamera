@@ -444,6 +444,10 @@ fun GalleryEditScreen(
     var curveSelected by remember { mutableStateOf<Int?>(null) }
     var curveDrag by remember { mutableStateOf<List<Pair<Float, Float>>?>(null) }
     val curveOpen = groupPath.substringAfterLast("/") == EditorGroup.Curve.name
+    // Mixer, Grading and Calibration: the colour, range or primary picked in each.
+    var mixerPick by rememberSaveable { mutableIntStateOf(1) }
+    var gradingPick by rememberSaveable { mutableIntStateOf(0) }
+    var calibrationPick by rememberSaveable { mutableIntStateOf(0) }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     val scope = rememberCoroutineScope()
     val isBaselineLutEditSheetVisible = showBaselineLutEditSheet && baselineLutEditId != null
@@ -1787,7 +1791,31 @@ fun GalleryEditScreen(
                     }
                 }
 
+                // Mixer, Grading, Calibration: the numbers of the picked colour, range or primary.
+                fun groupValuesOf(g: EditorGroup?, pick: Int): List<GroupValue> = when (g) {
+                    EditorGroup.Mixer -> mixerValues(pick)
+                    EditorGroup.Grading -> gradingValues(pick)
+                    EditorGroup.Calibration -> calibrationValues(pick)
+                    else -> emptyList()
+                }
+                val groupValues = groupValuesOf(
+                    group,
+                    when (group) {
+                        EditorGroup.Mixer -> mixerPick
+                        EditorGroup.Grading -> gradingPick
+                        else -> calibrationPick
+                    }
+                )
+                fun groupOpen(v: GroupValue): Float = v.open(viewModel.editOpenValue(v.openKey))
+                fun groupChanged(v: GroupValue): Boolean = v.get(effectiveRecipe) != groupOpen(v)
+                fun setGroupValue(v: GroupValue, x: Float) {
+                    viewModel.setPhotoRecipeParams(v.set(editPhotoRecipeParams ?: editLutRecipeParams, x))
+                }
+
                 val values = when {
+                    groupValues.isNotEmpty() -> groupValues.map { v ->
+                        EditorValue(v.key, stringResource(v.label), v.text(v.get(effectiveRecipe)), v.icon, groupChanged(v))
+                    }
                     group == EditorGroup.Curve -> listOf(
                         EditorValue(
                             "curvePoint", stringResource(R.string.editor_curve_point),
@@ -1895,6 +1923,7 @@ fun GalleryEditScreen(
                 val selectable = values.filterNot { it.group || it.key in setOf("rotation", "mirror", "curveDelete") }
                 val selectedKey = selectable.firstOrNull { it.key == selections[levelKey] }?.key ?: selectable.firstOrNull()?.key
                 val selectedSetting = settings.firstOrNull { it.key == selectedKey }
+                val selectedGroupValue = groupValues.firstOrNull { it.key == selectedKey }
 
                 fun sectionChanged(s: EditorSection): Boolean = when (s) {
                     EditorSection.Light, EditorSection.Color, EditorSection.Effects, EditorSection.Detail ->
@@ -1980,6 +2009,20 @@ fun GalleryEditScreen(
                             .align(Alignment.BottomCenter)
                             .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
                     )
+                } else if (groupValues.any { it.key == explainKey }) {
+                    val v = groupValues.first { it.key == explainKey }
+                    val pickName = when (group) {
+                        EditorGroup.Mixer -> stringResource(MixerColors[mixerPick].second)
+                        EditorGroup.Grading -> stringResource(GradingRanges[gradingPick])
+                        else -> stringResource(CalibrationChannels[calibrationPick].third)
+                    }
+                    EditorExplanationCard(
+                        name = "$pickName ${stringResource(v.label)}",
+                        text = stringResource(v.explanation),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
+                    )
                 } else if (explainKey == "curvePoint") {
                     EditorExplanationCard(
                         name = stringResource(R.string.editor_group_curve),
@@ -2033,6 +2076,23 @@ fun GalleryEditScreen(
                 ) {
                     when {
                         group == EditorGroup.Curve -> EditorControlHint(stringResource(R.string.editor_curve_hint))
+                        selectedGroupValue != null -> {
+                            val v = selectedGroupValue
+                            val start = groupOpen(v)
+                            LilacRuler(
+                                values = if (start in v.steps) v.steps else (v.steps + start).sorted(),
+                                value = v.get(effectiveRecipe),
+                                start = start,
+                                label = v::tick,
+                                onChange = { setGroupValue(v, it) },
+                                onRelease = {},
+                                onReset = { setGroupValue(v, start) },
+                                // Hue: every 30°.
+                                labelEvery = if (v.hue) 6 else null,
+                                onTouch = { fingerOnRuler = it },
+                                tickColor = if (v.hue) ::hueColor else null,
+                            )
+                        }
                         group != null -> EditorControlHint(
                             stringResource(R.string.editor_section_not_built, stringResource(group.label))
                         )
@@ -2365,6 +2425,7 @@ fun GalleryEditScreen(
                                         }
                                         if (item.key == "cropRatio") restoreCropRatio()
                                         if (item.key == "straighten") viewModel.setStraightenDegrees(openStraighten)
+                                        groupValues.firstOrNull { it.key == item.key }?.let { setGroupValue(it, groupOpen(it)) }
                                         // The selected point only: back onto the channel's curve as it was when the
                                         // editor opened, at the same input.
                                         if (item.key == "curvePoint") {
@@ -2403,6 +2464,16 @@ fun GalleryEditScreen(
                                 when {
                                     item.group || item.key == "curveDelete" -> Unit
                                     section == EditorSection.Crop -> heldCrop = item.key.takeIf { holding }
+                                    groupValues.any { it.key == item.key } && holding -> {
+                                        val v = groupValues.first { it.key == item.key }
+                                        val recipe = editPhotoRecipeParams ?: editLutRecipeParams
+                                        heldRecipe = recipe
+                                        viewModel.setPhotoRecipeParams(v.set(recipe, groupOpen(v)))
+                                    }
+                                    groupValues.any { it.key == item.key } -> heldRecipe?.let {
+                                        heldRecipe = null
+                                        viewModel.setPhotoRecipeParams(it)
+                                    }
                                     item.key == "curvePoint" && holding -> {
                                         val recipe = editPhotoRecipeParams ?: editLutRecipeParams
                                         heldRecipe = recipe
@@ -2461,18 +2532,50 @@ fun GalleryEditScreen(
                                     }
                                 }
                             },
-                            picker = if (!curve) null else {
-                                {
-                                    listOf(
-                                        CurveChannel.MASTER to stringResource(R.string.editor_curve_all),
-                                        CurveChannel.RED to "R", CurveChannel.GREEN to "G", CurveChannel.BLUE to "B",
-                                    ).forEach { (c, label) ->
-                                        CurveChannelChip(label, c, c == curveChannel, curveChanged(c)) {
-                                            curveChannel = c
-                                            curveSelected = null
+                            picker = when (group) {
+                                EditorGroup.Mixer -> {
+                                    {
+                                        MixerColors.indices.forEach { i ->
+                                            ColorDotChip(mixerColor(i), i == mixerPick, groupValuesOf(group, i).any(::groupChanged)) {
+                                                mixerPick = i
+                                            }
                                         }
                                     }
                                 }
+                                EditorGroup.Grading -> {
+                                    {
+                                        GradingRanges.forEachIndexed { i, label ->
+                                            GroupPickChip(
+                                                stringResource(label), if (i == gradingPick) LilacText else LilacDim, i == gradingPick,
+                                                groupValuesOf(group, i).any(::groupChanged), { gradingPick = i }, width = 60
+                                            )
+                                        }
+                                    }
+                                }
+                                EditorGroup.Calibration -> {
+                                    {
+                                        CalibrationChannels.forEachIndexed { i, (_, short, _) ->
+                                            GroupPickChip(
+                                                short, calibrationColor(i).copy(alpha = if (i == calibrationPick) 1f else 0.6f),
+                                                i == calibrationPick, groupValuesOf(group, i).any(::groupChanged), { calibrationPick = i }
+                                            )
+                                        }
+                                    }
+                                }
+                                EditorGroup.Curve -> {
+                                    {
+                                        listOf(
+                                            CurveChannel.MASTER to stringResource(R.string.editor_curve_all),
+                                            CurveChannel.RED to "R", CurveChannel.GREEN to "G", CurveChannel.BLUE to "B",
+                                        ).forEach { (c, label) ->
+                                            CurveChannelChip(label, c, c == curveChannel, curveChanged(c)) {
+                                                curveChannel = c
+                                                curveSelected = null
+                                            }
+                                        }
+                                    }
+                                }
+                                else -> null
                             }
                         )
                     }

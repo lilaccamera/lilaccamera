@@ -1569,7 +1569,7 @@ fun ColorRecipeSlider(
 /**
  * 获取参数对应的强调色
  */
-private fun getParamColor(param: RecipeParam): Color {
+internal fun getParamColor(param: RecipeParam): Color {
     return when (param) {
         RecipeParam.EXPOSURE -> Color(0xFFFFEB3B)
         RecipeParam.TONALITY -> Color(0xFFFFC46B)

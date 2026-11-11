@@ -238,7 +238,7 @@ internal enum class EditorGroup(
     Calibration(
         EditorSection.Color, R.string.editor_group_calibration,
         listOf("RED", "GREEN", "BLUE")
-            .flatMap { c -> listOf("HUE", "SATURATION", "LIGHTNESS").map { "recipe.PRIMARY_${c}_$it" } }
+            .flatMap { c -> listOf("HUE", "SATURATION").map { "recipe.PRIMARY_${c}_$it" } }
             .toSet()
     );
 
