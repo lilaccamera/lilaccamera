@@ -2,6 +2,7 @@ package com.hinnka.mycamera.utils
 
 import android.graphics.*
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.media.ExifInterface
 import android.util.Log
@@ -404,6 +405,18 @@ object RawProcessor {
         )
     }
 
+    // On lilac a zoomed RAW still is requested at the full sensor (see Camera2Controller.applyZoomSettings), so the
+    // camera reports no crop; the crop the user framed is kept here by request object until the RAW is written.
+    // shortcut: keeps the last 128 requests, far more than one RAW shot or burst; pass the crop with the frame if
+    // bursts ever grow past that.
+    private val framedCrops = java.util.IdentityHashMap<CaptureRequest, Rect>()
+    private val framedCropOrder = ArrayDeque<CaptureRequest>()
+
+    fun rememberFramedCrop(request: CaptureRequest, crop: Rect) = synchronized(framedCrops) {
+        if (framedCrops.put(request, Rect(crop)) == null) framedCropOrder.addLast(request)
+        while (framedCropOrder.size > 128) framedCrops.remove(framedCropOrder.removeFirst())
+    }
+
     internal fun resolveCameraRawDefaultCrop(
         width: Int,
         height: Int,
@@ -418,7 +431,8 @@ object RawProcessor {
         val bufferIncludesPixelArray = pixelArray?.width == width && pixelArray.height == height
         val targetWidth = if (bufferIncludesPixelArray) preCorrection.width() else width
         val targetHeight = if (bufferIncludesPixelArray) preCorrection.height() else height
-        val scalerCropRegion = captureResult.get(CaptureResult.SCALER_CROP_REGION)
+        val framedCrop = synchronized(framedCrops) { framedCrops[captureResult.request] }
+        val scalerCropRegion = framedCrop ?: captureResult.get(CaptureResult.SCALER_CROP_REGION)
         val zoomRatio = captureResult.get(CaptureResult.CONTROL_ZOOM_RATIO) ?: 1f
         val distortionMode = captureResult.get(CaptureResult.DISTORTION_CORRECTION_MODE)
         val hasDistortionCorrectionControl = characteristics.get(
@@ -443,7 +457,7 @@ object RawProcessor {
             TAG,
             "RAW_CROP_TRACE stage=CAMERA2_RESULT buffer=${width}x$height " +
                 "pixelArray=$pixelArray activePre=$preCorrection activePost=$postCorrection " +
-                "scalerCrop=$scalerCropRegion scalerReturned=${scalerCropRegion != null} " +
+                "scalerCrop=$scalerCropRegion scalerReturned=${scalerCropRegion != null} framed=${framedCrop != null} " +
                 "zoomRatio=$zoomRatio bufferCropSource=RAW_SENSOR_SOFTWARE " +
                 "distortionMode=$distortionMode " +
                 "distortionControl=$hasDistortionCorrectionControl " +
