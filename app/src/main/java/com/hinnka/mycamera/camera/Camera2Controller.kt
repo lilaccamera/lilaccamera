@@ -5273,10 +5273,28 @@ class Camera2Controller(private val context: Context) {
             }
 
             else -> {
-                builder.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_OFF)
+                builder.set(
+                    CaptureRequest.FLASH_MODE,
+                    if (selfTimerLampOn && !isCapture) CameraMetadata.FLASH_MODE_TORCH else CameraMetadata.FLASH_MODE_OFF
+                )
             }
         }
     }
+
+    // The flash LED as a self-timer lamp, like a camera's front lamp; only while the flash is off.
+    private var selfTimerLampOn = false
+
+    fun setSelfTimerLamp(on: Boolean) {
+        if (!isFlashSupported || selfTimerLampOn == on) return
+        selfTimerLampOn = on
+        previewRequestBuilder?.apply {
+            applyFlashSettings(this, _state.value, isCapture = false)
+            updatePreview()
+        }
+    }
+
+    /** Whether the camera's own face detection sees a face in the latest preview frame. */
+    fun facesInView(): Boolean = (lastCaptureResult?.get(CaptureResult.STATISTICS_FACES)?.size ?: 0) > 0
 
     /**
      * 应用变焦设置
