@@ -44,7 +44,7 @@ fun CountdownOverlay(
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
                 style = TextStyle(shadow = ViewfinderTextShadow),
-                modifier = Modifier.scale(scale)
+                modifier = Modifier.autoRotate().scale(scale)
             )
         }
     }

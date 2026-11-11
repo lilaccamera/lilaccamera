@@ -290,6 +290,9 @@ data class CameraState(
     val exposureCompensation: Int = 0,
     val isIsoAuto: Boolean = true,
     val isShutterSpeedAuto: Boolean = true,
+    // The camera key is half-pressed: focus is held, and exposure too when [exposureHeld].
+    val shutterKeyHeld: Boolean = false,
+    val exposureHeld: Boolean = false,
     val iso: Int = 100,
     val shutterSpeed: Long = 1_000_000_000L / 60, // 1/60s in nanoseconds
     val exposureBias: Float = 0f,
