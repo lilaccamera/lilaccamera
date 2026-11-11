@@ -243,6 +243,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private var cameraStreamToken = 0
     private var cameraStreamCounter = 0
     private var latchedStreamToken = 0
+    // Stream whose images cameraTextureId has held; 0 while the texture is still fresh.
+    private var textureStreamToken = 0
     private var stabilizationCoordinator: RealtimeStabilizationCoordinator? = null
     @Volatile
     private var stabilizationSession: RealtimeStabilizationCoordinator.Session? = null
@@ -611,6 +613,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         mgcEisYuvRenderer.resetAfterContextLoss()
         cameraTextureId = 0
         latchedStreamToken = 0
+        textureStreamToken = 0
         currentCameraTextureId = 0
         currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
         currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
@@ -1094,6 +1097,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             stabilizationSessionStarted = stabilizationSession?.start() == true
         }
         val streamToken = cameraStreamToken
+        if (streamToken != 0 && streamToken != textureStreamToken) {
+            if (textureStreamToken != 0) renewCameraTexture()
+            textureStreamToken = streamToken
+        }
         val oesFrameUpdated = streamToken != 0 &&
             frameAvailable.getAndSet(false) && acquireLatestCameraFrame()
         if (oesFrameUpdated) latchedStreamToken = streamToken
@@ -1403,6 +1410,24 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         currentCameraTextureId = cameraTextureId
         currentCameraTextureMatrix = stMatrix
         currentFrameTimestampNs = surfaceTexture?.timestamp ?: 0L
+    }
+
+    /**
+     * Gives the SurfaceTexture a new GL texture for each camera stream. On the Adreno 540, drawing
+     * the first frames of a restarted stream through the texture that had held the closed stream's
+     * (now freed) image caused GPU page faults near the preview buffers; with a new texture per
+     * stream they stopped.
+     */
+    private fun renewCameraTexture() {
+        val texture = surfaceTexture ?: return
+        try {
+            texture.detachFromGLContext() // deletes the old texture
+            cameraTextureId = GlUtils.createOESTexture()
+            texture.attachToGLContext(cameraTextureId)
+            PLog.d(TAG, "Camera texture renewed for a new camera stream")
+        } catch (error: RuntimeException) {
+            PLog.e(TAG, "Camera texture renewal failed", error)
+        }
     }
 
     private fun acquireLatestCameraFrame(): Boolean {
