@@ -13,6 +13,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.cos
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -23,7 +24,8 @@ import kotlin.math.sqrt
  */
 internal enum class EditorGlyph {
     Contrast, Highlights, Shadows, Whites, Blacks, Tonality, Fade, Vignette, Sharpness, Bloom, Halation, SoftLight,
-    Temp, Tint, Saturation, Vibrance, Clarity, NoiseReduction, ColorNoise, AiDenoise
+    Temp, Tint, Saturation, Vibrance, Clarity, NoiseReduction, ColorNoise, AiDenoise,
+    Grain, Flash, Bleach, Fringe, Noise
 }
 
 private const val BOX = "M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-12a3 3 0 0 1 3 -3z"
@@ -46,6 +48,16 @@ private fun sparkle(cx: Float, cy: Float, h: Float): String {
     val a = "a${f1(h)} ${f1(h)} 0 0 0"
     return "M${f1(cx)} ${f1(cy - h)}$a ${f1(h)} ${f1(h)}$a ${f1(-h)} ${f1(h)}$a ${f1(-h)} ${f1(-h)}$a ${f1(h)} ${f1(-h)}z"
 }
+
+private val GRAINS = listOf(
+    4.5f to 9.5f, 9.5f to 4.5f, 9.5f to 14.5f, 4.5f to 19.5f, 14.5f to 9.5f, 19.5f to 4.5f, 14.5f to 19.5f, 19.5f to 14.5f,
+)
+
+// Places between the Noise icon's lines where specks appear, in the order they appear.
+private val SPECKS = listOf(
+    10f to 6.5f, 8f to 13.5f, 17f to 9.5f, 16f to 15.5f, 6f to 5.5f,
+    14f to 7.5f, 13f to 13.5f, 5f to 11.5f, 19f to 12.5f, 15.5f to 6f,
+)
 
 private const val DROPLET = "M7.502 19.423c2.602 2.105 6.395 2.105 8.996 0c2.602 -2.105 3.262 -5.708 1.566 -8.546" +
     "l-4.89 -7.26c-.42 -.625 -1.287 -.803 -1.936 -.397a1.376 1.376 0 0 0 -.41 .397l-4.893 7.26" +
@@ -160,6 +172,41 @@ internal fun editorGlyph(glyph: EditorGlyph, k: Float, color: Color): ImageVecto
                     "M${f1(12 + 5.5f * d)} ${f1(cy - 5.5f * d)}L${f1(12 + 7f * d)} ${f1(cy - 7f * d)}",
                 LINE_STROKE
             )
+        }
+        // Grain: the grains grow.
+        EditorGlyph.Grain -> {
+            val r = 0.9f + 0.8f * k1.coerceAtLeast(0f)
+            fill(GRAINS.joinToString("") { (x, y) -> circle(x, y, r) }, alpha = 1f)
+        }
+        // Flash: the bolt fills with light.
+        EditorGlyph.Flash -> {
+            val bolt = "M13 3v7h6l-8 11v-7h-6l8 -11z"
+            fill(bolt, alpha = 0.12f + 0.5f * k1.coerceAtLeast(0f))
+            line(bolt, LINE_STROKE)
+        }
+        // Bleach: the colour drains from the struck-through drop.
+        EditorGlyph.Bleach -> {
+            fill(DROPLET, alpha = 0.4f * (1f - k1.coerceAtLeast(0f)))
+            line(
+                "M8.454 8.458l-1.554 2.42c-1.546 2.839 -1.146 6.442 1.456 8.546c2.602 2.105 6.395 2.105 8.996 0" +
+                    "c1.215 -.983 1.97 -2.274 2.264 -3.65M18 14c-.12 -1.093 -.494 -2.134 -1.064 -3.124" +
+                    "l-4.936 -7.876l-1.807 2.877M3 3l18 18",
+                LINE_STROKE
+            )
+        }
+        // Fringe: the rainbow's bands slide apart, like colours that don't line up.
+        EditorGlyph.Fringe -> {
+            val shift = 1.2f * k1.coerceAtLeast(0f)
+            fun arc(cx: Float, r: Float) = "M${f1(cx + r)} 17a${f1(r)} ${f1(r)} 0 1 0 ${f1(-2 * r)} 0"
+            line(arc(12f - shift, 10f) + arc(12f, 6f) + arc(12f + shift, 2f), LINE_STROKE)
+        }
+        // Noise: specks appear between the lines.
+        EditorGlyph.Noise -> {
+            val count = (SPECKS.size * k1.coerceAtLeast(0f)).roundToInt()
+            if (count > 0) {
+                fill(SPECKS.take(count).joinToString("") { (x, y) -> "M${f1(x - 0.8f)} ${f1(y - 0.8f)}h1.6v1.6h-1.6z" }, alpha = 1f)
+            }
+            line("M6 3l-3 3M21 18l-3 3M11 3l-8 8M16 3l-13 13M21 3l-18 18M21 8l-13 13M21 13l-8 8", LINE_STROKE)
         }
         // Temp: the mercury rises and falls.
         EditorGlyph.Temp -> {
