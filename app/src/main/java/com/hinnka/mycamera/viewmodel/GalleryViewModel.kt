@@ -990,9 +990,14 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                             _isAiDenoising.value = true
                             _aiDenoiseProgress.value = 0f
                             try {
-                                editorGpu.heavy {
-                                    com.hinnka.mycamera.ml.AiDenoiser.denoise(context, input) { _aiDenoiseProgress.value = it }
-                                }
+                                // The GPU is taken per tile (about 1.6 s each), so the screen's preview renders get
+                                // in between instead of waiting the whole run; runBlocking keeps the thread-bound
+                                // model on this thread. A newer chain stops this one between tiles.
+                                com.hinnka.mycamera.ml.AiDenoiser.denoise(
+                                    context, input,
+                                    onProgress = { chainJob?.ensureActive(); _aiDenoiseProgress.value = it },
+                                    gpuTurn = { turn -> runBlocking { editorGpu.heavy { turn() } } },
+                                )
                             } finally {
                                 _isAiDenoising.value = false
                             }
@@ -1129,9 +1134,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 // at a time.
                 val denoised = try {
                     editorGpu.heavy {
-                        com.hinnka.mycamera.ml.AiDenoiser.denoise(context, bitmap) { p ->
+                        com.hinnka.mycamera.ml.AiDenoiser.denoise(context, bitmap, onProgress = { p ->
                             _aiDenoiseProgress.value = p
-                        }
+                        })
                     }
                 } finally {
                     bitmap.recycle()

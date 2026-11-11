@@ -37,24 +37,33 @@ object AiDenoiser {
 
     /**
      * Returns the denoised image as a new ARGB_8888 bitmap. Throws on model or backend failure.
+     *
+     * [gpuTurn] runs each piece of GPU work (creating the model, one tile, closing it) on the calling thread; a
+     * caller sharing the GPU can let other work in between tiles.
      */
     fun denoise(
         context: Context,
         input: Bitmap,
         onProgress: (Float) -> Unit,
+        gpuTurn: (() -> Unit) -> Unit = { it() },
     ): Bitmap {
         val source = if (input.config == Bitmap.Config.ARGB_8888) input else input.copy(Bitmap.Config.ARGB_8888, false)
             ?: error("Failed to convert ${input.config} bitmap to ARGB_8888")
         try {
-            return createBackend(context).use { backend ->
-                runTiles(backend, source, onProgress)
+            var backend: Backend? = null
+            gpuTurn { backend = createBackend(context) }
+            val made = backend ?: error("AI denoise backend not created")
+            try {
+                return runTiles(made, source, onProgress, gpuTurn)
+            } finally {
+                gpuTurn { made.close() }
             }
         } finally {
             if (source !== input) source.recycle()
         }
     }
 
-    private fun runTiles(backend: Backend, source: Bitmap, onProgress: (Float) -> Unit): Bitmap {
+    private fun runTiles(backend: Backend, source: Bitmap, onProgress: (Float) -> Unit, gpuTurn: (() -> Unit) -> Unit): Bitmap {
         val width = source.width
         val height = source.height
         val xs = tileOrigins(width)
@@ -77,11 +86,12 @@ object AiDenoiser {
                 readMs += SystemClock.elapsedRealtime() - t
 
                 t = SystemClock.elapsedRealtime()
-                val tileOutput = backend.run(tileInput)
+                var tileOutput: FloatArray? = null
+                gpuTurn { tileOutput = backend.run(tileInput) }
                 inferenceMs += SystemClock.elapsedRealtime() - t
 
                 t = SystemClock.elapsedRealtime()
-                writeTileNative(tileOutput, result, x, y, TILE, blendLeftEnd, blendTopEnd)
+                writeTileNative(tileOutput!!, result, x, y, TILE, blendLeftEnd, blendTopEnd)
                 writeMs += SystemClock.elapsedRealtime() - t
 
                 done++
