@@ -284,8 +284,10 @@ internal object GlesYuvSpatialShaders {
     """.trimIndent()
 
     /**
-     * Brightens a gamma-encoded colour by uOutputGain in linear light. The lift rolls off towards
-     * white (gain at black, 1 at white) and scales all channels alike, so hues and white stay put.
+     * Brightens the camera's tone-mapped colour by uOutputGain. The lift rolls off towards white
+     * (gain at black, 1 at white) and scales all channels alike, so hues and white stay put.
+     * It works on the encoded values: in dark scenes the camera's output grows about in proportion
+     * to the light (tested on the XZ1 Compact), so a gamma 2.2 decode lifted far too little.
      * An unset uniform reads 0 and leaves the colour unchanged.
      */
     val brightenOutput = """
@@ -293,11 +295,11 @@ internal object GlesYuvSpatialShaders {
 
         vec3 brightenOutput(vec3 rgb) {
             if (uOutputGain <= 1.0) return rgb;
-            vec3 linear = pow(max(rgb, vec3(0.0)), vec3(2.2));
-            float peak = max(max(linear.r, linear.g), linear.b);
+            rgb = max(rgb, vec3(0.0));
+            float peak = max(max(rgb.r, rgb.g), rgb.b);
             if (peak <= 1.0e-6) return rgb;
             float lifted = uOutputGain * peak / (1.0 + (uOutputGain - 1.0) * peak);
-            return pow(linear * (lifted / peak), vec3(1.0 / 2.2));
+            return rgb * (lifted / peak);
         }
     """.trimIndent()
 
