@@ -233,6 +233,16 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     // 相机 SurfaceTexture
     private var surfaceTexture: SurfaceTexture? = null
     private val frameAvailable = AtomicBoolean(false)
+
+    // When the camera stops streaming into the SurfaceTexture, the queue frees every buffer,
+    // including the one still bound to cameraTextureId (SurfaceTexture drops its EGLImage), and
+    // sampling it reads freed GPU memory (a GPU page fault on Adreno that kills the context).
+    // Non-zero while a stream runs, new for each stream; the bound image is only sampled when
+    // it was latched during the current stream.
+    @Volatile
+    private var cameraStreamToken = 0
+    private var cameraStreamCounter = 0
+    private var latchedStreamToken = 0
     private var stabilizationCoordinator: RealtimeStabilizationCoordinator? = null
     @Volatile
     private var stabilizationSession: RealtimeStabilizationCoordinator.Session? = null
@@ -600,6 +610,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         mgcEisHardwareBufferRenderer.resetAfterContextLoss()
         mgcEisYuvRenderer.resetAfterContextLoss()
         cameraTextureId = 0
+        latchedStreamToken = 0
         currentCameraTextureId = 0
         currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
         currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
@@ -1082,7 +1093,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         if (delayedStabilizationEnabled && !stabilizationSessionStarted) {
             stabilizationSessionStarted = stabilizationSession?.start() == true
         }
-        val oesFrameUpdated = frameAvailable.getAndSet(false) && acquireLatestCameraFrame()
+        val streamToken = cameraStreamToken
+        val oesFrameUpdated = streamToken != 0 &&
+            frameAvailable.getAndSet(false) && acquireLatestCameraFrame()
+        if (oesFrameUpdated) latchedStreamToken = streamToken
         var cameraFrameUpdated = oesFrameUpdated
 
         if (delayedStabilizationEnabled) {
@@ -1130,6 +1144,16 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             }
         } else if (cameraFrameUpdated) {
             useCurrentOesFrame()
+        }
+        if (currentCameraTextureSource == PreviewColorTextureSource.EXTERNAL_OES &&
+            (latchedStreamToken == 0 || latchedStreamToken != cameraStreamToken)
+        ) {
+            // The image bound to the camera texture may already be freed; keep the last frame shown.
+            if (latchedStreamToken != 0) {
+                PLog.d(TAG, "Camera stream stopped: not drawing its released image")
+                latchedStreamToken = 0
+            }
+            return
         }
 
         val liveRecorder = livePhotoRecorder
@@ -2422,6 +2446,18 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             PLog.d(TAG, "restore LUT texture after resume: ${config.title}")
             setLutInternal(config)
         }
+    }
+
+    /**
+     * Called from the camera thread: with false before the camera stream into the SurfaceTexture
+     * can stop, with true once a new stream is set up. Not queued on the GL thread, so it takes
+     * effect before the stream's buffers are freed.
+     * shortcut: a draw already past the check in onDrawFrame races the close; make the camera
+     * thread wait for the GL thread if faults still show up at camera close.
+     */
+    @Synchronized
+    fun setCameraStreamActive(active: Boolean) {
+        cameraStreamToken = if (active) ++cameraStreamCounter else 0
     }
 
     /**

@@ -1223,6 +1223,13 @@ class Camera2Controller(private val context: Context) {
     // canRetry: 是否可以重试打开相机
     var onCameraError: ((errorCode: Int, message: String, canRetry: Boolean) -> Unit)? = null
 
+    /**
+     * Runs on the camera thread: false before the preview stream can stop (its buffers are then
+     * freed), true once a new preview session runs. The preview renderer must stop sampling the
+     * camera texture synchronously, so this is not a StateFlow.
+     */
+    var onPreviewStreamActive: ((Boolean) -> Unit)? = null
+
     fun onImageRelease() {
         if (openImagesCount.decrementAndGet() == 0) {
             checkAndClosePendingReaders()
@@ -4222,6 +4229,7 @@ class Camera2Controller(private val context: Context) {
             previewRequestBuilder?.let { builder ->
                 session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
             }
+            onPreviewStreamActive?.invoke(true)
             if (shouldUseAlgorithmicStabilization()) {
                 scheduleEnhancedStabilizationInputWatchdog(sessionGeneration)
             }
@@ -9335,6 +9343,7 @@ class Camera2Controller(private val context: Context) {
     private fun invalidateCaptureSession(session: CameraCaptureSession?, reason: String) {
         // A delayed close callback from the old session must not clear its replacement.
         if (session == null || captureSession !== session) return
+        onPreviewStreamActive?.invoke(false)
         captureSession = null
         _enginePreviewSource.value = null
         previewRequestBuilder = null
