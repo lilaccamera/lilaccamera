@@ -888,6 +888,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * edit, that is when none of them changed. Save runs them in full ([commitEditChain]).
      */
     val editChainBase = MutableStateFlow<Bitmap?>(null)
+    /** The RAW settings [editChainBase] was developed with (null: as the editor opened). */
+    var editChainRawState: Map<String, Any?>? = null
+        private set
     private val _blurPending = MutableStateFlow(false)
     /** A blur is asked for and waiting for a pause or rendering: the screen shows the cheap blur meanwhile. */
     val blurPending = _blurPending.asStateFlow()
@@ -933,6 +936,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         noiseReduction: Float,
         chromaNoiseReduction: Float,
         fullSize: Boolean = false,
+        rawState: Map<String, Any?>? = null,
     ) {
         editChainJob?.cancel()
         val open = editOpenState
@@ -1051,6 +1055,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
                 ensureActive()
                 editChainBlurKey = blur
+                editChainRawState = rawState
                 editChainBase.value = bitmap
             } catch (e: CancellationException) {
                 throw e

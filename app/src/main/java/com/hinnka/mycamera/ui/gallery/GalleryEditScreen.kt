@@ -130,6 +130,7 @@ import com.hinnka.mycamera.raw.RawDevelopStage
 import com.hinnka.mycamera.ui.camera.ModeAmber
 import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.lut.CurveUtils
+import com.hinnka.mycamera.lut.creator.OklchConverter
 import com.hinnka.mycamera.lut.VideoLutEffect
 import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.video.VideoLogProfile
@@ -211,6 +212,8 @@ private data class PreviewRenderSignature(
     val showOrigin: Boolean,
     val cropView: Boolean,
     val portraitView: Boolean,
+    /** RAW: the recipe that stands in for tone values the shown develop wasn't made with ([rawToneStandIn]). */
+    val rawToneStandIn: ColorRecipeParams? = null,
 )
 
 /**
@@ -469,6 +472,35 @@ fun GalleryEditScreen(
     val editChainBase by viewModel.editChainBase.collectAsState()
     val shouldCalculateImageHistogram = isBaselineLutEditSheetVisible
 
+    // shortcut: a rough stand-in, exact only in the midtones (brightening clips early, darkening can't bring back
+    // what the develop clipped); it ends by itself when a develop of the current tone values lands.
+    // While the RAW tone rulers move, the shown develop gets the difference drawn on with the recipe's own Exposure,
+    // Highlights and Shadows, added to the recipe's values, and Whites/Blacks as a master curve.
+    fun rawToneStandIn(): ColorRecipeParams? {
+        if (!isRaw) return null
+        // The develop on screen: the edit chain's picture lags a new develop while AI denoise or the blur runs.
+        val developed = (if (editChainBase != null) viewModel.editChainRawState else ui.developedRaw)
+            ?: viewModel.editRawState(open = true)
+        fun was(key: String) = developed[key] as? Float ?: 0f
+        val exposure = editRawExposureCompensation - was("rawExposure")
+        val highlights = editRawHighlightsAdjustment - was("rawHighlights")
+        val shadows = editRawShadowsAdjustment - was("rawShadows")
+        val levelsChanged = editRawWhitePointCorrection != was("rawWhitePoint") ||
+            editRawBlackPointCorrection != was("rawBlackPoint")
+        if (exposure == 0f && highlights == 0f && shadows == 0f && !levelsChanged) return null
+        val base = editPhotoRecipeParams ?: editLutRecipeParams ?: ColorRecipeParams()
+        return base.copy(
+            exposure = base.exposure + exposure,
+            highlights = base.highlights + highlights,
+            shadows = base.shadows + shadows,
+            masterCurvePoints = if (!levelsChanged) base.masterCurvePoints else rawLevelsCurve(
+                was("rawBlackPoint"), was("rawWhitePoint"),
+                editRawBlackPointCorrection, editRawWhitePointCorrection,
+                base.masterCurvePoints,
+            ),
+        )
+    }
+
     fun currentPreviewSignature(fast: Boolean = false): PreviewRenderSignature? {
         val photo = editSourcePhoto ?: return null
         val rawDevelopIsBaked = isRaw
@@ -527,7 +559,8 @@ fun GalleryEditScreen(
             editMirrorHorizontal = if (inCrop) false else editMirrorHorizontal,
             showOrigin = showOrigin,
             cropView = section == EditorSection.Crop,
-            portraitView = section == EditorSection.Portrait
+            portraitView = section == EditorSection.Portrait,
+            rawToneStandIn = rawToneStandIn(),
         )
     }
 
@@ -557,6 +590,7 @@ fun GalleryEditScreen(
                 // Portrait shows the photo without its frame, so the focus ring lands on the photo itself.
                 ignoreFrame = isCropPreview || section == EditorSection.Portrait,
                 bitmap = (editChainBase ?: ui.rawPreviewBase.takeIf { isRaw }).takeIf { !showOrigin },
+                recipeParamsOverride = renderedFor?.rawToneStandIn,
                 maxEdge = maxEdge
             )
         }
@@ -587,11 +621,10 @@ fun GalleryEditScreen(
 
     LaunchedEffect(editSourcePhoto?.id, refreshKey, isRaw) {
         val photo = editSourcePhoto ?: return@LaunchedEffect
-        // RAW decoding is already the expensive source load. Running the fast JPEG-style pass
-        // before the full pass decodes the same DNG twice for every refresh.
-        if (photo.isVideo || isRaw) return@LaunchedEffect
+        if (photo.isVideo) return@LaunchedEffect
         snapshotFlow {
-            currentPreviewSignature(true)
+            // RAW: only the tone stand-in follows the finger; everything else waits for the full pass.
+            currentPreviewSignature(true)?.takeIf { !isRaw || it.rawToneStandIn != null }
         }
             .filter { it != null }
             .conflate()
@@ -751,6 +784,7 @@ fun GalleryEditScreen(
         if (photo.isVideo) return@LaunchedEffect
         viewModel.updateEditChain(
             photo, ui.rawPreviewBase.takeIf { isRaw }, noiseReleased.first, noiseReleased.second, fullSize = hdPreview,
+            rawState = ui.developedRaw,
         )
     }
     var awaitingBlur by remember { mutableStateOf(false) }
@@ -3314,4 +3348,29 @@ private fun EditorChip(
         action = action,
         modifier = Modifier.graphicsLayer { alpha = if (dim) 0.5f else 1f }
     )
+}
+
+/**
+ * A master curve standing in for the RAW develop's Blacks/Whites levels (raw/RawAdjustmentPass): undoes the levels
+ * the shown develop was made with and applies the current ones, in linear light, then the recipe's own master curve.
+ */
+private fun rawLevelsCurve(blacksWas: Float, whitesWas: Float, blacks: Float, whites: Float, master: FloatArray?): FloatArray {
+    fun blackLevel(b: Float) = b.coerceIn(-1f, 1f).let { if (it < 0f) -it * 0.18f else -it * 0.12f }
+    fun whiteLevel(w: Float, black: Float) = w.coerceIn(-1f, 1f)
+        .let { if (it > 0f) 1f - 0.28f * it else 1f + 0.55f * -it }
+        .coerceAtLeast(black + 0.05f)
+    val blWas = blackLevel(blacksWas)
+    val wlWas = whiteLevel(whitesWas, blWas)
+    val bl = blackLevel(blacks)
+    val wl = whiteLevel(whites, bl)
+    val masterLut = CurveUtils.evaluateCurve(master)
+    val points = FloatArray(34)
+    for (k in 0..16) {
+        val x = k / 16f
+        val scene = blWas + OklchConverter.srgbToLinear(x) * (wlWas - blWas)
+        val y = OklchConverter.linearToSrgb(((scene - bl) / (wl - bl)).coerceIn(0f, 1f))
+        points[2 * k] = x
+        points[2 * k + 1] = masterLut[(y * (CurveUtils.LUT_SIZE - 1)).roundToInt()]
+    }
+    return points
 }
