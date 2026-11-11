@@ -275,6 +275,10 @@ class GlesYuvStacker(
     }
     private val logFrameWeights = weightDiagnostics == "log" || weightDiagnostics == "off"
     private val rejectionDisabled = weightDiagnostics == "off"
+    // Debug builds only, off by default while it is tried out: `adb shell setprop debug.photon.yuv_stack.noise measured`
+    // widens the motion check's noise model by the noise measured on each frame; unset keeps the fixed model.
+    private val measuredNoiseEnabled = RawStackRuntimeDebug.enabled &&
+        SystemPropertiesUtil.get("debug.photon.yuv_stack.noise")?.trim()?.lowercase() == "measured"
     // The reference frame counts fully; each other frame adds its mean merge weight.
     private var mergedWeightSum = 1.0
 
@@ -1789,9 +1793,9 @@ class GlesYuvStacker(
     ) {
         val currentShotNoise = NOISE_ALPHA * currentToReferenceScale
         val currentReadNoise = NOISE_BETA * currentToReferenceScale * currentToReferenceScale
-        val noise = measureNoise(alignment, currentShotNoise, currentReadNoise)
+        val noise = if (measuredNoiseEnabled) measureNoise(alignment, currentShotNoise, currentReadNoise) else null
         lastNoise = noise
-        val noiseLut = createNoiseLut(currentShotNoise, currentReadNoise, noise.scales)
+        val noiseLut = createNoiseLut(currentShotNoise, currentReadNoise, noise?.scales)
         bindFramebufferOutputs(
             intArrayOf(rawReverseWeightTexture, rawPixelDifferenceTexture),
             "renderSpatialRejection",
@@ -2004,7 +2008,7 @@ class GlesYuvStacker(
     }
 
     // A small texture per merged frame; all are freed with the stacker's other textures.
-    private fun createNoiseLut(currentShotNoise: Float, currentReadNoise: Float, signalScale: FloatArray): Int {
+    private fun createNoiseLut(currentShotNoise: Float, currentReadNoise: Float, signalScale: FloatArray?): Int {
         val referenceShot = FloatArray(4) { NOISE_ALPHA }
         val referenceRead = FloatArray(4) { NOISE_BETA }
         val currentShot = FloatArray(4) { currentShotNoise }
