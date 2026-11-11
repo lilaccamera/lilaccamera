@@ -1,11 +1,14 @@
 package com.hinnka.mycamera.ui.camera
 
+import kotlinx.coroutines.delay
 import com.hinnka.mycamera.raw.fotufilm.FotufilmDocument
 import android.media.AudioDeviceInfo
 import android.os.Build
 import androidx.compose.animation.*
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -87,11 +90,11 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 // Quick settings sheet: a row of everyday settings floating above a translucent list in outlined groups.
-private val SheetEasing = CubicBezierEasing(0.3f, 1.35f, 0.5f, 1f)
-private val SheetText = LilacText
-private val SheetLabel = LilacLabel
-private val SheetDim = LilacSecondary
-private val SheetGrey = LilacDim
+internal val SheetEasing = CubicBezierEasing(0.3f, 1.35f, 0.5f, 1f)
+internal val SheetText = LilacText
+internal val SheetLabel = LilacLabel
+internal val SheetDim = LilacSecondary
+internal val SheetGrey = LilacDim
 private val SheetTextStyle = LilacTextStyle
 
 /** One camera the Lens row can switch to: a second camera at the same zoom, or a macro camera. */
@@ -195,6 +198,8 @@ internal fun CameraTopSheet(
     onPortraitHelp: () -> Unit = {},
     // Opens the Pro guide from the mode name.
     onProHelp: () -> Unit = {},
+    // Opens the camera basics guide from the Photo mode name.
+    onBasicsHelp: () -> Unit = {},
     // Long press on a setting's name opens Settings at that setting.
     onOpenSettingsAt: (SettingsTarget) -> Unit = {},
     multiFrameCount: Int,
@@ -227,6 +232,8 @@ internal fun CameraTopSheet(
     onJpgMaxToggle: (Boolean) -> Unit,
     useMultipleExposure: Boolean,
     onMultipleExposureToggle: (Boolean) -> Unit,
+    multipleExposureCount: Int,
+    onMultipleExposureCountChange: (Int) -> Unit,
     onDismiss: () -> Unit,
     // The everyday row on its own on the picture's top edge, dropped there by a swipe down.
     everydayRowOnTop: Boolean = false,
@@ -484,6 +491,12 @@ internal fun CameraTopSheet(
                     }
                 } else {
                     // Multi-frame and multi-exposure, shown in Photo's own section or in a plain group in Portrait.
+                    // They exclude each other: the one given way slides to Off as soon as the other is moved,
+                    // not only once the camera has switched.
+                    var stackPick by remember { mutableStateOf<String?>(null) }
+                    LaunchedEffect(useJpgMax, useMultipleExposure) {
+                        if (stackPick == "mf" && !useMultipleExposure || stackPick == "mexp" && !useJpgMax) stackPick = null
+                    }
                     val photoStackRows: @Composable ColumnScope.() -> Unit = {
                         rows.Setting(
                             key = "mf",
@@ -492,11 +505,16 @@ internal fun CameraTopSheet(
                             settingsTarget = SettingsTarget.MULTI_FRAME
                         ) {
                             FrameCountSlider(
-                                frames = if (useJpgMax) multiFrameCount else 0,
+                                frames = if (useJpgMax && stackPick != "mexp") multiFrameCount else 0,
                                 min = MultiFrameConfig.MIN_DENOISE_FRAME_COUNT,
                                 withOff = true,
                                 onFramesChange = { frames ->
-                                    if (frames == 0) onJpgMaxToggle(false) else onMultiFrameCountChange(frames)
+                                    if (frames == 0) {
+                                        onJpgMaxToggle(false)
+                                    } else {
+                                        stackPick = "mf"
+                                        onMultiFrameCountChange(frames)
+                                    }
                                 }
                             )
                         }
@@ -507,7 +525,23 @@ internal fun CameraTopSheet(
                             settingsTarget = SettingsTarget.MULTIPLE_EXPOSURE,
                             last = true
                         ) {
-                            QuickSwitch(useMultipleExposure) { onMultipleExposureToggle(!useMultipleExposure) }
+                            // Shots per picture, or Off.
+                            FrameCountSlider(
+                                frames = if (useMultipleExposure && stackPick != "mf") multipleExposureCount else 0,
+                                min = 2,
+                                max = 9,
+                                countLabel = R.plurals.quick_shot_count,
+                                withOff = true,
+                                onFramesChange = { shots ->
+                                    if (shots == 0) {
+                                        onMultipleExposureToggle(false)
+                                    } else {
+                                        stackPick = "mexp"
+                                        onMultipleExposureCountChange(shots)
+                                        if (!useMultipleExposure) onMultipleExposureToggle(true)
+                                    }
+                                }
+                            )
                         }
                     }
                     // The current mode's own settings, always first and marked, so the shared groups
@@ -523,7 +557,7 @@ internal fun CameraTopSheet(
                         onGuide = when {
                             isPortraitMode -> onPortraitHelp
                             isProfessionalMode -> onProHelp
-                            else -> null
+                            else -> onBasicsHelp
                         }
                     ) {
                         if (isPortraitMode) {
@@ -958,7 +992,7 @@ private fun SheetHeader(
 }
 
 @Composable
-private fun HeaderIcon(icon: ImageVector, description: String, onClick: () -> Unit) {
+internal fun HeaderIcon(icon: ImageVector, description: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .size(width = 40.dp, height = 34.dp)
@@ -970,7 +1004,7 @@ private fun HeaderIcon(icon: ImageVector, description: String, onClick: () -> Un
 }
 
 @Composable
-private fun QuickGroup(content: @Composable ColumnScope.() -> Unit) {
+internal fun QuickGroup(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1018,7 +1052,7 @@ private fun ModeGroup(title: String, onGuide: (() -> Unit)? = null, content: @Co
 }
 
 /** List rows: the name on the left (tap: explanation, long press: Settings), the choices on the right. */
-private class QuickRows(
+internal class QuickRows(
     val explained: String?,
     val onExplain: (String) -> Unit,
     val onOpenSettingsAt: (SettingsTarget) -> Unit
@@ -1033,13 +1067,15 @@ private class QuickRows(
         last: Boolean = false,
         // A long press that does something else than opening Settings.
         onLongClick: (() -> Unit)? = null,
+        // A small amber dot after the name: something here differs from what was saved.
+        marked: Boolean = false,
         content: @Composable RowScope.() -> Unit
     ) {
         val open = explained == key
         // The choices drop to a second line, still right-aligned, when they don't fit beside the name.
         FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             LongerLongPress {
-                Box(
+                Row(
                     modifier = Modifier
                         .weight(1f)
                         .height(36.dp)
@@ -1047,7 +1083,7 @@ private class QuickRows(
                             onClick = { onExplain(key) },
                             onLongClick = onLongClick ?: settingsTarget?.let { target -> { onOpenSettingsAt(target) } }
                         ),
-                    contentAlignment = Alignment.CenterStart
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = label,
@@ -1056,6 +1092,9 @@ private class QuickRows(
                         maxLines = 1,
                         softWrap = false
                     )
+                    if (marked) {
+                        Box(Modifier.padding(start = 5.dp).size(5.dp).background(ModeAmber, CircleShape))
+                    }
                 }
             }
             Row(
@@ -1078,7 +1117,7 @@ private class QuickRows(
 }
 
 @Composable
-private fun QuickChoice(text: String, selected: Boolean, minWidth: Dp, onClick: () -> Unit) =
+internal fun QuickChoice(text: String, selected: Boolean, minWidth: Dp, onClick: () -> Unit) =
     LilacChip(text = text, selected = selected, onClick = onClick, minWidth = minWidth)
 
 @Composable
@@ -1106,7 +1145,7 @@ private fun QuickSwitch(checked: Boolean, onClick: () -> Unit) {
 
 /** A value that opens a picker: an inline list under the row, or a sheet. */
 @Composable
-private fun QuickLink(value: String, open: Boolean, onClick: () -> Unit) {
+internal fun QuickLink(value: String, open: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .height(36.dp)
@@ -1149,28 +1188,73 @@ private fun InlinePicker(visible: Boolean, content: @Composable () -> Unit) {
 }
 
 /**
- * A frame count as a slider, whole counts from [min] up to the maximum. With [withOff] the left end is Off
+ * A frame count as a slider, whole counts from [min] up to [max]. With [withOff] the left end is Off
  * (reported as 0); without it a single frame is the inactive state.
  */
 @Composable
-private fun FrameCountSlider(frames: Int, min: Int, withOff: Boolean, onFramesChange: (Int) -> Unit) {
+private fun FrameCountSlider(
+    frames: Int,
+    min: Int,
+    withOff: Boolean,
+    onFramesChange: (Int) -> Unit,
+    max: Int = MultiFrameConfig.MAX_FRAME_COUNT,
+    countLabel: Int = R.plurals.quick_frame_count
+) {
     val start = if (withOff) min - 1 else min
-    val max = MultiFrameConfig.MAX_FRAME_COUNT
-    // The value while dragging, until the saved setting catches up.
+    // The value while dragging, until the saved setting reaches it: saves can land late and one drag step at a
+    // time (switching multi-frame on reconfigures the camera), and showing each would make the slider jump back.
+    // After 2 s without a change the saved setting shows anyway, in case the choice was refused.
     var dragged by remember { mutableStateOf<Int?>(null) }
-    LaunchedEffect(frames) { dragged = null }
+    val savedShown = if (withOff && frames <= 0) 0 else frames.coerceIn(min, max)
+    LaunchedEffect(savedShown) { if (savedShown == dragged) dragged = null }
+    LaunchedEffect(dragged) {
+        if (dragged != null) {
+            delay(2000)
+            dragged = null
+        }
+    }
     val currentOnFramesChange by rememberUpdatedState(onFramesChange)
-    val shown = dragged ?: if (withOff && frames <= 0) 0 else frames.coerceIn(min, max)
-    val active = if (withOff) shown > 0 else shown > 1
-    val fraction = ((if (shown == 0) start else shown) - start).toFloat() / (max - start)
+    val shown = dragged ?: savedShown
+    val target = ((if (shown == 0) start else shown) - start).toFloat() / (max - start)
+    // Follows the finger directly; any other change (the other stacking slider taking over) glides there.
+    val position = remember { Animatable(target) }
+    LaunchedEffect(target) {
+        if (dragged != null) position.snapTo(target) else position.animateTo(target, tween(250, easing = FastOutSlowInEasing))
+    }
+    QuickSlider(
+        text = if (shown == 0) stringResource(R.string.quick_frames_off)
+        else pluralStringResource(countLabel, shown, shown),
+        active = if (withOff) shown > 0 else shown > 1,
+        fraction = position.value,
+        onFraction = { f ->
+            val position = (start + f * (max - start)).roundToInt()
+            val value = if (withOff && position <= start) 0 else position
+            if (value != dragged) {
+                dragged = value
+                currentOnFramesChange(value)
+            }
+        }
+    )
+}
+
+/** The sheet's slider: the value on the left (amber when [active]), a 120 dp track; reports 0..1 while dragging. */
+@Composable
+internal fun QuickSlider(
+    text: String,
+    active: Boolean,
+    fraction: Float,
+    onFraction: (Float) -> Unit,
+    onDoubleTap: (() -> Unit)? = null
+) {
+    val currentOnFraction by rememberUpdatedState(onFraction)
+    val currentOnDoubleTap by rememberUpdatedState(onDoubleTap)
     Row(
         modifier = Modifier.height(36.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
-            text = if (shown == 0) stringResource(R.string.quick_frames_off)
-            else pluralStringResource(R.plurals.quick_frame_count, shown, shown),
+            text = text,
             color = if (active) ModeAmber else SheetText,
             fontSize = 12.5.sp,
             fontWeight = FontWeight.Medium,
@@ -1184,17 +1268,18 @@ private fun FrameCountSlider(frames: Int, min: Int, withOff: Boolean, onFramesCh
                 .width(120.dp)
                 .fillMaxHeight()
                 .pointerInput(Unit) {
-                    fun select(x: Float) {
-                        val position = (start + (x / size.width).coerceIn(0f, 1f) * (max - start)).roundToInt()
-                        val value = if (withOff && position <= start) 0 else position
-                        if (value != dragged) {
-                            dragged = value
-                            currentOnFramesChange(value)
-                        }
-                    }
+                    fun select(x: Float) = currentOnFraction((x / size.width).coerceIn(0f, 1f))
+                    var lastDown = 0L
                     awaitEachGesture {
                         val down = awaitFirstDown()
                         down.consume()
+                        val doubleTap = currentOnDoubleTap
+                        if (doubleTap != null && down.uptimeMillis - lastDown < viewConfiguration.doubleTapTimeoutMillis) {
+                            lastDown = 0L
+                            doubleTap()
+                            return@awaitEachGesture
+                        }
+                        lastDown = down.uptimeMillis
                         select(down.position.x)
                         while (true) {
                             val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
@@ -1357,7 +1442,7 @@ private fun QuickSettingLabel(
 }
 
 @Composable
-private fun ContentManagementOptionsPanel(
+internal fun ContentManagementOptionsPanel(
     visible: Boolean,
     onFilterManageClick: () -> Unit,
     onFrameManageClick: () -> Unit,

@@ -26,6 +26,8 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -91,7 +93,6 @@ import com.hinnka.mycamera.data.CaptureButtonStyle
 import com.hinnka.mycamera.data.DevelopAnimationStyle
 import com.hinnka.mycamera.model.CameraPreset
 import com.hinnka.mycamera.model.ColorRecipeParams
-import com.hinnka.mycamera.model.LutSelectorMode
 import com.hinnka.mycamera.raw.SpectralFilmSelection
 import com.hinnka.mycamera.render.RenderQueue
 import com.hinnka.mycamera.gallery.GalleryManager
@@ -152,6 +153,9 @@ private val ControlsArrivalEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
 // The controls rise and fade in once per app start, not again after the gallery or a mode switch.
 private var controlsArrivalPlayed = false
+// Whether the manual values show, per shooting mode, for this app run: Pro opens with them, the others
+// without, and a swipe that hides or shows them is remembered until the app restarts.
+private val manualControlsShownByMode = mutableMapOf<CameraShootingMode, Boolean>()
 private const val ZoomStopAnimationCompletionThreshold = 0.001f
 private const val RawCaptureTapDebounceMillis = 1000L
 private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
@@ -233,16 +237,6 @@ private fun PanelDismissPreviewOverlay(
     )
 }
 
-private fun CameraParameter.defaultResetValue(): Float {
-    return when (this) {
-        CameraParameter.EXPOSURE_COMPENSATION -> 0f
-        CameraParameter.SHUTTER_SPEED -> DefaultShutterSpeedNs
-        CameraParameter.ISO -> DefaultIso
-        CameraParameter.FOCUS -> DefaultFocusDistance
-        CameraParameter.WHITE_BALANCE -> DefaultAwbTemperature
-    }
-}
-
 @Composable
 fun CameraScreen(
     viewModel: CameraViewModel,
@@ -275,13 +269,13 @@ fun CameraScreen(
     val portraitIntroSeen by preferenceValue { it.portraitIntroSeen }
     val portraitDepthReminderSeen by preferenceValue { it.portraitDepthReminderSeen }
     val proGuideSeen by preferenceValue { it.proGuideSeen }
+    val basicsGuideSeen by preferenceValue { it.basicsGuideSeen }
     val portraitBokehStyle by preferenceValue { BokehStyle.fromPersistedName(it.portraitBokehStyle) }
     val eyeFocusEnabled by preferenceValue { it.eyeFocusEnabled }
     val keepScreenOn by preferenceValue { it.keepScreenOn }
     val currentLutId by viewModel.currentLutId.collectAsState()
     val lutSwipeState = rememberLutSwipeState()
     val currentRecipeParams by viewModel.currentRecipeParams.collectAsState()
-    val lutSelectorMode by viewModel.lutSelectorMode.collectAsState()
     val activePresetId by preferenceValue { it.activePresetId }
     val activePresetModified by viewModel.isActivePresetModified.collectAsState()
     val customPresets by preferenceValue { it.customPresets }
@@ -290,6 +284,7 @@ fun CameraScreen(
     val useRaw by preferenceValue { it.useRaw }
     val useJpgMax by preferenceValue { it.useJpgMax }
     val jpgMultiFrameCount by preferenceValue { it.jpgMultiFrameDenoiseFrameCount }
+    val multipleExposureCount by preferenceValue { it.multipleExposureCount }
     val hdrPlusFrameCount by preferenceValue { it.hdrPlusFrameCount }
     val useMultipleExposure by preferenceValue { it.useMultipleExposure }
     val useRawMax by preferenceValue { it.useRawMax }
@@ -327,8 +322,27 @@ fun CameraScreen(
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
-    var filterButtonBounds by remember { mutableStateOf<Rect?>(null) }
     var captureButtonBounds by remember { mutableStateOf<Rect?>(null) }
+    val noteLine = remember { NoteLineState() }
+    // Multiple exposure shots counted from the shutter press, so the actions, the count and the shutter ring answer
+    // at once instead of when each frame is saved.
+    var exposuresPressed by remember { mutableIntStateOf(0) }
+    var exposuresSavedBefore by remember { mutableIntStateOf(0) }
+    LaunchedEffect(multipleExposureState.capturedCount) {
+        val saved = multipleExposureState.capturedCount
+        // Undo, Discard and a finished picture lower the saved count; the presses follow it down.
+        if (saved < exposuresSavedBefore) exposuresPressed = saved
+        exposuresSavedBefore = saved
+    }
+    LaunchedEffect(exposuresPressed, multipleExposureState.capturedCount) {
+        // A press whose shot never arrives (refused or failed) stops counting after 5 s.
+        if (exposuresPressed > multipleExposureState.capturedCount) {
+            delay(5000)
+            exposuresPressed = multipleExposureState.capturedCount
+        }
+    }
+    val exposureCount = maxOf(multipleExposureState.capturedCount, exposuresPressed)
+    val snapshotFlash = remember { Animatable(0f) }
     var parameterBarTop by remember { mutableStateOf<Float?>(null) }
     var parameterRulerBounds by remember { mutableStateOf<Rect?>(null) }
     var galleryThumbnailBounds by remember { mutableStateOf<Rect?>(null) }
@@ -393,9 +407,41 @@ fun CameraScreen(
     var activePanel by remember { mutableStateOf(ActivePanel.NONE) }
     var selectedParameter by remember { mutableStateOf(CameraParameter.EXPOSURE_COMPENSATION) }
     var showParameterRuler by remember(state.captureMode, state.useRaw) { mutableStateOf(false) }
+    // The mode dial's state lives here so the manual values can give way while its list is open.
+    val modeLine = remember {
+        ModeLineState(
+            when {
+                state.captureMode == CaptureMode.VIDEO -> CameraShootingMode.VIDEO
+                state.useRaw && state.isRawSupported -> CameraShootingMode.PROFESSIONAL
+                state.isPortraitMode -> CameraShootingMode.PORTRAIT
+                else -> CameraShootingMode.PHOTO
+            },
+            state.isRawSupported
+        )
+    }
     // Vertical swipes on the picture: up shows the manual values on its bottom edge, down drops the
     // everyday quick settings onto its top edge. Each swipe first closes what the other one opened.
-    var manualControlsShown by rememberSaveable { mutableStateOf(false) }
+    // Keyed by the mode chosen on the dial, not the one the camera reports: the camera only reports the
+    // new mode once it has reloaded, which would bring the old mode's values back for a moment.
+    val manualControlsMode = modeLine.shownMode
+    var manualControlsShown by remember(manualControlsMode) {
+        mutableStateOf(
+            manualControlsShownByMode[manualControlsMode] ?: (manualControlsMode == CameraShootingMode.PROFESSIONAL)
+        )
+    }
+    LaunchedEffect(manualControlsMode, manualControlsShown) {
+        manualControlsShownByMode[manualControlsMode] = manualControlsShown
+    }
+    // A sideways drag on a value shows its ruler while dragging and for a moment after.
+    val rulerScrub = remember { RulerScrub() }
+    var scrubRulerShown by remember { mutableStateOf(false) }
+    LaunchedEffect(rulerScrub.active) {
+        if (rulerScrub.active) scrubRulerShown = true else {
+            delay(700)
+            scrubRulerShown = false
+        }
+    }
+    var lastValueTap by remember { mutableStateOf<Pair<CameraParameter, Long>?>(null) }
     var everydayRowShown by remember { mutableStateOf(false) }
     // A value set by hand (EV, ISO, shutter, focus, white balance) stays visible while the panel is closed,
     // as a compact line of just those values, so a shot is never taken with a fixed value nobody can see.
@@ -494,9 +540,12 @@ fun CameraScreen(
         }
     }
 
+    val currentRecordingForNotes by rememberUpdatedState(state.videoRecordingState.isRecording)
     // 监听照片保存完成事件，立即刷新缩略图
     LaunchedEffect(Unit) {
         viewModel.imageSavedEvent.collect {
+            // While recording, the only photos saved are Snapshot's.
+            if (currentRecordingForNotes) noteLine.say(R.string.video_snapshot_saved)
             galleryViewModel.refreshLatestPhoto()
             MyCameraApplication.updateWidgets(context)
         }
@@ -1015,11 +1064,31 @@ fun CameraScreen(
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
-        val onParameterClick: (CameraParameter) -> Unit = { parameter ->
-            val wasSelected = selectedParameter == parameter
-            selectedParameter = parameter
-            showParameterRuler = !wasSelected || !showParameterRuler
+        val setParameterAuto: (CameraParameter) -> Unit = { parameter ->
+            when (parameter) {
+                CameraParameter.EXPOSURE_COMPENSATION -> viewModel.setExposureCompensation(0)
+                CameraParameter.SHUTTER_SPEED -> viewModel.setShutterSpeedAuto(true)
+                CameraParameter.ISO -> viewModel.setIsoAuto(true)
+                CameraParameter.FOCUS -> viewModel.setAutoFocus(true)
+                CameraParameter.WHITE_BALANCE ->
+                    viewModel.setAwbMode(android.hardware.camera2.CameraMetadata.CONTROL_AWB_MODE_AUTO)
+            }
         }
+        // A tap toggles the value's ruler at once; a second tap on it within 320 ms puts it back to auto.
+        val onParameterClick: (CameraParameter) -> Unit = { parameter ->
+            val now = android.os.SystemClock.uptimeMillis()
+            val last = lastValueTap
+            if (last != null && last.first == parameter && now - last.second < 320L) {
+                lastValueTap = null
+                setParameterAuto(parameter)
+            } else {
+                lastValueTap = parameter to now
+                val wasSelected = selectedParameter == parameter
+                selectedParameter = parameter
+                showParameterRuler = !wasSelected || !showParameterRuler
+            }
+        }
+        val rulerShown = showParameterRuler || scrubRulerShown
         LaunchedEffect(showParameterRuler) {
             if (!showParameterRuler) {
                 parameterRulerBounds = null
@@ -1140,10 +1209,10 @@ fun CameraScreen(
                     else -> true
                 },
                 valueStep = state.getExposureCompensationStep(),
-                resetValue = selectedParameter.defaultResetValue(),
                 showHyperfocalButton = selectedParameter == CameraParameter.FOCUS && state.minimumFocusDistance > 0f,
                 hyperfocalEnabled = state.isHyperfocalFocusEnabled,
-                hyperfocalDistanceMeters = state.hyperfocalDistanceMeters,
+                onSetAuto = { setParameterAuto(selectedParameter) },
+                scrub = rulerScrub,
                 onHyperfocalToggle = { enabled ->
                     viewModel.setHyperfocalFocusEnabled(enabled)
                 },
@@ -1184,7 +1253,9 @@ fun CameraScreen(
             CameraParameterBar(
                 state = state,
                 selectedParameter = activeParameter,
-                onParameterClick = onParameterClick
+                onParameterClick = onParameterClick,
+                scrub = rulerScrub,
+                onScrubStart = { parameter -> selectedParameter = parameter }
             )
         }
 
@@ -1313,7 +1384,8 @@ fun CameraScreen(
                                                     !afterLongPress &&
                                                     !state.videoRecordingState.isRecording &&
                                                     !viewModel.showPortraitIntro &&
-                                                    !viewModel.showProGuide
+                                                    !viewModel.showProGuide &&
+                                                    !viewModel.showBasicsGuide
                                                 ) {
                                                     verticalTracking = true
                                                 }
@@ -1412,15 +1484,13 @@ fun CameraScreen(
                                 viewModel.closeCamera(surfaceTexture)
                             },
                             onTap = { x, y, w, h ->
-                                // Quick settings and the everyday row close and the tap still focuses;
-                                // other panels only close.
+                                // Quick settings, the everyday row and an open ruler close and the tap still focuses;
+                                // the manual values stay (only a swipe down hides them). Other panels only close.
                                 everydayRowShown = false
+                                showParameterRuler = false
+                                scrubRulerShown = false
                                 if (activePanel == ActivePanel.SETTINGS) activePanel = ActivePanel.NONE
-                                if (manualControlsShown && !isXpan) {
-                                    // The open manual panel closes, ruler included, without focusing.
-                                    manualControlsShown = false
-                                    showParameterRuler = false
-                                } else if (state.isFocusLocked) {
+                                if (state.isFocusLocked) {
                                     viewModel.unlockFocus()
                                 } else if (activePanel != ActivePanel.NONE) {
                                     activePanel = ActivePanel.NONE
@@ -1588,17 +1658,6 @@ fun CameraScreen(
                             )
                         }
 
-                        if (useMultipleExposure && state.captureMode == CaptureMode.PHOTO) {
-                            MultipleExposureOverlay(
-                                state = multipleExposureState,
-                                onFinish = { viewModel.finishMultipleExposureSession() },
-                                onUndo = { viewModel.undoLastMultipleExposureFrame() },
-                                onCancel = { viewModel.cancelMultipleExposureSession() },
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(top = TopEdgeLineHeight)
-                            )
-                        }
 
                     }
 
@@ -1649,9 +1708,6 @@ fun CameraScreen(
                                 activePanel =
                                     if (activePanel == ActivePanel.FILTERS) ActivePanel.NONE else ActivePanel.FILTERS
                             },
-                            onFilterButtonBoundsChanged = { bounds ->
-                                filterButtonBounds = bounds
-                            },
                         )
                     }
                     Box(
@@ -1681,6 +1737,7 @@ fun CameraScreen(
                 latestPhoto = latestPhoto,
                 useMultipleExposure = useMultipleExposure,
                 multipleExposureState = multipleExposureState,
+                exposureCount = exposureCount,
                 onGalleryThumbnailBoundsChanged = { bounds ->
                     galleryThumbnailBounds = bounds
                 },
@@ -1689,6 +1746,13 @@ fun CameraScreen(
                 },
                 onSwitchCameraClick = ::switchCameraWithPreviewTransition,
                 onCaptureModeSelected = ::selectShootingMode,
+                noteLine = noteLine,
+                onSnapshot = {
+                    scope.launch {
+                        snapshotFlash.snapTo(0.7f)
+                        snapshotFlash.animateTo(0f, tween(250))
+                    }
+                },
                 previewPending = !previewTransitionRevealing &&
                     (!hasPlayedInitialPreviewTransition || previewTransitionAwaitingResume),
                 onCaptureTap = {
@@ -1717,6 +1781,9 @@ fun CameraScreen(
                             }
                         }
                     }
+                    if (useMultipleExposure && state.captureMode == CaptureMode.PHOTO) {
+                        exposuresPressed = minOf(exposureCount + 1, multipleExposureState.targetCount)
+                    }
                     viewModel.capture()
                 },
                 onGalleryClick = {
@@ -1726,9 +1793,7 @@ fun CameraScreen(
                 onLooksClick = {
                     activePanel = if (activePanel == ActivePanel.FILTERS) ActivePanel.NONE else ActivePanel.FILTERS
                 },
-                onLooksBoundsChanged = { bounds ->
-                    filterButtonBounds = bounds
-                },
+                modeLine = modeLine,
                 onQuickSettingsClick = {
                     activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
                 },
@@ -1758,7 +1823,7 @@ fun CameraScreen(
         }
 
         val quickSheetCover by animateFloatAsState(
-            targetValue = if (activePanel == ActivePanel.SETTINGS) 1f else 0f,
+            targetValue = if (activePanel == ActivePanel.SETTINGS || activePanel == ActivePanel.FILTERS) 1f else 0f,
             animationSpec = tween(160),
             label = "quickSheetCover"
         )
@@ -1839,8 +1904,14 @@ fun CameraScreen(
                 )
             }
 
-            // Active settings and the histogram on the picture's top edge, while quick settings are closed and
-            // nothing records (the recording line takes their place). A tap opens quick settings.
+            // Active settings and the histogram on the picture's top edge, while quick settings are closed.
+            // While recording the time sits in a pill at the centre, the marks to its left and the space left,
+            // when it runs low, to its right; the heat gauge is a second line under it when the phone is hot. A tap opens quick settings, unless recording.
+            // From the first shot's press until it is discarded, Done is tapped or the last shot is pressed; the row
+            // leaves at once then, without waiting for the picture to be put together and saved.
+            val multipleExposureActionsShown = useMultipleExposure && state.captureMode == CaptureMode.PHOTO &&
+                exposureCount >= 1 && !multipleExposureState.isProcessing &&
+                exposureCount < multipleExposureState.targetCount
             val topEdgeMarks = buildList {
                 if (isVideoMode) {
                     if (state.videoConfig.torchEnabled && state.videoCapabilities.supportsTorch) {
@@ -1854,45 +1925,48 @@ fun CameraScreen(
                     if (state.flashMode != 0 && state.videoCapabilities.supportsTorch) {
                         add(TopEdgeMark(if (state.flashMode == 2) AppIcons.BulbLine else AppIcons.BoltLine))
                     }
-                    if (useMultipleExposure) add(TopEdgeMark(AppIcons.MultiExposureLine))
+                    if (useMultipleExposure) {
+                        add(TopEdgeMark(AppIcons.MultiExposureLine, "$exposureCount/${multipleExposureState.targetCount}"))
+                    }
+                    // Frames don't show on the live picture, so a mark says one will be added.
+                    if (viewModel.currentFrameId != null) add(TopEdgeMark(AppIcons.FrameLine))
                 }
             }
             val topEdgeHistogram = state.histogram.takeIf { isPhotoStyleMode && showHistogram }
+            val recordingLine = isVideoMode && state.videoRecordingState.isRecording
+            val recordingSecondsLeft = rememberRecordingSecondsLeft(recordingLine, state.videoConfig)
             AnimatedVisibility(
-                visible = activePanel != ActivePanel.SETTINGS && !state.videoRecordingState.isRecording &&
-                    !everydayRowShown && (topEdgeMarks.isNotEmpty() || topEdgeHistogram != null),
+                visible = activePanel != ActivePanel.SETTINGS && activePanel != ActivePanel.FILTERS &&
+                    !everydayRowShown && (recordingLine || topEdgeMarks.isNotEmpty() || topEdgeHistogram != null),
                 enter = fadeIn(tween(150)),
                 exit = fadeOut(tween(150)),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = viewfinderTop)
             ) {
-                TopEdgeLine(
-                    marks = topEdgeMarks,
-                    histogram = topEdgeHistogram,
-                    onClick = { everydayRowShown = true }
-                )
-            }
-
-            // While recording: time, heat and format, centred just below the picture's top edge.
-            // It drops in a few dp and fades in when recording starts, and leaves the same way.
-            val recordingHudDrop = with(LocalDensity.current) { 8.dp.roundToPx() }
-            AnimatedVisibility(
-                visible = isVideoMode && state.videoRecordingState.isRecording,
-                enter = slideInVertically(tween(200, easing = FastOutSlowInEasing)) { -recordingHudDrop } +
-                    fadeIn(tween(200)),
-                exit = slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { -recordingHudDrop } +
-                    fadeOut(tween(200)),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = viewfinderTop + 8.dp)
-            ) {
-                RecordingHud(
-                    elapsedMs = state.videoRecordingState.elapsedMs,
-                    isHot = state.videoRecordingState.isHot,
-                    heatGauge = state.videoRecordingState.heatGauge,
-                    videoConfig = state.videoConfig
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    TopEdgeLine(
+                        marks = topEdgeMarks,
+                        histogram = topEdgeHistogram,
+                        onClick = { if (recordingLine) noteLine.say(R.string.video_locked_while_recording) else everydayRowShown = true },
+                        center = if (recordingLine) {
+                            {
+                                RecordingPill(
+                                    elapsedMs = state.videoRecordingState.elapsedMs,
+                                    isPaused = state.videoRecordingState.isPaused,
+                                    isHot = state.videoRecordingState.isHot,
+                                    heatGauge = state.videoRecordingState.heatGauge
+                                )
+                            }
+                        } else null,
+                        trailing = recordingSecondsLeft?.takeIf { recordingLine && it < 20 * 60 }?.let { left ->
+                            { SpaceLeftMark(left) }
+                        }
+                    )
+                    if (recordingLine && state.videoRecordingState.isHot) {
+                        HeatGauge(state.videoRecordingState.heatGauge, barWidth = 64.dp)
+                    }
+                }
             }
 
             // Portrait offers its guide in a pill centred just above the picture's bottom, the manual
@@ -1905,7 +1979,7 @@ fun CameraScreen(
             // Guide pills sit 8 dp above the highest of the picture's bottom, the manual values and the shutter.
             val guidePillBottom = listOfNotNull(
                 previewBounds?.bottom,
-                parameterBarTop.takeIf { !isXpan && (manualControlsShown || anyManualValue) },
+                parameterBarTop.takeIf { multipleExposureActionsShown || !isXpan && (manualControlsShown || anyManualValue) },
                 captureButtonBounds?.top,
             ).minOrNull()?.let { it - (cameraScreenBounds?.top ?: 0f) }
             val guidePillPlacement = Modifier
@@ -1919,7 +1993,7 @@ fun CameraScreen(
             if (
                 state.isPortraitMode && state.captureMode == CaptureMode.PHOTO &&
                 (!portraitIntroSeen || showDepthReminder) &&
-                activePanel == ActivePanel.NONE && !viewModel.showPortraitIntro
+                activePanel == ActivePanel.NONE && !noteLine.shown && !viewModel.showPortraitIntro
             ) {
                 if (guidePillBottom != null) {
                     ModeGuidePill(
@@ -1942,12 +2016,25 @@ fun CameraScreen(
                 !state.isPortraitMode
             if (
                 proMode && !proGuideSeen && guidePillBottom != null &&
-                activePanel == ActivePanel.NONE && !viewModel.showProGuide
+                activePanel == ActivePanel.NONE && !noteLine.shown && !viewModel.showProGuide
             ) {
                 ModeGuidePill(
                     icon = AppIcons.InfoLine,
                     text = stringResource(R.string.pro_guide_pill),
                     onClick = { viewModel.showProHelp() },
+                    modifier = guidePillPlacement
+                )
+            }
+            // Photo mode offers the camera basics the same way, on every launch until opened once.
+            val photoMode = state.captureMode == CaptureMode.PHOTO && !proMode && !state.isPortraitMode
+            if (
+                photoMode && !basicsGuideSeen && guidePillBottom != null &&
+                activePanel == ActivePanel.NONE && !noteLine.shown && !viewModel.showBasicsGuide
+            ) {
+                ModeGuidePill(
+                    icon = AppIcons.InfoLine,
+                    text = stringResource(R.string.basics_guide_pill),
+                    onClick = { viewModel.showBasicsHelp() },
                     modifier = guidePillPlacement
                 )
             }
@@ -1963,7 +2050,9 @@ fun CameraScreen(
                     },
                 parameterRuler = {
                     AnimatedVisibility(
-                        visible = showParameterRuler,
+                        visible = rulerShown,
+                        // Gives way with the footer while the mode list is open.
+                        modifier = Modifier.graphicsLayer { alpha = 1f - modeLine.side },
                         enter = expandVertically(
                             animationSpec = tween(220, easing = FastOutSlowInEasing),
                             expandFrom = Alignment.Bottom
@@ -1979,17 +2068,40 @@ fun CameraScreen(
                                 .onGloballyPositioned { coordinates ->
                                     // Only while it shows: during its exit animation it keeps reporting its
                                     // full rectangle, which would leave swipes there ignored after it has gone.
-                                    parameterRulerBounds = coordinates.boundsInRoot().takeIf { showParameterRuler }
+                                    parameterRulerBounds = coordinates.boundsInRoot().takeIf { rulerShown }
                                 }
                         )
                     }
                 },
                 parameterBar = {
+                  // A multiple exposure's actions sit above the manual values, so Done stays in reach when they open.
+                  Column(
+                      modifier = Modifier
+                          .onGloballyPositioned { parameterBarTop = it.boundsInRoot().top }
+                          // Gives way with the footer while the mode list is open.
+                          .graphicsLayer { alpha = 1f - modeLine.side },
+                      horizontalAlignment = Alignment.CenterHorizontally
+                  ) {
+                    AnimatedVisibility(
+                        visible = multipleExposureActionsShown,
+                        enter = fadeIn(tween(180)) + slideInVertically(tween(260)) { it / 5 },
+                        exit = fadeOut(tween(150))
+                    ) {
+                        MultipleExposureActions(
+                            state = multipleExposureState,
+                            onDiscard = {
+                                exposuresPressed = 0
+                                viewModel.cancelMultipleExposureSession()
+                            },
+                            onUndo = { viewModel.undoLastMultipleExposureFrame() },
+                            onFinish = { viewModel.finishMultipleExposureSession() },
+                            onFinishTooEarly = { noteLine.say(R.string.multiple_exposure_needs_two) }
+                        )
+                    }
                     if (!isXpan) {
                         // Swipes that start on the values themselves work too: down closes, up opens.
                         Box(
                             Modifier
-                                .onGloballyPositioned { parameterBarTop = it.boundsInRoot().top }
                                 .pointerInput(Unit) {
                                     var dragged = 0f
                                     detectVerticalDragGestures(
@@ -2004,15 +2116,15 @@ fun CameraScreen(
                                     )
                                 }
                         ) {
-                            AnimatedVisibility(
+                            androidx.compose.animation.AnimatedVisibility(
                                 visible = manualControlsShown,
                                 enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 3 },
                                 exit = fadeOut(tween(150)) + slideOutVertically(tween(150)) { it / 3 }
                             ) {
-                                parameterBar(selectedParameter.takeIf { showParameterRuler }, onParameterClick)
+                                parameterBar(selectedParameter.takeIf { rulerShown }, onParameterClick)
                             }
                             // Closed: only the values set by hand; a tap opens the panel at that value.
-                            AnimatedVisibility(
+                            androidx.compose.animation.AnimatedVisibility(
                                 visible = !manualControlsShown && anyManualValue,
                                 enter = fadeIn(tween(180)),
                                 exit = fadeOut(tween(120)),
@@ -2029,11 +2141,45 @@ fun CameraScreen(
                             }
                         }
                     }
+                  }
                 },
                 captureControls = {
                     controls(Modifier.fillMaxWidth())
                 }
             )
+
+            // Notes use the mode guides' pill, 8 dp above the zoom collar (or the manual values when they show),
+            // whatever the picture's shape, so a note sits in the same place in every mode and while recording.
+            val noteBottom = listOfNotNull(
+                captureButtonBounds?.top?.let { it - with(LocalDensity.current) { CameraControlsLayoutDefaults.CollarClearance.toPx() } },
+                parameterBarTop.takeIf { multipleExposureActionsShown || !isXpan && (manualControlsShown || anyManualValue) },
+            ).minOrNull()?.let { it - (cameraScreenBounds?.top ?: 0f) }
+            if (noteBottom != null) {
+                NoteLine(
+                    state = noteLine,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .layout { measurable, constraints ->
+                            val placeable = measurable.measure(constraints)
+                            layout(placeable.width, placeable.height) {
+                                placeable.place(0, (noteBottom - 8.dp.toPx()).roundToInt() - placeable.height)
+                            }
+                        }
+                )
+            }
+
+            // A short white flash over the picture when Snapshot takes a photo while recording.
+            if (snapshotFlash.value > 0f) previewBounds?.let { bounds ->
+                val origin = cameraScreenBounds?.topLeft ?: Offset.Zero
+                val density = LocalDensity.current
+                Box(
+                    Modifier
+                        .offset { IntOffset((bounds.left - origin.x).roundToInt(), (bounds.top - origin.y).roundToInt()) }
+                        .size(with(density) { bounds.width.toDp() }, with(density) { bounds.height.toDp() })
+                        .graphicsLayer { alpha = snapshotFlash.value }
+                        .background(Color.White)
+                )
+            }
         }
         val panelDismissBounds = if (isXpan) {
             viewfinderAreaBounds ?: previewBounds
@@ -2114,6 +2260,7 @@ fun CameraScreen(
             onPortraitBokehStyleChange = viewModel::setPortraitBokehStyle,
             onPortraitHelp = viewModel::showPortraitHelp,
             onProHelp = viewModel::showProHelp,
+            onBasicsHelp = viewModel::showBasicsHelp,
             onOpenSettingsAt = onOpenSettingsAt,
             multiFrameCount = jpgMultiFrameCount,
             onMultiFrameCountChange = { viewModel.setJpgMultiFrameDenoiseFrameCountAndEnable(it) },
@@ -2173,6 +2320,8 @@ fun CameraScreen(
             },
             useMultipleExposure = useMultipleExposure,
             onMultipleExposureToggle = { viewModel.setUseMultipleExposure(it) },
+            multipleExposureCount = multipleExposureCount,
+            onMultipleExposureCountChange = { preferencesRepository.updateAsync { this.multipleExposureCount = it } },
             onDismiss = { activePanel = ActivePanel.NONE },
             everydayRowOnTop = everydayRowShown && activePanel == ActivePanel.NONE,
             everydayRowOnTopModifier = Modifier.align(Alignment.TopCenter).padding(top = viewfinderTop),
@@ -2192,108 +2341,75 @@ fun CameraScreen(
             ProGuide(onDismiss = viewModel::dismissProGuide)
         }
 
-        // During navigation measurement or window resizing, the viewport can be
-        // shorter than the top inset. The panel then has no available vertical space.
-        val filterPanelTop = minOf(topInset, maxHeight)
-        val fallbackFilterPanelBottom = when {
-            isXpan -> maxHeight - 48.dp
-            isVideoMode -> maxHeight - 170.dp
-            else -> viewfinderTop + cardHeight - 48.dp
+        if (viewModel.showBasicsGuide) {
+            BasicsGuide(onDismiss = viewModel::dismissBasicsGuide)
         }
-        val filterPanelAnchorY = if (isXpan) {
-            captureButtonBounds?.top
-        } else {
-            // Above the Looks button and the zoom collar beside it.
-            filterButtonBounds?.top
-        }
-        val requestedFilterPanelBottom = filterPanelAnchorY?.let { anchorY ->
-            val parentTop = cameraScreenBounds?.top ?: 0f
-            with(density) { (anchorY - parentTop).toDp() - 8.dp }
-        } ?: fallbackFilterPanelBottom
-        val filterPanelBottom = requestedFilterPanelBottom.coerceIn(filterPanelTop, maxHeight)
 
-        AnimatedVisibility(
-            activePanel == ActivePanel.FILTERS,
-            enter = if (isXpan) {slideInVertically(initialOffsetY = { it })} else fadeIn(),
-            exit = if (isXpan) {slideOutVertically(targetOffsetY = { it })} else fadeOut()
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(filterPanelBottom)
-                    .padding(top = filterPanelTop),
-                contentAlignment = Alignment.BottomCenter
-            ) {
-                val allPresets by viewModel.allPresets.collectAsState()
-                val defaultPresetName = stringResource(R.string.preset_new_preset_default)
-                val isVideoLog = isVideoMode && state.videoConfig.logProfile.isEnabled
-
-                // LUT 选择器 (内嵌 Presets 列表与统一控制，无多余背景遮挡)
-                LutSelector(
-                    availableLuts = viewModel.selectableLutList,
-                    currentLutId = currentLutId,
-                    thumbnail = viewModel.previewThumbnail,
-                    onLutSelected = { viewModel.setLut(it) },
-                    allPresets = allPresets,
-                    presetModeEnabled = !isVideoLog,
-                    activePresetId = activePresetId,
-                    activePresetModified = activePresetModified,
-                    selectedMode = if (isVideoLog) LutSelectorMode.Style else lutSelectorMode,
-                    onModeSelected = { viewModel.setLutSelectorMode(it) },
-                    availableFrames = viewModel.availableFrameList,
-                    currentFrameId = viewModel.currentFrameId,
-                    onFrameSelected = if (isVideoLog) null else viewModel::setFrame,
-                    onFrameManagementClick = {
-                        activePanel = ActivePanel.NONE
-                        onFrameManagementClick()
-                    },
-                    onPresetSelected = { preset ->
-                        discardTransientLookEdits()
-                        if (presetRequiresPreviewTransition(preset)) {
-                            runPreviewTransition { viewModel.applyPreset(preset) }
-                        } else {
-                            viewModel.applyPreset(preset)
-                        }
-                    },
-                    onCreatePresetClick = {
-                        viewModel.prepareCurrentSettingsPresetDraft(defaultPresetName)
-                        onPresetEditClick(null)
-                    },
-                    onResetPresetClick = {
-                        discardTransientLookEdits()
-                        val preset = allPresets.firstOrNull { it.id == activePresetId }
-                        if (presetRequiresPreviewTransition(preset)) {
-                            runPreviewTransition { viewModel.resetActivePreset() }
-                        } else {
-                            viewModel.resetActivePreset()
-                        }
-                    },
-                    onSavePresetClick = viewModel::saveCurrentSettingsToActivePreset,
-                    onPresetManagementClick = onPresetManagementClick,
-                    onEditClick = {
-                        activePanel = ActivePanel.EDIT
-                    },
-                    onManageClick = { lutId ->
-                        activePanel = ActivePanel.NONE
-                        onFilterManagementClick(lutId)
-                    },
-                    categoryOrder = categoryOrder,
-                    headerContent = if (isVideoLog) {
-                        {
-                            VideoLogLutModeSelector(
-                                mode = state.videoConfig.logLutMode,
-                                enabled = !state.videoRecordingState.isRecording &&
-                                    !state.videoRecordingState.isProcessing,
-                                onModeSelected = viewModel::setVideoLogLutMode
-                            )
-                        }
-                    } else null,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 6.dp, top = 10.dp, end = 6.dp)
-                )
-            }
-        }
+        // FILM: the look strip and its sheet, from the bottom like quick settings. Back closes it.
+        BackHandler(enabled = activePanel == ActivePanel.FILTERS) { activePanel = ActivePanel.NONE }
+        val allPresets by viewModel.allPresets.collectAsState()
+        val defaultPresetName = stringResource(R.string.preset_new_preset_default)
+        FilmPanel(
+            visible = activePanel == ActivePanel.FILTERS,
+            luts = viewModel.selectableLutList,
+            currentLutId = currentLutId,
+            thumbnail = viewModel.previewThumbnail,
+            categoryOrder = categoryOrder,
+            onLutSelected = { viewModel.setLut(it) },
+            onEditClick = { activePanel = ActivePanel.EDIT },
+            onLutManageClick = { lutId ->
+                activePanel = ActivePanel.NONE
+                onFilterManagementClick(lutId)
+            },
+            intensity = (previewRecipeParamsOverride ?: currentRecipeParams).lutIntensity,
+            onIntensityChange = { intensity ->
+                // The picture follows at once; the saved recipe catches up after a short pause.
+                previewRecipeParamsOverride = (previewRecipeParamsOverride ?: currentRecipeParams).copy(lutIntensity = intensity)
+                viewModel.updateLutIntensity(intensity)
+            },
+            frames = viewModel.availableFrameList,
+            currentFrameId = viewModel.currentFrameId,
+            onFrameSelected = viewModel::setFrame,
+            onFrameManageClick = {
+                activePanel = ActivePanel.NONE
+                onFrameManagementClick()
+            },
+            presets = allPresets,
+            activePresetId = activePresetId,
+            activePresetModified = activePresetModified,
+            onPresetSelected = { preset ->
+                discardTransientLookEdits()
+                if (presetRequiresPreviewTransition(preset)) {
+                    runPreviewTransition { viewModel.applyPreset(preset) }
+                } else {
+                    viewModel.applyPreset(preset)
+                }
+            },
+            onNewPresetClick = {
+                viewModel.prepareCurrentSettingsPresetDraft(defaultPresetName)
+                onPresetEditClick(null)
+            },
+            onResetPresetClick = {
+                discardTransientLookEdits()
+                val preset = allPresets.firstOrNull { it.id == activePresetId }
+                if (presetRequiresPreviewTransition(preset)) {
+                    runPreviewTransition { viewModel.resetActivePreset() }
+                } else {
+                    viewModel.resetActivePreset()
+                }
+            },
+            onUpdatePresetClick = viewModel::saveCurrentSettingsToActivePreset,
+            onPresetManageClick = {
+                activePanel = ActivePanel.NONE
+                onPresetManagementClick()
+            },
+            isVideoLog = isVideoMode && state.videoConfig.logProfile.isEnabled,
+            logLutMode = state.videoConfig.logLutMode,
+            logLutModeEnabled = !state.videoRecordingState.isRecording && !state.videoRecordingState.isProcessing,
+            onLogLutModeChange = viewModel::setVideoLogLutMode,
+            onDismiss = { activePanel = ActivePanel.NONE },
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
 
         if (activePanel == ActivePanel.EDIT) {
             LutEditBottomSheet(
@@ -2323,95 +2439,91 @@ fun CameraScreen(
     }
 }
 
+/**
+ * Discard, Undo and Done for a multiple exposure, in three equal slots on the picture's bottom edge, far apart so
+ * Discard is hard to hit by mistake. With two or more shots Discard asks once ("Discard 2?" for 2 s); Done stays
+ * dimmed until two shots, and a tap then says why.
+ */
 @Composable
-fun MultipleExposureOverlay(
+private fun MultipleExposureActions(
     state: com.hinnka.mycamera.viewmodel.MultipleExposureSessionState,
-    onFinish: () -> Unit,
+    onDiscard: () -> Unit,
     onUndo: () -> Unit,
-    onCancel: () -> Unit,
+    onFinish: () -> Unit,
+    onFinishTooEarly: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Box(modifier = modifier.padding(8.dp)) {
-        Surface(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .wrapContentWidth(),
-            color = Color.Transparent,
-            shape = RoundedCornerShape(20.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .background(
-                        brush = Brush.horizontalGradient(
-                            listOf(
-                                Color(0xD90D1117),
-                                Color(0xB8141B22)
-                            )
-                        ),
-                        shape = RoundedCornerShape(20.dp)
-                    )
-                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(18.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Icon(
-                    imageVector = AppIcons.Layers,
-                    contentDescription = null,
-                    tint = AccentColor,
-                    modifier = Modifier.size(16.dp)
-                )
-
-                Text(
-                    text = "${state.capturedCount}/${state.targetCount}",
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelLarge.copy(
-                        shadow = ViewfinderTextShadow
-                    )
-                )
-
-                if (state.isSessionActive) {
-                    IconButton(
-                        onClick = onUndo,
-                        enabled = state.capturedCount > 0 && !state.isProcessing,
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            AppIcons.AutoMirroredOutlinedUndo,
-                            contentDescription = stringResource(R.string.multiple_exposure_undo),
-                            modifier = Modifier.size(16.dp),
-                            tint = Color.White
-                        )
-                    }
-
-                    IconButton(
-                        onClick = onFinish,
-                        enabled = state.canFinish,
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Check,
-                            contentDescription = stringResource(R.string.multiple_exposure_finish),
-                            modifier = Modifier.size(16.dp),
-                            tint = AccentColor
-                        )
-                    }
-
-                    IconButton(
-                        onClick = onCancel,
-                        enabled = !state.isProcessing,
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = stringResource(R.string.multiple_exposure_cancel),
-                            modifier = Modifier.size(16.dp),
-                            tint = Color.Red
-                        )
-                    }
+    var discardArmed by remember { mutableStateOf(false) }
+    LaunchedEffect(discardArmed, state.capturedCount) {
+        if (discardArmed) {
+            delay(2000)
+            discardArmed = false
+        }
+    }
+    val busy = state.isProcessing
+    Row(modifier.fillMaxWidth().height(40.dp)) {
+        MultipleExposureAction(
+            icon = AppIcons.CloseLine,
+            text = if (discardArmed) {
+                stringResource(R.string.multiple_exposure_discard_confirm, state.capturedCount)
+            } else {
+                stringResource(R.string.multiple_exposure_discard)
+            },
+            dimmed = busy,
+            onClick = {
+                if (busy) return@MultipleExposureAction
+                if (state.capturedCount >= 2 && !discardArmed) {
+                    discardArmed = true
+                } else {
+                    discardArmed = false
+                    onDiscard()
                 }
             }
-        }
+        )
+        MultipleExposureAction(
+            icon = AppIcons.UndoLine,
+            text = stringResource(R.string.multiple_exposure_undo),
+            dimmed = busy,
+            onClick = { if (!busy) onUndo() }
+        )
+        MultipleExposureAction(
+            icon = AppIcons.CheckLine,
+            text = stringResource(R.string.multiple_exposure_done),
+            dimmed = !state.canFinish,
+            onClick = {
+                when {
+                    state.canFinish -> onFinish()
+                    !busy -> onFinishTooEarly()
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun RowScope.MultipleExposureAction(icon: ImageVector, text: String, dimmed: Boolean, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    Row(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .graphicsLayer {
+                val scale = if (pressed) 0.92f else 1f
+                scaleX = scale
+                scaleY = scale
+                alpha = if (dimmed) 0.4f else 1f
+            },
+        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        ShadowedLineIcon(icon, 18.dp)
+        Text(
+            text,
+            style = TextStyle(shadow = ViewfinderTextShadow, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White),
+            maxLines = 1
+        )
     }
 }
 
@@ -2423,10 +2535,14 @@ private fun Controls(
     latestPhoto: com.hinnka.mycamera.gallery.MediaData?,
     useMultipleExposure: Boolean,
     multipleExposureState: com.hinnka.mycamera.viewmodel.MultipleExposureSessionState,
+    // Multiple exposure shots so far, counted from the shutter press.
+    exposureCount: Int,
     onGalleryThumbnailBoundsChanged: (Rect) -> Unit,
     onCaptureButtonBoundsChanged: (Rect) -> Unit,
     onSwitchCameraClick: () -> Unit,
     onCaptureModeSelected: (CameraShootingMode) -> Unit,
+    noteLine: NoteLineState,
+    onSnapshot: () -> Unit,
     // The camera is not showing live frames yet or again: the shutter shows its busy look, as when it cannot shoot.
     previewPending: Boolean,
     onCaptureTap: () -> Unit,
@@ -2434,8 +2550,8 @@ private fun Controls(
     // XPAN keeps its filter button on the side bar and has no Looks button or collar.
     isXpan: Boolean,
     onLooksClick: () -> Unit,
-    onLooksBoundsChanged: (Rect) -> Unit,
     onQuickSettingsClick: () -> Unit,
+    modeLine: ModeLineState,
     zoomCollar: (@Composable (fold: () -> Float) -> Unit)?,
     sideControlInset: Dp?,
     modifier: Modifier = Modifier.fillMaxSize()
@@ -2464,7 +2580,7 @@ private fun Controls(
                 state.isPortraitMode -> CameraShootingMode.PORTRAIT
                 else -> CameraShootingMode.PHOTO
             }
-            val line = remember { ModeLineState(shootingMode, state.isRawSupported) }
+            val line = modeLine
             if (!isXpan) Spacer(Modifier.height(CameraControlsLayoutDefaults.CollarRise))
             Box(
                 modifier = Modifier
@@ -2483,6 +2599,7 @@ private fun Controls(
                     recording = state.videoRecordingState.isRecording,
                     videoProcessing = state.videoRecordingState.isProcessing,
                     onSelect = onCaptureModeSelected,
+                    say = noteLine::say,
                     modifier = Modifier.matchParentSize(),
                     collar = zoomCollar?.let { collar -> @Composable { collar { line.fold } } }
                 ) { shutterModifier ->
@@ -2501,8 +2618,9 @@ private fun Controls(
                         allowLongPress = state.captureMode == CaptureMode.PHOTO &&
                             !useMultipleExposure,
                         multipleExposureEnabled = useMultipleExposure && state.captureMode == CaptureMode.PHOTO,
-                        multipleExposureProgress = multipleExposureState.capturedCount.toFloat() /
-                                multipleExposureState.targetCount.coerceAtLeast(1).toFloat(),
+                        // Moves at each press; empty again once the picture is saved or discarded.
+                        multipleExposureProgress = exposureCount.toFloat() /
+                            multipleExposureState.targetCount.coerceAtLeast(1).toFloat(),
                         customStyle = captureButtonStyle,
                         customColor = captureButtonColor,
                         customImagePath = captureButtonImagePath,
@@ -2588,7 +2706,10 @@ private fun Controls(
                             .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
                     )
                     FramedFooterButton(
-                        onClick = { viewModel.captureVideoFrame() },
+                        onClick = {
+                            viewModel.captureVideoFrame()
+                            onSnapshot()
+                        },
                         icon = AppIcons.CameraLine,
                         contentDescription = stringResource(R.string.take_photo),
                         modifier = Modifier
@@ -2671,10 +2792,6 @@ private fun Controls(
                             // Level with the zoom collar's knob.
                             .offset(y = -LooksRise)
                             .size(CameraControlsLayoutDefaults.SideButtonSize)
-                            // Before the lift, so the filter panel's anchor stays put.
-                            .onGloballyPositioned { coordinates ->
-                                onLooksBoundsChanged(coordinates.boundsInRoot())
-                            }
                             .graphicsLayer {
                                 translationY = -10.dp.toPx() * line.side
                                 alpha = 1f - line.side
@@ -2965,6 +3082,12 @@ fun CaptureButton(
         label = "captureProgressRotation"
     )
 
+    val animatedMultipleExposureProgress by animateFloatAsState(
+        targetValue = multipleExposureProgress.coerceIn(0f, 1f),
+        animationSpec = tween(400, easing = FastOutSlowInEasing),
+        label = "multipleExposureProgress"
+    )
+
     val captureProgress = rememberPhotoCaptureProgress(
         photoCaptureProgress.takeIf { isCapturing && captureMode == CaptureMode.PHOTO }
     )
@@ -3112,7 +3235,8 @@ fun CaptureButton(
                 modifier = Modifier.align(Alignment.Center).size(28.dp)
             )
         }
-        if (showBusy && !showActivityProgress) {
+        // A multiple exposure keeps its count ring through every shot; capture and busy rings would blank it.
+        if (showBusy && !showActivityProgress && !showMultipleExposureProgress) {
             CaptureProgressRing(
                 color = Color.White.copy(alpha = rememberRawBusyPulse()),
                 startAngle = -90f,
@@ -3120,14 +3244,14 @@ fun CaptureButton(
                 modifier = Modifier.progressSemantics()
             )
         }
-        if (showMultipleExposureProgress && !showActivityProgress && !showBusy) {
+        if (showMultipleExposureProgress) {
             CaptureProgressRing(
                 color = progressColor,
                 startAngle = -90f,
-                sweepAngle = 360f * multipleExposureProgress.coerceIn(0f, 1f)
+                sweepAngle = 360f * animatedMultipleExposureProgress
             )
         }
-        if (showActivityProgress) {
+        if (showActivityProgress && !showMultipleExposureProgress) {
             val isIndeterminate = isBurstCapturing || showVideoProcessingProgress
             CaptureProgressRing(
                 color = progressColor,

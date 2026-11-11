@@ -31,8 +31,10 @@ internal object CameraControlsLayoutDefaults {
     val MarkColor = Color(0xFFD3D1C7)
 
     val CaptureAreaHeight = ModeZoneHeight + BottomPadding
-    // Room above the mode zone for the zoom collar: 8 dp off the shutter, 26 dp deep.
-    val CollarRise = CaptureButtonSize / 2 + 8.dp + 26.dp - ModeZoneHeight / 2
+    // The zoom collar's top above the shutter's top: 8 dp off the shutter, 26 dp deep.
+    val CollarClearance = 8.dp + 26.dp
+    // Room above the mode zone for the zoom collar.
+    val CollarRise = CaptureButtonSize / 2 + CollarClearance - ModeZoneHeight / 2
     val CollapsedControlsHeight = CaptureAreaHeight + CollarRise + CaptureClearance + ParameterBarHeight
 }
 

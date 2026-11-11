@@ -2981,11 +2981,19 @@ class Camera2Controller(private val context: Context) {
                     afModes = availableAfModes,
                 )
 
+                // A camera without manual exposure (such as a front camera) always meters on its own. A manual
+                // ISO or shutter left from another camera would otherwise freeze its readings and grey out EV.
+                val supportsManualExposure = isManualSensorSupported &&
+                    availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_OFF)
                 _state.update { currentState ->
                     currentState.copy(
                         useRaw = requestedRawCaptureEnabled,
                         isRawSupported = isRawSupported,
                         isManualSensorSupported = isManualSensorSupported,
+                        isIsoAuto = currentState.isIsoAuto || !supportsManualExposure,
+                        isShutterSpeedAuto = currentState.isShutterSpeedAuto || !supportsManualExposure,
+                        exposureBias = if (supportsManualExposure) currentState.exposureBias
+                        else currentState.exposureCompensation * currentState.getExposureCompensationStep(),
                         isP010Supported = isP010Supported,
                         availableNrModes = selectableNrModes,
                         supportsCctWhiteBalance = supportsCctWhiteBalance(),
