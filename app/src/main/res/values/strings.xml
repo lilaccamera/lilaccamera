@@ -43,6 +43,7 @@
     <string name="camera_parameter_focus_auto">Auto</string>
     <string name="camera_parameter_white_balance" translatable="false">AWB</string>
     <string name="camera_parameter_auto" translatable="false">A</string>
+    <string name="camera_parameter_hyperfocal_mark" translatable="false">H</string>
 
     <!-- Focus -->
     <string name="camera_focus_auto">AUTO</string>

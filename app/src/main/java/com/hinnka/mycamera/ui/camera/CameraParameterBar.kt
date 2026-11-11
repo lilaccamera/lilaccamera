@@ -2,11 +2,18 @@ package com.hinnka.mycamera.ui.camera
 
 import android.hardware.camera2.CameraMetadata
 import android.widget.Toast
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.annotation.StringRes
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,7 +56,10 @@ fun CameraParameterBar(
     state: CameraState,
     selectedParameter: CameraParameter?,
     onParameterClick: (CameraParameter) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // A sideways drag on a value changes it through its ruler; called first with the dragged value.
+    scrub: RulerScrub? = null,
+    onScrubStart: (CameraParameter) -> Unit = {},
 ) {
     Row(
         modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp),
@@ -60,7 +70,9 @@ fun CameraParameterBar(
                 item = item,
                 isSelected = selectedParameter == item.parameter,
                 onClick = { onParameterClick(item.parameter) },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                scrub = scrub?.takeIf { item.isEnabled },
+                onScrubStart = { onScrubStart(item.parameter) }
             )
         }
     }
@@ -114,7 +126,13 @@ internal fun cameraParameterItems(state: CameraState): List<CameraParameterItem>
         CameraParameterItem(
             CameraParameter.ISO,
             stringResource(R.string.camera_parameter_iso),
-            if (isoManual) state.iso.toString() else nearestIsoStep(liveIso).toString(),
+            when {
+                isoManual -> state.iso.toString()
+                // Without manual sensor control (this phone's front camera) the reported ISO barely moves and
+                // lies far outside the camera's own range, so it would read as a fixed number.
+                !state.isManualSensorSupported -> stringResource(R.string.camera_parameter_focus_auto)
+                else -> nearestIsoStep(liveIso).toString()
+            },
             isEnabled = state.isManualSensorSupported,
             disabledMessage = R.string.manual_sensor_unavailable,
             isManual = isoManual
@@ -185,9 +203,14 @@ internal fun ParameterItem(
     isSelected: Boolean,
     onClick: () -> Unit,
     vertical: Boolean = false,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    scrub: RulerScrub? = null,
+    onScrubStart: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val pressSource = remember { MutableInteractionSource() }
+    val pressed by pressSource.collectIsPressedAsState()
+    val pressAlpha by animateFloatAsState(if (pressed) 0.55f else 1f, tween(if (pressed) 60 else 180), label = "press")
     val valueColor by animateColorAsState(
         targetValue = when {
             item.isWarning -> Color(0xFFFF6666)
@@ -212,10 +235,37 @@ internal fun ParameterItem(
                 else Modifier.height(CameraControlsLayoutDefaults.ParameterBarHeight)
             )
             .semantics { selected = isSelected }
-            .clickable(enabled = item.isEnabled || item.disabledMessage != null, role = Role.Button) {
+            .then(
+                if (scrub != null) {
+                    Modifier.pointerInput(item.parameter) {
+                        detectHorizontalDragGestures(
+                            onDragStart = {
+                                onScrubStart()
+                                scrub.start(item.parameter)
+                            },
+                            onDragEnd = { scrub.end() },
+                            onDragCancel = { scrub.end() },
+                            onHorizontalDrag = { change, delta ->
+                                change.consume()
+                                scrub.dragBy(delta)
+                            }
+                        )
+                    }
+                } else {
+                    Modifier
+                }
+            )
+            // On the picture a pressed box looks out of place: the value dims under the finger instead.
+            .clickable(
+                interactionSource = pressSource,
+                indication = null,
+                enabled = item.isEnabled || item.disabledMessage != null,
+                role = Role.Button
+            ) {
                 if (item.isEnabled) onClick()
                 else item.disabledMessage?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
-            },
+            }
+            .graphicsLayer { alpha = pressAlpha },
         contentAlignment = Alignment.Center
     ) {
         Box(
@@ -309,7 +359,9 @@ internal fun ManualValuesLine(
             Row(
                 modifier = Modifier
                     .height(TopEdgeLineHeight)
-                    .clickable(role = Role.Button) { onValueClick(item.parameter) },
+                    .clickable(interactionSource = null, indication = null, role = Role.Button) {
+                        onValueClick(item.parameter)
+                    },
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // ISO and EV are bare numbers, so they keep their name; the others read by their unit.
