@@ -46,8 +46,17 @@ enum class CameraParameter {
     SHUTTER_SPEED,
     ISO,
     FOCUS,
-    WHITE_BALANCE
+    WHITE_BALANCE,
+    /** Portrait's virtual aperture: the blur strength, in the viewfinder and in the saved photo. */
+    APERTURE
 }
+
+/** Third stops from f/1.0 to f/16, as on a lens's aperture ring. */
+internal val PortraitApertureStops = listOf(
+    1.0f, 1.1f, 1.2f, 1.4f, 1.6f, 1.8f, 2.0f, 2.2f, 2.5f, 2.8f, 3.2f, 3.5f, 4.0f, 4.5f, 5.0f, 5.6f,
+    6.3f, 7.1f, 8.0f, 9.0f, 10f, 11f, 13f, 14f, 16f
+)
+private val FullApertureStops = setOf(1.0f, 1.4f, 2.0f, 2.8f, 4.0f, 5.6f, 8.0f, 11f, 16f)
 
 internal val CameraParameterRulerHeight = 44.dp
 private val ParameterRulerTickSpacing = 12.dp
@@ -296,6 +305,7 @@ private fun isMajorStep(parameter: CameraParameter, value: Float, index: Int): B
     CameraParameter.ISO -> value.roundToInt() in setOf(50, 100, 200, 400, 800, 1600, 3200, 6400, 12800)
     CameraParameter.WHITE_BALANCE -> value.roundToInt() % 1000 == 0
     CameraParameter.FOCUS -> index % 5 == 0
+    CameraParameter.APERTURE -> value in FullApertureStops
 }
 
 /** A round 30 dp mark at the ruler's ends: amber when on. */
@@ -335,7 +345,12 @@ private fun formatParameterValue(parameter: CameraParameter, value: Float): Stri
     CameraParameter.ISO -> value.roundToInt().toString()
     CameraParameter.WHITE_BALANCE -> "${value.roundToInt()}K"
     CameraParameter.FOCUS -> formatFocusDistance(value)
+    CameraParameter.APERTURE -> formatApertureValue(value)
 }
+
+/** 2 and 2.8, not 2.0. */
+internal fun formatApertureValue(value: Float): String =
+    if (value % 1f == 0f) value.toInt().toString() else String.format(java.util.Locale.ROOT, "%.1f", value)
 
 private fun getScaleValues(parameter: CameraParameter, minValue: Float, maxValue: Float, valueStep: Float): List<Float> {
     if (maxValue <= minValue) return listOf(minValue)
@@ -443,6 +458,8 @@ private fun getScaleValues(parameter: CameraParameter, minValue: Float, maxValue
                 .filter { it in minValue..maxValue }
                 .toList()
         }
+
+        CameraParameter.APERTURE -> PortraitApertureStops
 
         CameraParameter.FOCUS -> {
             val steps = 20

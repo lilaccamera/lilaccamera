@@ -165,6 +165,7 @@ private const val DefaultAwbTemperature = 5000f
 private const val DefaultFocusDistance = 0f
 private val XpanViewfinderInnerBorder = 4.dp
 private val XpanSideControlReservedWidth = 56.dp
+private const val ManualValuesIdleMs = 5_000L
 
 private fun formatVirtualApertureFStop(aperture: Float): String {
     val rounded = aperture.roundToInt()
@@ -443,11 +444,22 @@ fun CameraScreen(
         }
     }
     var lastValueTap by remember { mutableStateOf<Pair<CameraParameter, Long>?>(null) }
+    // Outside Pro the manual values close again a few seconds after their last touch; the values set by
+    // hand stay on the picture's edge. Pro keeps them open: there they are the main controls.
+    var manualValuesTouch by remember { mutableIntStateOf(0) }
+    LaunchedEffect(manualControlsShown, manualControlsMode, manualValuesTouch, rulerScrub.active) {
+        if (manualControlsShown && manualControlsMode != CameraShootingMode.PROFESSIONAL && !rulerScrub.active) {
+            delay(ManualValuesIdleMs)
+            manualControlsShown = false
+            showParameterRuler = false
+        }
+    }
     var everydayRowShown by remember { mutableStateOf(false) }
     // A value set by hand (EV, ISO, shutter, focus, white balance) stays visible while the panel is closed,
     // as a compact line of just those values, so a shot is never taken with a fixed value nobody can see.
     val anyManualValue = state.exposureCompensation != 0 || !state.isIsoAuto || !state.isShutterSpeedAuto ||
-        !state.isAutoFocus || state.awbMode != CaptureRequest.CONTROL_AWB_MODE_AUTO
+        !state.isAutoFocus || state.awbMode != CaptureRequest.CONTROL_AWB_MODE_AUTO ||
+        showsPortraitAperture(state)
     val isXpan = state.aspectRatio == AspectRatio.XPAN
     val burstCapturingCount = viewModel.burstImageCount
 
@@ -1073,10 +1085,12 @@ fun CameraScreen(
                 CameraParameter.FOCUS -> viewModel.setAutoFocus(true)
                 CameraParameter.WHITE_BALANCE ->
                     viewModel.setAwbMode(android.hardware.camera2.CameraMetadata.CONTROL_AWB_MODE_AUTO)
+                CameraParameter.APERTURE -> viewModel.resetPortraitAperture()
             }
         }
         // A tap toggles the value's ruler at once; a second tap on it within 320 ms puts it back to auto.
         val onParameterClick: (CameraParameter) -> Unit = { parameter ->
+            manualValuesTouch++
             val now = android.os.SystemClock.uptimeMillis()
             val last = lastValueTap
             if (last != null && last.first == parameter && now - last.second < 320L) {
@@ -1171,6 +1185,7 @@ fun CameraScreen(
                     CameraParameter.ISO -> state.iso.toFloat()
                     CameraParameter.FOCUS -> state.focusDistance
                     CameraParameter.WHITE_BALANCE -> whiteBalanceCurrentValue
+                    CameraParameter.APERTURE -> state.virtualAperture
                 },
                 minValue = when (selectedParameter) {
                     CameraParameter.EXPOSURE_COMPENSATION -> state.getExposureCompensationRange().lower * state.getExposureCompensationStep()
@@ -1178,6 +1193,7 @@ fun CameraScreen(
                     CameraParameter.ISO -> state.getIsoRange().lower.toFloat()
                     CameraParameter.FOCUS -> 0f
                     CameraParameter.WHITE_BALANCE -> state.awbTemperatureMin.toFloat()
+                    CameraParameter.APERTURE -> PortraitApertureStops.first()
                 },
                 maxValue = when (selectedParameter) {
                     CameraParameter.EXPOSURE_COMPENSATION -> state.getExposureCompensationRange().upper * state.getExposureCompensationStep()
@@ -1185,8 +1201,10 @@ fun CameraScreen(
                     CameraParameter.ISO -> state.getIsoRange().upper.toFloat()
                     CameraParameter.FOCUS -> state.minimumFocusDistance
                     CameraParameter.WHITE_BALANCE -> state.awbTemperatureMax.toFloat()
+                    CameraParameter.APERTURE -> PortraitApertureStops.last()
                 },
                 isAdjustable = when (selectedParameter) {
+                    CameraParameter.APERTURE -> true
                     CameraParameter.EXPOSURE_COMPENSATION -> state.isAutoExposure
                     CameraParameter.SHUTTER_SPEED, CameraParameter.ISO -> state.isManualSensorSupported
                     CameraParameter.FOCUS -> state.minimumFocusDistance > 0f
@@ -1198,7 +1216,7 @@ fun CameraScreen(
                     CameraParameter.FOCUS -> state.isAutoFocus
                     CameraParameter.WHITE_BALANCE ->
                         state.awbMode == android.hardware.camera2.CameraMetadata.CONTROL_AWB_MODE_AUTO
-                    CameraParameter.EXPOSURE_COMPENSATION -> false
+                    CameraParameter.EXPOSURE_COMPENSATION, CameraParameter.APERTURE -> false
                 },
                 showAutoButton = when (selectedParameter) {
                     CameraParameter.SHUTTER_SPEED, CameraParameter.ISO, CameraParameter.WHITE_BALANCE, CameraParameter.FOCUS -> true
@@ -1218,12 +1236,14 @@ fun CameraScreen(
                     viewModel.setHyperfocalFocusEnabled(enabled)
                 },
                 onValueChange = { value ->
+                    manualValuesTouch++
                     when (selectedParameter) {
                         CameraParameter.EXPOSURE_COMPENSATION -> viewModel.setExposureCompensation((value / state.getExposureCompensationStep()).roundToInt())
                         CameraParameter.SHUTTER_SPEED -> viewModel.setShutterSpeed(value.toLong())
                         CameraParameter.ISO -> viewModel.setIso(value.toInt())
                         CameraParameter.FOCUS -> viewModel.setFocusDistance(value)
                         CameraParameter.WHITE_BALANCE -> viewModel.setAwbTemperature(value.toInt())
+                        CameraParameter.APERTURE -> viewModel.setAperture(value)
                     }
                 },
                 onAutoModeToggle = {
@@ -1573,9 +1593,10 @@ fun CameraScreen(
                         Box(Modifier.fillMaxSize().background(Color.Black))
                     }
 
+                    // Portrait shows its aperture with the manual values instead.
                     val showVirtualApertureIndicator =
                         state.captureMode != CaptureMode.VIDEO &&
-                            state.isVirtualApertureEnabled
+                            state.isVirtualApertureEnabled && !state.isPortraitMode
                     if (showVirtualApertureIndicator) {
                         Column(
                             modifier = Modifier
@@ -2611,6 +2632,7 @@ private fun Controls(
                     CaptureButton(
                         captureMode = if (line.shownMode == CameraShootingMode.VIDEO) CaptureMode.VIDEO else CaptureMode.PHOTO,
                         isProfessionalMode = line.shownMode == CameraShootingMode.PROFESSIONAL,
+                        isPortraitMode = line.shownMode == CameraShootingMode.PORTRAIT,
                         isCapturing = state.isCapturing,
                         isCaptureBusy = captureBusy,
                         isCountdownActive = state.countdownValue > 0,
@@ -2994,6 +3016,7 @@ private fun GalleryProcessingOverlay(
 fun CaptureButton(
     captureMode: CaptureMode,
     isProfessionalMode: Boolean,
+    isPortraitMode: Boolean = false,
     isCapturing: Boolean,
     isCaptureBusy: Boolean = false,
     isCountdownActive: Boolean = false,
@@ -3230,6 +3253,15 @@ fun CaptureButton(
             if (busyTint > 0f) {
                 Box(Modifier.fillMaxSize().background(Color(0xFF3C3C3C).copy(alpha = busyTint)))
             }
+        }
+        if (isPortraitMode && !showCancelTimer) {
+            // The mode dial's Portrait mark, in the ring's grey, tells Portrait apart from Photo.
+            Icon(
+                AppIcons.User,
+                contentDescription = null,
+                tint = CameraControlsLayoutDefaults.LineColor,
+                modifier = Modifier.align(Alignment.Center).size(36.dp)
+            )
         }
         if (showCancelTimer) {
             Icon(

@@ -1691,6 +1691,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val shown = face.takeIf { state.value.isPortraitMode }
                 latestPortraitFace = shown
                 latestPortraitFaceAtMs = SystemClock.elapsedRealtime()
+                // Also covers a viewfinder created after the aperture was last set.
+                if (shown != null) glSurfaceView?.setPortraitAperture(state.value.virtualAperture)
                 glSurfaceView?.setPortraitFace(shown)
             }
         }
@@ -1851,6 +1853,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+
+        cameraController.onPreviewStreamActive = { active -> glSurfaceView?.setCameraStreamActive(active) }
 
         cameraController.onCameraError = { code, message, canRetry ->
             // 只记录错误日志，不在这里重试打开相机
@@ -3319,8 +3323,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (enabled) {
             val current = state.value
             virtualApertureBeforePortrait = Pair(current.isVirtualApertureEnabled, current.virtualAperture)
-            val aperture = userPreferencesRepository.current.defaultVirtualAperture
-            cameraController.setAperture(if (aperture > 0f) aperture else PORTRAIT_DEFAULT_APERTURE)
+            resetPortraitAperture()
             setVirtualApertureAuto(true)
         } else {
             virtualApertureBeforePortrait?.let { (wasEnabled, aperture) ->
@@ -3765,6 +3768,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun setAperture(value: Float) {
         cameraController.setAperture(value)
+        glSurfaceView?.setPortraitAperture(value)
+    }
+
+    /** Portrait's starting aperture: the default virtual aperture, or f/2 while that is off. */
+    fun resetPortraitAperture() {
+        val aperture = userPreferencesRepository.current.defaultVirtualAperture
+        setAperture(if (aperture > 0f) aperture else PORTRAIT_DEFAULT_APERTURE)
     }
 
     /**
