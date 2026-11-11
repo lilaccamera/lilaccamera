@@ -91,7 +91,6 @@ import com.hinnka.mycamera.data.CaptureButtonStyle
 import com.hinnka.mycamera.data.DevelopAnimationStyle
 import com.hinnka.mycamera.model.CameraPreset
 import com.hinnka.mycamera.model.ColorRecipeParams
-import com.hinnka.mycamera.model.LutSelectorMode
 import com.hinnka.mycamera.raw.SpectralFilmSelection
 import com.hinnka.mycamera.render.RenderQueue
 import com.hinnka.mycamera.gallery.GalleryManager
@@ -281,7 +280,6 @@ fun CameraScreen(
     val currentLutId by viewModel.currentLutId.collectAsState()
     val lutSwipeState = rememberLutSwipeState()
     val currentRecipeParams by viewModel.currentRecipeParams.collectAsState()
-    val lutSelectorMode by viewModel.lutSelectorMode.collectAsState()
     val activePresetId by preferenceValue { it.activePresetId }
     val activePresetModified by viewModel.isActivePresetModified.collectAsState()
     val customPresets by preferenceValue { it.customPresets }
@@ -327,7 +325,6 @@ fun CameraScreen(
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
-    var filterButtonBounds by remember { mutableStateOf<Rect?>(null) }
     var captureButtonBounds by remember { mutableStateOf<Rect?>(null) }
     var parameterBarTop by remember { mutableStateOf<Float?>(null) }
     var parameterRulerBounds by remember { mutableStateOf<Rect?>(null) }
@@ -1649,9 +1646,6 @@ fun CameraScreen(
                                 activePanel =
                                     if (activePanel == ActivePanel.FILTERS) ActivePanel.NONE else ActivePanel.FILTERS
                             },
-                            onFilterButtonBoundsChanged = { bounds ->
-                                filterButtonBounds = bounds
-                            },
                         )
                     }
                     Box(
@@ -1726,9 +1720,6 @@ fun CameraScreen(
                 onLooksClick = {
                     activePanel = if (activePanel == ActivePanel.FILTERS) ActivePanel.NONE else ActivePanel.FILTERS
                 },
-                onLooksBoundsChanged = { bounds ->
-                    filterButtonBounds = bounds
-                },
                 onQuickSettingsClick = {
                     activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
                 },
@@ -1758,7 +1749,7 @@ fun CameraScreen(
         }
 
         val quickSheetCover by animateFloatAsState(
-            targetValue = if (activePanel == ActivePanel.SETTINGS) 1f else 0f,
+            targetValue = if (activePanel == ActivePanel.SETTINGS || activePanel == ActivePanel.FILTERS) 1f else 0f,
             animationSpec = tween(160),
             label = "quickSheetCover"
         )
@@ -1859,8 +1850,8 @@ fun CameraScreen(
             }
             val topEdgeHistogram = state.histogram.takeIf { isPhotoStyleMode && showHistogram }
             AnimatedVisibility(
-                visible = activePanel != ActivePanel.SETTINGS && !state.videoRecordingState.isRecording &&
-                    !everydayRowShown && (topEdgeMarks.isNotEmpty() || topEdgeHistogram != null),
+                visible = activePanel != ActivePanel.SETTINGS && activePanel != ActivePanel.FILTERS &&
+                    !state.videoRecordingState.isRecording && !everydayRowShown && (topEdgeMarks.isNotEmpty() || topEdgeHistogram != null),
                 enter = fadeIn(tween(150)),
                 exit = fadeOut(tween(150)),
                 modifier = Modifier
@@ -2192,108 +2183,71 @@ fun CameraScreen(
             ProGuide(onDismiss = viewModel::dismissProGuide)
         }
 
-        // During navigation measurement or window resizing, the viewport can be
-        // shorter than the top inset. The panel then has no available vertical space.
-        val filterPanelTop = minOf(topInset, maxHeight)
-        val fallbackFilterPanelBottom = when {
-            isXpan -> maxHeight - 48.dp
-            isVideoMode -> maxHeight - 170.dp
-            else -> viewfinderTop + cardHeight - 48.dp
-        }
-        val filterPanelAnchorY = if (isXpan) {
-            captureButtonBounds?.top
-        } else {
-            // Above the Looks button and the zoom collar beside it.
-            filterButtonBounds?.top
-        }
-        val requestedFilterPanelBottom = filterPanelAnchorY?.let { anchorY ->
-            val parentTop = cameraScreenBounds?.top ?: 0f
-            with(density) { (anchorY - parentTop).toDp() - 8.dp }
-        } ?: fallbackFilterPanelBottom
-        val filterPanelBottom = requestedFilterPanelBottom.coerceIn(filterPanelTop, maxHeight)
-
-        AnimatedVisibility(
-            activePanel == ActivePanel.FILTERS,
-            enter = if (isXpan) {slideInVertically(initialOffsetY = { it })} else fadeIn(),
-            exit = if (isXpan) {slideOutVertically(targetOffsetY = { it })} else fadeOut()
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(filterPanelBottom)
-                    .padding(top = filterPanelTop),
-                contentAlignment = Alignment.BottomCenter
-            ) {
-                val allPresets by viewModel.allPresets.collectAsState()
-                val defaultPresetName = stringResource(R.string.preset_new_preset_default)
-                val isVideoLog = isVideoMode && state.videoConfig.logProfile.isEnabled
-
-                // LUT 选择器 (内嵌 Presets 列表与统一控制，无多余背景遮挡)
-                LutSelector(
-                    availableLuts = viewModel.selectableLutList,
-                    currentLutId = currentLutId,
-                    thumbnail = viewModel.previewThumbnail,
-                    onLutSelected = { viewModel.setLut(it) },
-                    allPresets = allPresets,
-                    presetModeEnabled = !isVideoLog,
-                    activePresetId = activePresetId,
-                    activePresetModified = activePresetModified,
-                    selectedMode = if (isVideoLog) LutSelectorMode.Style else lutSelectorMode,
-                    onModeSelected = { viewModel.setLutSelectorMode(it) },
-                    availableFrames = viewModel.availableFrameList,
-                    currentFrameId = viewModel.currentFrameId,
-                    onFrameSelected = if (isVideoLog) null else viewModel::setFrame,
-                    onFrameManagementClick = {
-                        activePanel = ActivePanel.NONE
-                        onFrameManagementClick()
-                    },
-                    onPresetSelected = { preset ->
-                        discardTransientLookEdits()
-                        if (presetRequiresPreviewTransition(preset)) {
-                            runPreviewTransition { viewModel.applyPreset(preset) }
-                        } else {
-                            viewModel.applyPreset(preset)
-                        }
-                    },
-                    onCreatePresetClick = {
-                        viewModel.prepareCurrentSettingsPresetDraft(defaultPresetName)
-                        onPresetEditClick(null)
-                    },
-                    onResetPresetClick = {
-                        discardTransientLookEdits()
-                        val preset = allPresets.firstOrNull { it.id == activePresetId }
-                        if (presetRequiresPreviewTransition(preset)) {
-                            runPreviewTransition { viewModel.resetActivePreset() }
-                        } else {
-                            viewModel.resetActivePreset()
-                        }
-                    },
-                    onSavePresetClick = viewModel::saveCurrentSettingsToActivePreset,
-                    onPresetManagementClick = onPresetManagementClick,
-                    onEditClick = {
-                        activePanel = ActivePanel.EDIT
-                    },
-                    onManageClick = { lutId ->
-                        activePanel = ActivePanel.NONE
-                        onFilterManagementClick(lutId)
-                    },
-                    categoryOrder = categoryOrder,
-                    headerContent = if (isVideoLog) {
-                        {
-                            VideoLogLutModeSelector(
-                                mode = state.videoConfig.logLutMode,
-                                enabled = !state.videoRecordingState.isRecording &&
-                                    !state.videoRecordingState.isProcessing,
-                                onModeSelected = viewModel::setVideoLogLutMode
-                            )
-                        }
-                    } else null,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 6.dp, top = 10.dp, end = 6.dp)
-                )
-            }
-        }
+        // FILM: the look strip and its sheet, from the bottom like quick settings. Back closes it.
+        BackHandler(enabled = activePanel == ActivePanel.FILTERS) { activePanel = ActivePanel.NONE }
+        val allPresets by viewModel.allPresets.collectAsState()
+        val defaultPresetName = stringResource(R.string.preset_new_preset_default)
+        FilmPanel(
+            visible = activePanel == ActivePanel.FILTERS,
+            luts = viewModel.selectableLutList,
+            currentLutId = currentLutId,
+            thumbnail = viewModel.previewThumbnail,
+            categoryOrder = categoryOrder,
+            onLutSelected = { viewModel.setLut(it) },
+            onEditClick = { activePanel = ActivePanel.EDIT },
+            onLutManageClick = { lutId ->
+                activePanel = ActivePanel.NONE
+                onFilterManagementClick(lutId)
+            },
+            intensity = (previewRecipeParamsOverride ?: currentRecipeParams).lutIntensity,
+            onIntensityChange = { intensity ->
+                // The picture follows at once; the saved recipe catches up after a short pause.
+                previewRecipeParamsOverride = (previewRecipeParamsOverride ?: currentRecipeParams).copy(lutIntensity = intensity)
+                viewModel.updateLutIntensity(intensity)
+            },
+            frames = viewModel.availableFrameList,
+            currentFrameId = viewModel.currentFrameId,
+            onFrameSelected = viewModel::setFrame,
+            onFrameManageClick = {
+                activePanel = ActivePanel.NONE
+                onFrameManagementClick()
+            },
+            presets = allPresets,
+            activePresetId = activePresetId,
+            activePresetModified = activePresetModified,
+            onPresetSelected = { preset ->
+                discardTransientLookEdits()
+                if (presetRequiresPreviewTransition(preset)) {
+                    runPreviewTransition { viewModel.applyPreset(preset) }
+                } else {
+                    viewModel.applyPreset(preset)
+                }
+            },
+            onNewPresetClick = {
+                viewModel.prepareCurrentSettingsPresetDraft(defaultPresetName)
+                onPresetEditClick(null)
+            },
+            onResetPresetClick = {
+                discardTransientLookEdits()
+                val preset = allPresets.firstOrNull { it.id == activePresetId }
+                if (presetRequiresPreviewTransition(preset)) {
+                    runPreviewTransition { viewModel.resetActivePreset() }
+                } else {
+                    viewModel.resetActivePreset()
+                }
+            },
+            onUpdatePresetClick = viewModel::saveCurrentSettingsToActivePreset,
+            onPresetManageClick = {
+                activePanel = ActivePanel.NONE
+                onPresetManagementClick()
+            },
+            isVideoLog = isVideoMode && state.videoConfig.logProfile.isEnabled,
+            logLutMode = state.videoConfig.logLutMode,
+            logLutModeEnabled = !state.videoRecordingState.isRecording && !state.videoRecordingState.isProcessing,
+            onLogLutModeChange = viewModel::setVideoLogLutMode,
+            onDismiss = { activePanel = ActivePanel.NONE },
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
 
         if (activePanel == ActivePanel.EDIT) {
             LutEditBottomSheet(
@@ -2434,7 +2388,6 @@ private fun Controls(
     // XPAN keeps its filter button on the side bar and has no Looks button or collar.
     isXpan: Boolean,
     onLooksClick: () -> Unit,
-    onLooksBoundsChanged: (Rect) -> Unit,
     onQuickSettingsClick: () -> Unit,
     zoomCollar: (@Composable (fold: () -> Float) -> Unit)?,
     sideControlInset: Dp?,
@@ -2671,10 +2624,6 @@ private fun Controls(
                             // Level with the zoom collar's knob.
                             .offset(y = -LooksRise)
                             .size(CameraControlsLayoutDefaults.SideButtonSize)
-                            // Before the lift, so the filter panel's anchor stays put.
-                            .onGloballyPositioned { coordinates ->
-                                onLooksBoundsChanged(coordinates.boundsInRoot())
-                            }
                             .graphicsLayer {
                                 translationY = -10.dp.toPx() * line.side
                                 alpha = 1f - line.side

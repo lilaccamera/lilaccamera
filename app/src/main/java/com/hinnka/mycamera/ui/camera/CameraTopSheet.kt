@@ -81,11 +81,11 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 // Quick settings sheet: a row of everyday settings floating above a translucent list in outlined groups.
-private val SheetEasing = CubicBezierEasing(0.3f, 1.35f, 0.5f, 1f)
-private val SheetText = Color(0xFFE8E6DF)
-private val SheetLabel = Color(0xFFC2C0B6)
-private val SheetDim = Color(0xFFB4B2A9)
-private val SheetGrey = Color(0xFF888780)
+internal val SheetEasing = CubicBezierEasing(0.3f, 1.35f, 0.5f, 1f)
+internal val SheetText = Color(0xFFE8E6DF)
+internal val SheetLabel = Color(0xFFC2C0B6)
+internal val SheetDim = Color(0xFFB4B2A9)
+internal val SheetGrey = Color(0xFF888780)
 private val SheetTextStyle = TextStyle(shadow = ViewfinderTextShadow)
 
 /** One camera the Lens row can switch to: a second camera at the same zoom, or a macro camera. */
@@ -952,7 +952,7 @@ private fun SheetHeader(
 }
 
 @Composable
-private fun HeaderIcon(icon: ImageVector, description: String, onClick: () -> Unit) {
+internal fun HeaderIcon(icon: ImageVector, description: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .size(width = 40.dp, height = 34.dp)
@@ -964,7 +964,7 @@ private fun HeaderIcon(icon: ImageVector, description: String, onClick: () -> Un
 }
 
 @Composable
-private fun QuickGroup(content: @Composable ColumnScope.() -> Unit) {
+internal fun QuickGroup(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1012,7 +1012,7 @@ private fun ModeGroup(title: String, onGuide: (() -> Unit)? = null, content: @Co
 }
 
 /** List rows: the name on the left (tap: explanation, long press: Settings), the choices on the right. */
-private class QuickRows(
+internal class QuickRows(
     val explained: String?,
     val onExplain: (String) -> Unit,
     val onOpenSettingsAt: (SettingsTarget) -> Unit
@@ -1027,13 +1027,15 @@ private class QuickRows(
         last: Boolean = false,
         // A long press that does something else than opening Settings.
         onLongClick: (() -> Unit)? = null,
+        // A small amber dot after the name: something here differs from what was saved.
+        marked: Boolean = false,
         content: @Composable RowScope.() -> Unit
     ) {
         val open = explained == key
         // The choices drop to a second line, still right-aligned, when they don't fit beside the name.
         FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             LongerLongPress {
-                Box(
+                Row(
                     modifier = Modifier
                         .weight(1f)
                         .height(36.dp)
@@ -1041,7 +1043,7 @@ private class QuickRows(
                             onClick = { onExplain(key) },
                             onLongClick = onLongClick ?: settingsTarget?.let { target -> { onOpenSettingsAt(target) } }
                         ),
-                    contentAlignment = Alignment.CenterStart
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = label,
@@ -1050,6 +1052,9 @@ private class QuickRows(
                         maxLines = 1,
                         softWrap = false
                     )
+                    if (marked) {
+                        Box(Modifier.padding(start = 5.dp).size(5.dp).background(ModeAmber, CircleShape))
+                    }
                 }
             }
             Row(
@@ -1072,7 +1077,7 @@ private class QuickRows(
 }
 
 @Composable
-private fun QuickChoice(text: String, selected: Boolean, minWidth: Dp, onClick: () -> Unit) {
+internal fun QuickChoice(text: String, selected: Boolean, minWidth: Dp, onClick: () -> Unit) {
     val shape = RoundedCornerShape(13.dp)
     Box(
         modifier = Modifier
@@ -1120,7 +1125,7 @@ private fun QuickSwitch(checked: Boolean, onClick: () -> Unit) {
 
 /** A value that opens a picker: an inline list under the row, or a sheet. */
 @Composable
-private fun QuickLink(value: String, open: Boolean, onClick: () -> Unit) {
+internal fun QuickLink(value: String, open: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .height(36.dp)
@@ -1175,16 +1180,40 @@ private fun FrameCountSlider(frames: Int, min: Int, withOff: Boolean, onFramesCh
     LaunchedEffect(frames) { dragged = null }
     val currentOnFramesChange by rememberUpdatedState(onFramesChange)
     val shown = dragged ?: if (withOff && frames <= 0) 0 else frames.coerceIn(min, max)
-    val active = if (withOff) shown > 0 else shown > 1
-    val fraction = ((if (shown == 0) start else shown) - start).toFloat() / (max - start)
+    QuickSlider(
+        text = if (shown == 0) stringResource(R.string.quick_frames_off)
+        else pluralStringResource(R.plurals.quick_frame_count, shown, shown),
+        active = if (withOff) shown > 0 else shown > 1,
+        fraction = ((if (shown == 0) start else shown) - start).toFloat() / (max - start),
+        onFraction = { f ->
+            val position = (start + f * (max - start)).roundToInt()
+            val value = if (withOff && position <= start) 0 else position
+            if (value != dragged) {
+                dragged = value
+                currentOnFramesChange(value)
+            }
+        }
+    )
+}
+
+/** The sheet's slider: the value on the left (amber when [active]), a 120 dp track; reports 0..1 while dragging. */
+@Composable
+internal fun QuickSlider(
+    text: String,
+    active: Boolean,
+    fraction: Float,
+    onFraction: (Float) -> Unit,
+    onDoubleTap: (() -> Unit)? = null
+) {
+    val currentOnFraction by rememberUpdatedState(onFraction)
+    val currentOnDoubleTap by rememberUpdatedState(onDoubleTap)
     Row(
         modifier = Modifier.height(36.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
-            text = if (shown == 0) stringResource(R.string.quick_frames_off)
-            else pluralStringResource(R.plurals.quick_frame_count, shown, shown),
+            text = text,
             color = if (active) ModeAmber else SheetText,
             fontSize = 12.5.sp,
             fontWeight = FontWeight.Medium,
@@ -1198,17 +1227,18 @@ private fun FrameCountSlider(frames: Int, min: Int, withOff: Boolean, onFramesCh
                 .width(120.dp)
                 .fillMaxHeight()
                 .pointerInput(Unit) {
-                    fun select(x: Float) {
-                        val position = (start + (x / size.width).coerceIn(0f, 1f) * (max - start)).roundToInt()
-                        val value = if (withOff && position <= start) 0 else position
-                        if (value != dragged) {
-                            dragged = value
-                            currentOnFramesChange(value)
-                        }
-                    }
+                    fun select(x: Float) = currentOnFraction((x / size.width).coerceIn(0f, 1f))
+                    var lastDown = 0L
                     awaitEachGesture {
                         val down = awaitFirstDown()
                         down.consume()
+                        val doubleTap = currentOnDoubleTap
+                        if (doubleTap != null && down.uptimeMillis - lastDown < viewConfiguration.doubleTapTimeoutMillis) {
+                            lastDown = 0L
+                            doubleTap()
+                            return@awaitEachGesture
+                        }
+                        lastDown = down.uptimeMillis
                         select(down.position.x)
                         while (true) {
                             val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
@@ -1371,7 +1401,7 @@ private fun QuickSettingLabel(
 }
 
 @Composable
-private fun ContentManagementOptionsPanel(
+internal fun ContentManagementOptionsPanel(
     visible: Boolean,
     onFilterManageClick: () -> Unit,
     onFrameManageClick: () -> Unit,
