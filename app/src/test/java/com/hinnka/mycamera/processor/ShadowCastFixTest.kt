@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.pow
 
 class ShadowCastFixTest {
@@ -61,6 +62,36 @@ class ShadowCastFixTest {
         val lost = channel(before[i], 16) - channel(pixels[i], 16)
         assertTrue("red lost $lost", lost in 0..5)
         assertTrue(abs(channel(pixels[i], 8) - channel(before[i], 8)) <= 1)
+    }
+
+    @Test
+    fun blueShadowsAreNeutralised() {
+        // Deep shadows (30 % of the frame) whose blue sits above green on average but spreads widely, as in
+        // the front camera's dim shots, so the floor step alone cannot remove it; above them a neutral wall.
+        val lin = Array(w * h) { i ->
+            val x = i % w
+            val y = i / w
+            if (y < h * 3 / 10) {
+                val g = 0.002f + 0.004f * ((x * 7 + y * 13) % 100) / 100f
+                val spread = 0.006f * (((x * 31 + y * 17) % 100) / 50f - 1f)
+                floatArrayOf(g, g, max(g + 0.004f + spread, 0f))
+            } else {
+                val v = 0.02f + 0.08f * x / w
+                floatArrayOf(v, v, v)
+            }
+        }
+        val pixels = IntArray(w * h) { i ->
+            val c = lin[i]
+            (0xFF shl 24) or (encode(c[0]) shl 16) or (encode(c[1]) shl 8) or encode(c[2])
+        }
+        val p = run(pixels)
+        assertEquals(1f, p.floorWeight, 1e-3f)
+        assertTrue("shadow ${p.shadow.toList()}", p.shadow[2] > 0.003f)
+        val diffs = (0 until w * h * 3 / 10).map { channel(pixels[it], 0) - channel(pixels[it], 8) }.sorted()
+        assertTrue("shadow B-G median ${diffs[diffs.size / 2]}", abs(diffs[diffs.size / 2]) <= 2)
+        val wall = pixels[(h * 3 / 4) * w + w / 2]
+        assertTrue("wall ${channel(wall, 16)},${channel(wall, 8)},${channel(wall, 0)}",
+            abs(channel(wall, 0) - channel(wall, 8)) <= 2 && abs(channel(wall, 16) - channel(wall, 8)) <= 2)
     }
 
     @Test
