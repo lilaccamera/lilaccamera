@@ -147,6 +147,8 @@ internal fun lilacRulerLabelEvery(stepDp: Float): Int = RulerNiceSteps.firstOrNu
  * every new step while the finger moves, [onRelease] once when it lifts (do expensive work there). With
  * [stops] every value is a labelled stop that clicks (an aperture ring); otherwise the ruler clicks only when
  * the value crosses [start]. Untouched for 1.6 s, the ruler fades back so the picture shows through.
+ * [labelEvery] overrides how many steps lie between two labels (for example 3 for ⅓ EV steps, so the labels
+ * fall on whole EVs).
  */
 @Composable
 internal fun LilacRuler(
@@ -159,6 +161,7 @@ internal fun LilacRuler(
     onReset: () -> Unit,
     modifier: Modifier = Modifier,
     stops: Boolean = false,
+    labelEvery: Int? = null,
     onTouch: (Boolean) -> Unit = {},
 ) {
     if (values.isEmpty()) return
@@ -173,7 +176,7 @@ internal fun LilacRuler(
     val currentStart by rememberUpdatedState(start)
 
     val stepDp = lilacRulerStepDp(values.size, stops)
-    val labelEvery = lilacRulerLabelEvery(stepDp)
+    val labelStep = labelEvery ?: lilacRulerLabelEvery(stepDp)
     val stepPx = with(density) { stepDp.dp.toPx() }
     fun indexOf(v: Float) = values.indices.minBy { abs(values[it] - v) }
 
@@ -283,7 +286,7 @@ internal fun LilacRuler(
                 values.forEachIndexed { i, v ->
                     val x = origin + i * stepPx
                     if (x < -30 * dp || x > trackPx + 30 * dp) return@forEachIndexed
-                    val labelled = stops || i % labelEvery == 0
+                    val labelled = stops || i % labelStep == 0
                     val major = labelled || v == 0f
                     drawRect(
                         color = if (major) Color.White else Color.White.copy(alpha = 0.65f),

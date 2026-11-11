@@ -43,6 +43,7 @@ import com.hinnka.mycamera.lut.creator.OpenAIApiClient
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.model.CameraPreset
 import com.hinnka.mycamera.model.ColorRecipeParams
+import com.hinnka.mycamera.model.RecipeParam
 import com.hinnka.mycamera.model.toEffectParams
 import com.hinnka.mycamera.model.withoutIndependentEffects
 import com.hinnka.mycamera.processor.DenoiseStrength
@@ -2304,13 +2305,27 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     // The edit state as the editor opened, to tell which settings the user has changed since.
     private var editOpenState: Map<String, Any?> = emptyMap()
 
-    // Keys name the settings the editor's sections show; the recipe's look intensity is its own key.
+    // Keys name the settings the editor shows: each recipe value is "recipe.<RecipeParam>", the look intensity
+    // "lutIntensity", the curves and the colour grading one key each.
     private fun editStateSnapshot(): Map<String, Any?> {
         val recipe = editPhotoRecipeParams.value
-        return mapOf(
+        val recipeValues = RecipeParam.entries
+            .filter { it != RecipeParam.LUT_INTENSITY }
+            .associate { "recipe.${it.name}" to recipe?.let(it::getValue) }
+        return recipeValues + mapOf(
             "look" to editLutId.value,
             "lutIntensity" to recipe?.lutIntensity,
-            "recipe" to recipe?.copy(lutIntensity = 1f),
+            "recipe.curves" to recipe?.let {
+                listOf(it.masterCurvePoints, it.redCurvePoints, it.greenCurvePoints, it.blueCurvePoints).map { a -> a?.toList() }
+            },
+            "recipe.grading" to recipe?.let {
+                listOf(
+                    it.gradingShadowHue, it.gradingShadowAmount, it.gradingShadowLuminance,
+                    it.gradingMidtoneHue, it.gradingMidtoneAmount, it.gradingMidtoneLuminance,
+                    it.gradingHighlightHue, it.gradingHighlightAmount, it.gradingHighlightLuminance,
+                    it.gradingBalance, it.gradingBlending,
+                )
+            },
             "frame" to editFrameId.value,
             "applyEffectsToVideo" to editApplyEffectsToVideo.value,
             "sharpening" to editSharpening.value,
@@ -2350,6 +2365,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             "mirror" to editMirrorHorizontal.value,
         )
     }
+
+    /** A setting's value when the editor opened, by its [editStateSnapshot] key: where its reset returns to. */
+    fun editOpenValue(key: String): Any? = editOpenState[key]
 
     /** The settings changed since the editor opened, by the keys of [editStateSnapshot]. */
     fun editChangedKeys(): Set<String> {
@@ -3077,46 +3095,46 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun saveRawExposureCompensationValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
+    // The RAW render's tone values. They only set the edit state, so a ruler can move through many values
+    // without writing the photo's file each time; the editor saves and re-renders once, when the finger lifts
+    // (persistCurrentRawEditMetadata).
+    fun setRawExposureCompensation(value: Float) {
         editRawExposureCompensation.value = value
-        if (value != 0f) {
-            editRawAutoExposure.value = false
-        }
-        persistRawEditMetadata(mediaData, onComplete)
+        updateRawAutoExposureForTone()
     }
 
-    fun resetRawExposureCompensationValue(mediaData: MediaData, onComplete: ((Boolean) -> Unit)? = null) {
-        editRawAutoExposure.value = false
-        editRawExposureCompensation.value = 0f
-        persistRawEditMetadata(mediaData, onComplete)
-    }
-
-    fun saveRawHighlightsAdjustmentValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
+    fun setRawHighlightsAdjustment(value: Float) {
         editRawHighlightsAdjustment.value = value
-        if (value != 0f) {
-            editRawAutoExposure.value = false
-        }
-        persistRawEditMetadata(mediaData, onComplete)
+        updateRawAutoExposureForTone()
     }
 
-    fun saveRawShadowsAdjustmentValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
+    fun setRawShadowsAdjustment(value: Float) {
         editRawShadowsAdjustment.value = value
-        persistRawEditMetadata(mediaData, onComplete)
+    }
+
+    fun setRawBlackPointCorrection(value: Float) {
+        editRawBlackPointCorrection.value = value
+    }
+
+    fun setRawWhitePointCorrection(value: Float) {
+        editRawWhitePointCorrection.value = value
+    }
+
+    // A manual exposure or highlights value turns the legacy auto exposure off; putting both back as they were
+    // when the editor opened brings back the auto exposure the photo had.
+    private fun updateRawAutoExposureForTone() {
+        val exposure = editRawExposureCompensation.value
+        val highlights = editRawHighlightsAdjustment.value
+        if (exposure == editOpenState["rawExposure"] && highlights == editOpenState["rawHighlights"]) {
+            (editOpenState["rawAutoExposure"] as? Boolean)?.let { editRawAutoExposure.value = it }
+        } else if (exposure != 0f || highlights != 0f) {
+            editRawAutoExposure.value = false
+        }
     }
 
     fun saveRawDROModeValue(mediaData: MediaData, mode: String, onComplete: ((Boolean) -> Unit)? = null) {
         val resolvedMode = RawProcessingPreferences.DROMode.fromPersistedName(mode)
         editRawDROMode.value = resolvedMode.name
-        persistRawEditMetadata(mediaData, onComplete)
-    }
-
-    fun saveRawBlackPointCorrectionValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
-        editRawBlackPointCorrection.value = value
-        persistRawEditMetadata(mediaData, onComplete)
-    }
-
-    fun saveRawWhitePointCorrectionValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
-        editRawWhitePointCorrection.value = value
         persistRawEditMetadata(mediaData, onComplete)
     }
 

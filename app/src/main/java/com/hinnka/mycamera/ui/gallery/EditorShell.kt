@@ -9,6 +9,11 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.ui.text.TextStyle
@@ -43,6 +48,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -66,6 +76,7 @@ import com.hinnka.mycamera.R
 import com.hinnka.mycamera.ui.camera.ModeAmber
 import com.hinnka.mycamera.ui.components.LilacDim
 import com.hinnka.mycamera.ui.components.LilacIconTint
+import com.hinnka.mycamera.ui.components.LilacLabel
 import com.hinnka.mycamera.ui.components.LilacSecondary
 import com.hinnka.mycamera.ui.components.LilacText
 import com.hinnka.mycamera.ui.components.LilacTextStyle
@@ -83,19 +94,13 @@ internal const val EDITOR_CONTROL_DP = 46f
  * them for a video moves nothing else. [keys] are the settings (by [com.hinnka.mycamera.viewmodel.GalleryViewModel.editChangedKeys])
  * whose change puts a dot on the section.
  */
-internal enum class EditorSection(@StringRes val label: Int, val keys: Set<String>, val gap: Boolean = false) {
+internal enum class EditorSection(@StringRes val label: Int, val keys: Set<String> = emptySet(), val gap: Boolean = false) {
     Look(R.string.editor_section_look, setOf("look", "lutIntensity", "frame", "applyEffectsToVideo")),
-    Light(
-        R.string.editor_section_light,
-        setOf(
-            "recipe", "rawExposure", "rawAutoExposure", "rawHighlights", "rawShadows", "rawBlackPoint", "rawWhitePoint",
-            "rawLensShading", "rawDro", "rawBlackLevel", "rawWhiteLevel", "rawCfa", "rawDcp", "rawEmbeddedProfile",
-            "rawHncs", "rawBaseLook", "rawEngine", "rawToneMapping", "rawSpectralFilm", "rawFotufilm",
-        )
-    ),
-    Color(R.string.editor_section_color, setOf("recipe")),
-    Effects(R.string.editor_section_effects, setOf("recipe")),
-    Detail(R.string.editor_section_detail, setOf("sharpening", "noiseReduction", "chromaNoiseReduction", "aiDenoise")),
+    // Light, Color, Effects and Detail take their keys from their settings and groups (EditorAdjustments.kt).
+    Light(R.string.editor_section_light),
+    Color(R.string.editor_section_color),
+    Effects(R.string.editor_section_effects),
+    Detail(R.string.editor_section_detail),
     Portrait(R.string.editor_section_portrait, setOf("aperture", "bokeh", "focus"), gap = true),
     Crop(R.string.editor_section_crop, setOf("crop", "cropRatio", "rotation", "straighten", "mirror"));
 
@@ -314,6 +319,11 @@ internal data class EditorValue(
     val icon: ImageVector,
     val changed: Boolean = false,
     val wide: Boolean = false,
+    /** Drawn in place of [icon], following the value: [fraction] is its share of the range, −1 to 1. */
+    val glyph: EditorGlyph? = null,
+    val fraction: Float = 0f,
+    /** A group: shown as "Name ›", and a tap goes one level deeper. */
+    val group: Boolean = false,
 )
 
 /** The settings of the current level, side by side; the row scrolls sideways with faded edges when they don't fit. */
@@ -323,13 +333,14 @@ internal fun EditorValueRow(
     selectedKey: String?,
     onClick: (EditorValue) -> Unit,
     modifier: Modifier = Modifier,
+    onHold: (EditorValue, Boolean) -> Unit = { _, _ -> },
 ) {
     // When every item fits at its own width, the items share the row equally; otherwise each keeps its width
     // (80 dp for a number, 96 dp for a name) and the row scrolls.
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val natural = values.sumOf { if (it.wide) 96 else 80 }
         val shared = if (natural <= maxWidth.value) maxWidth / values.size.coerceAtLeast(1) else null
-        ValueRowItems(values, selectedKey, shared, onClick)
+        ValueRowItems(values, selectedKey, shared, onClick, onHold)
     }
 }
 
@@ -339,6 +350,7 @@ private fun ValueRowItems(
     selectedKey: String?,
     shared: Dp?,
     onClick: (EditorValue) -> Unit,
+    onHold: (EditorValue, Boolean) -> Unit,
 ) {
     val scroll = rememberScrollState()
     val canScroll = scroll.maxValue > 0
@@ -366,64 +378,112 @@ private fun ValueRowItems(
             }
             .horizontalScroll(scroll)
     ) {
-        values.forEach { v -> EditorValueItem(v, v.key == selectedKey, shared ?: if (v.wide) 96.dp else 80.dp) { onClick(v) } }
+        values.forEach { v ->
+            EditorValueItem(v, v.key == selectedKey, shared ?: if (v.wide) 96.dp else 80.dp, { onClick(v) }, { onHold(v, it) })
+        }
     }
 }
 
 @Composable
-private fun EditorValueItem(item: EditorValue, selected: Boolean, width: Dp, onClick: () -> Unit) {
+private fun EditorValueItem(
+    item: EditorValue,
+    selected: Boolean,
+    width: Dp,
+    onClick: () -> Unit,
+    onHold: (Boolean) -> Unit,
+) {
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentOnHold by rememberUpdatedState(onHold)
     Column(
         modifier = Modifier
             .width(width)
             .height(84.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                role = Role.Button,
-                onClick = onClick
-            )
+            // A tap, or a long press that lasts while the finger stays down. A drag belongs to the row's sideways
+            // scroll, which takes the pointer and ends either.
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var finished = false
+                    val up = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                        waitForUpOrCancellation().also { finished = true }
+                    }
+                    if (finished) {
+                        if (up != null) currentOnClick()
+                        return@awaitEachGesture
+                    }
+                    if (currentEvent.changes.any { it.isConsumed }) return@awaitEachGesture
+                    currentOnHold(true)
+                    try {
+                        waitForUpOrCancellation()
+                    } finally {
+                        currentOnHold(false)
+                    }
+                }
+            }
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                onClick { currentOnClick(); true }
+            }
             .padding(horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically)
     ) {
+        val iconColor = if (selected) ModeAmber else LilacIconTint
         Box(Modifier.height(26.dp), contentAlignment = Alignment.Center) {
-            Icon(item.icon, contentDescription = null, tint = if (selected) ModeAmber else LilacIconTint, modifier = Modifier.size(24.dp))
-        }
-        // A long name steps down in size, wrapping onto two lines from 13 sp, before it is cut short. Two lines
-        // spill a few dp into the gaps around the 24 dp value line, so the icon and the name stay where they
-        // are. The room for the change dot is kept free either way, so the size doesn't jump when it appears.
-        Row(
-            Modifier
-                .height(24.dp)
-                .wrapContentHeight(unbounded = true)
-                .heightIn(max = 30.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            BasicText(
-                text = item.value,
-                style = TextStyle(
-                    color = if (selected) ModeAmber else LilacText,
-                    fontWeight = FontWeight.Medium,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 1.1.em
-                ),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                autoSize = TextAutoSize.StepBased(minFontSize = 12.sp, maxFontSize = 17.sp, stepSize = 1.sp),
-                modifier = Modifier.widthIn(max = width - 17.dp)
-            )
-            if (item.changed) {
-                Box(Modifier.padding(start = 4.dp).size(5.dp).background(ModeAmber, CircleShape))
+            val glyph = item.glyph
+            if (glyph != null) {
+                val vector = remember(glyph, item.fraction, iconColor) { editorGlyph(glyph, item.fraction, iconColor) }
+                Icon(vector, contentDescription = null, tint = Color.Unspecified, modifier = Modifier.size(24.dp))
+            } else {
+                Icon(item.icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(24.dp))
             }
         }
-        Text(
-            text = item.name,
-            color = if (selected) Color.White else LilacSecondary,
-            fontSize = 11.sp,
-            lineHeight = 14.sp,  // the theme's 24 sp line would cut the name's bottom off
-            maxLines = 1,
-            modifier = Modifier.height(14.dp)
-        )
+        if (item.group) {
+            Row(Modifier.height(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(item.name, color = LilacText, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                Icon(AppIcons.ChevronRightLine, contentDescription = null, tint = LilacDim, modifier = Modifier.size(16.dp))
+                if (item.changed) {
+                    Box(Modifier.padding(start = 2.dp).size(5.dp).background(ModeAmber, CircleShape))
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+        } else {
+            // A long name steps down in size, wrapping onto two lines from 13 sp, before it is cut short. Two lines
+            // spill a few dp into the gaps around the 24 dp value line, so the icon and the name stay where they
+            // are. The room for the change dot is kept free either way, so the size doesn't jump when it appears.
+            Row(
+                Modifier
+                    .height(24.dp)
+                    .wrapContentHeight(unbounded = true)
+                    .heightIn(max = 30.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                BasicText(
+                    text = item.value,
+                    style = TextStyle(
+                        color = if (selected) ModeAmber else LilacText,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 1.1.em
+                    ),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    autoSize = TextAutoSize.StepBased(minFontSize = 12.sp, maxFontSize = 17.sp, stepSize = 1.sp),
+                    modifier = Modifier.widthIn(max = width - 17.dp)
+                )
+                if (item.changed) {
+                    Box(Modifier.padding(start = 4.dp).size(5.dp).background(ModeAmber, CircleShape))
+                }
+            }
+            Text(
+                text = item.name,
+                color = if (selected) Color.White else LilacSecondary,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,  // the theme's 24 sp line would cut the name's bottom off
+                maxLines = 1,
+                modifier = Modifier.height(14.dp)
+            )
+        }
     }
 }
 
@@ -480,4 +540,90 @@ private fun DialogButton(text: String, color: Color, onClick: () -> Unit) {
     ) {
         Text(text, color = color, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
+}
+
+/**
+ * The path row inside a group: ← and the group's name (with its parent two levels down), the group's own
+ * picker, and Reset when the group has one. It takes the sections row's place, 70 dp to the bottom edge.
+ */
+@Composable
+internal fun EditorGroupRow(
+    title: String,
+    parentTitle: String?,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    onReset: (() -> Unit)? = null,
+    picker: (@Composable RowScope.() -> Unit)? = null,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(70.dp)
+            .drawWithContent {
+                drawContent()
+                drawRect(Color.White.copy(alpha = 0.08f), size = androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx()))
+            },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxHeight()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    role = Role.Button,
+                    onClick = onBack
+                )
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(AppIcons.ArrowLeftLine, contentDescription = stringResource(R.string.editor_back), tint = LilacText, modifier = Modifier.size(20.dp))
+            if (parentTitle != null) {
+                Text("$parentTitle ›", color = LilacDim, fontSize = 15.sp, maxLines = 1)
+            }
+            Text(title, color = LilacText, fontSize = 15.sp, maxLines = 1)
+        }
+        Row(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            picker?.invoke(this)
+        }
+        if (onReset != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .clickable(role = Role.Button, onClick = onReset)
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(AppIcons.UndoLine, contentDescription = null, tint = LilacDim, modifier = Modifier.size(16.dp))
+                Text(stringResource(R.string.editor_reset), color = LilacDim, fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+/** The explanation of one setting, on request: a card floating above the control layer. */
+@Composable
+internal fun EditorExplanationCard(name: String, text: String, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(14.dp)
+    Text(
+        text = buildAnnotatedString {
+            withStyle(SpanStyle(color = Color.White, fontWeight = FontWeight.Medium)) { append(name) }
+            append(" · ")
+            append(text)
+        },
+        color = LilacLabel,
+        fontSize = 12.5.sp,
+        lineHeight = 1.45.em,
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Color(0xDB141413), shape)
+            .border(1.dp, Color.White.copy(alpha = 0.08f), shape)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    )
 }

@@ -6,6 +6,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -127,6 +128,9 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.sign
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+
+// Two taps on the same setting closer than this are a double tap.
+private const val DOUBLE_TAP_MS = 300L
 
 // Look intensity, 0 to 200 % in 5 % steps.
 private val IntensitySteps = List(41) { it * 5 / 100f }
@@ -382,6 +386,16 @@ fun GalleryEditScreen(
     var section by rememberSaveable { mutableStateOf(EditorSection.Look) }
     var selections by rememberSaveable { mutableStateOf(hashMapOf<String, String>()) }
     var fullView by rememberSaveable { mutableStateOf(false) }
+    // The groups entered inside the section, outermost first, as EditorGroup names joined by "/".
+    var groupPath by rememberSaveable { mutableStateOf("") }
+    // The setting whose explanation card is open.
+    var explainKey by remember { mutableStateOf<String?>(null) }
+    // Taps on the value row: the last one, to tell a double tap, and a second tap's card waiting out that window.
+    var lastTapKey by remember { mutableStateOf<String?>(null) }
+    var lastTapAt by remember { mutableLongStateOf(0L) }
+    var pendingCard by remember { mutableStateOf<Job?>(null) }
+    // The recipe as it was when a long press on one setting began, to put back when it ends.
+    var heldRecipe by remember { mutableStateOf<ColorRecipeParams?>(null) }
     var showDiscardDialog by remember { mutableStateOf(false) }
     var fingerOnPhoto by remember { mutableStateOf(false) }
     var fingerOnRuler by remember { mutableStateOf(false) }
@@ -619,9 +633,27 @@ fun GalleryEditScreen(
     } else {
         EditorSection.entries
     }
-    val changedKeys = viewModel.editChangedKeys()
+    // Reading every edit value here makes this recompute on the frame a value changes, so a change dot
+    // appears and goes at once rather than with the next unrelated recomposition.
+    val applyEffectsToVideo by viewModel.editApplyEffectsToVideo.collectAsState()
+    val changedKeys = remember(
+        editLutId, editPhotoRecipeParams, editFrameId, applyEffectsToVideo, editSharpening, editNoiseReduction,
+        editChromaNoiseReduction, editAiDenoiseEnabled, editRawExposureCompensation, editRawAutoExposure,
+        editRawHighlightsAdjustment, editRawShadowsAdjustment, editRawBlackPointCorrection, editRawWhitePointCorrection,
+        editRawLensShadingCorrectionEnabled, editRawDROMode, editRawBlackLevelMode, editRawCustomBlackLevel,
+        editRawWhiteLevelMode, editRawCustomWhiteLevel, editRawCfaCorrectionMode, editRawDcpId, editRawEmbeddedDngProfileId,
+        editRawHncsProfileId, editRawHncsRenderIntent, editRawHncsFilmCurveMode, editRawBaselineLutId, editRawColorEngine,
+        editRawToneMappingParameters, editRawSpectralFilmStock, editRawSpectralFilmPrint, editRawSpectralFilmCDensityGain,
+        editRawSpectralFilmMDensityGain, editRawSpectralFilmYDensityGain, editRawFotufilmDocument, editComputationalAperture,
+        editBokehStyle, editFocusX, editFocusY, editCropRect, editCropAspectOption, editRotationDegrees,
+        editStraightenDegrees, editMirrorHorizontal,
+    ) { viewModel.editChangedKeys() }
     val openIntensity = remember(currentEditSourcePhoto.id) { (editPhotoRecipeParams ?: editLutRecipeParams).lutIntensity }
     val isAiDenoising by viewModel.isAiDenoising.collectAsState()
+    val aiDenoiseProgress by viewModel.aiDenoiseProgress.collectAsState()
+    LaunchedEffect(fullView) {
+        if (fullView) explainKey = null
+    }
 
     fun leaveEditor() {
         viewModel.exitEditMode()
@@ -633,10 +665,12 @@ fun GalleryEditScreen(
         if (viewModel.editChangedKeys().isNotEmpty()) showDiscardDialog = true else leaveEditor()
     }
 
-    // Back goes up one step: the question, full view, then leaving.
+    // Back goes up one step: the question, the explanation card, a group, full view, then leaving.
     BackHandler {
         when {
             showDiscardDialog -> showDiscardDialog = false
+            explainKey != null -> explainKey = null
+            groupPath.isNotEmpty() -> groupPath = groupPath.substringBeforeLast("/", "")
             fullView -> fullView = false
             else -> requestLeave()
         }
@@ -1130,24 +1164,142 @@ fun GalleryEditScreen(
             }
 
             if (!fullView) {
-                val lookChanged = "look" in changedKeys || "lutIntensity" in changedKeys
-                val lookName = availableLuts.find { it.id == editLutId }?.getName() ?: stringResource(R.string.none)
-                val frameName = availableFrames.find { it.id == editFrameId }?.name ?: stringResource(R.string.none)
                 val effectiveRecipe = editPhotoRecipeParams ?: editLutRecipeParams
                 val intensity = effectiveRecipe.lutIntensity
-                val values = when (section) {
-                    EditorSection.Look -> listOf(
-                        EditorValue("look", stringResource(R.string.editor_look), lookName, AppIcons.FiltersLine, "look" in changedKeys, wide = true),
+                val groupStack = groupPath.split("/").filter { it.isNotEmpty() }.map(EditorGroup::valueOf)
+                val group = groupStack.lastOrNull()
+                val levelKey = (listOf(section.name) + groupStack.map { it.name }).joinToString("/")
+
+                fun settingValue(s: EditorSetting): Float = when (s) {
+                    EditorSetting.RawExposure -> editRawExposureCompensation
+                    EditorSetting.RawHighlights -> editRawHighlightsAdjustment
+                    EditorSetting.RawShadows -> editRawShadowsAdjustment
+                    EditorSetting.Whites -> editRawWhitePointCorrection
+                    EditorSetting.Blacks -> editRawBlackPointCorrection
+                    EditorSetting.NoiseReduction -> editNoiseReduction
+                    EditorSetting.ColorNoise -> editChromaNoiseReduction
+                    EditorSetting.AiDenoise -> if (editAiDenoiseEnabled) 1f else 0f
+                    else -> s.param!!.getValue(effectiveRecipe)
+                }
+
+                // Where a setting's reset returns: its value when the editor opened.
+                fun openValue(s: EditorSetting): Float =
+                    viewModel.editOpenValue(s.key) as? Float ?: s.param?.defaultValue ?: 0f
+
+                fun setSetting(s: EditorSetting, v: Float) {
+                    when (s) {
+                        EditorSetting.RawExposure -> viewModel.setRawExposureCompensation(v)
+                        EditorSetting.RawHighlights -> viewModel.setRawHighlightsAdjustment(v)
+                        EditorSetting.RawShadows -> viewModel.setRawShadowsAdjustment(v)
+                        EditorSetting.Whites -> viewModel.setRawWhitePointCorrection(v)
+                        EditorSetting.Blacks -> viewModel.setRawBlackPointCorrection(v)
+                        EditorSetting.NoiseReduction -> viewModel.setNoiseReduction(v)
+                        EditorSetting.ColorNoise -> viewModel.setChromaNoiseReduction(v)
+                        else -> s.param?.let { param ->
+                            val recipe = editPhotoRecipeParams ?: editLutRecipeParams
+                            // The effects go through their own group, as they always have: it also clears the
+                            // retired legacy halation value a look may still carry.
+                            val effect = EffectType.entries.firstOrNull { it.recipeParam == param }
+                            viewModel.setPhotoRecipeParams(
+                                effect?.setValue(recipe.toEffectParams(), v)?.applyTo(recipe) ?: param.setValue(recipe, v)
+                            )
+                        }
+                    }
+                }
+
+                // RAW tone values and noise reduction are saved and rendered once, when the finger lifts.
+                fun releaseSetting(s: EditorSetting) {
+                    when {
+                        s.kind == SettingKind.RawTone ->
+                            viewModel.persistCurrentRawEditMetadata(currentEditSourcePhoto) { requestRawPreviewRefresh() }
+                        s.kind == SettingKind.Denoise && isRaw ->
+                            viewModel.persistCurrentRawEditMetadata(currentEditSourcePhoto) { success ->
+                                if (success) requestRawPreviewRefresh()
+                            }
+                        s.kind == SettingKind.Denoise -> viewModel.refreshPhotonDenoiseBase(currentEditSourcePhoto)
+                    }
+                }
+
+                fun setAiDenoise(enabled: Boolean) {
+                    if (isAiDenoising || enabled == editAiDenoiseEnabled) return
+                    viewModel.setAiDenoiseEnabled(enabled)
+                    if (enabled) {
+                        if (AiDenoiseModelManager.isInstalled(context)) startAiDenoise() else pendingAiDenoise = true
+                    } else {
+                        viewModel.resetAiDenoise(photo = currentEditSourcePhoto) { success ->
+                            if (!success) {
+                                viewModel.setAiDenoiseEnabled(true)
+                                showAiDenoiseFailure()
+                            }
+                        }
+                    }
+                }
+
+                val settings = if (group == null) {
+                    EditorSetting.forSection(section, isRaw, currentPhoto.isVideo)
+                } else {
+                    emptyList()
+                }
+                val groups = if (group == null) EditorGroup.forSection(section, isRaw) else emptyList()
+                val offText = stringResource(R.string.editor_off)
+                val onText = stringResource(R.string.editor_on)
+                val values = when {
+                    group != null -> emptyList()
+                    section == EditorSection.Look -> listOf(
+                        EditorValue(
+                            "look", stringResource(R.string.editor_look),
+                            availableLuts.find { it.id == editLutId }?.getName() ?: stringResource(R.string.none),
+                            AppIcons.FiltersLine, "look" in changedKeys, wide = true
+                        ),
                         EditorValue(
                             "intensity", stringResource(R.string.editor_intensity), "${(intensity * 100).roundToInt()}%",
                             AppIcons.AdjustmentsLine, "lutIntensity" in changedKeys
                         ),
-                        EditorValue("frame", stringResource(R.string.frame), frameName, AppIcons.FrameLine, "frame" in changedKeys, wide = true),
+                        EditorValue(
+                            "frame", stringResource(R.string.frame),
+                            availableFrames.find { it.id == editFrameId }?.name ?: stringResource(R.string.none),
+                            AppIcons.FrameLine, "frame" in changedKeys, wide = true
+                        ),
                         EditorValue("preset", stringResource(R.string.editor_preset), "—", AppIcons.BookmarkLine, wide = true),
                     )
-                    else -> emptyList()
+                    else -> settings.map { s ->
+                        val v = settingValue(s)
+                        EditorValue(
+                            key = s.key,
+                            name = stringResource(s.label),
+                            value = when {
+                                s.kind != SettingKind.AiDenoise -> s.format(v)
+                                isAiDenoising -> "${(aiDenoiseProgress * 100).roundToInt()}%"
+                                editAiDenoiseEnabled -> onText
+                                else -> offText
+                            },
+                            icon = s.icon,
+                            changed = s.key in changedKeys,
+                            glyph = s.glyph,
+                            fraction = s.fraction(v),
+                        )
+                    } + groups.map { g ->
+                        EditorValue(
+                            key = "group:${g.name}",
+                            name = stringResource(g.label),
+                            value = "",
+                            icon = g.icon,
+                            changed = g.keys.any { it in changedKeys },
+                            wide = true,
+                            group = true,
+                        )
+                    }
                 }
-                val selectedKey = values.firstOrNull { it.key == selections[section.name] }?.key ?: values.firstOrNull()?.key
+                val selectable = values.filterNot { it.group }
+                val selectedKey = selectable.firstOrNull { it.key == selections[levelKey] }?.key ?: selectable.firstOrNull()?.key
+                val selectedSetting = settings.firstOrNull { it.key == selectedKey }
+
+                fun sectionChanged(s: EditorSection): Boolean = when (s) {
+                    EditorSection.Light, EditorSection.Color, EditorSection.Effects, EditorSection.Detail ->
+                        EditorSetting.forSection(s, isRaw, currentPhoto.isVideo).any { it.key in changedKeys } ||
+                            EditorGroup.forSection(s, isRaw).any { g -> g.keys.any { it in changedKeys } }
+                    else -> s.keys.any { it in changedKeys }
+                }
 
                 EditorEdgeIcons(
                     busy = fingerOnPhoto || fingerOnRuler,
@@ -1179,6 +1331,40 @@ fun GalleryEditScreen(
                     modifier = Modifier.align(Alignment.TopCenter)
                 )
 
+                // The explanation of the selected setting, on a second tap on it.
+                val explained = settings.firstOrNull { it.key == explainKey }
+                if (explained != null) {
+                    // A look's own exposure, highlights or shadows stay applied on a RAW photo, hidden; say so.
+                    val lookPart = when (explained) {
+                        EditorSetting.RawExposure -> EditorSetting.Exposure
+                        EditorSetting.RawHighlights -> EditorSetting.Highlights
+                        EditorSetting.RawShadows -> EditorSetting.Shadows
+                        else -> null
+                    }?.let { part ->
+                        val v = part.param!!.getValue(effectiveRecipe)
+                        if (v != part.param.defaultValue) {
+                            " " + stringResource(R.string.editor_look_also_sets, stringResource(part.label), part.format(v))
+                        } else {
+                            ""
+                        }
+                    }.orEmpty()
+                    EditorExplanationCard(
+                        name = stringResource(explained.label),
+                        text = stringResource(explained.explanation) + lookPart,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
+                    )
+                } else if (explainKey == "intensity" && section == EditorSection.Look) {
+                    EditorExplanationCard(
+                        name = stringResource(R.string.editor_intensity),
+                        text = stringResource(R.string.editor_explain_intensity),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
+                    )
+                }
+
                 // The one active control, on the photo's bottom edge.
                 Box(
                     modifier = Modifier
@@ -1188,6 +1374,44 @@ fun GalleryEditScreen(
                         .height(EDITOR_CONTROL_DP.dp)
                 ) {
                     when {
+                        group != null -> EditorControlHint(
+                            stringResource(R.string.editor_section_not_built, stringResource(group.label))
+                        )
+                        selectedSetting?.kind == SettingKind.AiDenoise -> Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            listOf(false to offText, true to onText).forEach { (enabled, text) ->
+                                LilacChip(
+                                    text = text,
+                                    selected = editAiDenoiseEnabled == enabled,
+                                    onClick = { setAiDenoise(enabled) },
+                                    height = 36.dp,
+                                    fill = Color(0xB8141413),
+                                    fontSize = 13.sp,
+                                    horizontalPadding = 13.dp,
+                                )
+                            }
+                        }
+                        selectedSetting != null -> {
+                            val start = openValue(selectedSetting)
+                            val steps = selectedSetting.steps.let { if (start in it) it else (it + start).sorted() }
+                            LilacRuler(
+                                values = steps,
+                                value = settingValue(selectedSetting),
+                                start = start,
+                                label = selectedSetting::tickLabel,
+                                onChange = { setSetting(selectedSetting, it) },
+                                onRelease = { releaseSetting(selectedSetting) },
+                                onReset = {
+                                    setSetting(selectedSetting, start)
+                                    releaseSetting(selectedSetting)
+                                },
+                                labelEvery = selectedSetting.labelEvery,
+                                onTouch = { fingerOnRuler = it }
+                            )
+                        }
                         section != EditorSection.Look -> EditorControlHint(
                             stringResource(R.string.editor_section_not_built, stringResource(section.label))
                         )
@@ -1215,13 +1439,20 @@ fun GalleryEditScreen(
                     }
                 }
 
-                // The tool block: the settings of the current level above the sections.
+                // The tool block: the settings of the current level above the path row. It lightens one step for
+                // each group you are inside, so the depth shows without reading.
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
                         .height(EDITOR_BLOCK_DP.dp)
-                        .background(Color.Black)
+                        .background(
+                            when (groupStack.size) {
+                                0 -> Color.Black
+                                1 -> Color(0xFF222220)
+                                else -> Color(0xFF2E2E2C)
+                            }
+                        )
                 ) {
                     Spacer(Modifier.height(2.dp))
                     if (values.isEmpty()) {
@@ -1230,16 +1461,89 @@ fun GalleryEditScreen(
                         EditorValueRow(
                             values = values,
                             selectedKey = selectedKey,
-                            onClick = { selections = HashMap(selections).apply { put(section.name, it.key) } }
+                            onClick = { item ->
+                                val now = SystemClock.uptimeMillis()
+                                val doubleTap = item.key == lastTapKey && now - lastTapAt < DOUBLE_TAP_MS
+                                lastTapKey = item.key
+                                lastTapAt = if (doubleTap) 0L else now
+                                pendingCard?.cancel()
+                                when {
+                                    item.group -> {
+                                        explainKey = null
+                                        groupPath = (groupStack.map { it.name } + item.key.removePrefix("group:")).joinToString("/")
+                                    }
+                                    // A double tap returns the setting to where it was when the editor opened.
+                                    doubleTap -> {
+                                        explainKey = null
+                                        settings.firstOrNull { it.key == item.key }?.let { s ->
+                                            if (s.kind == SettingKind.AiDenoise) {
+                                                setAiDenoise(openValue(s) == 1f || viewModel.editOpenValue(s.key) == true)
+                                            } else {
+                                                setSetting(s, openValue(s))
+                                                releaseSetting(s)
+                                            }
+                                        }
+                                        if (item.key == "intensity") {
+                                            viewModel.setPhotoRecipeParams(
+                                                RecipeParam.LUT_INTENSITY.setValue(editPhotoRecipeParams ?: editLutRecipeParams, openIntensity)
+                                            )
+                                        }
+                                    }
+                                    // A second, single tap on the selected setting opens or closes its explanation,
+                                    // once it can't be the first half of a double tap any more.
+                                    item.key == selectedKey -> pendingCard = scope.launch {
+                                        delay(DOUBLE_TAP_MS)
+                                        explainKey = if (explainKey == item.key) null else item.key
+                                    }
+                                    else -> {
+                                        explainKey = null
+                                        selections = HashMap(selections).apply { put(levelKey, item.key) }
+                                    }
+                                }
+                            },
+                            // A long press shows the photo without this one setting's change while it lasts.
+                            onHold = { item, holding ->
+                                val s = settings.firstOrNull { it.key == item.key }
+                                val live = item.key == "intensity" || s?.kind == SettingKind.Recipe
+                                when {
+                                    item.group -> Unit
+                                    !live && holding -> Toast.makeText(context, R.string.editor_compare_one_unavailable, Toast.LENGTH_SHORT).show()
+                                    !live -> Unit
+                                    holding -> {
+                                        val recipe = editPhotoRecipeParams ?: editLutRecipeParams
+                                        heldRecipe = recipe
+                                        viewModel.setPhotoRecipeParams(
+                                            if (s != null) s.param!!.setValue(recipe, openValue(s))
+                                            else RecipeParam.LUT_INTENSITY.setValue(recipe, openIntensity)
+                                        )
+                                    }
+                                    else -> heldRecipe?.let {
+                                        heldRecipe = null
+                                        viewModel.setPhotoRecipeParams(it)
+                                    }
+                                }
+                            }
                         )
                     }
                     Spacer(Modifier.height(4.dp))
-                    EditorSectionRow(
-                        sections = sections,
-                        selected = section,
-                        changed = { s -> if (s == EditorSection.Look) lookChanged || "frame" in changedKeys else s.keys.any { it in changedKeys } },
-                        onSelect = { section = it }
-                    )
+                    if (group == null) {
+                        EditorSectionRow(
+                            sections = sections,
+                            selected = section,
+                            changed = ::sectionChanged,
+                            onSelect = {
+                                explainKey = null
+                                groupPath = ""
+                                section = it
+                            }
+                        )
+                    } else {
+                        EditorGroupRow(
+                            title = stringResource(group.label),
+                            parentTitle = groupStack.getOrNull(groupStack.size - 2)?.let { stringResource(it.label) },
+                            onBack = { groupPath = groupStack.dropLast(1).joinToString("/") { it.name } }
+                        )
+                    }
                 }
             }
 
