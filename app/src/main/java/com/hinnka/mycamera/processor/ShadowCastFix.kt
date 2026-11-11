@@ -19,17 +19,23 @@ import kotlin.math.sqrt
  * front camera: about 10 to 15 levels of luma with a magenta or blue tint that changes from shot to shot).
  * It shows as pink, hazy shadows and a magenta cast in dim mid-tones, more on the front camera.
  *
- * Three steps, all measured per photo on a copy about 250 px wide, in linear light:
+ * Four steps, all measured per photo on a copy about 250 px wide, in linear light:
  * 1. Black floor: the 1st percentile of each channel. Removed as a whole when the darkest tones pile up
  *    at one level, as a floor does (20th / 1st green percentile below 3; dim shots measured 2.1 to 3.1).
  *    Dark but real colours spread out (bright shots measured 4.4 to 9.3): above 4.5 only its colour
  *    (R and B above G) is removed. In between it fades.
- * 2. Shadow colour, dim photos only: the median colour offset (linear R-G, B-G) of the darkest quarter of
- *    tones, which the leftover floor turns blue or magenta depending on the gains. Removed fully up to that
- *    quarter's top brightness, fading to none two stops above it.
+ * 2. Shadow colour: the median colour offset (linear R-G, B-G) of the darkest quarter of tones, which the
+ *    leftover floor turns blue or magenta depending on the gains. In dim photos all of it is removed; in
+ *    brighter ones only the share R and B have in common (a leftover floor is never green, as green has the
+ *    smallest gain), so red or blue dark objects keep their colour. Full strength up to that quarter's top
+ *    brightness, fading to none two stops above it; the brightness taken out is given back equally to all
+ *    channels, so this step changes colour only.
  * 3. Magenta tint: the median colour of the flattest nearly neutral areas (walls, ceilings) gives the
  *    grey; only its magenta share is removed, never added, so warm or cool light keeps its colour. Full
  *    strength up to the grey's brightness, fading to none two stops above it, so bright areas keep theirs.
+ * 4. Shadow lift, dim photos only: all channels scaled by up to 1.5 in the darkest quarter, fading out two
+ *    stops above, to give back the detail and brightness step 1 takes. Not in photos with essentially no
+ *    light, where it would only show noise.
  */
 object ShadowCastFix {
     private const val TAG = "ShadowCastFix"
@@ -43,6 +49,9 @@ object ShadowCastFix {
     private const val MAX_WHOLE_BLACK = 0.012f // linear, about 28 levels
     private const val MAX_COLOUR_BLACK = 0.004f
     private const val MAX_SHADOW = 0.03f // largest shadow colour offset, linear
+    private const val LIFT = 0.5f // shadow lift in dim photos: x1.5 in the darkest quarter (x2 showed too much noise)
+    private const val LIFT_DARK = 0.0065f // median linear luma (about 19 levels): no lift at or below, nothing to show but noise
+    private const val LIFT_LIGHT = 0.012f // about 30 levels: full lift at or above
     private const val FADE_RANGE = 4f // tint fades out between the grey's brightness and 4x it (two stops)
     private const val BAND_ROWS = 64
     private const val ENCODE_STEPS = 16384
@@ -57,19 +66,20 @@ object ShadowCastFix {
     class Params(
         val black: FloatArray, // per channel, linear
         val floorWeight: Float, // 1 = dim photo: whole floor and shadow colour removed; 0 = only the floor's colour
-        val shadow: FloatArray, // shadow colour offset per channel (G is 0), linear
+        val shadow: FloatArray, // shadow colour offset removed per channel (G is 0), linear
         val shadowLuma: Float, // top of the darkest quarter of tones
+        val lift: Float, // shadow lift at the darkest quarter (0.5 = x1.5)
         val tint: Float, // magenta removed, log units
         val gains: FloatArray,
         val greyLuma: Float,
     ) {
         val isIdentity: Boolean
-            get() = black.all { it < 1e-5f } && tint <= 0f && (floorWeight <= 0f || shadow.all { abs(it) < 1e-5f })
+            get() = black.all { it < 1e-5f } && tint <= 0f && shadow.all { abs(it) < 1e-5f } && lift <= 0f
 
         override fun toString() =
-            ("black=%.4f,%.4f,%.4f floorWeight=%.2f shadow=%.4f,%.4f below %.4f tint=%.3f gains=%.3f,%.3f,%.3f " +
-                "greyLuma=%.3f").format(
-                black[0], black[1], black[2], floorWeight, shadow[0], shadow[2], shadowLuma, tint,
+            ("black=%.4f,%.4f,%.4f floorWeight=%.2f shadow=%.4f,%.4f below %.4f lift=%.2f tint=%.3f " +
+                "gains=%.3f,%.3f,%.3f greyLuma=%.3f").format(
+                black[0], black[1], black[2], floorWeight, shadow[0], shadow[2], shadowLuma, lift, tint,
                 gains[0], gains[1], gains[2], greyLuma,
             )
     }
@@ -135,6 +145,9 @@ object ShadowCastFix {
             }
         }
 
+        val medianLuma = median(FloatArray(n) { LUMA[0] * r[it] + LUMA[1] * g[it] + LUMA[2] * b[it] })
+        val liftGate = ((medianLuma - LIFT_DARK) / (LIFT_LIGHT - LIFT_DARK)).coerceIn(0f, 1f)
+
         // 1. Black floor.
         val q1 = floatArrayOf(quantile(r, 0.01f), quantile(g, 0.01f), quantile(b, 0.01f))
         val pileUp = quantile(g, 0.2f) / max(q1[1], 1e-6f)
@@ -161,12 +174,19 @@ object ShadowCastFix {
             db[k] = b[i] - g[i]
             k++
         }
-        val shadow = floatArrayOf(median(dr).coerceIn(-MAX_SHADOW, MAX_SHADOW), 0f, median(db).coerceIn(-MAX_SHADOW, MAX_SHADOW))
-        if (floorWeight > 0f && shadowLuma > 0f) {
+        val sr = median(dr).coerceIn(-MAX_SHADOW, MAX_SHADOW)
+        val sb = median(db).coerceIn(-MAX_SHADOW, MAX_SHADOW)
+        val common = max(min(sr, sb), 0f)
+        val shadow = floatArrayOf(floorWeight * sr + (1f - floorWeight) * common, 0f, floorWeight * sb + (1f - floorWeight) * common)
+        if (shadowLuma > 0f && (shadow[0] != 0f || shadow[2] != 0f)) {
             for (i in 0 until n) {
-                val wt = floorWeight * fade(y[i], shadowLuma)
-                r[i] = max(r[i] - wt * shadow[0], 0f)
-                b[i] = max(b[i] - wt * shadow[2], 0f)
+                val wt = fade(y[i], shadowLuma)
+                val nr = max(r[i] - wt * shadow[0], 0f)
+                val nb = max(b[i] - wt * shadow[2], 0f)
+                val back = LUMA[0] * (r[i] - nr) + LUMA[2] * (b[i] - nb)
+                r[i] = nr + back
+                g[i] += back
+                b[i] = nb + back
             }
             y = FloatArray(n) { LUMA[0] * r[it] + LUMA[1] * g[it] + LUMA[2] * b[it] }
         }
@@ -215,7 +235,8 @@ object ShadowCastFix {
         val grey = floatArrayOf(exp(tint), 1f, exp(tint)) // the cast grey keeps its brightness
         val norm = dot(grey) / dot(FloatArray(3) { grey[it] * gains[it] })
         for (c in 0..2) gains[c] *= norm
-        return Params(black, floorWeight, shadow, shadowLuma, tint, gains, greyLuma)
+        val lift = if (shadowLuma > 0f) LIFT * floorWeight * liftGate else 0f
+        return Params(black, floorWeight, shadow, shadowLuma, lift, tint, gains, greyLuma)
     }
 
     /** Applies [p] to the first [count] ARGB pixels of [pixels]; alpha is kept. */
@@ -226,8 +247,11 @@ object ShadowCastFix {
         val weight = if (p.tint > 0f && p.greyLuma > 0f) {
             FloatArray(WEIGHT_STEPS + 1) { fade(it / WEIGHT_STEPS.toFloat(), p.greyLuma) }
         } else null
-        val shadowWeight = if (p.floorWeight > 0f && p.shadowLuma > 0f && p.shadow.any { it != 0f }) {
-            FloatArray(WEIGHT_STEPS + 1) { p.floorWeight * fade(it / WEIGHT_STEPS.toFloat(), p.shadowLuma) }
+        val shadowWeight = if (p.shadowLuma > 0f && p.shadow.any { it != 0f }) {
+            FloatArray(WEIGHT_STEPS + 1) { fade(it / WEIGHT_STEPS.toFloat(), p.shadowLuma) }
+        } else null
+        val liftWeight = if (p.lift > 0f && p.shadowLuma > 0f) {
+            FloatArray(WEIGHT_STEPS + 1) { 1f + p.lift * fade(it / WEIGHT_STEPS.toFloat(), p.shadowLuma) }
         } else null
         val o0 = p.shadow[0]; val o2 = p.shadow[2]
         val g0 = p.gains[0] - 1f; val g1 = p.gains[1] - 1f; val g2 = p.gains[2] - 1f
@@ -238,8 +262,12 @@ object ShadowCastFix {
             var lb = max(toLinear[px and 0xFF] - b2, 0f) * s2
             if (shadowWeight != null) {
                 val ws = shadowWeight[((LUMA[0] * lr + LUMA[1] * lg + LUMA[2] * lb) * WEIGHT_STEPS).toInt().coerceIn(0, WEIGHT_STEPS)]
-                lr = max(lr - ws * o0, 0f)
-                lb = max(lb - ws * o2, 0f)
+                val nr = max(lr - ws * o0, 0f)
+                val nb = max(lb - ws * o2, 0f)
+                val back = LUMA[0] * (lr - nr) + LUMA[2] * (lb - nb) // brightness back, equally: colour only
+                lr = nr + back
+                lg += back
+                lb = nb + back
             }
             if (weight != null) {
                 val yv = LUMA[0] * lr + LUMA[1] * lg + LUMA[2] * lb
@@ -247,6 +275,12 @@ object ShadowCastFix {
                 lr *= 1f + wt * g0
                 lg *= 1f + wt * g1
                 lb *= 1f + wt * g2
+            }
+            if (liftWeight != null) {
+                val k = liftWeight[((LUMA[0] * lr + LUMA[1] * lg + LUMA[2] * lb) * WEIGHT_STEPS).toInt().coerceIn(0, WEIGHT_STEPS)]
+                lr *= k
+                lg *= k
+                lb *= k
             }
             pixels[i] = (px and 0xFF000000.toInt()) or
                 (enc[(lr * ENCODE_STEPS + 0.5f).toInt().coerceIn(0, ENCODE_STEPS)] shl 16) or

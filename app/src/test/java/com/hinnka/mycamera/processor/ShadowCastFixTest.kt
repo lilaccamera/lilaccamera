@@ -95,6 +95,35 @@ class ShadowCastFixTest {
     }
 
     @Test
+    fun dimShotIsLiftedButNotOneWithoutLight() {
+        // A fifth of the frame at the floor (enough to read as dim), so the darkest quarter reaches the wall.
+        val room = { x: Int, y: Int -> if (y < h * 22 / 100) 0f else 0.01f + 0.08f * x / w }
+        val floor = floatArrayOf(0.002f, 0.001f, 0.002f)
+        val dim = run(scene(room, floatArrayOf(1f, 1f, 1f), floor))
+        assertEquals(1f, dim.floorWeight, 1e-3f)
+        assertEquals(0.5f, dim.lift, 1e-3f)
+        val noLight = run(scene({ x, y -> 0.1f * room(x, y) }, floatArrayOf(1f, 1f, 1f), floor))
+        assertEquals(1f, noLight.floorWeight, 1e-3f)
+        assertEquals(0f, noLight.lift, 1e-6f)
+    }
+
+    @Test
+    fun brightPhotoLosesOnlyTheMagentaShareOfItsShadows() {
+        // Spread-out tones (not a floor); the darker third has R and B raised, R more than B.
+        val pixels = IntArray(w * h) { i ->
+            val v = 0.004f + 0.5f * i.toFloat() / (w * h)
+            val dark = v < 0.17f
+            (0xFF shl 24) or (encode(v + if (dark) 0.02f else 0f) shl 16) or (encode(v) shl 8) or
+                encode(v + if (dark) 0.012f else 0f)
+        }
+        val p = run(pixels)
+        assertEquals(0f, p.floorWeight, 1e-3f)
+        assertEquals(0f, p.lift, 1e-6f)
+        assertTrue("shadow ${p.shadow.toList()}", p.shadow[0] > 0.002f)
+        assertEquals(p.shadow[0], p.shadow[2], 1e-6f) // only the share both have; R keeps its extra red
+    }
+
+    @Test
     fun greenCastIsNeverMadeMagenta() {
         val pixels = scene(dimRoom, floatArrayOf(0.8f, 1f, 0.8f), FloatArray(3))
         val p = run(pixels)
