@@ -1,0 +1,72 @@
+package com.hinnka.mycamera.processor
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import kotlin.math.abs
+import kotlin.math.pow
+
+class ShadowCastFixTest {
+    private val w = 400
+    private val h = 300
+
+    private fun encode(v: Float): Int {
+        val c = v.coerceIn(0f, 1f)
+        val s = if (c <= 0.0031308f) c * 12.92f else 1.055f * c.pow(1f / 2.4f) - 0.055f
+        return (s * 255f + 0.5f).toInt().coerceIn(0, 255)
+    }
+
+    /** A scene from per-pixel linear grey, a channel multiplier (the cast) and an added floor. */
+    private fun scene(grey: (x: Int, y: Int) -> Float, cast: FloatArray, floor: FloatArray) = IntArray(w * h) { i ->
+        val v = grey(i % w, i / w)
+        (0xFF shl 24) or (encode(v * cast[0] + floor[0]) shl 16) or (encode(v * cast[1] + floor[1]) shl 8) or
+            encode(v * cast[2] + floor[2])
+    }
+
+    private fun run(pixels: IntArray): ShadowCastFix.Params {
+        val p = checkNotNull(ShadowCastFix.estimate(w, h) { y, rows, out -> pixels.copyInto(out, 0, y * w, (y + rows) * w) })
+        ShadowCastFix.correct(pixels, pixels.size, p)
+        return p
+    }
+
+    private fun channel(px: Int, shift: Int) = (px shr shift) and 0xFF
+
+    // Dim room: a third of the frame sits at the black floor, the rest is a smooth wall gradient.
+    private val dimRoom = { x: Int, y: Int -> if (y < h / 3) 0f else 0.01f + 0.08f * x / w }
+
+    @Test
+    fun dimShotLosesFloorAndMagenta() {
+        val pixels = scene(dimRoom, floatArrayOf(1.3f, 1f, 1.3f), floatArrayOf(0.004f, 0.002f, 0.003f))
+        val p = run(pixels)
+        assertEquals(1f, p.floorWeight, 1e-3f)
+        assertTrue("tint ${p.tint}", p.tint > 0.2f)
+        val black = pixels[10 * w + 200]
+        for (shift in intArrayOf(16, 8, 0)) assertTrue("black ${channel(black, shift)}", channel(black, shift) <= 1)
+        val wall = pixels[(h / 3 + 20) * w + 100] // dark wall, full correction strength
+        val g = channel(wall, 8)
+        assertTrue("wall R ${channel(wall, 16)} G $g", abs(channel(wall, 16) - g) <= 2)
+        assertTrue("wall B ${channel(wall, 0)} G $g", abs(channel(wall, 0) - g) <= 2)
+    }
+
+    @Test
+    fun litShotKeepsDarkColours() {
+        // Lit room: dark tones spread out and are genuinely red, not a floor.
+        val pixels = scene({ x, y -> 0.004f + 0.5f * (x + y * w).toFloat() / (w * h) }, floatArrayOf(2f, 1f, 0.6f), FloatArray(3))
+        val before = pixels.copyOf()
+        val p = run(pixels)
+        assertEquals(0f, p.floorWeight, 1e-3f)
+        assertTrue("tint ${p.tint}", p.tint < 0.02f) // a few quantised pixels pass as grey; at most a trace
+        // Only the floor's colour share goes (capped at 0.004 linear): the darkest reds lose a few levels.
+        val i = 5 * w + 10
+        val lost = channel(before[i], 16) - channel(pixels[i], 16)
+        assertTrue("red lost $lost", lost in 0..5)
+        assertTrue(abs(channel(pixels[i], 8) - channel(before[i], 8)) <= 1)
+    }
+
+    @Test
+    fun greenCastIsNeverMadeMagenta() {
+        val pixels = scene(dimRoom, floatArrayOf(0.8f, 1f, 0.8f), FloatArray(3))
+        val p = run(pixels)
+        assertEquals(0f, p.tint, 1e-6f)
+    }
+}
