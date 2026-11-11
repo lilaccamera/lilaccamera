@@ -2,8 +2,10 @@ package com.hinnka.mycamera.lut
 
 import android.graphics.Bitmap
 import android.opengl.GLES30
+import com.hinnka.mycamera.BuildConfig
 import com.hinnka.mycamera.processor.ShadowCastFix
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.utils.SystemPropertiesUtil
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.Executors
@@ -121,6 +123,14 @@ internal class PreviewCastFixGl {
         private const val TEXTURE_UNIT = 7
         private const val SAMPLE_INTERVAL_MS = 500L
         private const val LOG_EVERY = 20
+
+        /**
+         * Off by default: on the phone the estimate jumped between updates (floor weight 0 to 1 within seconds, so
+         * the boost went between 1x and 3x). Debug builds: `adb shell setprop debug.lilac.previewcastfix on`,
+         * read at each camera stream start.
+         */
+        val switchedOn: Boolean
+            get() = BuildConfig.DEBUG && SystemPropertiesUtil.get("debug.lilac.previewcastfix")?.trim() == "on"
 
         /** Photo brightness over the cast-fixed viewfinder at 1 lux, linear: L* 23 / 12 in the mid-tones, 44 / 24 at the top. */
         const val MAX_BOOST = 3f
