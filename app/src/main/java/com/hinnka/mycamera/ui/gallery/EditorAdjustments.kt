@@ -218,6 +218,8 @@ internal enum class EditorGroup(
     @StringRes val label: Int,
     val keys: Set<String>,
     val rawOnly: Boolean = false,
+    /** The group this one sits in; null for a group of the section itself. */
+    val parent: EditorGroup? = null,
 ) {
     Curve(EditorSection.Light, R.string.editor_group_curve, setOf("recipe.curves")),
     Raw(
@@ -227,6 +229,10 @@ internal enum class EditorGroup(
             "rawHncs", "rawBaseLook", "rawEngine", "rawToneMapping", "rawSpectralFilm", "rawFotufilm",
         ),
         rawOnly = true
+    ),
+    Sensor(
+        EditorSection.Light, R.string.editor_group_sensor, setOf("rawBlackLevel", "rawWhiteLevel", "rawCfa"),
+        rawOnly = true, parent = Raw
     ),
     Mixer(
         EditorSection.Color, R.string.editor_group_mixer,
@@ -246,6 +252,7 @@ internal enum class EditorGroup(
         get() = when (this) {
             Curve -> AppIcons.ChartLine
             Raw -> AppIcons.PhotoSensorLine
+            Sensor -> AppIcons.SensorLine
             Mixer -> AppIcons.PaletteLine
             Grading -> AppIcons.CircleHalfLine
             Calibration -> AppIcons.SlidersLine
@@ -253,14 +260,15 @@ internal enum class EditorGroup(
 
     companion object {
         fun forSection(section: EditorSection, isRaw: Boolean): List<EditorGroup> =
-            entries.filter { it.section == section && (!it.rawOnly || isRaw) }
+            entries.filter { it.section == section && it.parent == null && (!it.rawOnly || isRaw) }
     }
 }
 
 /** One option of a choice setting, shown as a chip on the photo's bottom edge. */
 internal data class EditorChoice(
     val label: String,
-    val icon: ImageVector,
+    val icon: ImageVector?,
     val selected: Boolean,
+    val onLongClick: (() -> Unit)? = null,
     val onClick: () -> Unit,
 )

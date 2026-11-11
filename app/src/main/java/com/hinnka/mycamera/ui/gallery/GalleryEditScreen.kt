@@ -125,6 +125,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.VideoFrameProcessor
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.AspectRatioFrameLayout
+import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.lut.CurveUtils
 import com.hinnka.mycamera.lut.VideoLutEffect
 import com.hinnka.mycamera.lut.LutConfig
@@ -443,6 +444,8 @@ fun GalleryEditScreen(
     var curveChannel by rememberSaveable { mutableStateOf(CurveChannel.MASTER) }
     var curveSelected by remember { mutableStateOf<Int?>(null) }
     var curveDrag by remember { mutableStateOf<List<Pair<Float, Float>>?>(null) }
+    // Light › RAW › Profile: the imported DCP a long press asked to delete.
+    var deleteDcpAsk by remember { mutableStateOf<DcpInfo?>(null) }
     val curveOpen = groupPath.substringAfterLast("/") == EditorGroup.Curve.name
     // Mixer, Grading and Calibration: the colour, range or primary picked in each.
     var mixerPick by rememberSaveable { mutableIntStateOf(1) }
@@ -514,6 +517,15 @@ fun GalleryEditScreen(
         )
     }
 
+    // RAW: this session's renders, small, by the edit state they show. Going back to one (an engine tried before)
+    // shows it at once while the RAW develops again behind it, so looks can be compared without waiting.
+    val rawLooks = remember(editSourcePhoto?.id) { mutableListOf<Pair<Map<String, Any?>, Bitmap>>() }
+    // The RAW state the photo's files were last developed from; null: as the editor opened.
+    var developedRaw by remember(editSourcePhoto?.id) { mutableStateOf<Map<String, Any?>?>(null) }
+    var rawLookShown by remember(editSourcePhoto?.id) { mutableStateOf(false) }
+    fun rawLook(state: Map<String, Any?>): Bitmap? = rawLooks.firstOrNull { it.first == state }?.second
+    fun rawDeveloped(): Boolean = viewModel.editRawState() == (developedRaw ?: viewModel.editRawState(open = true))
+
     suspend fun renderPreview(
         photo: MediaData,
         maxEdge: Int,
@@ -539,6 +551,8 @@ fun GalleryEditScreen(
                 if (section == EditorSection.Crop) {
                     cropPreviewBitmap = bitmap
                 }
+            } else if (isRaw && !rawDeveloped() && rawLook(viewModel.editStateKey()) != null) {
+                // An older develop finished while an earlier look is shown for the newer state: keep that look.
             } else {
                 previewBitmap = bitmap
             }
@@ -570,20 +584,13 @@ fun GalleryEditScreen(
                     )
                 }
             }
-            when {
-                importedDcps.size == 1 && failedCount == 0 -> {
-                    Toast.makeText(context, context.getString(R.string.raw_dcp_import_success, importedDcps.first().getName()), Toast.LENGTH_SHORT).show()
+            noteLine.say(
+                when {
+                    importedDcps.isEmpty() -> R.string.editor_dcp_import_failed
+                    failedCount > 0 -> R.string.editor_dcp_import_partial
+                    else -> R.string.editor_dcp_imported
                 }
-                importedDcps.isNotEmpty() && failedCount == 0 -> {
-                    Toast.makeText(context, context.getString(R.string.raw_dcp_import_success_count, importedDcps.size), Toast.LENGTH_SHORT).show()
-                }
-                importedDcps.isNotEmpty() -> {
-                    Toast.makeText(context, context.getString(R.string.raw_dcp_import_partial, importedDcps.size, failedCount), Toast.LENGTH_SHORT).show()
-                }
-                else -> {
-                    Toast.makeText(context, context.getString(R.string.raw_dcp_import_failed), Toast.LENGTH_SHORT).show()
-                }
-            }
+            )
         }
     }
 
@@ -693,7 +700,7 @@ fun GalleryEditScreen(
     val applyEffectsToVideo by viewModel.editApplyEffectsToVideo.collectAsState()
     val editPortraitQuick by viewModel.editPortraitQuick.collectAsState()
     val editDepthOfField by viewModel.editDepthOfField.collectAsState()
-    val changedKeys = remember(
+    val editState = remember(
         editLutId, editPhotoRecipeParams, editFrameId, applyEffectsToVideo, editSharpening, editNoiseReduction,
         editChromaNoiseReduction, editAiDenoiseEnabled, editRawExposureCompensation, editRawAutoExposure,
         editRawHighlightsAdjustment, editRawShadowsAdjustment, editRawBlackPointCorrection, editRawWhitePointCorrection,
@@ -704,7 +711,8 @@ fun GalleryEditScreen(
         editRawSpectralFilmMDensityGain, editRawSpectralFilmYDensityGain, editRawFotufilmDocument, editComputationalAperture,
         editBokehStyle, editFocusX, editFocusY, editCropRect, editCropAspectOption, editRotationDegrees,
         editStraightenDegrees, editMirrorHorizontal, editPortraitQuick, editDepthOfField,
-    ) { viewModel.editChangedKeys() }
+    ) { viewModel.editStateKey() }
+    val changedKeys = remember(editState) { viewModel.editChangedKeys() }
     val openIntensity = viewModel.editOpenValue("lutIntensity") as? Float ?: 1f
     val categoryOrder by preferenceValue { it.categoryOrder }
     val allPresets by cameraViewModel.allPresets.collectAsState()
@@ -872,6 +880,8 @@ fun GalleryEditScreen(
     val previewSourceHeight = previewBitmap?.height?.takeIf { it > 0 }
         ?: currentPhoto.height.takeIf { it > 0 }
     var pendingRawPreviewRefresh by remember(currentEditSourcePhoto.id) { mutableStateOf(false) }
+    // How long the last develop with each engine took in this session, for the status line's estimate.
+    val rawDevelopMs = remember { mutableStateMapOf<String, Long>() }
     var pendingPhotonPgtmRegeneration by remember(currentEditSourcePhoto.id) { mutableStateOf(false) }
     var pendingRawRefreshToast by remember(currentEditSourcePhoto.id) { mutableStateOf(false) }
     val isRefreshingRawPreview = viewModel.refreshingPhotos.contains(currentEditSourcePhoto.id)
@@ -880,10 +890,19 @@ fun GalleryEditScreen(
         showResultToast: Boolean = false,
         forceRegeneratePhotonPgtm: Boolean = false,
     ) {
+        // shortcut: assumes the files develop from the state saved just before; a change saved while this
+        // starts could be cached under the wrong state. Only a few small earlier looks are kept, so the cost is low.
+        val requested = viewModel.editRawState()
+        val engineAtStart = viewModel.editRawRenderingEngine.value.name
+        val startedAt = SystemClock.uptimeMillis()
         viewModel.refreshRawPreview(
             photo = currentEditSourcePhoto,
             forceRegeneratePhotonPgtm = forceRegeneratePhotonPgtm,
         ) { success ->
+            if (success) {
+                developedRaw = requested
+                rawDevelopMs[engineAtStart] = SystemClock.uptimeMillis() - startedAt
+            }
             if (showResultToast) {
                 Toast.makeText(
                     context,
@@ -923,6 +942,28 @@ fun GalleryEditScreen(
                 forceRegeneratePhotonPgtm = forceRegeneratePhotonPgtm,
             )
         }
+    }
+
+    val rawBusy = isRefreshingRawPreview || pendingRawPreviewRefresh
+    // A RAW state seen before shows its earlier look at once; the develop behind it replaces it when done.
+    LaunchedEffect(editState, developedRaw, rawBusy) {
+        if (!isRaw) return@LaunchedEffect
+        val look = rawLook(editState)
+        rawLookShown = look != null && !rawDeveloped()
+        if (rawLookShown) previewBitmap = look
+    }
+    // Once the photo shows its current state, a small copy is kept (the last six).
+    LaunchedEffect(previewBitmap, isLoadingPreview, rawBusy, editState, developedRaw) {
+        val shown = previewBitmap ?: return@LaunchedEffect
+        if (!isRaw || rawBusy || isLoadingPreview || showOrigin || !rawDeveloped()) return@LaunchedEffect
+        if (section == EditorSection.Crop || section == EditorSection.Portrait) return@LaunchedEffect
+        if (rawLook(editState) != null) return@LaunchedEffect
+        val scale = 1440f / max(shown.width, shown.height)
+        val small = if (scale >= 1f) shown else withContext(Dispatchers.Default) {
+            Bitmap.createScaledBitmap(shown, (shown.width * scale).roundToInt(), (shown.height * scale).roundToInt(), true)
+        }
+        rawLooks.add(0, editState to small)
+        while (rawLooks.size > 6) rawLooks.removeAt(rawLooks.lastIndex)
     }
 
     Scaffold(
@@ -1699,7 +1740,22 @@ fun GalleryEditScreen(
                 } else {
                     emptyList()
                 }
-                val groups = if (group == null) EditorGroup.forSection(section, isRaw) else emptyList()
+                val groups = if (group == null) {
+                    EditorGroup.forSection(section, isRaw)
+                } else {
+                    EditorGroup.entries.filter { it.parent == group && (!it.rawOnly || isRaw) }
+                }
+                val groupTiles = groups.map { g ->
+                    EditorValue(
+                        key = "group:${g.name}",
+                        name = stringResource(g.label),
+                        value = "",
+                        icon = g.icon,
+                        changed = g.keys.any { it in changedKeys },
+                        wide = true,
+                        group = true,
+                    )
+                }
                 val offText = stringResource(R.string.editor_off)
                 val autoText = stringResource(R.string.editor_auto)
                 val shallowText = stringResource(R.string.editor_shallow)
@@ -1812,7 +1868,37 @@ fun GalleryEditScreen(
                     viewModel.setPhotoRecipeParams(v.set(editPhotoRecipeParams ?: editLutRecipeParams, x))
                 }
 
+                // Light › RAW and its Sensor group: saved to the photo and re-rendered from the RAW file.
+                fun commitRaw() {
+                    viewModel.persistCurrentRawEditMetadata(currentEditSourcePhoto) { requestRawPreviewRefresh() }
+                }
+                val rawItems = if (isRaw && (group == EditorGroup.Raw || group == EditorGroup.Sensor)) {
+                    rawGroupItems(
+                        viewModel = viewModel,
+                        photo = currentEditSourcePhoto,
+                        sensor = group == EditorGroup.Sensor,
+                        changedKeys = changedKeys,
+                        imported = currentEditMetadata?.isImported == true,
+                        embeddedProfiles = embeddedDngProfileUiState.options,
+                        activeEmbeddedProfileId = activeEmbeddedDngProfileId,
+                        availableLuts = availableLuts,
+                        commit = ::commitRaw,
+                        refresh = { requestRawPreviewRefresh() },
+                        reRender = {
+                            requestRawPreviewRefresh(forceRegeneratePhotonPgtm = true)
+                            noteLine.say(R.string.editor_rerendering)
+                        },
+                        importDcp = { rawDcpLauncher.launch(arrayOf("*/*")) },
+                        deleteDcp = { deleteDcpAsk = it },
+                    )
+                } else {
+                    emptyList()
+                }
+
                 val values = when {
+                    rawItems.isNotEmpty() -> rawItems.map {
+                        EditorValue(it.key, it.name, it.value, it.icon, it.changed, wide = it.ruler == null)
+                    } + groupTiles
                     groupValues.isNotEmpty() -> groupValues.map { v ->
                         EditorValue(v.key, stringResource(v.label), v.text(v.get(effectiveRecipe)), v.icon, groupChanged(v))
                     }
@@ -1908,22 +1994,13 @@ fun GalleryEditScreen(
                             dimmed = s.section == EditorSection.Portrait && s != EditorSetting.Aperture &&
                                 s != EditorSetting.Depth && blurOff,
                         )
-                    } + groups.map { g ->
-                        EditorValue(
-                            key = "group:${g.name}",
-                            name = stringResource(g.label),
-                            value = "",
-                            icon = g.icon,
-                            changed = g.keys.any { it in changedKeys },
-                            wide = true,
-                            group = true,
-                        )
-                    }
+                    } + groupTiles
                 }
                 val selectable = values.filterNot { it.group || it.key in setOf("rotation", "mirror", "curveDelete") }
                 val selectedKey = selectable.firstOrNull { it.key == selections[levelKey] }?.key ?: selectable.firstOrNull()?.key
                 val selectedSetting = settings.firstOrNull { it.key == selectedKey }
                 val selectedGroupValue = groupValues.firstOrNull { it.key == selectedKey }
+                val selectedRawItem = rawItems.firstOrNull { it.key == selectedKey }
 
                 fun sectionChanged(s: EditorSection): Boolean = when (s) {
                     EditorSection.Light, EditorSection.Color, EditorSection.Effects, EditorSection.Detail ->
@@ -1973,9 +2050,19 @@ fun GalleryEditScreen(
                         ?: if (blurProgress?.stage == BokehStage.Depth) 15 else null
                     if (seconds != null && seconds >= 1) stringResource(R.string.editor_about_seconds, text, seconds) else text
                 }
-                if (blurStatus != null) {
+                // What the RAW develop is doing, the same way: with which engine, and how long it took last time.
+                val engineName = rawRenderingEngineName(editRawColorEngine)
+                val rawStatus = if (isRaw && rawBusy) {
+                    val text = if (rawLookShown) stringResource(R.string.editor_raw_earlier, engineName)
+                    else stringResource(R.string.editor_raw_developing, engineName)
+                    val seconds = rawDevelopMs[editRawColorEngine.name]?.let { ((it + 500) / 1000).toInt() }
+                    if (seconds != null && seconds >= 1) stringResource(R.string.editor_about_seconds, text, seconds) else text
+                } else {
+                    null
+                }
+                (blurStatus ?: rawStatus)?.let { status ->
                     Text(
-                        text = blurStatus,
+                        text = status,
                         color = LilacText,
                         fontSize = 12.sp,
                         style = LilacTextStyle,
@@ -2009,6 +2096,15 @@ fun GalleryEditScreen(
                             .align(Alignment.BottomCenter)
                             .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
                     )
+                } else if (rawItems.any { it.key == explainKey }) {
+                    val item = rawItems.first { it.key == explainKey }
+                    EditorExplanationCard(
+                        name = item.name,
+                        text = item.explanation,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
+                    )
                 } else if (groupValues.any { it.key == explainKey }) {
                     val v = groupValues.first { it.key == explainKey }
                     val pickName = when (group) {
@@ -2019,6 +2115,15 @@ fun GalleryEditScreen(
                     EditorExplanationCard(
                         name = "$pickName ${stringResource(v.label)}",
                         text = stringResource(v.explanation),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
+                    )
+                } else if (explainKey?.startsWith("group:") == true) {
+                    val g = EditorGroup.valueOf(explainKey!!.removePrefix("group:"))
+                    EditorExplanationCard(
+                        name = stringResource(g.label),
+                        text = stringResource(GroupIntros.getValue(g)),
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
@@ -2076,6 +2181,34 @@ fun GalleryEditScreen(
                 ) {
                     when {
                         group == EditorGroup.Curve -> EditorControlHint(stringResource(R.string.editor_curve_hint))
+                        selectedRawItem != null -> {
+                            val item = selectedRawItem
+                            val r = item.ruler
+                            if (r != null) {
+                                LilacRuler(
+                                    values = r.steps,
+                                    value = r.value,
+                                    start = r.start,
+                                    label = r.label,
+                                    onChange = r.onChange,
+                                    onRelease = ::commitRaw,
+                                    onReset = item.reset,
+                                    labelEvery = r.labelEvery,
+                                    onTouch = { fingerOnRuler = it },
+                                )
+                            } else {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    ChoiceScroller(item.choices.indexOfFirst { it.selected }.coerceAtLeast(0), maxWidth = 360.dp) {
+                                        item.choices.forEach { c ->
+                                            EditorChip(text = c.label, selected = c.selected, onClick = c.onClick, onLongClick = c.onLongClick)
+                                        }
+                                        item.actions.forEach { a ->
+                                            EditorChip(text = a.label, selected = false, icon = a.icon, action = true, onClick = a.onClick)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         selectedGroupValue != null -> {
                             val v = selectedGroupValue
                             val start = groupOpen(v)
@@ -2395,7 +2528,10 @@ fun GalleryEditScreen(
                                 pendingCard?.cancel()
                                 when {
                                     item.group -> {
-                                        explainKey = null
+                                        // The colour groups say what they work on as they open: they look alike.
+                                        explainKey = item.key.takeIf {
+                                            it.removePrefix("group:") in GroupIntros.keys.map { g -> g.name }
+                                        }
                                         groupPath = (groupStack.map { it.name } + item.key.removePrefix("group:")).joinToString("/")
                                     }
                                     item.key == "rotation" -> {
@@ -2426,6 +2562,7 @@ fun GalleryEditScreen(
                                         if (item.key == "cropRatio") restoreCropRatio()
                                         if (item.key == "straighten") viewModel.setStraightenDegrees(openStraighten)
                                         groupValues.firstOrNull { it.key == item.key }?.let { setGroupValue(it, groupOpen(it)) }
+                                        rawItems.firstOrNull { it.key == item.key }?.reset?.invoke()
                                         // The selected point only: back onto the channel's curve as it was when the
                                         // editor opened, at the same input.
                                         if (item.key == "curvePoint") {
@@ -2519,18 +2656,32 @@ fun GalleryEditScreen(
                             title = stringResource(group.label),
                             parentTitle = groupStack.getOrNull(groupStack.size - 2)?.let { stringResource(it.label) },
                             onBack = { groupPath = groupStack.dropLast(1).joinToString("/") { it.name } },
-                            // Reset: all four curves back to where they were when the editor opened.
-                            onReset = if (!curve) null else {
-                                {
-                                    if (CurveChannel.entries.none(::curveChanged)) {
-                                        noteLine.say(R.string.editor_curve_nothing_to_reset)
-                                    } else {
-                                        viewModel.setPhotoRecipeParams(
-                                            CurveChannel.entries.fold(effectiveRecipe) { r, c -> r.withCurve(c, openCurve(openCurves, c)) }
-                                        )
-                                        curveSelected = null
+                            // Reset: Curve's four curves, or RAW's values, back to where they were when the editor
+                            // opened.
+                            onReset = when (group) {
+                                EditorGroup.Curve -> {
+                                    {
+                                        if (CurveChannel.entries.none(::curveChanged)) {
+                                            noteLine.say(R.string.editor_curve_nothing_to_reset)
+                                        } else {
+                                            viewModel.setPhotoRecipeParams(
+                                                CurveChannel.entries.fold(effectiveRecipe) { r, c -> r.withCurve(c, openCurve(openCurves, c)) }
+                                            )
+                                            curveSelected = null
+                                        }
                                     }
                                 }
+                                EditorGroup.Raw -> {
+                                    {
+                                        if (EditorGroup.Raw.keys.none { it in changedKeys }) {
+                                            noteLine.say(R.string.editor_raw_nothing_to_reset)
+                                        } else {
+                                            viewModel.restoreRawGroupToOpen()
+                                            commitRaw()
+                                        }
+                                    }
+                                }
+                                else -> null
                             },
                             picker = when (group) {
                                 EditorGroup.Mixer -> {
@@ -2588,6 +2739,24 @@ fun GalleryEditScreen(
                     .align(Alignment.BottomCenter)
                     .padding(bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
             )
+
+            deleteDcpAsk?.let { dcp ->
+                EditorDiscardDialog(
+                    title = stringResource(R.string.editor_delete_dcp_title),
+                    message = stringResource(R.string.editor_delete_dcp_message, dcp.getName()),
+                    keepText = stringResource(R.string.cancel),
+                    actionText = stringResource(R.string.delete),
+                    onKeep = { deleteDcpAsk = null },
+                    onDiscard = {
+                        deleteDcpAsk = null
+                        val wasChosen = editRawDcpId == dcp.id
+                        viewModel.deleteRawDcp(currentEditSourcePhoto, dcp.id) { success ->
+                            noteLine.say(if (success) R.string.raw_dcp_delete_success else R.string.raw_dcp_delete_failed)
+                            if (success && wasChosen) requestRawPreviewRefresh()
+                        }
+                    }
+                )
+            }
 
             if (showSaveIntoLook) {
                 val lookName = availableLuts.find { it.id == editLutId }?.getName().orEmpty()
@@ -2854,11 +3023,13 @@ private fun EditorChip(
     icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     action: Boolean = false,
     dim: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
 ) {
     LilacChip(
         text = text,
         selected = selected,
         onClick = onClick,
+        onLongClick = onLongClick,
         height = 36.dp,
         fill = Color(0xB8141413),
         fontSize = 13.sp,

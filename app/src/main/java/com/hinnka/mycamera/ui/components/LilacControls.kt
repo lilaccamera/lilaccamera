@@ -8,6 +8,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -96,6 +97,7 @@ internal fun LilacChip(
     horizontalPadding: Dp = 6.dp,
     icon: ImageVector? = null,
     action: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val shape = RoundedCornerShape(height / 2)
     val color = when {
@@ -110,7 +112,7 @@ internal fun LilacChip(
             .clip(shape)
             .background(fill, shape)
             .then(if (selected) Modifier.border(1.25.dp, ModeAmber.copy(alpha = 0.8f), shape) else Modifier)
-            .clickable(role = Role.Button, onClick = onClick)
+            .combinedClickable(role = Role.Button, onLongClick = onLongClick, onClick = onClick)
             .padding(horizontal = horizontalPadding),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally)

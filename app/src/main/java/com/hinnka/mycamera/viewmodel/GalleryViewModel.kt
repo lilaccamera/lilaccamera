@@ -679,6 +679,44 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         updateBokehPhoto()
     }
 
+    /**
+     * Light › RAW's Reset: its values back as they were when the editor opened. The caller saves them and
+     * re-renders once.
+     */
+    fun restoreRawGroupToOpen() {
+        val open = editOpenState
+        (open["rawLensShading"] as? Boolean)?.let { editRawLensShadingCorrectionEnabled.value = it }
+        (open["rawDro"] as? String)?.let { editRawDROMode.value = it }
+        (open["rawBlackLevel"] as? Pair<*, *>)?.let { (mode, custom) ->
+            (mode as? String)?.let { editRawBlackLevelMode.value = it }
+            (custom as? Float)?.let { editRawCustomBlackLevel.value = it }
+        }
+        (open["rawWhiteLevel"] as? Pair<*, *>)?.let { (mode, custom) ->
+            (mode as? String)?.let { editRawWhiteLevelMode.value = it }
+            (custom as? Float)?.let { editRawCustomWhiteLevel.value = it }
+        }
+        (open["rawCfa"] as? String)?.let { editRawCfaCorrectionMode.value = it }
+        editRawDcpId.value = open["rawDcp"] as? String
+        editRawEmbeddedDngProfileId.value = open["rawEmbeddedProfile"] as? String
+        (open["rawHncs"] as? List<*>)?.let { hncs ->
+            editRawHncsProfileId.value = hncs.getOrNull(0) as? String
+            (hncs.getOrNull(1) as? HncsRenderIntent)?.let { editRawHncsRenderIntent.value = it }
+            (hncs.getOrNull(2) as? HncsFilmCurveMode)?.let { editRawHncsFilmCurveMode.value = it }
+        }
+        editRawBaselineLutId.value = open["rawBaseLook"] as? String
+        (open["rawEngine"] as? RawRenderingEngine)?.let { editRawRenderingEngine.value = it }
+        (open["rawToneMapping"] as? RawToneMappingParameters)?.let { editRawToneMappingParameters.value = it }
+        (open["rawSpectralFilm"] as? List<*>)?.let { film ->
+            editRawSpectralFilmStock.value = film.getOrNull(0) as? String
+            editRawSpectralFilmPrint.value = film.getOrNull(1) as? String
+            (film.getOrNull(2) as? Float)?.let { editRawSpectralFilmCDensityGain.value = it }
+            (film.getOrNull(3) as? Float)?.let { editRawSpectralFilmMDensityGain.value = it }
+            (film.getOrNull(4) as? Float)?.let { editRawSpectralFilmYDensityGain.value = it }
+        }
+        editRawFotufilmDocument.value = open["rawFotufilm"] as? FotufilmDocument
+        (open["rawAutoExposure"] as? Boolean)?.let { editRawAutoExposure.value = it }
+    }
+
     private suspend fun updatePhotoMetadata(
         photoId: String,
         transform: (MediaMetadata) -> MediaMetadata
@@ -2495,6 +2533,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             "mirror" to editMirrorHorizontal.value,
         )
     }
+
+    /** The whole edit state, by the keys of [editStateSnapshot]; equal maps mean the photo renders the same. */
+    fun editStateKey(): Map<String, Any?> = editStateSnapshot()
+
+    /** The RAW develop's part of the edit state, now or when the editor opened. */
+    fun editRawState(open: Boolean = false): Map<String, Any?> =
+        (if (open) editOpenState else editStateSnapshot()).filterKeys { it.startsWith("raw") }
 
     /** A setting's value when the editor opened, by its [editStateSnapshot] key: where its reset returns to. */
     fun editOpenValue(key: String): Any? = editOpenState[key]

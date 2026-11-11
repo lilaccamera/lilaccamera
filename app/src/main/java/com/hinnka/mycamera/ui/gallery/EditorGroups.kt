@@ -343,6 +343,13 @@ internal fun gradingValues(range: Int): List<GroupValue> =
         gradingValue("luminance", range * 3 + 2, R.string.recipe_grading_luminance, AppIcons.SunLine, R.string.editor_explain_grading_luminance, signed = true),
     )
 
+/** What each colour group works on, shown as it opens: they look alike, but pick different parts of the photo. */
+internal val GroupIntros = mapOf(
+    EditorGroup.Mixer to R.string.editor_intro_mixer,
+    EditorGroup.Grading to R.string.editor_intro_grading,
+    EditorGroup.Calibration to R.string.editor_intro_calibration,
+)
+
 /** The colour of a hue value (0..1), for the ruler's band. */
 internal fun hueColor(value: Float): Color = Color.hsv((value * 360f).mod(360f), 0.78f, 1f)
 
