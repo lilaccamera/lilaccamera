@@ -165,6 +165,7 @@ private const val DefaultAwbTemperature = 5000f
 private const val DefaultFocusDistance = 0f
 private val XpanViewfinderInnerBorder = 4.dp
 private val XpanSideControlReservedWidth = 56.dp
+private const val ManualValuesIdleMs = 5_000L
 
 private fun formatVirtualApertureFStop(aperture: Float): String {
     val rounded = aperture.roundToInt()
@@ -443,6 +444,16 @@ fun CameraScreen(
         }
     }
     var lastValueTap by remember { mutableStateOf<Pair<CameraParameter, Long>?>(null) }
+    // Outside Pro the manual values close again a few seconds after their last touch; the values set by
+    // hand stay on the picture's edge. Pro keeps them open: there they are the main controls.
+    var manualValuesTouch by remember { mutableIntStateOf(0) }
+    LaunchedEffect(manualControlsShown, manualControlsMode, manualValuesTouch, rulerScrub.active) {
+        if (manualControlsShown && manualControlsMode != CameraShootingMode.PROFESSIONAL && !rulerScrub.active) {
+            delay(ManualValuesIdleMs)
+            manualControlsShown = false
+            showParameterRuler = false
+        }
+    }
     var everydayRowShown by remember { mutableStateOf(false) }
     // A value set by hand (EV, ISO, shutter, focus, white balance) stays visible while the panel is closed,
     // as a compact line of just those values, so a shot is never taken with a fixed value nobody can see.
@@ -1079,6 +1090,7 @@ fun CameraScreen(
         }
         // A tap toggles the value's ruler at once; a second tap on it within 320 ms puts it back to auto.
         val onParameterClick: (CameraParameter) -> Unit = { parameter ->
+            manualValuesTouch++
             val now = android.os.SystemClock.uptimeMillis()
             val last = lastValueTap
             if (last != null && last.first == parameter && now - last.second < 320L) {
@@ -1224,6 +1236,7 @@ fun CameraScreen(
                     viewModel.setHyperfocalFocusEnabled(enabled)
                 },
                 onValueChange = { value ->
+                    manualValuesTouch++
                     when (selectedParameter) {
                         CameraParameter.EXPOSURE_COMPENSATION -> viewModel.setExposureCompensation((value / state.getExposureCompensationStep()).roundToInt())
                         CameraParameter.SHUTTER_SPEED -> viewModel.setShutterSpeed(value.toLong())
