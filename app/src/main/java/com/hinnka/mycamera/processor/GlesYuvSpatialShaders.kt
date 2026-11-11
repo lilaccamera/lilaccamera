@@ -150,6 +150,56 @@ internal object GlesYuvSpatialShaders {
 
     val rejection = GlesMgcRawSpatialShaders.rejectionWithFlowSource(tiledRejectionFlow)
 
+    /**
+     * Current minus reference guide on a sparse grid, looked up as the rejection pass does: what the
+     * motion check compares with its noise model. Alpha is the signal, or -1 for a sample to skip.
+     */
+    val rejectionNoiseProbe = """
+        #version 300 es
+        precision highp float;
+        precision highp sampler2D;
+        precision highp int;
+        uniform sampler2D uBaseGuide;
+        uniform sampler2D uAltGuide;
+        uniform ivec2 uGuideSize;
+        uniform ivec2 uProbeSize;
+        out vec4 oProbe;
+
+        $tiledRejectionFlow
+
+        vec2 mirrorUv(vec2 uv) {
+            uv = mod(uv, 2.0);
+            return mix(uv, 2.0 - uv, greaterThan(uv, vec2(1.0)));
+        }
+
+        // Same filtered lookup as the rejection pass, colour only.
+        vec3 sampleBiquadratic(sampler2D image, vec2 uv) {
+            vec2 texelSize = 1.0 / vec2(uGuideSize);
+            vec2 f = fract(uv * vec2(uGuideSize));
+            vec2 c = f * f - f + 0.5;
+            vec2 w0 = uv - c * texelSize;
+            vec2 w1 = uv + c * texelSize;
+            return 0.25 * (
+                abs(texture(image, vec2(w0.x, w0.y)).rgb) +
+                abs(texture(image, vec2(w0.x, w1.y)).rgb) +
+                abs(texture(image, vec2(w1.x, w1.y)).rgb) +
+                abs(texture(image, vec2(w1.x, w0.y)).rgb));
+        }
+
+        void main() {
+            vec2 uv = gl_FragCoord.xy / vec2(uProbeSize);
+            vec4 flow = rejectionFlow(uv);
+            vec3 reference = sampleBiquadratic(uBaseGuide, uv);
+            vec3 current = sampleBiquadratic(uAltGuide, mirrorUv(uv + flow.xy));
+            // Clipped guide pixels hold 10000; where neighbouring tiles disagree by more than a
+            // guide pixel, the difference is misalignment rather than noise.
+            bool skip = max(reference.r, current.r) > 100.0 || flow.z * float(uGuideSize.x) > 1.0;
+            oProbe = skip
+                ? vec4(0.0, 0.0, 0.0, -1.0)
+                : vec4(current - reference, dot(reference, vec3(1.0 / 3.0)));
+        }
+    """.trimIndent()
+
     /** Produce both quarter-resolution rejection inputs in one framebuffer pass. */
     val rejectionDownsample = """
         #version 300 es

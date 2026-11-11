@@ -141,7 +141,8 @@ class GlesYuvStacker(
     private val framebuffers = ArrayList<Int>()
     private val uniformLocations = HashMap<Int, MutableMap<String, Int>>()
     private val alignmentScratch = HashMap<Pair<Int, Int>, IntArray>()
-    private val noiseLuts = HashMap<Pair<Float, Float>, Int>()
+    // Noise measured on the frame being merged, per LUT signal point (for the weight log).
+    private var lastNoise: YuvMeasuredNoise.Result? = null
     private val globalAlignment = GlesSpatialGlobalAlignment()
     private val timing = GlesYuvTiming()
     private val hardwareInput = GlesYuvHardwareBufferInput()
@@ -158,6 +159,7 @@ class GlesYuvStacker(
     private var upsampleAlignmentProgram = 0
     private var blockLucasKanadeProgram = 0
     private var rejectionProgram = 0
+    private var noiseProbeProgram = 0
     private var rejectionDownsampleProgram = 0
     private var clippedGaussianProgram = 0
     private var rejectionFilterDownsampleProgram = 0
@@ -208,6 +210,7 @@ class GlesYuvStacker(
     private var mergeAlignmentTexture = 0
     private var rawReverseWeightTexture = 0
     private var rawPixelDifferenceTexture = 0
+    private var noiseProbeTexture = 0
     private var initialWeightTexture = 0
     private var pixelDifferenceTexture = 0
     private var pixelDifferenceHorizontalTexture = 0
@@ -242,6 +245,8 @@ class GlesYuvStacker(
     }
     private val guideWidth get() = rejectionGeometry.guideWidth
     private val guideHeight get() = rejectionGeometry.guideHeight
+    private val noiseProbeWidth get() = (guideWidth + NOISE_PROBE_STEP - 1) / NOISE_PROBE_STEP
+    private val noiseProbeHeight get() = (guideHeight + NOISE_PROBE_STEP - 1) / NOISE_PROBE_STEP
     private val mergeWeightWidth get() = rejectionGeometry.mergeWeightWidth
     private val mergeWeightHeight get() = rejectionGeometry.mergeWeightHeight
     private val rejectionFilterWidth get() = rejectionGeometry.filterWidth
@@ -643,6 +648,11 @@ class GlesYuvStacker(
             GlesYuvSpatialShaders.rejection,
             "yuv_spatial_rejection",
         )
+        noiseProbeProgram = linkGraphicsProgram(
+            FULLSCREEN_VERTEX_SHADER,
+            GlesYuvSpatialShaders.rejectionNoiseProbe,
+            "yuv_spatial_rejection_noise_probe",
+        )
         rejectionDownsampleProgram = linkGraphicsProgram(
             FULLSCREEN_VERTEX_SHADER,
             GlesYuvSpatialShaders.rejectionDownsample,
@@ -763,6 +773,7 @@ class GlesYuvStacker(
         )
         rawReverseWeightTexture = createTexture2D(guideWidth, guideHeight, GLES30.GL_R8, GLES30.GL_LINEAR)
         rawPixelDifferenceTexture = createTexture2D(guideWidth, guideHeight, GLES30.GL_R8, GLES30.GL_LINEAR)
+        noiseProbeTexture = createTexture2D(noiseProbeWidth, noiseProbeHeight, GLES30.GL_RGBA32F, GLES30.GL_NEAREST)
         initialWeightTexture = createTexture2D(mergeWeightWidth, mergeWeightHeight, GLES30.GL_R8, GLES30.GL_LINEAR)
         pixelDifferenceTexture = createTexture2D(mergeWeightWidth, mergeWeightHeight, GLES30.GL_R8, GLES30.GL_LINEAR)
         pixelDifferenceHorizontalTexture = createTexture2D(mergeWeightWidth, mergeWeightHeight, GLES30.GL_R16F, GLES30.GL_LINEAR)
@@ -1778,9 +1789,9 @@ class GlesYuvStacker(
     ) {
         val currentShotNoise = NOISE_ALPHA * currentToReferenceScale
         val currentReadNoise = NOISE_BETA * currentToReferenceScale * currentToReferenceScale
-        val noiseLut = noiseLuts.getOrPut(currentShotNoise to currentReadNoise) {
-            createNoiseLut(currentShotNoise, currentReadNoise)
-        }
+        val noise = measureNoise(alignment, currentShotNoise, currentReadNoise)
+        lastNoise = noise
+        val noiseLut = createNoiseLut(currentShotNoise, currentReadNoise, noise.scales)
         bindFramebufferOutputs(
             intArrayOf(rawReverseWeightTexture, rawPixelDifferenceTexture),
             "renderSpatialRejection",
@@ -1789,16 +1800,7 @@ class GlesYuvStacker(
         GLES30.glUseProgram(rejectionProgram)
         bindTexture(rejectionProgram, "uBaseGuide", 0, referenceGuideTexture)
         bindTexture(rejectionProgram, "uAltGuide", 1, currentGuideTexture)
-        bindTexture(rejectionProgram, "uAlignment", 2, alignment.texture)
-        GLES30.glUniform2i(
-            uniform(rejectionProgram, "uAlignmentGridSize"), alignment.gridWidth, alignment.gridHeight,
-        )
-        GLES30.glUniform1i(
-            uniform(rejectionProgram, "uAlignmentTileSize"),
-            (alignment.tileStride * alignment.scaleToGuidePixels).toInt(),
-        )
-        GLES30.glUniform1i(uniform(rejectionProgram, "uAlignmentGridMin"), alignment.gridMin)
-        GLES30.glUniform1f(uniform(rejectionProgram, "uAlignmentScale"), alignment.scaleToGuidePixels)
+        bindRejectionFlow(rejectionProgram, alignment)
         bindTexture(rejectionProgram, "uUnblocker", 3, zeroUnblockerTexture)
         bindTexture(rejectionProgram, "uNoiseEstimates", 4, noiseLut)
         GLES30.glUniform2i(
@@ -1847,6 +1849,50 @@ class GlesYuvStacker(
         renderRejectionDownsample()
         renderClippedGaussianPixelDifference()
         renderFilteredRejection(referenceRejectionLuma)
+    }
+
+    /** Binds the merge-tile flow that the rejection and noise-probe shaders resolve per pixel. */
+    private fun bindRejectionFlow(program: Int, alignment: Alignment) {
+        bindTexture(program, "uAlignment", 2, alignment.texture)
+        GLES30.glUniform2i(uniform(program, "uAlignmentGridSize"), alignment.gridWidth, alignment.gridHeight)
+        GLES30.glUniform1i(
+            uniform(program, "uAlignmentTileSize"),
+            (alignment.tileStride * alignment.scaleToGuidePixels).toInt(),
+        )
+        GLES30.glUniform1i(uniform(program, "uAlignmentGridMin"), alignment.gridMin)
+        GLES30.glUniform1f(uniform(program, "uAlignmentScale"), alignment.scaleToGuidePixels)
+    }
+
+    /**
+     * Noise multipliers per LUT signal point for this frame, from the reference-to-frame differences
+     * the motion check sees (see [YuvMeasuredNoise]).
+     */
+    private fun measureNoise(alignment: Alignment, currentShotNoise: Float, currentReadNoise: Float): YuvMeasuredNoise.Result {
+        val w = noiseProbeWidth
+        val h = noiseProbeHeight
+        bindFramebufferOutput(noiseProbeTexture, "renderNoiseProbe")
+        GLES30.glViewport(0, 0, w, h)
+        GLES30.glUseProgram(noiseProbeProgram)
+        bindTexture(noiseProbeProgram, "uBaseGuide", 0, referenceGuideTexture)
+        bindTexture(noiseProbeProgram, "uAltGuide", 1, currentGuideTexture)
+        bindRejectionFlow(noiseProbeProgram, alignment)
+        GLES30.glUniform2i(uniform(noiseProbeProgram, "uGuideSize"), guideWidth, guideHeight)
+        GLES30.glUniform2i(uniform(noiseProbeProgram, "uProbeSize"), w, h)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
+        finishFramebufferPass("renderNoiseProbe")
+        val buffer = ByteBuffer.allocateDirect(w * h * 4 * Float.SIZE_BYTES).order(ByteOrder.nativeOrder())
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, renderFbo)
+        GLES30.glReadBuffer(GLES30.GL_COLOR_ATTACHMENT0)
+        GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_FLOAT, buffer)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        checkGlError("noise probe readback")
+        val samples = FloatArray(w * h * 4).also { buffer.asFloatBuffer().get(it) }
+        return YuvMeasuredNoise.measure(samples) { signal, channel ->
+            // The rejection pass's allowance for one colour channel: reference plus current frame,
+            // after its filter; the LUT's green holds half a channel's variance (two Bayer greens).
+            val variance = (NOISE_ALPHA * signal + NOISE_BETA) + (currentShotNoise * signal + currentReadNoise)
+            REJECTION_FILTER_VARIANCE_SCALE * variance * (if (channel == 1) 0.5f else 1f)
+        }
     }
 
     private fun renderRejectionDownsample() {
@@ -1957,7 +2003,8 @@ class GlesYuvStacker(
         finishFramebufferPass("renderRejectionPostprocess")
     }
 
-    private fun createNoiseLut(currentShotNoise: Float, currentReadNoise: Float): Int {
+    // A small texture per merged frame; all are freed with the stacker's other textures.
+    private fun createNoiseLut(currentShotNoise: Float, currentReadNoise: Float, signalScale: FloatArray): Int {
         val referenceShot = FloatArray(4) { NOISE_ALPHA }
         val referenceRead = FloatArray(4) { NOISE_BETA }
         val currentShot = FloatArray(4) { currentShotNoise }
@@ -1967,6 +2014,7 @@ class GlesYuvStacker(
             referenceReadNoise = referenceRead,
             currentShotNoise = currentShot,
             currentReadNoise = currentRead,
+            signalScale = signalScale,
         )
         return createFloatTexture(
             MgcSpatialNoiseEstimatesLut.WIDTH,
@@ -2473,11 +2521,22 @@ class GlesYuvStacker(
                     "belowHalf=${"%.1f".format(100.0 * below / pixelCount)}% " +
                     "belowQuarter=${"%.1f".format(100.0 * strong / pixelCount)}% " +
                     "lowBlocks=$lowBlocks/${blockSums.size} cause=$cause " +
-                    "size=${w}x$h rejection=${if (rejectionDisabled) "off" else "on"}",
+                    "size=${w}x$h rejection=${if (rejectionDisabled) "off" else "on"} " +
+                    noiseSummary(),
             )
         } finally {
             LargeDirectBuffer.free(buffer)
         }
+    }
+
+    /** Measured noise of the last merged frame per LUT point: scale used, raw ratio, signed offset (8-bit levels), samples. */
+    private fun noiseSummary(): String {
+        val noise = lastNoise ?: return "noise=-"
+        val f = { v: Float, pattern: String -> if (v.isNaN()) "-" else pattern.format(v) }
+        return "noiseScale=" + noise.scales.joinToString(",") { f(it, "%.1f") } +
+            " noiseRatio=" + noise.ratios.joinToString(",") { f(it, "%.2f") } +
+            " noiseOffset=" + noise.offsets.joinToString(",") { f(it * 255f, "%.2f") } +
+            " noiseCount=" + noise.counts.joinToString(",")
     }
 
     private fun readOutputBitmap(): Bitmap? {
@@ -2878,6 +2937,10 @@ class GlesYuvStacker(
         private val ALIGN_LEVEL_TILE_STRIDES = intArrayOf(32, 32, 16, 8)
         private const val NOISE_ALPHA = 0.005f
         private const val NOISE_BETA = 0.001f
+        // Guide pixels between noise-probe samples (about 47,000 samples at 12 MP).
+        private const val NOISE_PROBE_STEP = 8
+        // The rejection shader's filterVarianceScale for colour (not green-only) pixels.
+        private const val REJECTION_FILTER_VARIANCE_SCALE = 0.0976597f
         private const val GUIDE_CLIPPING_POINT = 0.99f
         private const val SPATIAL_BASE_SCALE = 0.32f
         private const val PIXEL_DIFFERENCE_KERNEL_SIZE = 20
