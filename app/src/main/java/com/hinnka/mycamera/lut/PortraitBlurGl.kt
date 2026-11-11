@@ -15,6 +15,18 @@ import com.hinnka.mycamera.utils.PLog
  * one full-size composite. The face eases toward each new detection, and the effect fades in and out
  * with it, so the picture never jumps between the few detections made each second.
  */
+// Face size (square root of the face box's share of the frame) where the blur starts and where it is full.
+// Around a smaller, distant face the blur would cover nearly the whole frame; 0.10 is about 1.7 m and
+// 0.25 about 0.7 m on the back camera.
+private const val BLUR_START_FACE = 0.10f
+private const val BLUR_FULL_FACE = 0.25f
+
+/** How much of the viewfinder blur to show for a face of [faceSize]: 0 when distant, 1 when close, smooth between. */
+internal fun portraitBlurForFaceSize(faceSize: Float): Float {
+    val t = ((faceSize - BLUR_START_FACE) / (BLUR_FULL_FACE - BLUR_START_FACE)).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
+
 internal class PortraitBlurGl(
     private val logTag: String,
     private val outlineWidthPx: Float,
@@ -87,10 +99,12 @@ internal class PortraitBlurGl(
 
         GLES30.glDisable(GLES30.GL_BLEND)
         GLES30.glUseProgram(blurProgram)
+        val blurAmount = portraitBlurForFaceSize(kotlin.math.sqrt(faceWidth * faceHeight))
         // Two passes, across and down into the small texture: a light blur that keeps the frame readable.
+        // Skipped for a distant face, which keeps only its outline.
         var input = sourceTextureId
         var inputWidth = width
-        val passes = arrayOf(floatArrayOf(2f, 0f), floatArrayOf(0f, 1f))
+        val passes = if (blurAmount > 0f) arrayOf(floatArrayOf(2f, 0f), floatArrayOf(0f, 1f)) else emptyArray()
         for ((index, direction) in passes.withIndex()) {
             val destination = index % 2
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, smallFramebuffer[destination])
@@ -134,6 +148,7 @@ internal class PortraitBlurGl(
         GLES30.glUniform2f(composite[U_OUTLINE_RADIUS], faceWidth * OUTLINE_SCALE, faceHeight * OUTLINE_SCALE)
         GLES30.glUniform2f(composite[U_SIZE_PX], width.toFloat(), height.toFloat())
         GLES30.glUniform1f(composite[U_STRENGTH], strength)
+        GLES30.glUniform1f(composite[U_BLUR_AMOUNT], blurAmount)
         GLES30.glUniform1f(composite[U_FEATHER], FEATHER)
         GLES30.glUniform1f(composite[U_OUTLINE_PX], outlineWidthPx)
         GLES30.glUniform4f(composite[U_OUTLINE_COLOR], OUTLINE_R, OUTLINE_G, OUTLINE_B, OUTLINE_ALPHA)
@@ -321,10 +336,11 @@ internal class PortraitBlurGl(
         const val U_BODY_CENTER = 11
         const val U_BODY_RADIUS = 12
         const val U_BODY_DOWN = 13
+        const val U_BLUR_AMOUNT = 14
         val COMPOSITE_UNIFORMS = arrayOf(
             "uSharpTexture", "uBlurTexture", "uCenter", "uRadius", "uOutlineCenter", "uOutlineRadius",
             "uSizePx", "uStrength", "uFeather", "uOutlinePx", "uOutlineColor", "uBodyCenter", "uBodyRadius",
-            "uBodyDown",
+            "uBodyDown", "uBlurAmount",
         )
 
         // Nine taps of a gaussian along one direction; the step is in texels of the pass's input.
@@ -359,6 +375,7 @@ internal class PortraitBlurGl(
             uniform vec2 uOutlineRadius;
             uniform vec2 uSizePx;
             uniform float uStrength;
+            uniform float uBlurAmount;
             uniform float uFeather;
             uniform float uOutlinePx;
             uniform vec4 uOutlineColor;
@@ -371,7 +388,7 @@ internal class PortraitBlurGl(
                 vec2 bodyAxes = vec2(dot(body, vec2(uBodyDown.y, -uBodyDown.x)), dot(body, uBodyDown)) / uBodyRadius;
                 float r = min(length((vTexCoord - uCenter) / uRadius), length(bodyAxes));
                 float outside = smoothstep(1.0, 1.0 + uFeather, r);
-                vec3 color = mix(sharp, blurred, outside * uStrength);
+                vec3 color = mix(sharp, blurred, outside * uStrength * uBlurAmount);
                 // Distance in pixels to the outline's ellipse, from the implicit function and its gradient.
                 vec2 q = (vTexCoord - uOutlineCenter) / uOutlineRadius;
                 float f = dot(q, q) - 1.0;
