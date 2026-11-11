@@ -151,6 +151,8 @@ class DepthBokehProcessor(
                 bokehStyle,
                 // The quick blur has no depth to focus a layer by: it always protects the subject.
                 focusOnSubject = quickBlur || focusMask >= 0.5f,
+                // The quick blur's depth is the cut-out itself, so only it keeps the subject's own range.
+                focalRangeFromPoint = !quickBlur,
             )
             result = bokehResult
         }
