@@ -6022,8 +6022,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * Index of the steadiest of the first [GYRO_REFERENCE_CANDIDATES] frames, scored by gyro
      * angular energy times exposure time (an upper bound on the squared angle swept during the
-     * exposure). Returns 0, the first frame as before, when any candidate lacks gyro coverage or
-     * no other frame is clearly steadier.
+     * exposure). Frames without gyro coverage are left out; see [steadiestGyroScoreIndex].
      */
     private fun steadiestGyroReferenceIndex(frames: List<PendingRawStackFrame>): Int {
         val windows = frames.take(GYRO_REFERENCE_CANDIDATES).map { it.frame.gyroWindow }
@@ -6039,10 +6038,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             "YUV burst gyro: coverage=${windows.joinToString { "%.2f".format(it?.coverageRatio ?: 0f) }} " +
                 "score=${scores.joinToString { it?.let { s -> "%.2e".format(s) } ?: "-" }}",
         )
-        if (scores.size < 2 || scores.any { it == null }) return 0
-        val validScores = scores.map { it!! }
-        val best = validScores.indices.minBy { validScores[it] }
-        return if (validScores[best] < validScores[0] * GYRO_REFERENCE_MIN_GAIN) best else 0
+        return steadiestGyroScoreIndex(scores, GYRO_REFERENCE_MIN_GAIN)
     }
 
     private fun rawStackFrame(
@@ -6909,4 +6905,17 @@ private fun shouldIncludeCropRegionInOutputSize(imageFormat: Int): Boolean {
 
         else -> false
     }
+}
+
+/**
+ * Index of the lowest gyro motion score among frames that have one. While the first frame has a
+ * score it stays the reference unless another frame's score is below [minGain] times its own.
+ * Without one (the gyro can start after the first frame when the burst follows the tap at once)
+ * the steadiest covered frame wins: the first frame carries the tap's shake, so it is a poor
+ * default anyway. Returns 0 when no frame has a score.
+ */
+internal fun steadiestGyroScoreIndex(scores: List<Float?>, minGain: Float): Int {
+    val best = scores.indices.filter { scores[it] != null }.minByOrNull { scores[it]!! } ?: return 0
+    val first = scores[0] ?: return best
+    return if (scores[best]!! < first * minGain) best else 0
 }
