@@ -4257,6 +4257,7 @@ class Camera2Controller(private val context: Context) {
 
             _state.update { s -> s.copy(isPreviewActive = true) }
             PLog.d(TAG, "Preview started")
+            settleFrontAutoExposure(sessionGeneration)
 
         } catch (e: CameraAccessException) {
             PLog.e(TAG, "Failed to start preview")
@@ -4268,6 +4269,27 @@ class Camera2Controller(private val context: Context) {
             PLog.e(TAG, "Failed to start preview - unconfigured surface")
             handlePreviewSessionFailure("start preview unconfigured surface", openGeneration, e)
         }
+    }
+
+    /**
+     * lilac front camera at full size: the viewfinder's brightness swings for as long as the camera is open,
+     * with the same request on every frame, until one focus trigger is sent (a tap or a half-press does this).
+     * An exposure lock alone did not stop it. Send that trigger once after the preview starts.
+     */
+    private fun settleFrontAutoExposure(sessionGeneration: Long) {
+        val handler = cameraHandler ?: return
+        if (!DeviceQuirks.isLilac || !isFrontCameraOpen() || _state.value.captureMode != CaptureMode.PHOTO) return
+        handler.postDelayed({
+            if (sessionGeneration != previewSessionGeneration || shutterKeyHold) return@postDelayed
+            val builder = previewRequestBuilder ?: return@postDelayed
+            val previousAfMode = builder.get(CaptureRequest.CONTROL_AF_MODE) ?: return@postDelayed
+            if (!submitOneShotAfTrigger(CaptureRequest.CONTROL_AF_MODE_AUTO, "settle front exposure")) return@postDelayed
+            handler.postDelayed({
+                if (sessionGeneration != previewSessionGeneration || _state.value.focusPoint != null) return@postDelayed
+                builder.set(CaptureRequest.CONTROL_AF_MODE, previousAfMode)
+                updatePreview()
+            }, 1100)
+        }, 1500)
     }
 
     private fun imageFormatToString(format: Int): String {
