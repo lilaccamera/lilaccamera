@@ -1085,6 +1085,26 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    private fun gyroWindowExposureNs(
+        result: CaptureResult?,
+        sensorTimestampNs: Long,
+        shot: PhotoCaptureContext,
+    ): Long {
+        val request = result?.request
+        val manualExposure = request?.get(CaptureRequest.CONTROL_AE_MODE) == CaptureRequest.CONTROL_AE_MODE_OFF ||
+            request?.get(CaptureRequest.CONTROL_MODE) == CaptureRequest.CONTROL_MODE_OFF
+        val frameNumber = result?.frameNumber
+        return GyroWindowSpan.exposureNs(
+            resultExposureNs = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME),
+            manualRequestExposureNs = request?.get(CaptureRequest.SENSOR_EXPOSURE_TIME)?.takeIf { manualExposure },
+            frameDurationNs = result?.get(CaptureResult.SENSOR_FRAME_DURATION),
+            startTimestampNs = sensorTimestampNs,
+            neighbourStartTimestampsNs = frameNumber?.let {
+                listOf(shot.timestampByFrameNumber[it - 1], shot.timestampByFrameNumber[it + 1])
+            }.orEmpty(),
+        )
+    }
+
     private fun captureFrameMetadata(
         result: TotalCaptureResult,
         sensorTimestampNs: Long,
@@ -9490,6 +9510,11 @@ class Camera2Controller(private val context: Context) {
             val exposureTimeNs = frameResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L
             val sensitivityIso = frameResult?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 0
             val frozenMetadata = pendingFrameMetadata.remove(image.timestamp)
+            val gyroWindow = frozenMetadata?.gyroWindow
+                ?: burstGyroRecorder.exposureWindow(
+                    sensorTimestampNs,
+                    gyroWindowExposureNs(frameResult, sensorTimestampNs, shot),
+                )
             val sensitivityLimits = sensorSensitivityLimits(effectiveCharacteristics)
             val frameMetadata = if (image.format == ImageFormat.RAW_SENSOR && frameResult != null) {
                 CapturedFrameMetadata(
@@ -9518,8 +9543,7 @@ class Camera2Controller(private val context: Context) {
                         ?: Float.NaN,
                     lensState = frameResult.get(CaptureResult.LENS_STATE),
                     rollingShutterSkewNs = frameResult.get(CaptureResult.SENSOR_ROLLING_SHUTTER_SKEW),
-                    gyroWindow = frozenMetadata?.gyroWindow
-                        ?: burstGyroRecorder.exposureWindow(sensorTimestampNs, exposureTimeNs),
+                    gyroWindow = gyroWindow,
                     // Resolve noise from the same result as this RAW's ISO/CFA. The early
                     // snapshot belongs to the logical result, while dimension matching above
                     // may select a different physical sensor. If its profile is absent, let
@@ -9553,7 +9577,7 @@ class Camera2Controller(private val context: Context) {
                         effectiveCharacteristics,
                         frameResult,
                         frameMetadata,
-                        gyroWindow = frameMetadata?.gyroWindow ?: frozenMetadata?.gyroWindow,
+                        gyroWindow = gyroWindow,
                     ),
                 )?.image?.close()
             }
