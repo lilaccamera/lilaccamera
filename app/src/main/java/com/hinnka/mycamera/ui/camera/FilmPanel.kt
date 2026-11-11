@@ -46,6 +46,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.R
@@ -283,9 +284,9 @@ internal fun FilmPanel(
     }
 }
 
-/** Choices that scroll sideways (frames, presets), at most 252 dp wide, fading in at the left edge. */
+/** Choices that scroll sideways (frames, presets), at most [maxWidth] wide, fading in at the left edge. */
 @Composable
-private fun ChoiceScroller(selectedIndex: Int, content: @Composable () -> Unit) {
+internal fun ChoiceScroller(selectedIndex: Int, maxWidth: Dp = 252.dp, content: @Composable () -> Unit) {
     val scroll = rememberScrollState()
     val density = LocalDensity.current
     // Opens with the chosen one near the middle; choices are about 70 dp wide.
@@ -294,7 +295,7 @@ private fun ChoiceScroller(selectedIndex: Int, content: @Composable () -> Unit) 
     }
     Row(
         modifier = Modifier
-            .widthIn(max = 252.dp)
+            .widthIn(max = maxWidth)
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
             .drawWithContent {
                 drawContent()

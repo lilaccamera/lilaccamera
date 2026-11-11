@@ -125,6 +125,9 @@ import com.hinnka.mycamera.lut.VideoLutEffect
 import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.ui.camera.autoRotate
+import com.hinnka.mycamera.frame.FrameInfo
+import com.hinnka.mycamera.ui.settings.presetDisplayName
+import com.hinnka.mycamera.ui.camera.ChoiceScroller
 import com.hinnka.mycamera.ui.camera.NoteLineState
 import com.hinnka.mycamera.ui.camera.NoteLine
 import com.hinnka.mycamera.ui.components.RawEditPanelContentMode
@@ -678,7 +681,16 @@ fun GalleryEditScreen(
         editBokehStyle, editFocusX, editFocusY, editCropRect, editCropAspectOption, editRotationDegrees,
         editStraightenDegrees, editMirrorHorizontal, editPortraitQuick,
     ) { viewModel.editChangedKeys() }
-    val openIntensity = remember(currentEditSourcePhoto.id) { (editPhotoRecipeParams ?: editLutRecipeParams).lutIntensity }
+    val openIntensity = viewModel.editOpenValue("lutIntensity") as? Float ?: 1f
+    val categoryOrder by preferenceValue { it.categoryOrder }
+    val allPresets by cameraViewModel.allPresets.collectAsState()
+    // The look strip's thumbnails are made from a small copy: each look renders on the shared GPU thread.
+    val stripThumbnail = remember(thumbnailBitmap) {
+        thumbnailBitmap?.let { Bitmap.createScaledBitmap(it, 132, (132f * it.height / it.width).roundToInt().coerceAtLeast(1), true) }
+    }
+    var showSaveIntoLook by remember { mutableStateOf(false) }
+    // A photo saved with the built-in "none" look keeps that id until another look is picked.
+    val hasLook = editLutId != null && editLutId != "none"
     val isAiDenoising by viewModel.isAiDenoising.collectAsState()
     val aiDenoiseProgress by viewModel.aiDenoiseProgress.collectAsState()
     LaunchedEffect(fullView) {
@@ -1561,13 +1573,26 @@ fun GalleryEditScreen(
                             "intensity", stringResource(R.string.editor_intensity), "${(intensity * 100).roundToInt()}%",
                             AppIcons.AdjustmentsLine, "lutIntensity" in changedKeys
                         ),
+                    ) + if (currentPhoto.isVideo) emptyList() else listOf(
                         EditorValue(
                             "frame", stringResource(R.string.frame),
                             availableFrames.find { it.id == editFrameId }?.name ?: stringResource(R.string.none),
                             AppIcons.FrameLine, "frame" in changedKeys, wide = true
                         ),
-                        EditorValue("preset", stringResource(R.string.editor_preset), "—", AppIcons.BookmarkLine, wide = true),
-                    )
+                        EditorValue(
+                            "preset", stringResource(R.string.editor_preset),
+                            allPresets.find { it.id == viewModel.appliedPresetId }
+                                ?.let { presetDisplayName(it) + if (viewModel.appliedPresetChanged()) "*" else "" }
+                                ?: "—",
+                            AppIcons.BookmarkLine, wide = true
+                        ),
+                    ) + if (currentPhoto.isMotionPhoto) listOf(
+                        EditorValue(
+                            "livePhoto", stringResource(R.string.settings_use_live_photo),
+                            if (applyEffectsToVideo) onText else offText,
+                            AppIcons.MovieLine, "applyEffectsToVideo" in changedKeys
+                        )
+                    ) else emptyList()
                     else -> settings.map { s ->
                         val v = settingValue(s)
                         EditorValue(
@@ -1690,10 +1715,25 @@ fun GalleryEditScreen(
                             .align(Alignment.BottomCenter)
                             .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
                     )
-                } else if (explainKey == "intensity" && section == EditorSection.Look) {
+                } else if (explainKey != null && section == EditorSection.Look) {
+                    val lookName = availableLuts.find { it.id == editLutId }?.getName() ?: stringResource(R.string.none)
                     EditorExplanationCard(
-                        name = stringResource(R.string.editor_intensity),
-                        text = stringResource(R.string.editor_explain_intensity),
+                        name = when (explainKey) {
+                            "look" -> lookName
+                            "frame" -> stringResource(R.string.frame)
+                            "preset" -> stringResource(R.string.editor_preset)
+                            "livePhoto" -> stringResource(R.string.settings_use_live_photo)
+                            else -> stringResource(R.string.editor_intensity)
+                        },
+                        text = stringResource(
+                            when (explainKey) {
+                                "look" -> R.string.editor_explain_look
+                                "frame" -> R.string.editor_explain_frame
+                                "preset" -> R.string.editor_explain_preset
+                                "livePhoto" -> R.string.editor_explain_live_photo
+                                else -> R.string.editor_explain_intensity
+                            }
+                        ),
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
@@ -1784,7 +1824,115 @@ fun GalleryEditScreen(
                         section != EditorSection.Look -> EditorControlHint(
                             stringResource(R.string.editor_section_not_built, stringResource(section.label))
                         )
-                        selectedKey == "intensity" && editLutId == null ->
+                        selectedKey == "look" -> LookStrip(
+                            luts = availableLuts,
+                            currentLutId = editLutId ?: "none",
+                            // A Log video shows no thumbnails: they would show the flat Log picture.
+                            thumbnail = stripThumbnail.takeUnless { videoSourceProfile?.isEnabled == true },
+                            categoryOrder = categoryOrder,
+                            onSelect = { id ->
+                                viewModel.setEditLut(id)
+                                availableLuts.find { it.id == id }?.let { lutSwipeState.announce(it.getName()) }
+                            },
+                            onSelectedClick = {
+                                availableLuts.find { it.id == editLutId }?.let { lutSwipeState.announce(it.getName()) }
+                            },
+                            onLongPress = { onFilterManagementClick(it) },
+                            onManage = { onFilterManagementClick(null) },
+                            compact = true,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        selectedKey == "frame" -> {
+                            val frames = listOf<FrameInfo?>(null) + availableFrames
+                            val selected = availableFrames.find { it.id == editFrameId }
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                ChoiceScroller(frames.indexOfFirst { it?.id == editFrameId }.coerceAtLeast(0), maxWidth = 360.dp) {
+                                    frames.forEach { frame ->
+                                        EditorChip(
+                                            text = frame?.name ?: stringResource(R.string.none),
+                                            selected = frame?.id == editFrameId,
+                                            onClick = {
+                                                // A second tap on an editable frame opens it in the frame editor.
+                                                if (frame?.id == editFrameId) frame?.takeIf { it.isEditable }?.let { onOpenFrameEditor(it.id) }
+                                                else viewModel.setEditFrame(frame?.id)
+                                            }
+                                        )
+                                    }
+                                    if (selected?.isEditable == true) {
+                                        EditorChip(
+                                            text = stringResource(R.string.editor_edit_frame), selected = false,
+                                            icon = AppIcons.FrameLine, action = true,
+                                            onClick = { onOpenFrameEditor(selected.id) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        selectedKey == "preset" -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            ChoiceScroller(allPresets.indexOfFirst { it.id == viewModel.appliedPresetId }.coerceAtLeast(0), maxWidth = 360.dp) {
+                                allPresets.forEach { preset ->
+                                    val name = presetDisplayName(preset)
+                                    EditorChip(
+                                        text = name,
+                                        selected = preset.id == viewModel.appliedPresetId,
+                                        onClick = {
+                                            viewModel.applyPresetToEdit(preset)
+                                            lutSwipeState.announce(name)
+                                        }
+                                    )
+                                }
+                                EditorChip(
+                                    text = stringResource(R.string.editor_copy_edits), selected = false,
+                                    icon = AppIcons.ContentCopy, action = true,
+                                    onClick = {
+                                        viewModel.copyCurrentEditSettings(editFrameCustomProperties)
+                                        noteLine.say(R.string.copy_settings_success)
+                                    }
+                                )
+                                EditorChip(
+                                    text = stringResource(R.string.editor_paste_edits), selected = false,
+                                    icon = AppIcons.ContentCopy, action = true,
+                                    dim = !hasCopiedEditSettings,
+                                    onClick = {
+                                        if (!hasCopiedEditSettings) {
+                                            noteLine.say(R.string.editor_paste_nothing)
+                                        } else {
+                                            viewModel.pasteCopiedEditSettingsToCurrentEdit()?.let {
+                                                editFrameCustomProperties = it
+                                                noteLine.say(R.string.paste_settings_success)
+                                            }
+                                        }
+                                    }
+                                )
+                                EditorChip(
+                                    text = stringResource(R.string.save_as_preset), selected = false,
+                                    icon = AppIcons.Bookmark, action = true,
+                                    onClick = {
+                                        cameraViewModel.draftPreset = viewModel.createPresetFromCurrentEdit(
+                                            cameraViewModel.prepareCurrentSettingsPresetDraft(defaultPresetName)
+                                        )
+                                        onCreatePresetClick()
+                                    }
+                                )
+                                if (hasLook) {
+                                    EditorChip(
+                                        text = stringResource(R.string.editor_save_into_look), selected = false,
+                                        icon = AppIcons.FiltersLine, action = true,
+                                        onClick = { showSaveIntoLook = true }
+                                    )
+                                }
+                            }
+                        }
+                        selectedKey == "livePhoto" -> Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            listOf(false to offText, true to onText).forEach { (apply, text) ->
+                                EditorChip(text = text, selected = applyEffectsToVideo == apply, onClick = { viewModel.setApplyEffectsToVideo(apply) })
+                            }
+                        }
+                        selectedKey == "intensity" && !hasLook ->
                             EditorControlHint(stringResource(R.string.editor_intensity_no_look))
                         selectedKey == "intensity" -> LilacRuler(
                             values = IntensitySteps,
@@ -1924,6 +2072,21 @@ fun GalleryEditScreen(
                     .align(Alignment.BottomCenter)
                     .padding(bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
             )
+
+            if (showSaveIntoLook) {
+                val lookName = availableLuts.find { it.id == editLutId }?.getName().orEmpty()
+                EditorDiscardDialog(
+                    title = stringResource(R.string.editor_save_into_look_title, lookName),
+                    message = stringResource(R.string.editor_save_into_look_message),
+                    keepText = stringResource(R.string.cancel),
+                    actionText = stringResource(R.string.editor_save_into_look),
+                    onKeep = { showSaveIntoLook = false },
+                    onDiscard = {
+                        showSaveIntoLook = false
+                        scope.launch { if (viewModel.saveRecipeIntoLook()) noteLine.say(R.string.editor_saved_into_look) }
+                    }
+                )
+            }
 
             if (showDiscardDialog) {
                 EditorDiscardDialog(
@@ -2164,4 +2327,28 @@ private fun VideoEditPlayer(
     } else {
         Spacer(modifier = modifier.fillMaxSize())
     }
+}
+
+/** A choice on the photo's bottom edge, as the editor's other choices: 36 dp on a dark see-through fill. */
+@Composable
+private fun EditorChip(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    action: Boolean = false,
+    dim: Boolean = false,
+) {
+    LilacChip(
+        text = text,
+        selected = selected,
+        onClick = onClick,
+        height = 36.dp,
+        fill = Color(0xB8141413),
+        fontSize = 13.sp,
+        horizontalPadding = 13.dp,
+        icon = icon,
+        action = action,
+        modifier = Modifier.graphicsLayer { alpha = if (dim) 0.5f else 1f }
+    )
 }

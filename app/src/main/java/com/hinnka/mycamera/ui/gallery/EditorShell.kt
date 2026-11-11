@@ -503,7 +503,14 @@ internal fun EditorControlHint(text: String, modifier: Modifier = Modifier) {
 
 /** "Discard changes?", drawn inside the editor's window so the hidden system bars stay hidden. */
 @Composable
-internal fun EditorDiscardDialog(message: String, onKeep: () -> Unit, onDiscard: () -> Unit) {
+internal fun EditorDiscardDialog(
+    message: String,
+    onKeep: () -> Unit,
+    onDiscard: () -> Unit,
+    title: String = stringResource(R.string.frame_editor_discard_title),
+    keepText: String = stringResource(R.string.editor_keep_editing),
+    actionText: String = stringResource(R.string.discard),
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -519,13 +526,13 @@ internal fun EditorDiscardDialog(message: String, onKeep: () -> Unit, onDiscard:
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
                 .padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 10.dp)
         ) {
-            Text(stringResource(R.string.frame_editor_discard_title), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(6.dp))
             Text(message, color = LilacSecondary, fontSize = 13.sp, lineHeight = 19.sp)
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End)) {
-                DialogButton(stringResource(R.string.editor_keep_editing), LilacText, onKeep)
-                DialogButton(stringResource(R.string.discard), ModeAmber, onDiscard)
+                DialogButton(keepText, LilacText, onKeep)
+                DialogButton(actionText, ModeAmber, onDiscard)
             }
         }
     }

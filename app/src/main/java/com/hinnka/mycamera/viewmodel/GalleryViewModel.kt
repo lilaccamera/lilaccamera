@@ -279,13 +279,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     var editLutId = MutableStateFlow<String?>(null)
         private set
 
-    var editSyncAdjustmentsToLut by mutableStateOf(false)
-        private set
-
-    private var editLutRecipeSyncJob: Job? = null
-    private val pendingEditLutRecipeSync = mutableMapOf<String, ColorRecipeParams>()
-    private val editLutRecipeSyncMutex = Mutex()
-
     var editApplyEffectsToVideo = MutableStateFlow(false)
         private set
 
@@ -299,7 +292,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             flowOf(ColorRecipeParams.DEFAULT)
         } else {
             contentRepository.lutManager.getColorRecipeParams(id)
-                .map { params -> pendingEditLutRecipeSync[id] ?: params }
         }
     }.stateIn(
         scope = viewModelScope,
@@ -2281,7 +2273,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
 
         isEditing = true
-        editSyncAdjustmentsToLut = false
+        appliedPresetId = null
         independentEditPhotoRecipeParams = ColorRecipeParams.DEFAULT
         // 从当前元数据恢复编辑状态
         currentMediaMetadata?.let { metadata ->
@@ -2431,7 +2423,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             .filter { it != RecipeParam.LUT_INTENSITY }
             .associate { "recipe.${it.name}" to recipe?.let(it::getValue) }
         return recipeValues + mapOf(
-            "look" to editLutId.value,
+            "look" to CameraPreset.normalizeLutId(editLutId.value),
             "lutIntensity" to recipe?.lutIntensity,
             "recipe.curves" to recipe?.let {
                 listOf(it.masterCurvePoints, it.redCurvePoints, it.greenCurvePoints, it.blueCurvePoints).map { a -> a?.toList() }
@@ -2555,14 +2547,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * 退出编辑模式
      */
     fun exitEditMode() {
-        viewModelScope.launch {
-            flushPendingEditLutRecipeSync()
-        }
         isEditing = false
         editVideoSourceProfile = null
         editVideoProfileDetected = false
         editVideoProfileOverride = null
-        editSyncAdjustmentsToLut = false
         editLutId.value = null
         editLutConfig = null
         editFrameId.value = null
@@ -2603,89 +2591,75 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         editRawFotufilmDocument.value = null
     }
 
-    /**
-     * 切换绑定状态时保留当前调节，开启绑定后才将调节写入当前 LUT。
-     */
-    fun setSyncAdjustmentsToLut(enabled: Boolean) {
-        val shouldSync = enabled && editLutId.value != null
-        if (editSyncAdjustmentsToLut == shouldSync) return
-
-        val params = snapshotEditRecipe(editPhotoRecipeParams.value, editLutId.value)
-        editSyncAdjustmentsToLut = shouldSync
-        if (shouldSync) {
-            setPhotoRecipeParams(params)
-        } else {
-            editPhotoRecipeParams.value = params
-        }
-    }
-
     private fun snapshotEditRecipe(params: ColorRecipeParams?, lutId: String?): ColorRecipeParams {
         // 旧照片可能只保存了 LUT 引用。读取一次实际配方后独立编辑，保持进入编辑时的画面。
         // 按 ID 读取也避免快速切换后取消同步时，拿到 StateFlow 尚未更新的上一个 LUT 配方。
         val recipe = params ?: lutId?.let { id ->
-            pendingEditLutRecipeSync[id] ?: runBlocking(Dispatchers.IO) {
+            runBlocking(Dispatchers.IO) {
                 contentRepository.lutManager.loadColorRecipeParams(id)
             }
         } ?: ColorRecipeParams.DEFAULT
         return recipe.deepCopy()
     }
 
-    /** 设置照片调节，并根据本次编辑的绑定状态同步到 LUT。 */
+    /** The photo's own adjustments; the look's saved recipe changes only with [saveRecipeIntoLook]. */
     fun setPhotoRecipeParams(params: ColorRecipeParams) {
         editPhotoRecipeParams.value = params
-        if (!editSyncAdjustmentsToLut) {
-            independentEditPhotoRecipeParams = params.deepCopy()
-        }
-        if (editSyncAdjustmentsToLut) {
-            val lutId = editLutId.value ?: return
-            pendingEditLutRecipeSync[lutId] = params.deepCopy()
-            editLutRecipeSyncJob?.cancel()
-            editLutRecipeSyncJob = viewModelScope.launch {
-                delay(250)
-                editLutRecipeSyncJob = null
-                flushPendingEditLutRecipeSync()
-            }
-        }
+        independentEditPhotoRecipeParams = params.deepCopy()
     }
 
-    private suspend fun flushPendingEditLutRecipeSync() {
-        editLutRecipeSyncJob?.cancel()
-        editLutRecipeSyncJob = null
-        editLutRecipeSyncMutex.withLock {
-            // 按 LUT 保留尚未落盘的调节，快速切换不会覆盖前一个 LUT 的待保存配方。
-            val pending = pendingEditLutRecipeSync.toMap()
-            for ((lutId, params) in pending) {
-                contentRepository.lutManager.saveColorRecipeParams(lutId, params)
-                if (pendingEditLutRecipeSync[lutId] === params) {
-                    pendingEditLutRecipeSync.remove(lutId)
-                }
-            }
+    /**
+     * Writes the photo's current adjustments into its look, so the look (on every photo and in the camera) has
+     * them from now on. One action; nothing follows later edits. False when there is no look.
+     */
+    suspend fun saveRecipeIntoLook(): Boolean {
+        val lutId = editLutId.value ?: return false
+        val recipe = editPhotoRecipeParams.value ?: return false
+        contentRepository.lutManager.saveColorRecipeParams(lutId, recipe.deepCopy())
+        return true
+    }
+
+    /** The camera preset applied to this photo in this edit, if any (photos don't record their preset). */
+    var appliedPresetId by mutableStateOf<String?>(null)
+        private set
+    private var appliedPresetState: Map<String, Any?> = emptyMap()
+
+    /** Applies a camera preset's look, colour recipe and effects, and frame to the photo being edited. */
+    fun applyPresetToEdit(preset: CameraPreset) {
+        setEditLut(preset.lutId)
+        setPhotoRecipeParams(preset.effects.applyTo(preset.colorRecipe))
+        setEditFrame(preset.frameId)
+        appliedPresetId = preset.id
+        appliedPresetState = editStateSnapshot()
+    }
+
+    /** Whether the look, its intensity, the recipe or the frame changed since the preset was applied. */
+    fun appliedPresetChanged(): Boolean {
+        val now = editStateSnapshot()
+        return now.keys.any { key ->
+            (key == "look" || key == "lutIntensity" || key == "frame" || key.startsWith("recipe.")) &&
+                now[key] != appliedPresetState[key]
         }
     }
 
     /**
      * 设置 LUT
      */
-    fun setEditLut(lutId: String?) {
+    fun setEditLut(id: String?) {
+        // The built-in "none" look is stored as no look.
+        val lutId = CameraPreset.normalizeLutId(id)
         if (lutId != null && getCurrentPhoto()?.isVideo == true &&
             (editVideoSourceProfile == null || selectableEditLuts.none { it.id == lutId })
         ) return
-        if (lutId == null) {
-            editSyncAdjustmentsToLut = false
-        }
         if (editLutId.value != lutId) {
             val lutRecipe = lutId?.let { id ->
-                pendingEditLutRecipeSync[id] ?: runBlocking(Dispatchers.IO) {
+                runBlocking(Dispatchers.IO) {
                     contentRepository.lutManager.loadSavedColorRecipeParams(id)
                 }
             }
             // LUT 配方完整应用，但不能覆盖独立调节草稿；离开带配方的 LUT 后恢复草稿。
             editPhotoRecipeParams.value = (
-                lutRecipe ?: if (editSyncAdjustmentsToLut) {
-                    ColorRecipeParams.DEFAULT
-                } else {
-                    independentEditPhotoRecipeParams
-                }
+                lutRecipe ?: independentEditPhotoRecipeParams
             ).deepCopy()
         }
         editLutId.value = lutId
@@ -2707,8 +2681,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     /**
      * 预览下一个滤镜（不切换）
      */
+    // The sideways swipe on the photo steps through the favourites; with fewer than two, through every look.
+    private val swipeLutList: List<LutInfo>
+        get() = selectableEditLuts.let { all -> all.filter { it.isFavorite }.takeIf { it.size >= 2 } ?: all }
+
     fun peekNextLut(): LutInfo? {
-        val availableLuts = selectableEditLuts
+        val availableLuts = swipeLutList
         if (availableLuts.isEmpty()) return null
         val currentLut = editLutId.value
         val currentIndex = availableLuts.indexOfFirst { it.id == currentLut }
@@ -2720,7 +2698,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * 预览上一个滤镜（不切换）
      */
     fun peekPreviousLut(): LutInfo? {
-        val availableLuts = selectableEditLuts
+        val availableLuts = swipeLutList
         if (availableLuts.isEmpty()) return null
         val currentLut = editLutId.value
         val currentIndex = availableLuts.indexOfFirst { it.id == currentLut }
@@ -2974,11 +2952,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun pasteCopiedEditSettingsToCurrentEdit(): Map<String, String>? {
         val copied = copiedEditSettings ?: return null
         val settings = copied.metadata
-
-        viewModelScope.launch {
-            flushPendingEditLutRecipeSync()
-        }
-        editSyncAdjustmentsToLut = false
 
         editLutId.value = settings.lutId
         val recipe = snapshotEditRecipe(settings.colorRecipeParams, settings.lutId)
@@ -4148,7 +4121,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             try {
                 // The blur file is part of what is saved: let a render still running finish first.
                 while (bokehJob?.isActive == true) bokehJob?.join()
-                flushPendingEditLutRecipeSync()
                 val context = getApplication<Application>()
                 val wasSystemPhoto = selectedTab == GalleryTab.SYSTEM
 

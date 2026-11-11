@@ -1934,4 +1934,17 @@
     <string name="film_explain_preset">Look, frame, aspect and rendering, set in one tap.</string>
     <string name="film_explain_current_new">Saves the current settings as a new preset.</string>
     <string name="film_explain_current_changed">Changed since the preset. Reset, update it, or save as a new one.</string>
+    <string name="editor_manage_looks">Manage looks</string>
+    <string name="editor_edit_frame">Edit frame</string>
+    <string name="editor_copy_edits">Copy edits</string>
+    <string name="editor_paste_edits">Paste edits</string>
+    <string name="editor_paste_nothing">Copy edits on a photo first</string>
+    <string name="editor_save_into_look">Save into look</string>
+    <string name="editor_save_into_look_title">Save into %1$s?</string>
+    <string name="editor_save_into_look_message">The look keeps these adjustments from now on: every photo and the camera using it change.</string>
+    <string name="editor_saved_into_look">Saved into the look</string>
+    <string name="editor_explain_look">The look (LUT) for this photo. A sideways swipe on the photo steps through your favourites. Long-press a look to manage it.</string>
+    <string name="editor_explain_frame">Add a decorative frame and watermark to the photo. Tap the chosen frame again to edit it.</string>
+    <string name="editor_explain_preset">A saved set of look, adjustments and frame. Copy and Paste carry these edits to another photo.</string>
+    <string name="editor_explain_live_photo">Apply the look and adjustments to the moving part of this Live Photo too.</string>
 </resources>
