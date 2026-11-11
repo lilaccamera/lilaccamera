@@ -2,6 +2,9 @@ package com.hinnka.mycamera.ui.gallery
 
 import com.hinnka.mycamera.ui.prefs.preferenceValue
 import android.annotation.SuppressLint
+import android.graphics.RectF
+import com.hinnka.mycamera.camera.AspectRatio
+import java.util.Locale
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -155,6 +158,7 @@ private data class EmbeddedDngProfileUiState(
 
 private data class PreviewRenderSignature(
     val photoId: String,
+    val editCropRect: RectF?,
     val refreshKey: Long,
     val editLutId: String?,
     val editPhotoRecipeParams: ColorRecipeParams?,
@@ -425,6 +429,8 @@ fun GalleryEditScreen(
     var ringDrag by remember { mutableStateOf<Offset?>(null) }
     // The recipe as it was when a long press on one setting began, to put back when it ends.
     var heldRecipe by remember { mutableStateOf<ColorRecipeParams?>(null) }
+    // The Crop value held down: the photo shows without that one change, and without the frame.
+    var heldCrop by remember { mutableStateOf<String?>(null) }
     var showDiscardDialog by remember { mutableStateOf(false) }
     var fingerOnPhoto by remember { mutableStateOf(false) }
     var fingerOnRuler by remember { mutableStateOf(false) }
@@ -441,8 +447,10 @@ fun GalleryEditScreen(
     fun currentPreviewSignature(fast: Boolean = false): PreviewRenderSignature? {
         val photo = editSourcePhoto ?: return null
         val rawDevelopIsBaked = isRaw
+        val inCrop = section == EditorSection.Crop
         return PreviewRenderSignature(
             photoId = photo.id,
+            editCropRect = if (inCrop) null else editCropRect,
             refreshKey = refreshKey,
             editLutId = editLutId,
             editPhotoRecipeParams = editPhotoRecipeParams,
@@ -485,10 +493,10 @@ fun GalleryEditScreen(
             editBokehStyle = editBokehStyle,
             editFocusX = editFocusX,
             editFocusY = editFocusY,
-            editRotationDegrees = editRotationDegrees,
-            // 裁剪页通过 Compose Canvas 实时校正，不触发防抖后的 Bitmap 重渲染。
-            editStraightenDegrees = if (section == EditorSection.Crop) 0f else editStraightenDegrees,
-            editMirrorHorizontal = editMirrorHorizontal,
+            // Crop draws the turn, flip and straightening on its canvas: changing them there renders nothing.
+            editRotationDegrees = if (inCrop) 0 else editRotationDegrees,
+            editStraightenDegrees = if (inCrop) 0f else editStraightenDegrees,
+            editMirrorHorizontal = if (inCrop) false else editMirrorHorizontal,
             showOrigin = showOrigin,
             cropView = section == EditorSection.Crop,
             portraitView = section == EditorSection.Portrait
@@ -509,6 +517,7 @@ fun GalleryEditScreen(
                 showOrigin = showOrigin,
                 ignoreCrop = isCropPreview,
                 ignoreStraighten = isCropPreview,
+                ignoreTurn = isCropPreview,
                 // Portrait shows the photo without its frame, so the focus ring lands on the photo itself.
                 ignoreFrame = isCropPreview || section == EditorSection.Portrait,
                 maxEdge = maxEdge
@@ -1242,13 +1251,14 @@ fun GalleryEditScreen(
                                                     when {
                                                         fullView -> fullView = false
                                                         section == EditorSection.Portrait -> placeFocus(tapAt)
-                                                        section != EditorSection.Crop -> fullView = true
+                                                        section == EditorSection.Crop -> noteLine.say(R.string.editor_crop_tap_hint)
+                                                        else -> fullView = true
                                                     }
                                                 }
                                             }
                                         } else {
-                                            // 确认为长按：显示原图
-                                            showOrigin = true
+                                            // 确认为长按：显示原图. Not in Crop: there a held finger is about to drag the frame.
+                                            if (section != EditorSection.Crop) showOrigin = true
                                             // 继续监控直到手指抬起，或者变成多指（开始缩放）
                                             while (true) {
                                                 val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -1330,16 +1340,26 @@ fun GalleryEditScreen(
                         straightenDegrees = editStraightenDegrees,
                         pixelAspect = effectiveCropAspectRatio
                     )
+                    // A held value shows the photo without that one change (the frame hides, it no longer fits).
+                    val heldTurn = heldCrop == "rotation"
+                    val heldFlip = heldCrop == "mirror"
                     CropOverlay(
                         bitmap = cropPreviewBitmap,
                         cropRect = editCropRect ?: cropBounds,
                         cropAspectRatio = cropAspectRatio,
-                        straightenDegrees = editStraightenDegrees,
+                        straightenDegrees = when {
+                            heldCrop == "straighten" -> 0f
+                            heldFlip -> -editStraightenDegrees  // flipping also mirrored the angle
+                            else -> editStraightenDegrees
+                        },
                         geometrySourceWidth = straightenSourceWidth,
                         geometrySourceHeight = straightenSourceHeight,
                         onCropRectChanged = { rect -> viewModel.setCropRect(rect) },
                         aspectOption = editCropAspectOption,
-                        contentPadding = 28.dp,
+                        contentPadding = 24.dp,
+                        rotationDegrees = if (heldTurn) 0 else editRotationDegrees,
+                        mirrorHorizontal = editMirrorHorizontal && !heldFlip,
+                        showFrame = heldCrop == null,
                         modifier = previewMediaModifier
                     )
                 } else {
@@ -1590,8 +1610,91 @@ fun GalleryEditScreen(
                 }
                 val subjectText = stringResource(R.string.editor_subject)
                 val onText = stringResource(R.string.editor_on)
+
+                // Crop: the photo's size once turned (Original's shape), and the frame's shape on it.
+                val cropBaseW = currentEditSourcePhoto.metadata?.width?.takeIf { it > 0 } ?: currentEditSourcePhoto.width.coerceAtLeast(1)
+                val cropBaseH = currentEditSourcePhoto.metadata?.height?.takeIf { it > 0 } ?: currentEditSourcePhoto.height.coerceAtLeast(1)
+                val (turnedW, turnedH) = PostEditGeometry.rotatedDimensions(cropBaseW, cropBaseH, editRotationDegrees)
+                val (straightW, straightH) = PostEditGeometry.straightenedDimensions(turnedW, turnedH, editStraightenDegrees)
+                val frameShape = editCropRect?.takeIf { it.height() > 0f }?.let { it.width() * straightW / (it.height() * straightH) }
+                    ?: (turnedW.toFloat() / turnedH)
+                // The ratio chips: the common ones, then the user's own camera ratios. Each is turned to the photo.
+                val customCameraRatios by cameraViewModel.availablePhotoAspectRatios.collectAsState()
+                val ratioChoices = listOf(
+                    AspectRatio.RATIO_1_1, AspectRatio.RATIO_4_3, AspectRatio.RATIO_3_2, AspectRatio.RATIO_16_9,
+                    AspectRatio.RATIO_21_9, AspectRatio.XPAN,
+                ) + customCameraRatios.filterNot { it in AspectRatio.entries }
+                fun sameShape(option: CropAspectOption, r: AspectRatio): Boolean {
+                    if (!option.hasFixedRatio || option.heightRatio == 0f) return false
+                    val a = option.widthRatio / option.heightRatio
+                    val wide = r.widthRatio.toFloat() / r.heightRatio
+                    return abs(a - wide) / wide < 0.01f || abs(a - 1f / wide) * wide < 0.01f
+                }
+                val freeText = stringResource(R.string.crop_free)
+                val originalText = stringResource(R.string.crop_original)
+                fun ratioText(option: CropAspectOption): String = when {
+                    option.isFree -> freeText
+                    option.isOriginal -> originalText
+                    else -> ratioChoices.firstOrNull { sameShape(option, it) }?.let { r ->
+                        when {
+                            r == AspectRatio.XPAN -> "XPAN"
+                            option.widthRatio >= option.heightRatio -> "${r.widthRatio}:${r.heightRatio}"
+                            else -> "${r.heightRatio}:${r.widthRatio}"
+                        }
+                    } ?: String.format(Locale.ROOT, "%.2f:1", option.widthRatio / option.heightRatio)
+                }
+                fun chooseRatio(r: AspectRatio) {
+                    val landscape = turnedW >= turnedH
+                    viewModel.setCropAspectOption(
+                        if (landscape) CropAspectOption.FromAspectRatio(r)
+                        else CropAspectOption.Custom(r.heightRatio.toFloat(), r.widthRatio.toFloat())
+                    )
+                }
+                val openStraighten = viewModel.editOpenValue("straighten") as? Float ?: 0f
+                // Back to the ratio and frame the editor opened with; if the photo was turned since, the old frame
+                // no longer fits, so the opening ratio is fitted afresh.
+                fun restoreCropRatio() {
+                    val openOption = CropAspectOption.fromShapeKey(viewModel.editOpenValue("cropRatio"))
+                    val sameGeometry = editRotationDegrees == viewModel.editOpenValue("rotation") &&
+                        editMirrorHorizontal == viewModel.editOpenValue("mirror") &&
+                        editStraightenDegrees == openStraighten
+                    if (sameGeometry) {
+                        viewModel.editCropAspectOption.value = openOption
+                        viewModel.setCropRect(viewModel.editOpenValue("crop") as? RectF)
+                    } else {
+                        viewModel.setCropAspectOption(openOption)
+                    }
+                }
+                fun straightenText(v: Float) = String.format(Locale.ROOT, "%.1f", v).removeSuffix(".0") + "°"
+
                 val values = when {
                     group != null -> emptyList()
+                    section == EditorSection.Crop -> listOf(
+                        EditorValue(
+                            "cropRatio", stringResource(R.string.editor_ratio), ratioText(editCropAspectOption),
+                            AppIcons.CropLine,
+                            // A frame moved by turning or straightening alone is those values' change, not the ratio's.
+                            "cropRatio" in changedKeys || "crop" in changedKeys &&
+                                listOf("rotation", "straighten", "mirror").none { it in changedKeys },
+                            glyph = EditorGlyph.CropRatio, fraction = (frameShape - 1f) / (frameShape + 1f)
+                        ),
+                        EditorValue(
+                            "straighten", stringResource(R.string.crop_straighten), straightenText(editStraightenDegrees),
+                            AppIcons.CropLine, "straighten" in changedKeys,
+                            glyph = EditorGlyph.Straighten, fraction = editStraightenDegrees / 45f
+                        ),
+                        // Rotate and Flip act on every tap; they are never the selected control.
+                        EditorValue(
+                            "rotation", stringResource(R.string.rotate), "$editRotationDegrees°",
+                            AppIcons.RotateClockwiseLine, "rotation" in changedKeys,
+                            glyph = EditorGlyph.Rotate, fraction = editRotationDegrees / 360f
+                        ),
+                        EditorValue(
+                            "mirror", stringResource(R.string.editor_flip), if (editMirrorHorizontal) onText else offText,
+                            AppIcons.CropLine, "mirror" in changedKeys,
+                            glyph = EditorGlyph.Flip, fraction = if (editMirrorHorizontal) 1f else 0f
+                        ),
+                    )
                     section == EditorSection.Look -> listOf(
                         EditorValue(
                             "look", stringResource(R.string.editor_look),
@@ -1657,7 +1760,7 @@ fun GalleryEditScreen(
                         )
                     }
                 }
-                val selectable = values.filterNot { it.group }
+                val selectable = values.filterNot { it.group || it.key == "rotation" || it.key == "mirror" }
                 val selectedKey = selectable.firstOrNull { it.key == selections[levelKey] }?.key ?: selectable.firstOrNull()?.key
                 val selectedSetting = settings.firstOrNull { it.key == selectedKey }
 
@@ -1741,6 +1844,16 @@ fun GalleryEditScreen(
                     EditorExplanationCard(
                         name = stringResource(explained.label),
                         text = stringResource(explained.explanation) + lookPart,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
+                    )
+                } else if (explainKey != null && section == EditorSection.Crop) {
+                    EditorExplanationCard(
+                        name = stringResource(if (explainKey == "straighten") R.string.crop_straighten else R.string.editor_ratio),
+                        text = stringResource(
+                            if (explainKey == "straighten") R.string.editor_explain_straighten else R.string.editor_explain_crop_ratio
+                        ),
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
@@ -1860,6 +1973,59 @@ fun GalleryEditScreen(
                                     releaseSetting(selectedSetting)
                                 },
                                 labelEvery = selectedSetting.labelEvery,
+                                onTouch = { fingerOnRuler = it }
+                            )
+                        }
+                        selectedKey == "cropRatio" -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            val selectedIndex = when {
+                                editCropAspectOption.isOriginal -> 1
+                                editCropAspectOption.isFree -> 2
+                                else -> 3 + ratioChoices.indexOfFirst { sameShape(editCropAspectOption, it) }.coerceAtLeast(0)
+                            }
+                            ChoiceScroller(selectedIndex, maxWidth = 360.dp) {
+                                // Turn swaps a fixed shape between portrait and landscape.
+                                val turnable = editCropAspectOption.hasFixedRatio &&
+                                    editCropAspectOption.widthRatio != editCropAspectOption.heightRatio
+                                EditorChip(
+                                    text = stringResource(R.string.editor_turn), selected = false,
+                                    icon = AppIcons.RotateClockwiseLine, action = true, dim = !turnable,
+                                    onClick = {
+                                        val o = editCropAspectOption
+                                        if (turnable) viewModel.setCropAspectOption(CropAspectOption.Custom(o.heightRatio, o.widthRatio))
+                                        else noteLine.say(R.string.editor_turn_needs_shape)
+                                    }
+                                )
+                                EditorChip(
+                                    text = originalText, selected = editCropAspectOption.isOriginal,
+                                    onClick = { viewModel.setCropAspectOption(CropAspectOption.Original) }
+                                )
+                                EditorChip(
+                                    text = freeText, selected = editCropAspectOption.isFree,
+                                    onClick = { viewModel.setCropAspectOption(CropAspectOption.Free) }
+                                )
+                                ratioChoices.forEach { r ->
+                                    EditorChip(
+                                        text = if (r == AspectRatio.XPAN) "XPAN"
+                                        else if (turnedW >= turnedH) "${r.widthRatio}:${r.heightRatio}"
+                                        else "${r.heightRatio}:${r.widthRatio}",
+                                        selected = sameShape(editCropAspectOption, r),
+                                        onClick = { chooseRatio(r) }
+                                    )
+                                }
+                            }
+                        }
+                        selectedKey == "straighten" -> {
+                            val steps = (-90..90).map { it / 2f }.let { if (openStraighten in it) it else (it + openStraighten).sorted() }
+                            LilacRuler(
+                                values = steps,
+                                value = editStraightenDegrees,
+                                start = openStraighten,
+                                label = { "${it.roundToInt()}" },
+                                // Only the canvas redraws while it moves: no render.
+                                onChange = { viewModel.setStraightenDegrees(it) },
+                                onRelease = {},
+                                onReset = { viewModel.setStraightenDegrees(openStraighten) },
+                                labelEvery = 10,
                                 onTouch = { fingerOnRuler = it }
                             )
                         }
@@ -2031,6 +2197,14 @@ fun GalleryEditScreen(
                                         explainKey = null
                                         groupPath = (groupStack.map { it.name } + item.key.removePrefix("group:")).joinToString("/")
                                     }
+                                    item.key == "rotation" -> {
+                                        explainKey = null
+                                        viewModel.rotateEditClockwise()
+                                    }
+                                    item.key == "mirror" -> {
+                                        explainKey = null
+                                        viewModel.toggleEditHorizontalMirror()
+                                    }
                                     // A double tap returns the setting to where it was when the editor opened.
                                     doubleTap -> {
                                         explainKey = null
@@ -2044,6 +2218,8 @@ fun GalleryEditScreen(
                                                 releaseSetting(s)
                                             }
                                         }
+                                        if (item.key == "cropRatio") restoreCropRatio()
+                                        if (item.key == "straighten") viewModel.setStraightenDegrees(openStraighten)
                                         if (item.key == "intensity") {
                                             viewModel.setPhotoRecipeParams(
                                                 RecipeParam.LUT_INTENSITY.setValue(editPhotoRecipeParams ?: editLutRecipeParams, openIntensity)
@@ -2068,6 +2244,7 @@ fun GalleryEditScreen(
                                 val live = item.key == "intensity" || s?.kind == SettingKind.Recipe
                                 when {
                                     item.group -> Unit
+                                    section == EditorSection.Crop -> heldCrop = item.key.takeIf { holding }
                                     !live && holding -> noteLine.say(R.string.editor_compare_one_unavailable)
                                     !live -> Unit
                                     holding -> {

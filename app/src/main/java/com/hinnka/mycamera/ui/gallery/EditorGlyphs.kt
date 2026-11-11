@@ -25,7 +25,7 @@ import kotlin.math.sqrt
 internal enum class EditorGlyph {
     Contrast, Highlights, Shadows, Whites, Blacks, Tonality, Fade, Vignette, Sharpness, Bloom, Halation, SoftLight,
     Temp, Tint, Saturation, Vibrance, Clarity, NoiseReduction, ColorNoise, AiDenoise,
-    Grain, Flash, Bleach, Fringe, Noise, DepthOfField
+    Grain, Flash, Bleach, Fringe, Noise, DepthOfField, CropRatio, Straighten, Flip, Rotate
 }
 
 private const val BOX = "M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-12a3 3 0 0 1 3 -3z"
@@ -266,6 +266,33 @@ internal fun editorGlyph(glyph: EditorGlyph, k: Float, color: Color): ImageVecto
             fill("M3.9 ${f1(12 + half)}H20.1V20.1H3.9z")
             line(BOX)
             line("M3 ${f1(12 - half)}H21M3 ${f1(12 + half)}H21")
+        }
+        // Ratio: a frame of the crop's shape; k is (w − h) / (w + h), so 0 is square, −1 tall, 1 wide.
+        EditorGlyph.CropRatio -> {
+            val a = ((1f + k1) / (1f - k1).coerceAtLeast(0.05f)).coerceIn(0.2f, 5f)
+            val w = if (a >= 1f) 18f else 18f * a
+            val h = if (a >= 1f) 18f / a else 18f
+            line("M${f1(12 - w / 2)} ${f1(12 - h / 2)}h${f1(w)}v${f1(h)}h${f1(-w)}z", LINE_STROKE)
+        }
+        // Straighten: a horizon that tilts with the angle (k is the angle over 45°) between two level marks.
+        EditorGlyph.Straighten -> {
+            val angle = k1 * Math.PI.toFloat() / 4f
+            val dx = 7f * cos(angle)
+            val dy = 7f * sin(angle)
+            line("M2 12h2.5M19.5 12h2.5M${f1(12 - dx)} ${f1(12 - dy)}L${f1(12 + dx)} ${f1(12 + dy)}", LINE_STROKE)
+        }
+        // Rotate: the turn arrow, itself turned by the photo's turn (k is the turn over 360°).
+        EditorGlyph.Rotate -> {
+            b.addGroup(rotate = k1 * 360f, pivotX = 12f, pivotY = 12f)
+            line("M4.05 11a8 8 0 1 1 .5 4m-.5 5v-5h5", LINE_STROKE)
+            b.clearGroup()
+        }
+        // Flip: two triangles mirrored over a dashed line; the filled one changes side when the flip is on.
+        EditorGlyph.Flip -> {
+            val leftShape = "M10 6L3 18h7z"
+            val rightShape = "M14 6l7 12h-7z"
+            fill(if (k1 > 0f) rightShape else leftShape, alpha = 1f)
+            line("M12 3v2M12 8v2M12 13v2M12 18v2" + if (k1 > 0f) leftShape else rightShape, LINE_STROKE)
         }
         // Soft light: a circle whose hatched half spreads across it.
         EditorGlyph.SoftLight -> {

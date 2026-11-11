@@ -1950,6 +1950,13 @@
     <string name="editor_depth_of_field">Depth of field</string>
     <string name="editor_auto">Auto</string>
     <string name="editor_shallow">Shallow</string>
+    <string name="editor_ratio">Ratio</string>
+    <string name="editor_flip">Flip</string>
+    <string name="editor_turn">Turn</string>
+    <string name="editor_turn_needs_shape">Turn swaps a fixed shape, such as 4:3 to 3:4. Pick one first</string>
+    <string name="editor_crop_tap_hint">Drag the frame\'s corners, or inside it to move it</string>
+    <string name="editor_explain_crop_ratio">The frame\'s shape. Original keeps the photo\'s own shape, Free lets every edge move, and Turn swaps a shape between portrait and landscape.</string>
+    <string name="editor_explain_straighten">Tilts the photo to level a horizon, up to 45° each way. The frame stays inside the photo.</string>
     <string name="editor_deep">Deep</string>
     <string name="editor_shallow_value">Shallow %1$d</string>
     <string name="editor_deep_value">Deep %1$d</string>

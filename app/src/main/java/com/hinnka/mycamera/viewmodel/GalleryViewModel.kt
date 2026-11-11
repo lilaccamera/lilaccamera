@@ -1579,7 +1579,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private fun restoreCropEditState(photo: MediaData?, metadata: MediaMetadata?) {
         if (metadata == null) {
             editCropRect.value = null
-            editCropAspectOption.value = CropAspectOption.Free
+            editCropAspectOption.value = CropAspectOption.Original
             return
         }
 
@@ -1604,13 +1604,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
 
-            editCropAspectOption.value = CropAspectOption.Custom(
-                metadata.postCropRegion.width().toFloat(),
-                metadata.postCropRegion.height().toFloat()
-            )
+            val (rw, rh) = PostEditGeometry.rotatedDimensions(baseWidth, baseHeight, metadata.postRotationDegrees)
+            editCropAspectOption.value = cropOptionFor(editCropRect.value, cw, ch, rw.toFloat() / rh.coerceAtLeast(1))
         } else {
             editCropRect.value = null
-            editCropAspectOption.value = CropAspectOption.Free
+            editCropAspectOption.value = CropAspectOption.Original
         }
     }
 
@@ -2485,8 +2483,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             "depth" to editPortraitQuick.value,
             "depthOfField" to editDepthOfField.value,
             "focus" to (editFocusPointX.value to editFocusPointY.value),
-            "crop" to editCropRect.value?.let { RectF(it) },
-            "cropRatio" to editCropAspectOption.value,
+            // Rounded, and the whole photo as no crop, so turning four times or straightening and back is no change.
+            "crop" to editCropRect.value?.let { r ->
+                fun round(v: Float) = (v * 10_000f).roundToInt() / 10_000f
+                RectF(round(r.left), round(r.top), round(r.right), round(r.bottom))
+                    .takeUnless { it.left <= 0f && it.top <= 0f && it.right >= 1f && it.bottom >= 1f }
+            },
+            "cropRatio" to editCropAspectOption.value.shapeKey,
             "rotation" to editRotationDegrees.value,
             "straighten" to editStraightenDegrees.value,
             "mirror" to editMirrorHorizontal.value,
@@ -2574,7 +2577,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         independentEditPhotoRecipeParams = ColorRecipeParams.DEFAULT
         editApplyEffectsToVideo.value = false
         editCropRect.value = null
-        editCropAspectOption.value = CropAspectOption.Free
+        editCropAspectOption.value = CropAspectOption.Original
         editRotationDegrees.value = 0
         editStraightenDegrees.value = 0f
         editMirrorHorizontal.value = false
@@ -2856,6 +2859,24 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         )
     }
 
+    /**
+     * The ratio choice a crop of [rect] matches on a turned and straightened [width] x [height] photo: Original
+     * when it has the photo's own shape ([sourceAspect]), a built-in ratio in either orientation, else Free.
+     */
+    private fun cropOptionFor(rect: RectF?, width: Int, height: Int, sourceAspect: Float): CropAspectOption {
+        if (rect == null || width <= 0 || height <= 0 || rect.height() <= 0f) return CropAspectOption.Original
+        val shape = rect.width() * width / (rect.height() * height)
+        fun close(target: Float) = kotlin.math.abs(shape - target) / target < ASPECT_RATIO_MATCH_TOLERANCE
+        if (close(sourceAspect)) return CropAspectOption.Original
+        for (r in AspectRatio.entries) {
+            if (close(r.widthRatio.toFloat() / r.heightRatio)) return CropAspectOption.FromAspectRatio(r)
+            if (close(r.heightRatio.toFloat() / r.widthRatio)) {
+                return CropAspectOption.Custom(r.heightRatio.toFloat(), r.widthRatio.toFloat())
+            }
+        }
+        return CropAspectOption.Free
+    }
+
     /** 按旋转、拉直与裁切后的成片长短边比匹配内置画幅，与方向无关；不命中时返回 null。 */
     private fun resolveEditedAspectRatio(photo: MediaData): AspectRatio? {
         val metadata = photo.metadata
@@ -2996,9 +3017,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             PostEditGeometry.normalizeStraightenDegrees(settings.postStraightenDegrees)
         editMirrorHorizontal.value = settings.postMirrorHorizontal
         editCropRect.value = copied.normalizedCropRect?.let(::RectF)
-        editCropAspectOption.value = copied.normalizedCropRect?.let {
-            CropAspectOption.Custom(it.width(), it.height())
-        } ?: CropAspectOption.Free
+        editCropAspectOption.value = resolveCurrentEditBaseDimensions()?.let { (bw, bh) ->
+            val (cw, ch) = PostEditGeometry.editedDimensions(bw, bh, editRotationDegrees.value, editStraightenDegrees.value)
+            val (rw, rh) = PostEditGeometry.rotatedDimensions(bw, bh, editRotationDegrees.value)
+            cropOptionFor(editCropRect.value, cw, ch, rw.toFloat() / rh.coerceAtLeast(1))
+        } ?: CropAspectOption.Original
         editApplyEffectsToVideo.value = settings.applyEffectsToVideo
         currentMediaMetadata = (currentMediaMetadata ?: MediaMetadata()).let {
             it.copy(customProperties = PhotoStacks.keepStackOf(it.customProperties, settings.customProperties))
@@ -3754,6 +3777,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         bitmap: Bitmap? = null,
         ignoreCrop: Boolean = false,
         ignoreStraighten: Boolean = false,
+        ignoreTurn: Boolean = false,
         ignoreFrame: Boolean = false,
         ignoreDenoise: Boolean = false,
         recipeParamsOverride: ColorRecipeParams? = null,
@@ -3846,6 +3870,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     if (ignoreStraighten) {
                         finalMetadata = finalMetadata.copy(postStraightenDegrees = 0f)
                     }
+                    if (ignoreTurn) {
+                        finalMetadata = finalMetadata.copy(postRotationDegrees = 0, postMirrorHorizontal = false)
+                    }
                     finalS = editSharpening.value
                     finalNR = editNoiseReduction.value
                     finalCNR = editChromaNoiseReduction.value
@@ -3863,6 +3890,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     }
                     if (ignoreStraighten) {
                         finalMetadata = finalMetadata.copy(postStraightenDegrees = 0f)
+                    }
+                    if (ignoreTurn) {
+                        finalMetadata = finalMetadata.copy(postRotationDegrees = 0, postMirrorHorizontal = false)
                     }
                 }
 

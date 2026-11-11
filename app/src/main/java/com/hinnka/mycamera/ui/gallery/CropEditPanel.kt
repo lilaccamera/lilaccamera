@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
@@ -76,6 +77,23 @@ sealed class CropAspectOption(
     val isOriginal get() = this is Original
     val hasFixedRatio get() = !isFree && !isOriginal
 
+    /** The shape alone, so one ratio written two ways (4:3 and 8:6, after turning twice) compares equal. */
+    val shapeKey: Any
+        get() = when {
+            isFree -> "free"
+            isOriginal -> "original"
+            else -> (widthRatio / heightRatio * 1000f).roundToInt()
+        }
+
+    companion object {
+        /** The choice back from its [shapeKey]. */
+        fun fromShapeKey(key: Any?): CropAspectOption = when (key) {
+            "free" -> Free
+            is Int -> Custom(key / 1000f, 1f)
+            else -> Original
+        }
+    }
+
     /**
      * 获取宽高比 (w/h)，根据图像方向自动调整
      */
@@ -84,416 +102,6 @@ sealed class CropAspectOption(
         if (isOriginal) return imageW.toFloat() / imageH.toFloat()
         if (heightRatio == 0f) return null
         return widthRatio / heightRatio
-    }
-}
-
-/**
- * 获取所有可用的裁剪选项列表
- */
-fun getCropAspectOptions(allRatios: List<AspectRatio>): List<CropAspectOption> {
-    val options = mutableListOf<CropAspectOption>()
-    options.add(CropAspectOption.Free)
-    options.add(CropAspectOption.Original)
-    
-    // Sort ratios to put common ones first if needed, but here we just take them all
-    for (ratio in allRatios) {
-        val option = CropAspectOption.FromAspectRatio(ratio)
-        options.add(option)
-        // Also add the inverted version (e.g., 3:4 for 4:3) if not square
-        if (ratio.widthRatio != ratio.heightRatio) {
-            options.add(CropAspectOption.Custom(ratio.heightRatio.toFloat(), ratio.widthRatio.toFloat()))
-        }
-    }
-    return options
-}
-
-/**
- * 裁剪编辑面板
- */
-@Composable
-fun CropEditPanel(
-    selectedOption: CropAspectOption,
-    onOptionSelected: (CropAspectOption) -> Unit,
-    straightenDegrees: Float,
-    onStraightenDegreesChanged: (Float) -> Unit,
-    isHorizontallyMirrored: Boolean,
-    onRotate: () -> Unit,
-    onMirrorHorizontal: () -> Unit,
-    availableRatios: List<AspectRatio>,
-    imageWidth: Int,
-    imageHeight: Int,
-    modifier: Modifier = Modifier
-) {
-    val options = remember(availableRatios) {
-        getCropAspectOptions(availableRatios)
-    }
-
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(vertical = 12.dp)
-    ) {
-        StraightenControl(
-            degrees = straightenDegrees,
-            onDegreesChanged = onStraightenDegreesChanged
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FilledTonalButton(
-                onClick = onRotate,
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(horizontal = 8.dp),
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = Color.White.copy(alpha = 0.05f),
-                    contentColor = Color.White.copy(alpha = 0.6f)
-                )
-            ) {
-                Icon(
-                    imageVector = AppIcons.ScreenRotation,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(stringResource(R.string.rotate), maxLines = 1)
-            }
-            FilledTonalButton(
-                onClick = onMirrorHorizontal,
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(horizontal = 8.dp),
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = if (isHorizontallyMirrored) {
-                        AccentColor.copy(alpha = 0.18f)
-                    } else {
-                        Color.White.copy(alpha = 0.05f)
-                    },
-                    contentColor = if (isHorizontallyMirrored) AccentColor else Color.White.copy(0.6f)
-                )
-            ) {
-                Icon(
-                    imageVector = AppIcons.SwapHoriz,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(stringResource(R.string.flip_horizontal), maxLines = 1)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // 比例选择标题
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = stringResource(R.string.crop).uppercase(),
-                color = Color.White.copy(alpha = 0.4f),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
-            )
-            
-            Text(
-                text = when (selectedOption) {
-                    is CropAspectOption.Free -> stringResource(R.string.crop_free)
-                    is CropAspectOption.Original -> stringResource(R.string.crop_original)
-                    else -> selectedOption.displayName
-                },
-                color = AccentColor,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            items(options) { option ->
-                CropAspectOptionItem(
-                    option = option,
-                    isSelected = option.displayName == selectedOption.displayName && 
-                                 option.widthRatio == selectedOption.widthRatio && 
-                                 option.heightRatio == selectedOption.heightRatio,
-                    onClick = { onOptionSelected(option) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun StraightenControl(
-    degrees: Float,
-    onDegreesChanged: (Float) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val currentOnDegreesChanged by rememberUpdatedState(onDegreesChanged)
-
-    Column(modifier = modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = stringResource(R.string.crop_straighten).uppercase(),
-                color = Color.White.copy(alpha = 0.4f),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
-            )
-            Text(
-                text = stringResource(R.string.crop_straighten_degrees, degrees),
-                color = AccentColor,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { currentOnDegreesChanged(0f) }
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        StraightenRuler(
-            degrees = degrees,
-            onDegreesChanged = currentOnDegreesChanged,
-            onDoubleTap = { currentOnDegreesChanged(0f) }
-        )
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                stringResource(R.string.crop_straighten_range_min),
-                color = Color.White.copy(alpha = 0.35f),
-                fontSize = 9.sp
-            )
-            Text(
-                stringResource(R.string.crop_straighten_range_zero),
-                color = Color.White.copy(alpha = 0.35f),
-                fontSize = 9.sp
-            )
-            Text(
-                stringResource(R.string.crop_straighten_range_max),
-                color = Color.White.copy(alpha = 0.35f),
-                fontSize = 9.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun StraightenRuler(
-    degrees: Float,
-    onDegreesChanged: (Float) -> Unit,
-    onDoubleTap: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val accentColor = AccentColor
-    val currentOnDegreesChanged by rememberUpdatedState(onDegreesChanged)
-    val currentOnDoubleTap by rememberUpdatedState(onDoubleTap)
-    val trackInsetPx = with(LocalDensity.current) { 10.dp.toPx() }
-
-    fun updateFromPosition(positionX: Float, width: Float) {
-        val trackWidth = (width - trackInsetPx * 2f).coerceAtLeast(1f)
-        val fraction = ((positionX - trackInsetPx) / trackWidth).coerceIn(0f, 1f)
-        val value = -PostEditGeometry.MAX_STRAIGHTEN_DEGREES +
-            fraction * PostEditGeometry.MAX_STRAIGHTEN_DEGREES * 2f
-        currentOnDegreesChanged(if (abs(value) < 0.12f) 0f else value)
-    }
-
-    Canvas(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(40.dp)
-            .straightenSliderDragInput(trackInsetPx) { positionX, width ->
-                updateFromPosition(positionX, width)
-            }
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onDoubleTap = { currentOnDoubleTap() },
-                    onTap = { position ->
-                        updateFromPosition(position.x, size.width.toFloat())
-                    }
-                )
-            }
-    ) {
-        val centerY = size.height / 2f
-        val trackWidth = (size.width - trackInsetPx * 2f).coerceAtLeast(1f)
-        for (tick in -45..45) {
-            val x = trackInsetPx + (tick + 45f) / 90f * trackWidth
-            val isMajor = tick % 5 == 0
-            val tickHeight = if (isMajor) 12.dp.toPx() else 6.dp.toPx()
-            drawLine(
-                color = Color.White.copy(alpha = if (isMajor) 0.5f else 0.22f),
-                start = Offset(x, centerY - tickHeight / 2f),
-                end = Offset(x, centerY + tickHeight / 2f),
-                strokeWidth = if (isMajor) 1.5.dp.toPx() else 1.dp.toPx()
-            )
-        }
-
-        val normalizedValue = (
-            PostEditGeometry.normalizeStraightenDegrees(degrees) +
-                PostEditGeometry.MAX_STRAIGHTEN_DEGREES
-            ) / (PostEditGeometry.MAX_STRAIGHTEN_DEGREES * 2f)
-        val thumbWidth = 5.dp.toPx()
-        val thumbHeight = 30.dp.toPx()
-        val thumbX = trackInsetPx + normalizedValue * trackWidth
-        drawRoundRect(
-            color = accentColor,
-            topLeft = Offset(thumbX - thumbWidth / 2f, centerY - thumbHeight / 2f),
-            size = Size(thumbWidth, thumbHeight),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(
-                thumbWidth / 2f,
-                thumbWidth / 2f
-            )
-        )
-    }
-}
-
-private fun Modifier.straightenSliderDragInput(
-    trackInsetPx: Float,
-    onPositionChange: (positionX: Float, width: Float) -> Unit
-): Modifier = pointerInput(trackInsetPx) {
-    awaitEachGesture {
-        val down = awaitFirstDown(requireUnconsumed = false)
-        var totalX = 0f
-        var totalY = 0f
-        var dragging = false
-
-        while (true) {
-            val event = awaitPointerEvent()
-            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-            if (!change.pressed) break
-
-            val delta = change.positionChange()
-            if (!dragging) {
-                totalX += delta.x
-                totalY += delta.y
-                if (abs(totalY) > viewConfiguration.touchSlop && abs(totalY) > abs(totalX)) {
-                    break
-                }
-                if (abs(totalX) <= viewConfiguration.touchSlop || abs(totalX) <= abs(totalY)) {
-                    continue
-                }
-                dragging = true
-            }
-
-            change.consume()
-            onPositionChange(change.position.x, size.width.toFloat())
-        }
-    }
-}
-
-/**
- * 裁剪比例选项按钮
- */
-@Composable
-private fun CropAspectOptionItem(
-    option: CropAspectOption,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    val displayText = when (option) {
-        is CropAspectOption.Free -> stringResource(R.string.crop_free)
-        is CropAspectOption.Original -> stringResource(R.string.crop_original)
-        else -> option.displayName
-    }
-
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .width(64.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable { onClick() }
-            .padding(vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        // Visual Preview
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .background(
-                    if (isSelected) AccentColor.copy(alpha = 0.15f)
-                    else Color.White.copy(alpha = 0.05f),
-                    RoundedCornerShape(10.dp)
-                )
-                .border(
-                    1.dp,
-                    if (isSelected) AccentColor else Color.White.copy(alpha = 0.1f),
-                    RoundedCornerShape(10.dp)
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            when (option) {
-                is CropAspectOption.Free -> {
-                    Icon(
-                        imageVector = AppIcons.FilterNone,
-                        contentDescription = null,
-                        tint = if (isSelected) AccentColor else Color.White.copy(alpha = 0.5f),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                is CropAspectOption.Original -> {
-                    Icon(
-                        imageVector = AppIcons.Article,
-                        contentDescription = null,
-                        tint = if (isSelected) AccentColor else Color.White.copy(alpha = 0.5f),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                else -> {
-                    val w = option.widthRatio
-                    val h = option.heightRatio
-                    val maxDim = 24.dp
-                    val displayW: androidx.compose.ui.unit.Dp
-                    val displayH: androidx.compose.ui.unit.Dp
-                    
-                    if (w > h) {
-                        displayW = maxDim
-                        displayH = maxDim * (h / w)
-                    } else {
-                        displayH = maxDim
-                        displayW = maxDim * (w / h)
-                    }
-                    
-                    Box(
-                        modifier = Modifier
-                            .size(displayW, displayH)
-                            .background(
-                                if (isSelected) AccentColor else Color.White.copy(alpha = 0.4f),
-                                RoundedCornerShape(2.dp)
-                            )
-                    )
-                }
-            }
-        }
-
-        Text(
-            text = displayText,
-            color = if (isSelected) AccentColor else Color.White.copy(alpha = 0.6f),
-            fontSize = 11.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-            maxLines = 1,
-            textAlign = TextAlign.Center
-        )
     }
 }
 
@@ -511,19 +119,25 @@ fun CropOverlay(
     onCropRectChanged: (RectF) -> Unit,
     aspectOption: CropAspectOption,
     contentPadding: Dp = 0.dp,
+    rotationDegrees: Int = 0,
+    mirrorHorizontal: Boolean = false,
+    showFrame: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     if (bitmap == null) return
 
-    val sourceImageWidth = bitmap.width.toFloat()
-    val sourceImageHeight = bitmap.height.toFloat()
-    val cropSourceWidth = geometrySourceWidth?.takeIf { it > 0 } ?: bitmap.width
-    val cropSourceHeight = geometrySourceHeight?.takeIf { it > 0 } ?: bitmap.height
+    // [bitmap] may come unturned and unflipped: the turn and flip are then drawn here, so a tap on Rotate or
+    // Flip shows at once without a new render. The geometry below works on the turned size.
+    val quarterTurned = PostEditGeometry.normalizeRotation(rotationDegrees) % 180 != 0
+    val turnedWidth = if (quarterTurned) bitmap.height else bitmap.width
+    val turnedHeight = if (quarterTurned) bitmap.width else bitmap.height
+    val cropSourceWidth = geometrySourceWidth?.takeIf { it > 0 } ?: turnedWidth
+    val cropSourceHeight = geometrySourceHeight?.takeIf { it > 0 } ?: turnedHeight
     val normalizedStraightenDegrees = PostEditGeometry.normalizeStraightenDegrees(straightenDegrees)
-    val straightenedImageSize = remember(bitmap.width, bitmap.height, normalizedStraightenDegrees) {
+    val straightenedImageSize = remember(turnedWidth, turnedHeight, normalizedStraightenDegrees) {
         PostEditGeometry.straightenedDimensions(
-            bitmap.width,
-            bitmap.height,
+            turnedWidth,
+            turnedHeight,
             normalizedStraightenDegrees
         )
     }
@@ -543,7 +157,7 @@ fun CropOverlay(
     val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
     val density = LocalDensity.current
     val contentPaddingPx = with(density) { contentPadding.toPx() }
-    val handleTouchSlopPx = with(density) { 24.dp.toPx() }
+    val dp = density.density
 
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
     var dragHandle by remember { mutableStateOf<DragHandle?>(null) }
@@ -586,28 +200,31 @@ fun CropOverlay(
                     imageDisplayRect.width / imageWidth,
                     imageDisplayRect.height / imageHeight
                 )
-                val sourceDisplayWidth = (sourceImageWidth * pixelScale).roundToInt().coerceAtLeast(1)
-                val sourceDisplayHeight = (sourceImageHeight * pixelScale).roundToInt().coerceAtLeast(1)
+                val sourceDisplayWidth = (bitmap.width * pixelScale).roundToInt().coerceAtLeast(1)
+                val sourceDisplayHeight = (bitmap.height * pixelScale).roundToInt().coerceAtLeast(1)
                 val destinationOffset = IntOffset(
                     x = (imageDisplayRect.center.x - sourceDisplayWidth / 2f).roundToInt(),
                     y = (imageDisplayRect.center.y - sourceDisplayHeight / 2f).roundToInt()
                 )
-                rotate(
-                    degrees = normalizedStraightenDegrees,
-                    pivot = imageDisplayRect.center
-                ) {
-                    drawImage(
-                        image = imageBitmap,
-                        dstOffset = destinationOffset,
-                        dstSize = IntSize(sourceDisplayWidth, sourceDisplayHeight),
-                        filterQuality = FilterQuality.Medium
-                    )
+                // The saved photo's order, innermost first: turn, then flip, then straighten.
+                val center = imageDisplayRect.center
+                rotate(degrees = normalizedStraightenDegrees, pivot = center) {
+                    scale(scaleX = if (mirrorHorizontal) -1f else 1f, scaleY = 1f, pivot = center) {
+                        rotate(degrees = rotationDegrees.toFloat(), pivot = center) {
+                            drawImage(
+                                image = imageBitmap,
+                                dstOffset = destinationOffset,
+                                dstSize = IntSize(sourceDisplayWidth, sourceDisplayHeight),
+                                filterQuality = FilterQuality.Medium
+                            )
+                        }
+                    }
                 }
             }
         }
 
         // 裁剪叠加层
-        if (imageDisplayRect != Rect.Zero) {
+        if (imageDisplayRect != Rect.Zero && showFrame) {
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
@@ -618,21 +235,15 @@ fun CropOverlay(
                         normalizedStraightenDegrees,
                         cropSourceWidth,
                         cropSourceHeight,
-                        handleTouchSlopPx
+                        dp
                     ) {
                         detectDragGestures(
                             onDragStart = { offset ->
-                                // 转换触摸坐标到归一化坐标
-                                val normalizedX = (offset.x - imageDisplayRect.left) / imageDisplayRect.width
-                                val normalizedY = (offset.y - imageDisplayRect.top) / imageDisplayRect.height
-
-                                // 判断拖拽哪个手柄
                                 dragHandle = detectDragHandle(
-                                    x = normalizedX,
-                                    y = normalizedY,
-                                    rect = currentCropRect,
-                                    horizontalSlop = handleTouchSlopPx / imageDisplayRect.width,
-                                    verticalSlop = handleTouchSlopPx / imageDisplayRect.height
+                                    point = offset,
+                                    frame = frameOnScreen(currentCropRect, imageDisplayRect),
+                                    free = aspectOption.isFree,
+                                    dp = dp
                                 )
                             },
                             onDrag = { change, dragAmount ->
@@ -657,10 +268,7 @@ fun CropOverlay(
                                         dx = dx,
                                         dy = dy,
                                         fixedAspect = cropAspectRatio
-                                            ?: aspectOption.getAspectRatioValue(
-                                                bitmap.width,
-                                                bitmap.height
-                                            ),
+                                            ?: aspectOption.getAspectRatioValue(turnedWidth, turnedHeight),
                                         imageAspect = cropGeometrySize.first.toFloat() /
                                             cropGeometrySize.second
                                     )
@@ -684,7 +292,7 @@ fun CropOverlay(
                         )
                     }
             ) {
-                drawCropOverlay(safeCropRect, imageDisplayRect)
+                drawCropOverlay(frameOnScreen(safeCropRect, imageDisplayRect), aspectOption.isFree, dp)
             }
         }
     }
@@ -733,45 +341,44 @@ private fun calculateImageDisplayRect(
     return Rect(offsetX, offsetY, offsetX + displayWidth, offsetY + displayHeight)
 }
 
+private fun frameOnScreen(cropRect: RectF, imageDisplayRect: Rect) = Rect(
+    imageDisplayRect.left + cropRect.left * imageDisplayRect.width,
+    imageDisplayRect.top + cropRect.top * imageDisplayRect.height,
+    imageDisplayRect.left + cropRect.right * imageDisplayRect.width,
+    imageDisplayRect.top + cropRect.bottom * imageDisplayRect.height
+)
+
 /**
- * 检测触摸点对应的拖拽手柄
+ * The part of the frame a finger at [point] takes, in screen pixels: a corner from a zone centred 10 dp inside
+ * it (a finger needn't land on the line), in [free] crops an edge from a strip reaching 14 dp outside to 22 dp
+ * inside, else the inside, which moves the frame. Zones shrink on a small frame so its middle stays movable.
  */
-private fun detectDragHandle(
-    x: Float, y: Float,
-    rect: RectF,
-    horizontalSlop: Float,
-    verticalSlop: Float
-): DragHandle? {
-    // Keep a center region even for a small crop. Otherwise overlapping corner/edge hit targets
-    // make it impossible to select the move gesture.
-    val xThreshold = min(horizontalSlop, rect.width() / 3f)
-    val yThreshold = min(verticalSlop, rect.height() / 3f)
-
-    // 四角
-    if (abs(x - rect.left) <= xThreshold && abs(y - rect.top) <= yThreshold)
-        return DragHandle.TOP_LEFT
-    if (abs(x - rect.right) <= xThreshold && abs(y - rect.top) <= yThreshold)
-        return DragHandle.TOP_RIGHT
-    if (abs(x - rect.left) <= xThreshold && abs(y - rect.bottom) <= yThreshold)
-        return DragHandle.BOTTOM_LEFT
-    if (abs(x - rect.right) <= xThreshold && abs(y - rect.bottom) <= yThreshold)
-        return DragHandle.BOTTOM_RIGHT
-
-    // 四边
-    if (abs(y - rect.top) <= yThreshold && x > rect.left && x < rect.right)
-        return DragHandle.TOP
-    if (abs(y - rect.bottom) <= yThreshold && x > rect.left && x < rect.right)
-        return DragHandle.BOTTOM
-    if (abs(x - rect.left) <= xThreshold && y > rect.top && y < rect.bottom)
-        return DragHandle.LEFT
-    if (abs(x - rect.right) <= xThreshold && y > rect.top && y < rect.bottom)
-        return DragHandle.RIGHT
-
-    // 内部 → 平移
-    if (x > rect.left && x < rect.right && y > rect.top && y < rect.bottom)
-        return DragHandle.CENTER
-
-    return null
+private fun detectDragHandle(point: Offset, frame: Rect, free: Boolean, dp: Float): DragHandle? {
+    val reach = min(30f * dp, frame.minDimension / 3f)
+    val inset = min(10f * dp, frame.minDimension / 6f)
+    listOf(
+        DragHandle.TOP_LEFT to Offset(frame.left + inset, frame.top + inset),
+        DragHandle.TOP_RIGHT to Offset(frame.right - inset, frame.top + inset),
+        DragHandle.BOTTOM_LEFT to Offset(frame.left + inset, frame.bottom - inset),
+        DragHandle.BOTTOM_RIGHT to Offset(frame.right - inset, frame.bottom - inset),
+    ).map { (handle, at) -> handle to (point - at).getDistance() }
+        .filter { it.second <= reach }
+        .minByOrNull { it.second }
+        ?.let { return it.first }
+    if (free) {
+        val outside = 14f * dp
+        val inside = min(22f * dp, frame.minDimension / 3f)
+        val clear = min(24f * dp, frame.minDimension / 3f)
+        val alongX = point.x > frame.left + clear && point.x < frame.right - clear
+        val alongY = point.y > frame.top + clear && point.y < frame.bottom - clear
+        when {
+            alongX && point.y in (frame.top - outside)..(frame.top + inside) -> return DragHandle.TOP
+            alongX && point.y in (frame.bottom - inside)..(frame.bottom + outside) -> return DragHandle.BOTTOM
+            alongY && point.x in (frame.left - outside)..(frame.left + inside) -> return DragHandle.LEFT
+            alongY && point.x in (frame.right - inside)..(frame.right + outside) -> return DragHandle.RIGHT
+        }
+    }
+    return if (frame.contains(point)) DragHandle.CENTER else null
 }
 
 /**
@@ -913,44 +520,24 @@ private fun moveWithFixedAspect(
     val normalizedAspect = targetAspect / imageAspect
 
     when (handle) {
-        DragHandle.TOP_LEFT -> {
-            val newLeft = min(rect.left + dx, rect.right - minSize)
-            val newWidth = rect.right - newLeft
-            val newHeight = newWidth / normalizedAspect
-            val newTop = rect.bottom - newHeight
-            if (newTop >= 0f && newWidth >= minSize && newHeight >= minSize) {
-                rect.left = newLeft
-                rect.top = newTop
-            }
-        }
-        DragHandle.TOP_RIGHT -> {
-            val newRight = max(rect.right + dx, rect.left + minSize)
-            val newWidth = newRight - rect.left
-            val newHeight = newWidth / normalizedAspect
-            val newTop = rect.bottom - newHeight
-            if (newTop >= 0f && newWidth >= minSize && newHeight >= minSize) {
-                rect.right = newRight
-                rect.top = newTop
-            }
-        }
-        DragHandle.BOTTOM_LEFT -> {
-            val newLeft = min(rect.left + dx, rect.right - minSize)
-            val newWidth = rect.right - newLeft
-            val newHeight = newWidth / normalizedAspect
-            val newBottom = rect.top + newHeight
-            if (newBottom <= 1f && newWidth >= minSize && newHeight >= minSize) {
-                rect.left = newLeft
-                rect.bottom = newBottom
-            }
-        }
-        DragHandle.BOTTOM_RIGHT -> {
-            val newRight = max(rect.right + dx, rect.left + minSize)
-            val newWidth = newRight - rect.left
-            val newHeight = newWidth / normalizedAspect
-            val newBottom = rect.top + newHeight
-            if (newBottom <= 1f && newWidth >= minSize && newHeight >= minSize) {
-                rect.right = newRight
-                rect.bottom = newBottom
+        DragHandle.TOP_LEFT, DragHandle.TOP_RIGHT, DragHandle.BOTTOM_LEFT, DragHandle.BOTTOM_RIGHT -> {
+            // The opposite corner stays put; at the photo's edge the frame stops growing instead of freezing.
+            val left = handle == DragHandle.TOP_LEFT || handle == DragHandle.BOTTOM_LEFT
+            val top = handle == DragHandle.TOP_LEFT || handle == DragHandle.TOP_RIGHT
+            val anchorX = if (left) rect.right else rect.left
+            val anchorY = if (top) rect.bottom else rect.top
+            val movedX = if (left) rect.left + dx else rect.right + dx
+            var w = max(abs(movedX - anchorX), minSize)
+            var h = w / normalizedAspect
+            val maxW = if (left) anchorX else 1f - anchorX
+            val maxH = if (top) anchorY else 1f - anchorY
+            if (h > maxH) { h = maxH; w = h * normalizedAspect }
+            if (w > maxW) { w = maxW; h = w / normalizedAspect }
+            if (w >= minSize && h >= minSize) {
+                rect.left = if (left) anchorX - w else anchorX
+                rect.right = if (left) anchorX else anchorX + w
+                rect.top = if (top) anchorY - h else anchorY
+                rect.bottom = if (top) anchorY else anchorY + h
             }
         }
         DragHandle.TOP, DragHandle.BOTTOM -> {
@@ -988,74 +575,42 @@ private fun moveWithFixedAspect(
     }
 }
 
-/**
- * 绘制裁剪叠加效果
- */
-private fun DrawScope.drawCropOverlay(
-    cropRect: RectF,
-    imageDisplayRect: Rect
-) {
-    val left = imageDisplayRect.left + cropRect.left * imageDisplayRect.width
-    val top = imageDisplayRect.top + cropRect.top * imageDisplayRect.height
-    val right = imageDisplayRect.left + cropRect.right * imageDisplayRect.width
-    val bottom = imageDisplayRect.top + cropRect.bottom * imageDisplayRect.height
-
+/** The dimming outside [frame], its line, a thirds grid, corner brackets inside it, and in [free] crops a bar inside each edge. */
+private fun DrawScope.drawCropOverlay(frame: Rect, free: Boolean, dp: Float) {
+    val (left, top, right, bottom) = listOf(frame.left, frame.top, frame.right, frame.bottom)
     val dimColor = Color.Black.copy(alpha = 0.6f)
-
-    // 上方遮罩
     drawRect(dimColor, Offset(0f, 0f), Size(size.width, top))
-    // 下方遮罩
     drawRect(dimColor, Offset(0f, bottom), Size(size.width, size.height - bottom))
-    // 左侧遮罩
     drawRect(dimColor, Offset(0f, top), Size(left, bottom - top))
-    // 右侧遮罩
     drawRect(dimColor, Offset(right, top), Size(size.width - right, bottom - top))
 
-    // 裁剪框边框
-    val borderColor = Color.White
-    drawRect(
-        borderColor,
-        Offset(left, top),
-        Size(right - left, bottom - top),
-        style = Stroke(width = 3f)
-    )
-
-    // 三等分网格线
-    val thirdWidth = (right - left) / 3f
-    val thirdHeight = (bottom - top) / 3f
+    drawRect(Color.White, Offset(left, top), Size(right - left, bottom - top), style = Stroke(width = 1f * dp))
     val gridColor = Color.White.copy(alpha = 0.3f)
-
-    // 竖线
     for (i in 1..2) {
-        val x = left + thirdWidth * i
-        drawLine(gridColor, Offset(x, top), Offset(x, bottom), strokeWidth = 2f)
-    }
-    // 横线
-    for (i in 1..2) {
-        val y = top + thirdHeight * i
-        drawLine(gridColor, Offset(left, y), Offset(right, y), strokeWidth = 2f)
+        val x = left + (right - left) * i / 3f
+        val y = top + (bottom - top) * i / 3f
+        drawLine(gridColor, Offset(x, top), Offset(x, bottom), strokeWidth = 0.75f * dp)
+        drawLine(gridColor, Offset(left, y), Offset(right, y), strokeWidth = 0.75f * dp)
     }
 
-    // 四角手柄
-    val handleLength = 64f
-    val handleWidth = 10f
-    val handleColor = Color.White
-
-    // 左上
-    drawLine(handleColor, Offset(left - 1, top), Offset(left + handleLength, top), strokeWidth = handleWidth)
-    drawLine(handleColor, Offset(left, top - 1), Offset(left, top + handleLength), strokeWidth = handleWidth)
-
-    // 右上
-    drawLine(handleColor, Offset(right + 1, top), Offset(right - handleLength, top), strokeWidth = handleWidth)
-    drawLine(handleColor, Offset(right, top - 1), Offset(right, top + handleLength), strokeWidth = handleWidth)
-
-    // 左下
-    drawLine(handleColor, Offset(left - 1, bottom), Offset(left + handleLength, bottom), strokeWidth = handleWidth)
-    drawLine(handleColor, Offset(left, bottom + 1), Offset(left, bottom - handleLength), strokeWidth = handleWidth)
-
-    // 右下
-    drawLine(handleColor, Offset(right + 1, bottom), Offset(right - handleLength, bottom), strokeWidth = handleWidth)
-    drawLine(handleColor, Offset(right, bottom + 1), Offset(right, bottom - handleLength), strokeWidth = handleWidth)
+    val stroke = 3f * dp
+    val half = stroke / 2f
+    val length = min(20f * dp, frame.minDimension / 3f)
+    for ((x, sx) in listOf(left + half to 1f, right - half to -1f)) {
+        for ((y, sy) in listOf(top + half to 1f, bottom - half to -1f)) {
+            drawLine(Color.White, Offset(x - sx * half, y), Offset(x + sx * length, y), strokeWidth = stroke)
+            drawLine(Color.White, Offset(x, y - sy * half), Offset(x, y + sy * length), strokeWidth = stroke)
+        }
+    }
+    if (free) {
+        val bar = 12f * dp
+        val cx = (left + right) / 2f
+        val cy = (top + bottom) / 2f
+        drawLine(Color.White, Offset(cx - bar, top + half), Offset(cx + bar, top + half), strokeWidth = stroke)
+        drawLine(Color.White, Offset(cx - bar, bottom - half), Offset(cx + bar, bottom - half), strokeWidth = stroke)
+        drawLine(Color.White, Offset(left + half, cy - bar), Offset(left + half, cy + bar), strokeWidth = stroke)
+        drawLine(Color.White, Offset(right - half, cy - bar), Offset(right - half, cy + bar), strokeWidth = stroke)
+    }
 }
 
 /**
