@@ -4,6 +4,25 @@ import androidx.annotation.StringRes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import com.hinnka.mycamera.raw.fotufilm.FotufilmCatalogue
+import com.hinnka.mycamera.raw.fotufilm.FotufilmDocument
+import com.hinnka.mycamera.raw.fotufilm.FotufilmRuntime
+import com.hinnka.mycamera.ui.components.FotufilmStrings
+import com.hinnka.mycamera.ui.components.SHOWN_LIGHT_FIELDS
+import com.hinnka.mycamera.ui.components.SHOWN_SECTIONS
+import com.hinnka.mycamera.ui.components.documentForStock
+import com.hinnka.mycamera.ui.components.withNumber
+import com.hinnka.mycamera.ui.components.withValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.math.abs
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import com.hinnka.mycamera.R
@@ -38,6 +57,8 @@ internal class RawRuler(
     val label: (Float) -> String,
     val onChange: (Float) -> Unit,
     val labelEvery: Int? = null,
+    /** In place of the usual save and re-render on release. */
+    val onRelease: (() -> Unit)? = null,
 )
 
 /**
@@ -58,6 +79,9 @@ internal class RawItem(
     val ruler: RawRuler? = null,
 )
 
+/** A level of Light › RAW: its items, and the Fotufilm sections the film has controls in (changed or not). */
+internal class RawLevel(val items: List<RawItem>, val filmSections: Map<String, Boolean>)
+
 private fun evText(v: Float) = trimmed(v) + " EV"
 
 private fun trimmed(v: Float) = String.format(Locale.ROOT, "%.2f", v).trimEnd('0').trimEnd('.')
@@ -72,7 +96,7 @@ private fun steps(from: Float, to: Float, step: Float): List<Float> {
 internal fun rawGroupItems(
     viewModel: GalleryViewModel,
     photo: MediaData,
-    sensor: Boolean,
+    level: EditorGroup,
     changedKeys: Set<String>,
     imported: Boolean,
     embeddedProfiles: List<RawEmbeddedDngProfileOption>,
@@ -83,11 +107,15 @@ internal fun rawGroupItems(
     reRender: () -> Unit,
     importDcp: () -> Unit,
     deleteDcp: (DcpInfo) -> Unit,
-): List<RawItem> {
+): RawLevel {
+    val sensor = level == EditorGroup.Sensor
     val onText = stringResource(R.string.editor_on)
     val offText = stringResource(R.string.editor_off)
     val noneText = stringResource(R.string.none)
     val done: (Boolean) -> Unit = { refresh() }
+
+    val film = fotufilmItems(viewModel, level, commit)
+    if (level.filmSection != null) return RawLevel(film.items, film.filmSections)
 
     if (sensor) {
         val blackMode by viewModel.editRawBlackLevelMode.collectAsState()
@@ -135,7 +163,7 @@ internal fun rawGroupItems(
         fun chips(options: List<Pair<String, String>>, current: String, pick: (String) -> Unit) =
             options.map { (mode, label) -> EditorChoice(label, null, mode == current) { pick(mode) } }
 
-        return listOf(
+        return RawLevel(listOf(
             RawItem(
                 "blackLevel", stringResource(R.string.editor_black_level),
                 blackOptions.firstOrNull { it.first == blackMode }?.second ?: blackMode, AppIcons.MoonStars,
@@ -157,7 +185,7 @@ internal fun rawGroupItems(
                 reset = { (viewModel.editOpenValue("rawCfa") as? String)?.let { viewModel.saveRawCfaCorrectionMode(photo, it, done) } },
                 choices = chips(cfaOptions, cfa) { viewModel.saveRawCfaCorrectionMode(photo, it, done) },
             ),
-        )
+        ), film.filmSections)
     }
 
     val engine by viewModel.editRawRenderingEngine.collectAsState()
@@ -166,7 +194,7 @@ internal fun rawGroupItems(
     val hncsCurve by viewModel.editRawHncsFilmCurveMode.collectAsState()
     val lensShading by viewModel.editRawLensShadingCorrectionEnabled.collectAsState()
     val baseLook by viewModel.editRawBaselineLutId.collectAsState()
-    val film by viewModel.editRawSpectralFilmStock.collectAsState()
+    val spectralFilm by viewModel.editRawSpectralFilmStock.collectAsState()
     val print by viewModel.editRawSpectralFilmPrint.collectAsState()
     val cDensity by viewModel.editRawSpectralFilmCDensityGain.collectAsState()
     val mDensity by viewModel.editRawSpectralFilmMDensityGain.collectAsState()
@@ -380,20 +408,20 @@ internal fun rawGroupItems(
         RawRenderingEngine.Spektrafilm -> {
             val openFilm = viewModel.editOpenValue("rawSpectralFilm") as? List<*>
             items += RawItem(
-                "film", stringResource(R.string.editor_film), film?.let(SpectralFilmUiInfo::getFilmDisplayName) ?: noneText,
-                AppIcons.Film, film != openFilm?.getOrNull(0), stringResource(R.string.editor_explain_film),
+                "film", stringResource(R.string.editor_film), spectralFilm?.let(SpectralFilmUiInfo::getFilmDisplayName) ?: noneText,
+                AppIcons.Film, spectralFilm != openFilm?.getOrNull(0), stringResource(R.string.editor_explain_film),
                 reset = {
                     viewModel.saveRawSpectralFilmSelection(photo, (openFilm?.getOrNull(0) as? String)?.let(::SpectralFilmSelection), done)
                 },
-                choices = listOf(EditorChoice(noneText, null, film == null) { viewModel.saveRawSpectralFilmSelection(photo, null, done) }) +
+                choices = listOf(EditorChoice(noneText, null, spectralFilm == null) { viewModel.saveRawSpectralFilmSelection(photo, null, done) }) +
                     SpectralFilmUiInfo.availableFilms.map { id ->
-                        EditorChoice(SpectralFilmUiInfo.getFilmDisplayName(id), null, id == film) {
+                        EditorChoice(SpectralFilmUiInfo.getFilmDisplayName(id), null, id == spectralFilm) {
                             viewModel.saveRawSpectralFilmSelection(photo, SpectralFilmSelection(id), done)
                         }
                     },
             )
             // A slide film is its own print; only negatives take a paper and dye densities.
-            if (film != null && !SpectralFilmUiInfo.isPositiveFilm(film)) {
+            if (spectralFilm != null && !SpectralFilmUiInfo.isPositiveFilm(spectralFilm)) {
                 items += RawItem(
                     "print", stringResource(R.string.editor_print), print?.let(SpectralFilmUiInfo::getPrintDisplayName) ?: noneText,
                     AppIcons.Image, print != openFilm?.getOrNull(1), stringResource(R.string.editor_explain_print),
@@ -430,7 +458,9 @@ internal fun rawGroupItems(
                 }
             }
         }
-        else -> Unit  // Sigmoid has no values of its own; Fotufilm's follow.
+        // Fotufilm: the film here, its sections as groups.
+        RawRenderingEngine.Fotufilm -> items += film.items
+        else -> Unit  // Sigmoid has no values of its own.
     }
 
     items += RawItem(
@@ -470,7 +500,138 @@ internal fun rawGroupItems(
                 EditorChoice(lut.getName(), null, lut.id == baseLook) { viewModel.saveRawBaselineLutSelection(photo, lut.id, done) }
             },
     )
-    return items
+    return RawLevel(items, film.filmSections)
+}
+
+/**
+ * Fotufilm's controls, from its catalogue for the photo's film: the film itself on the RAW level, the rest in the
+ * group of their catalogue section (the film's format and the camera preflash in Lab). Each change is saved and
+ * re-rendered once; a ruler's value changes the document only on release.
+ */
+@Composable
+private fun fotufilmItems(viewModel: GalleryViewModel, level: EditorGroup, commit: () -> Unit): RawLevel {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val engine by viewModel.editRawRenderingEngine.collectAsState()
+    val document by viewModel.editRawFotufilmDocument.collectAsState()
+    val doc = document?.takeIf { engine == RawRenderingEngine.Fotufilm } ?: return RawLevel(emptyList(), emptyMap())
+    val catalogue by produceState<FotufilmCatalogue?>(null, doc) {
+        value = withContext(Dispatchers.Default) { runCatching { FotufilmRuntime.catalogue(context, doc) }.getOrNull() } ?: value
+    }
+    val current = catalogue ?: return RawLevel(emptyList(), emptyMap())
+    var drag by remember { mutableStateOf<Pair<String, Float>?>(null) }
+    val open = viewModel.editOpenValue("rawFotufilm") as? FotufilmDocument
+    val onText = stringResource(R.string.editor_on)
+    val offText = stringResource(R.string.editor_off)
+
+    fun setDoc(next: FotufilmDocument) {
+        viewModel.editRawFotufilmDocument.value = next
+        commit()
+    }
+    fun changeStock(id: String) {
+        scope.launch {
+            withContext(Dispatchers.Default) { documentForStock(context, doc, id) }?.let(::setDoc)
+        }
+    }
+    fun sectionOf(c: FotufilmCatalogue.Control): String? = when {
+        c.field == FotufilmDocument.STOCK_FIELD -> null
+        c.section == "filmStock" || c.field in SHOWN_LIGHT_FIELDS -> "filmLab"
+        else -> c.section
+    }
+
+    val visible = current.controls.filter { c ->
+        c.available && c.kind !is FotufilmCatalogue.Kind.Other &&
+            (c.section in SHOWN_SECTIONS || c.field in SHOWN_LIGHT_FIELDS) &&
+            (c.foldsUnder == null || current.control(c.foldsUnder)?.moved == true)
+    }
+    fun changed(c: FotufilmCatalogue.Control): Boolean =
+        if (c.field == FotufilmDocument.STOCK_FIELD) doc.stockId != open?.stockId
+        else doc.values[c.field] != open?.values?.get(c.field)
+
+    val sections = visible.mapNotNull { c -> sectionOf(c)?.let { it to changed(c) } }
+        .groupBy({ it.first }, { it.second })
+        .mapValues { (_, flags) -> flags.any { it } }
+    val wanted = level.filmSection
+    val items = visible.filter { sectionOf(it) == wanted }.map { c ->
+        val name = FotufilmStrings.title(c.field)
+        val explanation = FotufilmStrings.description(c.field) ?: name
+        val openValue = open?.values?.get(c.field)
+        val reset: () -> Unit = {
+            if (c.field == FotufilmDocument.STOCK_FIELD) {
+                open?.stockId?.let(::changeStock)
+            } else {
+                setDoc(if (openValue == null) doc.without(c.field) else doc.with(c.field, openValue))
+            }
+        }
+        when (val kind = c.kind) {
+            is FotufilmCatalogue.Kind.Slider -> {
+                val scale = kind.scale
+                val stored = ((c.value as? FotufilmDocument.Value.Number)?.value ?: scale.neutral).toFloat()
+                val start = ((openValue as? FotufilmDocument.Value.Number)?.value ?: scale.neutral).toFloat()
+                val value = drag?.takeIf { it.first == c.field }?.second ?: stored
+                // The track's own detents, else about fifty steps across it; the resting and stored values stay on it.
+                val steps = (if (scale.stops.isNotEmpty()) scale.stops.map { it.toFloat() }
+                else (0..50).map { (scale.min + (scale.max - scale.min) * it / 50.0).toFloat() })
+                    .plus(listOf(scale.neutral.toFloat(), stored, start)).distinct().sorted()
+                fun text(v: Float) = FotufilmStrings.formatValue(context, scale, v)
+                RawItem(
+                    "film:${c.field}", name, text(value), AppIcons.AdjustmentsLine, changed(c), explanation, reset,
+                    ruler = RawRuler(
+                        steps = steps, value = value, start = start, label = ::text,
+                        onChange = { drag = c.field to it },
+                        onRelease = {
+                            drag?.let { (_, v) -> setDoc(doc.withNumber(c, v.toDouble())) }
+                            drag = null
+                        },
+                    ),
+                )
+            }
+            is FotufilmCatalogue.Kind.Chips -> {
+                val stored = (c.value as? FotufilmDocument.Value.Number)?.value ?: kind.scale.neutral
+                val selected = kind.chips.minByOrNull { abs(it.value - stored) }
+                RawItem(
+                    "film:${c.field}", name, selected?.let { FotufilmStrings.chip(c.field, it) }.orEmpty(),
+                    AppIcons.AdjustmentsLine, changed(c), explanation, reset,
+                    choices = kind.chips.map { chip ->
+                        EditorChoice(FotufilmStrings.chip(c.field, chip), null, chip == selected) {
+                            setDoc(doc.withValue(c, if (chip.value == kind.scale.neutral) null else FotufilmDocument.Value.Number(chip.value)))
+                        }
+                    },
+                )
+            }
+            is FotufilmCatalogue.Kind.Toggle -> {
+                val on = (c.value as? FotufilmDocument.Value.Flag)?.value ?: kind.restingOn
+                RawItem(
+                    "film:${c.field}", name, if (on) onText else offText, AppIcons.AdjustmentsLine, changed(c), explanation, reset,
+                    choices = listOf(false to offText, true to onText).map { (v, label) ->
+                        EditorChoice(label, null, v == on) {
+                            setDoc(doc.withValue(c, if (v == kind.restingOn) null else FotufilmDocument.Value.Flag(v)))
+                        }
+                    },
+                )
+            }
+            is FotufilmCatalogue.Kind.Menu -> {
+                val selected = (c.value as? FotufilmDocument.Value.Choice)?.id ?: kind.defaultChoice
+                val stock = c.field == FotufilmDocument.STOCK_FIELD
+                RawItem(
+                    "film:${c.field}", name,
+                    kind.choices.firstOrNull { it.id == selected }?.let { FotufilmStrings.choice(c.field, kind.menu, it) }.orEmpty(),
+                    if (stock) AppIcons.Film else AppIcons.AdjustmentsLine, changed(c), explanation, reset,
+                    choices = kind.choices.map { choice ->
+                        EditorChoice(FotufilmStrings.choice(c.field, kind.menu, choice), null, choice.id == selected) {
+                            when {
+                                choice.id == selected -> Unit
+                                stock -> changeStock(choice.id)
+                                else -> setDoc(doc.withValue(c, if (choice.id == kind.defaultChoice) null else FotufilmDocument.Value.Choice(choice.id)))
+                            }
+                        }
+                    },
+                )
+            }
+            FotufilmCatalogue.Kind.Other -> null
+        }
+    }.filterNotNull()
+    return RawLevel(items, sections)
 }
 
 private fun lumixStyleLabel(style: LumixPhotoStyle): Int = when (style) {

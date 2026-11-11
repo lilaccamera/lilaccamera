@@ -1740,10 +1740,49 @@ fun GalleryEditScreen(
                 } else {
                     emptyList()
                 }
+                // Light › RAW and its Sensor group: saved to the photo and re-rendered from the RAW file.
+                fun commitRaw() {
+                    viewModel.persistCurrentRawEditMetadata(currentEditSourcePhoto) { requestRawPreviewRefresh() }
+                }
+                val rawLevel = if (isRaw && (group == EditorGroup.Raw || group?.parent == EditorGroup.Raw)) {
+                    rawGroupItems(
+                        viewModel = viewModel,
+                        photo = currentEditSourcePhoto,
+                        level = group,
+                        changedKeys = changedKeys,
+                        imported = currentEditMetadata?.isImported == true,
+                        embeddedProfiles = embeddedDngProfileUiState.options,
+                        activeEmbeddedProfileId = activeEmbeddedDngProfileId,
+                        availableLuts = availableLuts,
+                        commit = ::commitRaw,
+                        refresh = { requestRawPreviewRefresh() },
+                        reRender = {
+                            requestRawPreviewRefresh(forceRegeneratePhotonPgtm = true)
+                            noteLine.say(R.string.editor_rerendering)
+                        },
+                        importDcp = { rawDcpLauncher.launch(arrayOf("*/*")) },
+                        deleteDcp = { deleteDcpAsk = it },
+                    )
+                } else {
+                    null
+                }
+                val rawItems = rawLevel?.items.orEmpty()
+                // A film change can leave a Fotufilm group with nothing in it: go up to RAW and say so.
+                val filmSection = group?.filmSection
+                if (filmSection != null && rawLevel != null && rawLevel.filmSections.isNotEmpty() && filmSection !in rawLevel.filmSections) {
+                    LaunchedEffect(filmSection) {
+                        groupPath = EditorGroup.Raw.name
+                        noteLine.say(R.string.editor_film_section_gone)
+                    }
+                }
+
                 val groups = if (group == null) {
                     EditorGroup.forSection(section, isRaw)
                 } else {
-                    EditorGroup.entries.filter { it.parent == group && (!it.rawOnly || isRaw) }
+                    EditorGroup.entries.filter {
+                        it.parent == group && (!it.rawOnly || isRaw) &&
+                            (it.filmSection == null || rawLevel?.filmSections?.containsKey(it.filmSection) == true)
+                    }
                 }
                 val groupTiles = groups.map { g ->
                     EditorValue(
@@ -1751,7 +1790,7 @@ fun GalleryEditScreen(
                         name = stringResource(g.label),
                         value = "",
                         icon = g.icon,
-                        changed = g.keys.any { it in changedKeys },
+                        changed = g.filmSection?.let { rawLevel?.filmSections?.get(it) } ?: g.keys.any { it in changedKeys },
                         wide = true,
                         group = true,
                     )
@@ -1866,33 +1905,6 @@ fun GalleryEditScreen(
                 fun groupChanged(v: GroupValue): Boolean = v.get(effectiveRecipe) != groupOpen(v)
                 fun setGroupValue(v: GroupValue, x: Float) {
                     viewModel.setPhotoRecipeParams(v.set(editPhotoRecipeParams ?: editLutRecipeParams, x))
-                }
-
-                // Light › RAW and its Sensor group: saved to the photo and re-rendered from the RAW file.
-                fun commitRaw() {
-                    viewModel.persistCurrentRawEditMetadata(currentEditSourcePhoto) { requestRawPreviewRefresh() }
-                }
-                val rawItems = if (isRaw && (group == EditorGroup.Raw || group == EditorGroup.Sensor)) {
-                    rawGroupItems(
-                        viewModel = viewModel,
-                        photo = currentEditSourcePhoto,
-                        sensor = group == EditorGroup.Sensor,
-                        changedKeys = changedKeys,
-                        imported = currentEditMetadata?.isImported == true,
-                        embeddedProfiles = embeddedDngProfileUiState.options,
-                        activeEmbeddedProfileId = activeEmbeddedDngProfileId,
-                        availableLuts = availableLuts,
-                        commit = ::commitRaw,
-                        refresh = { requestRawPreviewRefresh() },
-                        reRender = {
-                            requestRawPreviewRefresh(forceRegeneratePhotonPgtm = true)
-                            noteLine.say(R.string.editor_rerendering)
-                        },
-                        importDcp = { rawDcpLauncher.launch(arrayOf("*/*")) },
-                        deleteDcp = { deleteDcpAsk = it },
-                    )
-                } else {
-                    emptyList()
                 }
 
                 val values = when {
@@ -2191,7 +2203,7 @@ fun GalleryEditScreen(
                                     start = r.start,
                                     label = r.label,
                                     onChange = r.onChange,
-                                    onRelease = ::commitRaw,
+                                    onRelease = r.onRelease ?: ::commitRaw,
                                     onReset = item.reset,
                                     labelEvery = r.labelEvery,
                                     onTouch = { fingerOnRuler = it },

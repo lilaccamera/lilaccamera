@@ -1897,6 +1897,7 @@
     <string name="editor_cfa">CFA</string>
     <string name="editor_camera_default">Camera default</string>
     <string name="editor_rerender">Re-render</string>
+    <string name="editor_film_section_gone">This film has no controls there</string>
     <string name="editor_raw_developing">Developing the RAW with %1$s</string>
     <string name="editor_raw_earlier">Earlier %1$s look shown; developing the RAW to keep it</string>
     <string name="editor_rerendering">Re-rendering the RAW photo</string>

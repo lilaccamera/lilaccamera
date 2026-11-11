@@ -220,6 +220,8 @@ internal enum class EditorGroup(
     val rawOnly: Boolean = false,
     /** The group this one sits in; null for a group of the section itself. */
     val parent: EditorGroup? = null,
+    /** A Fotufilm catalogue section shown as this group, while the film has controls in it. */
+    val filmSection: String? = null,
 ) {
     Curve(EditorSection.Light, R.string.editor_group_curve, setOf("recipe.curves")),
     Raw(
@@ -234,6 +236,13 @@ internal enum class EditorGroup(
         EditorSection.Light, R.string.editor_group_sensor, setOf("rawBlackLevel", "rawWhiteLevel", "rawCfa"),
         rawOnly = true, parent = Raw
     ),
+    FilmGrain(EditorSection.Light, R.string.fotufilm_section_filmGrain, emptySet(), true, Raw, "filmGrain"),
+    FilmHalation(EditorSection.Light, R.string.fotufilm_section_filmHalation, emptySet(), true, Raw, "filmHalation"),
+    FilmEmulsion(EditorSection.Light, R.string.fotufilm_section_filmEmulsion, emptySet(), true, Raw, "filmEmulsion"),
+    // Lab also holds the film's Format and the camera preflash.
+    FilmLab(EditorSection.Light, R.string.fotufilm_section_filmLab, emptySet(), true, Raw, "filmLab"),
+    FilmOutput(EditorSection.Light, R.string.fotufilm_section_printPaper, emptySet(), true, Raw, "printPaper"),
+    FilmLamp(EditorSection.Light, R.string.fotufilm_section_printLamp, emptySet(), true, Raw, "printLamp"),
     Mixer(
         EditorSection.Color, R.string.editor_group_mixer,
         listOf("SKIN", "RED", "ORANGE", "YELLOW", "GREEN", "CYAN", "BLUE", "PURPLE", "MAGENTA")
@@ -253,6 +262,12 @@ internal enum class EditorGroup(
             Curve -> AppIcons.ChartLine
             Raw -> AppIcons.PhotoSensorLine
             Sensor -> AppIcons.SensorLine
+            FilmGrain -> AppIcons.GrainLine
+            FilmHalation -> AppIcons.HalationLine
+            FilmEmulsion -> AppIcons.Layers
+            FilmLab -> AppIcons.ToolboxLine
+            FilmOutput -> AppIcons.Image
+            FilmLamp -> AppIcons.BulbLine
             Mixer -> AppIcons.PaletteLine
             Grading -> AppIcons.CircleHalfLine
             Calibration -> AppIcons.SlidersLine
