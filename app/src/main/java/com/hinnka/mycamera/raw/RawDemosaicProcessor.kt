@@ -5372,7 +5372,7 @@ class RawDemosaicProcessor {
         releaseDenoiseProfileFramebuffers()
         gfWidth = width
         gfHeight = height
-        // Only slot 1 is read (renderPhotonUserAdjustmentDenoise); slot 0 would be an unused full-size RGBA16F.
+        // Only slot 1 is used (renderMgcUserAdjustmentDenoise); slot 0 would be an unused full-size RGBA16F.
         for (index in 1..1) {
             val textures = IntArray(1)
             val framebuffers = IntArray(1)
@@ -5493,11 +5493,12 @@ class RawDemosaicProcessor {
 
         try {
             denoiseTransfer.prepare(width, height)
-            renderPassthroughToTexture(sourceTextureId, width, height, gfFboId[0])
+            // Denoise in place in slot 1, the only scratch slot setupNLMFramebuffers allocates.
+            renderPassthroughToTexture(sourceTextureId, width, height, gfFboId[1])
             var nativeMs = 0L
             var succeeded = false
             val timing = denoiseTransfer.read(
-                gfTexId[0], width, height, label = "MGC USER_ADJUSTMENT denoise",
+                gfTexId[1], width, height, label = "MGC USER_ADJUSTMENT denoise",
             ) { readback ->
                 val nativeStartNs = System.nanoTime()
                 succeeded = MgcFullResolutionDenoise.denoise(
@@ -5523,13 +5524,7 @@ class RawDemosaicProcessor {
                     "origin=($globalOriginX,$globalOriginY)"
             }
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
-            denoiseTransfer.upload(gfTexId[0], width, height)
-            renderPassthroughToTexture(
-                gfTexId[0],
-                width,
-                height,
-                gfFboId[1],
-            )
+            denoiseTransfer.upload(gfTexId[1], width, height)
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
             checkGlError("MGC denoise output RGB")

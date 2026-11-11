@@ -3241,9 +3241,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (timerSeconds > 0) {
             // 延时拍摄：开始倒计时
             countdownJob = viewModelScope.launch {
-                for (i in timerSeconds downTo 1) {
-                    cameraController.setCountdownValue(i)
-                    delay(1000)
+                try {
+                    for (i in timerSeconds downTo 1) {
+                        cameraController.setCountdownValue(i)
+                        selfTimerLampSecond(i)
+                    }
+                } finally {
+                    cameraController.setSelfTimerLamp(false)
                 }
                 // 倒计时结束，拍照
                 cameraController.setCountdownValue(0)
@@ -3252,6 +3256,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         } else {
             submitPhotoCapture()
         }
+    }
+
+    /**
+     * One second of the self-timer. With a face in view of the back camera the flash LED blinks like a
+     * camera's self-timer lamp: slowly, then fast for the last 2 s, and dark for the last 0.5 s so exposure
+     * settles before the shot. The flash itself must be off.
+     */
+    private suspend fun selfTimerLampSecond(secondsLeft: Int) {
+        val lamp = state.value.flashMode == 0 && cameraController.facesInView()
+        if (!lamp) {
+            cameraController.setSelfTimerLamp(false)
+            delay(1000)
+            return
+        }
+        val blinks = when (secondsLeft) { 1 -> 2; 2 -> 4; else -> 1 }
+        val half = if (secondsLeft > 2) 500L else 125L
+        repeat(blinks) {
+            cameraController.setSelfTimerLamp(true); delay(half)
+            cameraController.setSelfTimerLamp(false); delay(half)
+        }
+        if (secondsLeft == 1) delay(500)
     }
 
     /**
@@ -4077,10 +4102,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.mergeMeteringPoint()
     }
 
-    fun lockFocusOnPoint(x: Float, y: Float, viewWidth: Int, viewHeight: Int) {
-        cameraController.lockFocusOnPoint(x, y, viewWidth, viewHeight)
-    }
-
     fun unlockFocus() {
         cameraController.unlockFocus()
     }
@@ -4095,9 +4116,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         shutterKeyFocusHeld = true
         val point = s.focusPoint
         when {
-            // A point the user tapped is already locked; keep it.
-            point != null && s.focusPointSource == FocusPointSource.MANUAL && s.isFocusLocked ->
+            // A point the user tapped holds, as a camera's focus area does.
+            point != null && s.focusPointSource == FocusPointSource.MANUAL -> {
+                // As a camera's half-press does, try again where the last attempt missed.
+                if (s.focusSuccess == false) cameraController.refocusTapPoint()
                 shutterKeyOwnsFocusLock = false
+            }
             point != null && s.focusPointSource == FocusPointSource.EYE -> {
                 cameraController.focusOnNormalizedPoint(point.first, point.second, FocusPointSource.EYE, lockFocus = true)
                 shutterKeyOwnsFocusLock = true
@@ -4107,11 +4131,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 shutterKeyOwnsFocusLock = true
             }
         }
+        cameraController.setShutterKeyHold(true)
     }
 
     fun onShutterKeyHalfRelease() {
         if (!shutterKeyFocusHeld) return
         shutterKeyFocusHeld = false
+        cameraController.setShutterKeyHold(false)
         if (shutterKeyOwnsFocusLock) {
             shutterKeyOwnsFocusLock = false
             unlockFocus()
