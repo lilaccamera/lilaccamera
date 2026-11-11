@@ -2,40 +2,32 @@ package com.hinnka.mycamera.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.drag
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material3.Icon
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.FocusPointSource
+import com.hinnka.mycamera.camera.MeteringMode
+import com.hinnka.mycamera.utils.VibrationHelper
 import kotlinx.coroutines.delay
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 /**
  * 对焦指示器
@@ -52,6 +44,13 @@ fun FocusIndicator(
     isFocusLocked: Boolean = false,
     isFocusing: Boolean,
     focusSuccess: Boolean?,
+    // A fixed-focus camera (most front cameras): a tap only sets exposure, so only its circle shows.
+    fixedFocus: Boolean = false,
+    // A half-pressed camera key: the mark stays until the key is let go.
+    held: Boolean = false,
+    // A tap point left untouched clears itself, so the next half-press starts from the centre again.
+    onIdle: () -> Unit = {},
+    meteringMode: MeteringMode = MeteringMode.SYSTEM_DEFAULT,
     modifier: Modifier = Modifier
 ) {
     var visible by remember { mutableStateOf(position != null) }
@@ -76,6 +75,7 @@ fun FocusIndicator(
         targetValue = when {
             isSeparated -> 1f
             isFocusing -> 1f
+            fixedFocus && position != null -> 1f
             source == FocusPointSource.EYE && position != null -> 0.9f
             isFocusLocked && focusSuccess != false -> 0.9f
             focusSuccess == true -> 0.8f
@@ -87,19 +87,62 @@ fun FocusIndicator(
         label = "focusAlpha"
     )
 
-    // 聚焦动画
+    // A tap mark works like a Sony camera's focus frame: white while focusing, green with a light tick
+    // once focus locks, a white blink on a miss; it appears a little large and settles as focus locks.
+    val isTapMark = source != FocusPointSource.EYE
     val scale by animateFloatAsState(
-        targetValue = if (focusSuccess == true) 0.8f else 1f,
-        animationSpec = tween(300),
+        targetValue = when {
+            isTapMark -> if (focusSuccess == true) 1f else 1.25f
+            focusSuccess == true -> 0.8f
+            else -> 1f
+        },
+        animationSpec = if (isTapMark) tween(220, easing = CubicBezierEasing(0.3f, 1.35f, 0.5f, 1f)) else tween(300),
         label = "focusScale"
     )
-    
+
     // 颜色
-    val color = when (focusSuccess) {
-        true -> Color.Green
-        false -> Color.Red
-        else -> if (source == FocusPointSource.EYE) Color(0xFF64D8FF) else Color.White
+    val color = when {
+        isTapMark -> if (focusSuccess == true) FocusGreen else Color.White
+        focusSuccess == true -> Color.Green
+        focusSuccess == false -> Color.Red
+        else -> Color(0xFF64D8FF)
     }
+
+    val context = LocalContext.current
+    val vibration = remember(context) { VibrationHelper(context) }
+    var blinkOff by remember { mutableStateOf(false) }
+    LaunchedEffect(focusSuccess) {
+        blinkOff = false
+        if (!isTapMark || currentFocusPosition == null) return@LaunchedEffect
+        when (focusSuccess) {
+            true -> vibration.vibrate(VibrationHelper.LIGHT_TICK_MS)
+            false -> repeat(3) { blinkOff = true; delay(120); blinkOff = false; delay(120) }
+            null -> Unit
+        }
+    }
+    val currentOnIdle by rememberUpdatedState(onIdle)
+    // Focus and exposure pulled apart are a deliberate setting: only a new tap clears them.
+    LaunchedEffect(position, meteringPosition, focusSuccess, held, isFocusLocked) {
+        if (position == null || !isTapMark || held || isFocusLocked || isSeparated) return@LaunchedEffect
+        delay(TapPointIdleMs)
+        currentOnIdle()
+    }
+    // A half-press on a point already in focus shows it green at once, with the tick.
+    LaunchedEffect(held) {
+        if (held && isTapMark && focusSuccess == true && currentFocusPosition != null) {
+            vibration.vibrate(VibrationHelper.LIGHT_TICK_MS)
+        }
+    }
+    // Once focus has settled the mark fades, as on a camera; a locked or split mark stays to show it.
+    var faded by remember { mutableStateOf(false) }
+    LaunchedEffect(position, focusSuccess, isFocusLocked, isSeparated, held) {
+        if (position == null) return@LaunchedEffect  // cleared: keep fading, never flash back
+        faded = false
+        if (!isTapMark || (focusSuccess == null && !fixedFocus) || isFocusLocked || isSeparated || held) return@LaunchedEffect
+        delay(1500)
+        faded = true
+    }
+    val tapMarkAlpha by animateFloatAsState(if (isTapMark && faded) 0f else 1f, tween(300), label = "focusFade")
 
     LaunchedEffect(position) {
         if (position != null) {
@@ -110,11 +153,29 @@ fun FocusIndicator(
         }
     }
 
-    val displayPosition = position ?: Pair(0f, 0f)
-    val density = LocalDensity.current
+    // While the mark fades out after the point is cleared it stays where it was.
+    val lastPosition = remember { arrayOf(Pair(0.5f, 0.5f)) }
+    if (position != null) lastPosition[0] = position
+    val displayPosition = position ?: lastPosition[0]
+
+    // Metering circles, as on a Sony camera: Spot's sits in the centre until a tap moves it with the focus
+    // frame, and stays; Centre-weighted's is fixed in the centre. The other modes show none.
+    val circleCenter = when (meteringMode) {
+        MeteringMode.SPOT -> meteringPosition ?: position?.takeIf { source == FocusPointSource.MANUAL } ?: (0.5f to 0.5f)
+        MeteringMode.CENTER_WEIGHTED -> 0.5f to 0.5f
+        else -> null
+    }
+    if (circleCenter != null) {
+        Canvas(modifier.fillMaxSize()) {
+            val center = Offset(circleCenter.first * size.width, circleCenter.second * size.height)
+            val radius = SpotCircleRadius.toPx()
+            drawCircle(Color.Black.copy(alpha = 0.3f), radius, center, style = Stroke(3.dp.toPx()))
+            drawCircle(Color.White, radius, center, style = Stroke(TapFrameLine.toPx()))
+        }
+    }
 
     AnimatedVisibility(visible = visible, modifier = modifier.fillMaxSize()) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize()) {
             Canvas(
                 modifier = Modifier.fillMaxSize()
                     .pointerInput(canMoveMeteringPoint, source, position != null) {
@@ -123,7 +184,7 @@ fun FocusIndicator(
                         }
                         val hitRadius = 24.dp.toPx()
                         val circleRadius = 11.dp.toPx()
-                        val focusHalfSize = 30.dp.toPx()
+                        val focusHalfSize = (TapFrameSize / 2).toPx()
                         val focusHitHalfSize = 38.dp.toPx()
                         val mergeRadius = 16.dp.toPx()
                         awaitEachGesture {
@@ -200,130 +261,111 @@ fun FocusIndicator(
             ) {
                 val x = displayPosition.first * size.width
                 val y = displayPosition.second * size.height
-                val boxSize = (if (source == FocusPointSource.EYE) 24.dp else 60.dp).toPx() * scale
+                val boxSize = (if (source == FocusPointSource.EYE) 24.dp else TapFrameSize).toPx() * scale
                 val halfSize = boxSize / 2
-                val cornerLength = (if (source == FocusPointSource.EYE) 6.dp else 15.dp).toPx()
-                val strokeWidth = (if (source == FocusPointSource.EYE) 1.5.dp else 2.dp).toPx()
+                val cornerLength = 6.dp.toPx()
+                val strokeWidth = 1.5.dp.toPx()
 
-                val drawColor = color.copy(alpha = alpha)
+                val markAlpha = alpha * tapMarkAlpha * (if (blinkOff) 0.15f else 1f)
+                val drawColor = color.copy(alpha = markAlpha)
 
-                // 左上角
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x - halfSize, y - halfSize),
-                    end = Offset(x - halfSize + cornerLength, y - halfSize),
-                    strokeWidth = strokeWidth
-                )
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x - halfSize, y - halfSize),
-                    end = Offset(x - halfSize, y - halfSize + cornerLength),
-                    strokeWidth = strokeWidth
-                )
+                if (isTapMark && fixedFocus) {
+                    // No focus frame: there is nothing to focus.
+                } else if (isTapMark) {
+                    val topLeft = Offset(x - halfSize, y - halfSize)
+                    val frame = androidx.compose.ui.geometry.Size(boxSize, boxSize)
+                    // A soft dark edge keeps the thin line readable on bright scenes.
+                    drawRect(Color.Black.copy(alpha = 0.3f * markAlpha), topLeft, frame, style = Stroke(3.dp.toPx()))
+                    drawRect(drawColor, topLeft, frame, style = Stroke(TapFrameLine.toPx()))
+                } else {
+                    // 左上角
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x - halfSize, y - halfSize),
+                        end = Offset(x - halfSize + cornerLength, y - halfSize),
+                        strokeWidth = strokeWidth
+                    )
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x - halfSize, y - halfSize),
+                        end = Offset(x - halfSize, y - halfSize + cornerLength),
+                        strokeWidth = strokeWidth
+                    )
 
-                // 右上角
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x + halfSize, y - halfSize),
-                    end = Offset(x + halfSize - cornerLength, y - halfSize),
-                    strokeWidth = strokeWidth
-                )
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x + halfSize, y - halfSize),
-                    end = Offset(x + halfSize, y - halfSize + cornerLength),
-                    strokeWidth = strokeWidth
-                )
+                    // 右上角
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x + halfSize, y - halfSize),
+                        end = Offset(x + halfSize - cornerLength, y - halfSize),
+                        strokeWidth = strokeWidth
+                    )
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x + halfSize, y - halfSize),
+                        end = Offset(x + halfSize, y - halfSize + cornerLength),
+                        strokeWidth = strokeWidth
+                    )
 
-                // 左下角
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x - halfSize, y + halfSize),
-                    end = Offset(x - halfSize + cornerLength, y + halfSize),
-                    strokeWidth = strokeWidth
-                )
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x - halfSize, y + halfSize),
-                    end = Offset(x - halfSize, y + halfSize - cornerLength),
-                    strokeWidth = strokeWidth
-                )
+                    // 左下角
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x - halfSize, y + halfSize),
+                        end = Offset(x - halfSize + cornerLength, y + halfSize),
+                        strokeWidth = strokeWidth
+                    )
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x - halfSize, y + halfSize),
+                        end = Offset(x - halfSize, y + halfSize - cornerLength),
+                        strokeWidth = strokeWidth
+                    )
 
-                // 右下角
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x + halfSize, y + halfSize),
-                    end = Offset(x + halfSize - cornerLength, y + halfSize),
-                    strokeWidth = strokeWidth
-                )
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x + halfSize, y + halfSize),
-                    end = Offset(x + halfSize, y + halfSize - cornerLength),
-                    strokeWidth = strokeWidth
-                )
+                    // 右下角
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x + halfSize, y + halfSize),
+                        end = Offset(x + halfSize - cornerLength, y + halfSize),
+                        strokeWidth = strokeWidth
+                    )
+                    drawLine(
+                        color = drawColor,
+                        start = Offset(x + halfSize, y + halfSize),
+                        end = Offset(x + halfSize, y + halfSize - cornerLength),
+                        strokeWidth = strokeWidth
+                    )
+                }
 
-                if (source == FocusPointSource.MANUAL && (canMoveMeteringPoint || isSeparated)) {
+                if (isSeparated) {
                     val point = meteringPosition ?: displayPosition
                     val center = Offset(point.first * size.width, point.second * size.height)
-                    val radius = 11.dp.toPx()
-                    drawCircle(
-                        color = Color.White.copy(alpha = alpha),
-                        radius = radius,
-                        center = center,
-                        style = Stroke(width = 1.5.dp.toPx()),
-                    )
-                    if (isSeparated) {
-                        fun labelTopLeft(center: Offset, radius: Float, width: Int, height: Int): Offset {
-                            val below = center.y + radius + 5.dp.toPx()
-                            val top = if (below + height <= size.height) below
-                                else center.y - radius - 5.dp.toPx() - height
-                            return Offset(
-                                (center.x - width / 2f).coerceIn(0f, (size.width - width).coerceAtLeast(0f)),
-                                top.coerceIn(0f, (size.height - height).coerceAtLeast(0f)),
-                            )
-                        }
-                        drawText(
-                            focusLabel,
-                            topLeft = labelTopLeft(Offset(x, y), halfSize, focusLabel.size.width, focusLabel.size.height),
-                        )
-                        drawText(
-                            meteringLabel,
-                            topLeft = labelTopLeft(center, radius, meteringLabel.size.width, meteringLabel.size.height),
+                    val radius = SpotCircleRadius.toPx()
+                    fun labelTopLeft(center: Offset, radius: Float, width: Int, height: Int): Offset {
+                        val below = center.y + radius + 5.dp.toPx()
+                        val top = if (below + height <= size.height) below
+                            else center.y - radius - 5.dp.toPx() - height
+                        return Offset(
+                            (center.x - width / 2f).coerceIn(0f, (size.width - width).coerceAtLeast(0f)),
+                            top.coerceIn(0f, (size.height - height).coerceAtLeast(0f)),
                         )
                     }
-                }
-            }
-
-            if (source == FocusPointSource.MANUAL && isFocusLocked && position != null) {
-                val badgeSize = 24.dp
-                val badgeSizePx = with(density) { badgeSize.toPx() }
-                val focusHalfSizePx = with(density) { 30.dp.toPx() }
-                val maxWidthPx = constraints.maxWidth.toFloat()
-                val maxHeightPx = constraints.maxHeight.toFloat()
-                val offsetX = (displayPosition.first * maxWidthPx + focusHalfSizePx - badgeSizePx * 0.55f)
-                    .coerceIn(0f, (maxWidthPx - badgeSizePx).coerceAtLeast(0f))
-                val offsetY = (displayPosition.second * maxHeightPx - focusHalfSizePx - badgeSizePx * 0.45f)
-                    .coerceIn(0f, (maxHeightPx - badgeSizePx).coerceAtLeast(0f))
-                val badgeColor = color.copy(alpha = alpha.coerceAtLeast(0.75f))
-
-                Box(
-                    modifier = Modifier
-                        .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
-                        .size(badgeSize)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.55f))
-                        .border(1.dp, badgeColor, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Lock,
-                        contentDescription = null,
-                        tint = badgeColor,
-                        modifier = Modifier.size(14.dp)
+                    drawText(
+                        focusLabel,
+                        topLeft = labelTopLeft(Offset(x, y), halfSize, focusLabel.size.width, focusLabel.size.height),
+                    )
+                    drawText(
+                        meteringLabel,
+                        topLeft = labelTopLeft(center, radius, meteringLabel.size.width, meteringLabel.size.height),
                     )
                 }
             }
         }
     }
 }
+
+private val TapFrameSize = 42.dp
+private val TapFrameLine = 1.25.dp
+private val SpotCircleRadius = 11.dp
+// 1.5 s until the frame fades, then 10 s more.
+private const val TapPointIdleMs = 11_500L
+// The bright green of a Sony camera's in-focus frame.
+private val FocusGreen = Color(0xFF3FE03F)
