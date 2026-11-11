@@ -1764,6 +1764,10 @@
         <item quantity="one">%1$d frame</item>
         <item quantity="other">%1$d frames</item>
     </plurals>
+    <plurals name="quick_shot_count">
+        <item quantity="one">%1$d shot</item>
+        <item quantity="other">%1$d shots</item>
+    </plurals>
     <string name="quick_explain_camera_jpeg">Pro and stacked shots also keep the camera’s own JPEG, as a version of the photo.</string>
     <string name="quick_explain_resolution">Photo size in Photo mode. Pro is always full size.</string>
     <string name="quick_explain_metering">Which part of the frame sets the exposure. Auto: the camera decides. Centre: mostly the middle. Spot: a small spot. Avg: the whole frame evenly. High: keeps bright areas from blowing out.</string>

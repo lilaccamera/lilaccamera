@@ -284,6 +284,7 @@ fun CameraScreen(
     val useRaw by preferenceValue { it.useRaw }
     val useJpgMax by preferenceValue { it.useJpgMax }
     val jpgMultiFrameCount by preferenceValue { it.jpgMultiFrameDenoiseFrameCount }
+    val multipleExposureCount by preferenceValue { it.multipleExposureCount }
     val hdrPlusFrameCount by preferenceValue { it.hdrPlusFrameCount }
     val useMultipleExposure by preferenceValue { it.useMultipleExposure }
     val useRawMax by preferenceValue { it.useRawMax }
@@ -2319,6 +2320,8 @@ fun CameraScreen(
             },
             useMultipleExposure = useMultipleExposure,
             onMultipleExposureToggle = { viewModel.setUseMultipleExposure(it) },
+            multipleExposureCount = multipleExposureCount,
+            onMultipleExposureCountChange = { preferencesRepository.updateAsync { this.multipleExposureCount = it } },
             onDismiss = { activePanel = ActivePanel.NONE },
             everydayRowOnTop = everydayRowShown && activePanel == ActivePanel.NONE,
             everydayRowOnTopModifier = Modifier.align(Alignment.TopCenter).padding(top = viewfinderTop),

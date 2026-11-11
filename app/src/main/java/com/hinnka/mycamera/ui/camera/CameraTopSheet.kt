@@ -1,11 +1,14 @@
 package com.hinnka.mycamera.ui.camera
 
+import kotlinx.coroutines.delay
 import com.hinnka.mycamera.raw.fotufilm.FotufilmDocument
 import android.media.AudioDeviceInfo
 import android.os.Build
 import androidx.compose.animation.*
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -223,6 +226,8 @@ internal fun CameraTopSheet(
     onJpgMaxToggle: (Boolean) -> Unit,
     useMultipleExposure: Boolean,
     onMultipleExposureToggle: (Boolean) -> Unit,
+    multipleExposureCount: Int,
+    onMultipleExposureCountChange: (Int) -> Unit,
     onDismiss: () -> Unit,
     // The everyday row on its own on the picture's top edge, dropped there by a swipe down.
     everydayRowOnTop: Boolean = false,
@@ -480,6 +485,12 @@ internal fun CameraTopSheet(
                     }
                 } else {
                     // Multi-frame and multi-exposure, shown in Photo's own section or in a plain group in Portrait.
+                    // They exclude each other: the one given way slides to Off as soon as the other is moved,
+                    // not only once the camera has switched.
+                    var stackPick by remember { mutableStateOf<String?>(null) }
+                    LaunchedEffect(useJpgMax, useMultipleExposure) {
+                        if (stackPick == "mf" && !useMultipleExposure || stackPick == "mexp" && !useJpgMax) stackPick = null
+                    }
                     val photoStackRows: @Composable ColumnScope.() -> Unit = {
                         rows.Setting(
                             key = "mf",
@@ -488,11 +499,16 @@ internal fun CameraTopSheet(
                             settingsTarget = SettingsTarget.MULTI_FRAME
                         ) {
                             FrameCountSlider(
-                                frames = if (useJpgMax) multiFrameCount else 0,
+                                frames = if (useJpgMax && stackPick != "mexp") multiFrameCount else 0,
                                 min = MultiFrameConfig.MIN_DENOISE_FRAME_COUNT,
                                 withOff = true,
                                 onFramesChange = { frames ->
-                                    if (frames == 0) onJpgMaxToggle(false) else onMultiFrameCountChange(frames)
+                                    if (frames == 0) {
+                                        onJpgMaxToggle(false)
+                                    } else {
+                                        stackPick = "mf"
+                                        onMultiFrameCountChange(frames)
+                                    }
                                 }
                             )
                         }
@@ -503,7 +519,23 @@ internal fun CameraTopSheet(
                             settingsTarget = SettingsTarget.MULTIPLE_EXPOSURE,
                             last = true
                         ) {
-                            QuickSwitch(useMultipleExposure) { onMultipleExposureToggle(!useMultipleExposure) }
+                            // Shots per picture, or Off.
+                            FrameCountSlider(
+                                frames = if (useMultipleExposure && stackPick != "mf") multipleExposureCount else 0,
+                                min = 2,
+                                max = 9,
+                                countLabel = R.plurals.quick_shot_count,
+                                withOff = true,
+                                onFramesChange = { shots ->
+                                    if (shots == 0) {
+                                        onMultipleExposureToggle(false)
+                                    } else {
+                                        stackPick = "mexp"
+                                        onMultipleExposureCountChange(shots)
+                                        if (!useMultipleExposure) onMultipleExposureToggle(true)
+                                    }
+                                }
+                            )
                         }
                     }
                     // The current mode's own settings, always first and marked, so the shared groups
@@ -1170,23 +1202,44 @@ private fun InlinePicker(visible: Boolean, content: @Composable () -> Unit) {
 }
 
 /**
- * A frame count as a slider, whole counts from [min] up to the maximum. With [withOff] the left end is Off
+ * A frame count as a slider, whole counts from [min] up to [max]. With [withOff] the left end is Off
  * (reported as 0); without it a single frame is the inactive state.
  */
 @Composable
-private fun FrameCountSlider(frames: Int, min: Int, withOff: Boolean, onFramesChange: (Int) -> Unit) {
+private fun FrameCountSlider(
+    frames: Int,
+    min: Int,
+    withOff: Boolean,
+    onFramesChange: (Int) -> Unit,
+    max: Int = MultiFrameConfig.MAX_FRAME_COUNT,
+    countLabel: Int = R.plurals.quick_frame_count
+) {
     val start = if (withOff) min - 1 else min
-    val max = MultiFrameConfig.MAX_FRAME_COUNT
-    // The value while dragging, until the saved setting catches up.
+    // The value while dragging, until the saved setting reaches it: saves can land late and one drag step at a
+    // time (switching multi-frame on reconfigures the camera), and showing each would make the slider jump back.
+    // After 2 s without a change the saved setting shows anyway, in case the choice was refused.
     var dragged by remember { mutableStateOf<Int?>(null) }
-    LaunchedEffect(frames) { dragged = null }
+    val savedShown = if (withOff && frames <= 0) 0 else frames.coerceIn(min, max)
+    LaunchedEffect(savedShown) { if (savedShown == dragged) dragged = null }
+    LaunchedEffect(dragged) {
+        if (dragged != null) {
+            delay(2000)
+            dragged = null
+        }
+    }
     val currentOnFramesChange by rememberUpdatedState(onFramesChange)
-    val shown = dragged ?: if (withOff && frames <= 0) 0 else frames.coerceIn(min, max)
+    val shown = dragged ?: savedShown
+    val target = ((if (shown == 0) start else shown) - start).toFloat() / (max - start)
+    // Follows the finger directly; any other change (the other stacking slider taking over) glides there.
+    val position = remember { Animatable(target) }
+    LaunchedEffect(target) {
+        if (dragged != null) position.snapTo(target) else position.animateTo(target, tween(250, easing = FastOutSlowInEasing))
+    }
     QuickSlider(
         text = if (shown == 0) stringResource(R.string.quick_frames_off)
-        else pluralStringResource(R.plurals.quick_frame_count, shown, shown),
+        else pluralStringResource(countLabel, shown, shown),
         active = if (withOff) shown > 0 else shown > 1,
-        fraction = ((if (shown == 0) start else shown) - start).toFloat() / (max - start),
+        fraction = position.value,
         onFraction = { f ->
             val position = (start + f * (max - start)).roundToInt()
             val value = if (withOff && position <= start) 0 else position
