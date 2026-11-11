@@ -477,6 +477,22 @@ object AppIcons {
         )
     }
     val CloseLine: ImageVector by lazy { lineIcon("AppIcons.CloseLine", "M18 6l-12 12M6 6l12 12") }
+    val PlusLine: ImageVector by lazy { lineIcon("AppIcons.PlusLine", "M12 5v14M5 12h14") }
+    val CheckLine: ImageVector by lazy { lineIcon("AppIcons.CheckLine", "M5 12l5 5l10 -10") }
+    val UndoLine: ImageVector by lazy { lineIcon("AppIcons.UndoLine", "M9 14l-4 -4l4 -4M5 10h11a4 4 0 1 1 0 8h-1") }
+    val CircleOffLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.CircleOffLine",
+            "M20.042 16.045a9 9 0 0 0 -12.087 -12.087M5.637 5.635a9 9 0 1 0 12.725 12.73M3 3l18 18"
+        )
+    }
+    // A picture inside a border: a frame is added to the photo.
+    val FrameLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.FrameLine",
+            "M3 5a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2zM7 7h10v8h-10z"
+        )
+    }
     // Two overlapping frames: several shots in one picture.
     val MultiExposureLine: ImageVector by lazy {
         lineIcon(

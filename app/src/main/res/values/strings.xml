@@ -1825,4 +1825,14 @@
     <string name="zoom_collar">Zoom</string>
     <string name="zoom_collar_wide">Wide</string>
     <string name="zoom_collar_telephoto">Telephoto</string>
+    <!-- FILM panel: the look strip with one sheet for intensity, recipe, frame and presets -->
+    <string name="film_intensity">Intensity</string>
+    <string name="film_color_recipe">Color recipe</string>
+    <string name="film_preset">Preset</string>
+    <string name="film_current">Current</string>
+    <string name="film_log_lut">Log LUT</string>
+    <string name="film_explain_intensity">Strength of the look. Double-tap the slider: 100 %.</string>
+    <string name="film_explain_preset">Look, frame, aspect and rendering, set in one tap.</string>
+    <string name="film_explain_current_new">Saves the current settings as a new preset.</string>
+    <string name="film_explain_current_changed">Changed since the preset. Reset, update it, or save as a new one.</string>
 </resources>
