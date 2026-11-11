@@ -1552,8 +1552,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var latestPortraitFace: PortraitFace? = null
     private var latestPortraitFaceAtMs = 0L
 
-    /** Portrait on the mode dial explains itself the first time it is chosen. */
+    /** The Portrait guide is open; it opens from the pill in the picture or a long press on Portrait blur. */
     var showPortraitIntro by mutableStateOf(false)
+        private set
+    /** The guide opens at its blur step, where the depth model can be downloaded. */
+    var portraitGuideAtBlur by mutableStateOf(false)
         private set
     private var virtualApertureBeforePortrait: Pair<Boolean, Float>? = null
 
@@ -1688,6 +1691,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val shown = face.takeIf { state.value.isPortraitMode }
                 latestPortraitFace = shown
                 latestPortraitFaceAtMs = SystemClock.elapsedRealtime()
+                // Also covers a viewfinder created after the aperture was last set.
+                if (shown != null) glSurfaceView?.setPortraitAperture(state.value.virtualAperture)
                 glSurfaceView?.setPortraitFace(shown)
             }
         }
@@ -3238,9 +3243,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (timerSeconds > 0) {
             // 延时拍摄：开始倒计时
             countdownJob = viewModelScope.launch {
-                for (i in timerSeconds downTo 1) {
-                    cameraController.setCountdownValue(i)
-                    delay(1000)
+                try {
+                    for (i in timerSeconds downTo 1) {
+                        cameraController.setCountdownValue(i)
+                        selfTimerLampSecond(i)
+                    }
+                } finally {
+                    cameraController.setSelfTimerLamp(false)
                 }
                 // 倒计时结束，拍照
                 cameraController.setCountdownValue(0)
@@ -3249,6 +3258,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         } else {
             submitPhotoCapture()
         }
+    }
+
+    /**
+     * One second of the self-timer. With a face in view of the back camera the flash LED blinks like a
+     * camera's self-timer lamp: slowly, then fast for the last 2 s, and dark for the last 0.5 s so exposure
+     * settles before the shot. The flash itself must be off.
+     */
+    private suspend fun selfTimerLampSecond(secondsLeft: Int) {
+        val lamp = state.value.flashMode == 0 && cameraController.facesInView()
+        if (!lamp) {
+            cameraController.setSelfTimerLamp(false)
+            delay(1000)
+            return
+        }
+        val blinks = when (secondsLeft) { 1 -> 2; 2 -> 4; else -> 1 }
+        val half = if (secondsLeft > 2) 500L else 125L
+        repeat(blinks) {
+            cameraController.setSelfTimerLamp(true); delay(half)
+            cameraController.setSelfTimerLamp(false); delay(half)
+        }
+        if (secondsLeft == 1) delay(500)
     }
 
     /**
@@ -3275,9 +3305,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         userPreferencesRepository.updateAsync { portraitBokehStyle = style.persistedName }
     }
 
-    /** Reopens the Portrait explanation. */
-    fun showPortraitHelp() {
+    /** Opens the Portrait guide; once opened, the pill that offers it no longer shows. */
+    fun showPortraitHelp(atBlur: Boolean = false) {
+        portraitGuideAtBlur = atBlur
         showPortraitIntro = true
+        userPreferencesRepository.updateAsync { portraitIntroSeen = true }
     }
 
     /** Switches Portrait on or off; Portrait takes the blur strength of the default virtual aperture. */
@@ -3289,10 +3321,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (enabled) {
             val current = state.value
             virtualApertureBeforePortrait = Pair(current.isVirtualApertureEnabled, current.virtualAperture)
-            val aperture = userPreferencesRepository.current.defaultVirtualAperture
-            cameraController.setAperture(if (aperture > 0f) aperture else PORTRAIT_DEFAULT_APERTURE)
+            resetPortraitAperture()
             setVirtualApertureAuto(true)
-            if (!userPreferencesRepository.current.portraitIntroSeen) showPortraitIntro = true
         } else {
             virtualApertureBeforePortrait?.let { (wasEnabled, aperture) ->
                 cameraController.setAperture(aperture)
@@ -3306,7 +3336,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /** Depth blur needs the depth model; without it the choice is explained and offered for download. */
     fun setPortraitQuickBlur(quick: Boolean) {
         if (!quick && !DepthModelManager.isInstalled(getApplication())) {
-            showPortraitIntro = true
+            showPortraitHelp(atBlur = true)
             return
         }
         userPreferencesRepository.updateAsync { portraitQuickBlur = quick }
@@ -3314,7 +3344,34 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun dismissPortraitIntro() {
         showPortraitIntro = false
-        userPreferencesRepository.updateAsync { portraitIntroSeen = true }
+    }
+
+    /** The Pro guide is open; it opens from the pill in the picture or the mode name in quick settings. */
+    var showProGuide by mutableStateOf(false)
+        private set
+
+    /** Opens the Pro guide; once opened, the pill that offers it no longer shows. */
+    fun showProHelp() {
+        showProGuide = true
+        userPreferencesRepository.updateAsync { proGuideSeen = true }
+    }
+
+    fun dismissProGuide() {
+        showProGuide = false
+    }
+
+    /** The camera basics guide is open; it opens from the pill in Photo mode or the mode name in quick settings. */
+    var showBasicsGuide by mutableStateOf(false)
+        private set
+
+    /** Opens the camera basics guide; once opened, the pill that offers it no longer shows. */
+    fun showBasicsHelp() {
+        showBasicsGuide = true
+        userPreferencesRepository.updateAsync { basicsGuideSeen = true }
+    }
+
+    fun dismissBasicsGuide() {
+        showBasicsGuide = false
     }
 
     private fun snapshotCaptureSettings() = CaptureSettingsSnapshot(
@@ -3719,6 +3776,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun setAperture(value: Float) {
         cameraController.setAperture(value)
+        glSurfaceView?.setPortraitAperture(value)
+    }
+
+    /** Portrait's starting aperture: the default virtual aperture, or f/2 while that is off. */
+    fun resetPortraitAperture() {
+        val aperture = userPreferencesRepository.current.defaultVirtualAperture
+        setAperture(if (aperture > 0f) aperture else PORTRAIT_DEFAULT_APERTURE)
     }
 
     /**
@@ -4056,10 +4120,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.mergeMeteringPoint()
     }
 
-    fun lockFocusOnPoint(x: Float, y: Float, viewWidth: Int, viewHeight: Int) {
-        cameraController.lockFocusOnPoint(x, y, viewWidth, viewHeight)
-    }
-
     fun unlockFocus() {
         cameraController.unlockFocus()
     }
@@ -4074,9 +4134,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         shutterKeyFocusHeld = true
         val point = s.focusPoint
         when {
-            // A point the user tapped is already locked; keep it.
-            point != null && s.focusPointSource == FocusPointSource.MANUAL && s.isFocusLocked ->
+            // A point the user tapped holds, as a camera's focus area does.
+            point != null && s.focusPointSource == FocusPointSource.MANUAL -> {
+                // As a camera's half-press does, try again where the last attempt missed.
+                if (s.focusSuccess == false) cameraController.refocusTapPoint()
                 shutterKeyOwnsFocusLock = false
+            }
             point != null && s.focusPointSource == FocusPointSource.EYE -> {
                 cameraController.focusOnNormalizedPoint(point.first, point.second, FocusPointSource.EYE, lockFocus = true)
                 shutterKeyOwnsFocusLock = true
@@ -4086,11 +4149,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 shutterKeyOwnsFocusLock = true
             }
         }
+        cameraController.setShutterKeyHold(true)
     }
 
     fun onShutterKeyHalfRelease() {
         if (!shutterKeyFocusHeld) return
         shutterKeyFocusHeld = false
+        cameraController.setShutterKeyHold(false)
         if (shutterKeyOwnsFocusLock) {
             shutterKeyOwnsFocusLock = false
             unlockFocus()
@@ -4431,11 +4496,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // The sideways swipe on the picture steps through the favourites; with fewer than two, through every look.
+    private val swipeLutList: List<LutInfo>
+        get() = selectableLutList.let { all -> all.filter { it.isFavorite }.takeIf { it.size >= 2 } ?: all }
+
     /**
      * 预览下一个滤镜（不切换）
      */
     fun peekNextLut(): LutInfo? {
-        val luts = selectableLutList
+        val luts = swipeLutList
         if (luts.isEmpty()) return null
         val currentIndex = luts.indexOfFirst { it.id == currentLutId.value }
         val nextIndex = if (currentIndex == -1 || currentIndex == luts.size - 1) 0 else currentIndex + 1
@@ -4446,7 +4515,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 预览上一个滤镜（不切换）
      */
     fun peekPreviousLut(): LutInfo? {
-        val luts = selectableLutList
+        val luts = swipeLutList
         if (luts.isEmpty()) return null
         val currentIndex = luts.indexOfFirst { it.id == currentLutId.value }
         val prevIndex = if (currentIndex <= 0) luts.size - 1 else currentIndex - 1

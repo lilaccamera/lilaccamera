@@ -366,6 +366,23 @@ object AppIcons {
             "M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2"
         ).also { _user = it }
 
+    // Portrait guide: an info mark, a lens aperture for the blur, scissors for the subject cut-out.
+    val DownloadLine: ImageVector by lazy { lineIcon("AppIcons.DownloadLine", "M12 4v11M7 10l5 5l5 -5M5 19h14") }
+    val InfoLine: ImageVector by lazy { lineIcon("AppIcons.InfoLine", "M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0M12 9h.01M11 12h1v4h1") }
+    val ApertureLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.ApertureLine",
+            "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M3.6 15h10.55M6.551 4.938l3.26 10.034M17.032 4.636l-8.535 6.201" +
+                "M20.559 14.51l-8.535 -6.201M12.257 20.916l3.261 -10.034"
+        )
+    }
+    val ScissorsLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.ScissorsLine",
+            "M3 7a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M3 17a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M8.6 8.6l10.4 10.4M8.6 15.4l10.4 -10.4"
+        )
+    }
+
     val MovieCamera: ImageVector
         get() = _movieCamera ?: lineIcon(
             "AppIcons.MovieCamera",
@@ -460,6 +477,30 @@ object AppIcons {
         )
     }
     val CloseLine: ImageVector by lazy { lineIcon("AppIcons.CloseLine", "M18 6l-12 12M6 6l12 12") }
+    val PlusLine: ImageVector by lazy { lineIcon("AppIcons.PlusLine", "M12 5v14M5 12h14") }
+    val CheckLine: ImageVector by lazy { lineIcon("AppIcons.CheckLine", "M5 12l5 5l10 -10") }
+    val UndoLine: ImageVector by lazy { lineIcon("AppIcons.UndoLine", "M9 14l-4 -4l4 -4M5 10h11a4 4 0 1 1 0 8h-1") }
+    val CircleOffLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.CircleOffLine",
+            "M20.042 16.045a9 9 0 0 0 -12.087 -12.087M5.637 5.635a9 9 0 1 0 12.725 12.73M3 3l18 18"
+        )
+    }
+    // A picture inside a border: a frame is added to the photo.
+    val FrameLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.FrameLine",
+            "M3 5a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2zM7 7h10v8h-10z"
+        )
+    }
+    // Two overlapping frames: several shots in one picture.
+    val MultiExposureLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.MultiExposureLine",
+            "M8 10a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2z" +
+                "M16 8v-2a2 2 0 0 0 -2 -2h-8a2 2 0 0 0 -2 2v8a2 2 0 0 0 2 2h2"
+        )
+    }
 
     private fun lineIcon(name: String, pathData: String): ImageVector = ImageVector.Builder(
         name = name,
@@ -1220,6 +1261,28 @@ object AppIcons {
                 _pause = it
             }
         }
+
+    // Pro guide: an image sensor for RAW, stacked frames for merging.
+    val SensorLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.SensorLine",
+            "M5 6a1 1 0 0 1 1 -1h12a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-12a1 1 0 0 1 -1 -1zM9 9h6v6h-6z" +
+                "M3 10h2M3 14h2M10 3v2M14 3v2M21 10h-2M21 14h-2M14 21v-2M10 21v-2"
+        )
+    }
+    // Camera basics guide: the gestures, drawn as arrows round the control they act on.
+    val ModeSwipeLine: ImageVector by lazy {
+        lineIcon("AppIcons.ModeSwipeLine", "M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0M2 12h3M19 12h3M4 10l-2 2l2 2M20 10l2 2l-2 2")
+    }
+    val SwipeDownLine: ImageVector by lazy { lineIcon("AppIcons.SwipeDownLine", "M5 3h14M12 7v13M7 15l5 5l5 -5") }
+    val SwipeUpLine: ImageVector by lazy { lineIcon("AppIcons.SwipeUpLine", "M5 21h14M12 17v-13M7 9l5 -5l5 5") }
+    val ZoomRingLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.ZoomRingLine",
+            "M8 16a4 4 0 1 0 8 0a4 4 0 1 0 -8 0M5 10a9 9 0 0 1 14 0M5 10l-.5 -3.5M5 10l3.4 -1M19 10l.5 -3.5M19 10l-3.4 -1"
+        )
+    }
+    val StackLine: ImageVector by lazy { lineIcon("AppIcons.StackLine", "M12 4l-8 4l8 4l8 -4zM4 12l8 4l8 -4M4 16l8 4l8 -4") }
 
     val Photo: ImageVector
         get() {

@@ -50,18 +50,63 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.hinnka.mycamera.ui.icons.AppIcons
 
-private sealed class LutCategoryTab {
+internal sealed class LutCategoryTab {
     data object Favorite : LutCategoryTab()
     data object BuiltIn : LutCategoryTab()
     data object Uncategorized : LutCategoryTab()
     data class Category(val name: String) : LutCategoryTab()
 }
 
-private fun LutCategoryTab.stableKey(): String = when (this) {
+internal fun LutCategoryTab.stableKey(): String = when (this) {
     LutCategoryTab.Favorite -> "fixed:favorite"
     LutCategoryTab.BuiltIn -> "fixed:built_in"
     LutCategoryTab.Uncategorized -> "fixed:uncategorized"
     is LutCategoryTab.Category -> "category:$name"
+}
+
+/** The look sections in order: Favorites, Built-in and the categories in the saved order, Uncategorized last. */
+internal fun lutCategoryTabs(
+    availableLuts: List<LutInfo>,
+    categoryOrder: List<String>,
+    favoriteText: String,
+    builtInText: String,
+    uncategorizedText: String
+): List<LutCategoryTab> {
+    val reservedCategoryNames = setOf(favoriteText, builtInText, uncategorizedText)
+    val dynamicCategories = availableLuts.map { it.category }
+        .distinct()
+        .filter { it.isNotEmpty() && it !in reservedCategoryNames }
+    val hasUncategorizedLuts = availableLuts.any { !it.isBuiltIn && it.category.isEmpty() }
+    val orderedEntries = categoryOrder.filter { it == builtInText || dynamicCategories.contains(it) }
+    val remainingDynamic = dynamicCategories.filterNot { it in orderedEntries }.sorted()
+
+    return buildList {
+        add(LutCategoryTab.Favorite)
+        if (orderedEntries.isEmpty()) {
+            add(LutCategoryTab.BuiltIn)
+            addAll(remainingDynamic.map(LutCategoryTab::Category))
+        } else {
+            orderedEntries.forEach { entry ->
+                when (entry) {
+                    builtInText -> add(LutCategoryTab.BuiltIn)
+                    else -> add(LutCategoryTab.Category(entry))
+                }
+            }
+            if (builtInText !in orderedEntries) add(LutCategoryTab.BuiltIn)
+            addAll(remainingDynamic.map(LutCategoryTab::Category))
+        }
+
+        if (hasUncategorizedLuts) {
+            add(LutCategoryTab.Uncategorized)
+        }
+    }
+}
+
+internal fun LutCategoryTab.contains(lut: LutInfo): Boolean = when (this) {
+    LutCategoryTab.Favorite -> lut.isFavorite
+    LutCategoryTab.BuiltIn -> lut.isBuiltIn
+    LutCategoryTab.Uncategorized -> !lut.isBuiltIn && lut.category.isEmpty()
+    is LutCategoryTab.Category -> lut.category == name
 }
 
 private const val NONE_LUT_ITEM_KEY = "__photon_lut_selector_none__"
@@ -214,40 +259,7 @@ fun LutSelector(
 
     // 分类逻辑
     val categoryTabs = remember(availableLuts, categoryOrder, favoriteText, builtInText, uncategorizedText) {
-        val reservedCategoryNames = setOf(favoriteText, builtInText, uncategorizedText)
-        val dynamicCategories = availableLuts.map { it.category }
-            .distinct()
-            .filter { it.isNotEmpty() && it !in reservedCategoryNames }
-        val hasUncategorizedLuts = availableLuts.any { !it.isBuiltIn && it.category.isEmpty() }
-        val orderedEntries = categoryOrder.filter { it == builtInText || dynamicCategories.contains(it) }
-        val remainingDynamic = dynamicCategories.filterNot { it in orderedEntries }.sorted()
-
-        buildList {
-            add(LutCategoryTab.Favorite)
-            if (orderedEntries.isEmpty()) {
-                add(LutCategoryTab.BuiltIn)
-                addAll(remainingDynamic.map(LutCategoryTab::Category))
-            } else {
-                orderedEntries.forEach { entry ->
-                    when (entry) {
-                        builtInText -> add(LutCategoryTab.BuiltIn)
-                        else -> add(LutCategoryTab.Category(entry))
-                    }
-                }
-                if (builtInText !in orderedEntries) add(LutCategoryTab.BuiltIn)
-                addAll(remainingDynamic.map(LutCategoryTab::Category))
-            }
-
-            if (hasUncategorizedLuts) {
-                add(LutCategoryTab.Uncategorized)
-            }
-        }
-    }
-    fun LutCategoryTab.contains(lut: LutInfo): Boolean = when (this) {
-        LutCategoryTab.Favorite -> lut.isFavorite
-        LutCategoryTab.BuiltIn -> lut.isBuiltIn
-        LutCategoryTab.Uncategorized -> !lut.isBuiltIn && lut.category.isEmpty()
-        is LutCategoryTab.Category -> lut.category == name
+        lutCategoryTabs(availableLuts, categoryOrder, favoriteText, builtInText, uncategorizedText)
     }
 
     fun preferredCategoryFor(lut: LutInfo): LutCategoryTab = when {
@@ -698,46 +710,7 @@ private fun LutItem(
         ) {
             // 显示预览图片
             if (!isNone && previewBitmap != null) {
-                // 照片缩略图
-                val transformation = remember(id, previewBitmap) {
-                    object : Transformation {
-                        override val cacheKey: String = "previewTransformation_${previewBitmap.hashCode()}_$id"
-                        val contentRepository = ContentRepository.getInstance(context)
-
-                        override suspend fun transform(
-                            input: Bitmap,
-                            size: Size
-                        ): Bitmap {
-                            val lutConfig = withContext(Dispatchers.IO) {
-                                contentRepository.lutManager.loadLut(id)
-                            }
-                            if (lutConfig != null) {
-                                val colorRecipeParams = contentRepository.lutManager.loadColorRecipeParams(id, recipeTarget)
-                                return contentRepository.imageProcessor.applyLut(
-                                    bitmap = input,
-                                    lutConfig = lutConfig,
-                                    colorRecipeParams = colorRecipeParams
-                                )
-                            }
-                            return input
-                        }
-
-                    }
-                }
-                val imageRequest = remember(previewBitmap, transformation) {
-                    ImageRequest.Builder(context)
-                        .data(previewBitmap)
-                        .crossfade(true)
-                        .transformations(transformation)
-                        .build()
-                }
-
-                AsyncImage(
-                    model = imageRequest,
-                    contentDescription = name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                LutPreviewImage(id, name, previewBitmap, recipeTarget, Modifier.fillMaxSize())
             }
             if (isNone) {
                 Icon(
@@ -786,4 +759,56 @@ private fun LutItem(
                 .basicMarquee()
         )
     }
+}
+
+/** The photo thumbnail with the look applied (on the CPU, cached by Coil). */
+@Composable
+internal fun LutPreviewImage(
+    id: String,
+    name: String,
+    previewBitmap: Bitmap,
+    recipeTarget: BaselineColorCorrectionTarget? = null,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    // 照片缩略图
+    val transformation = remember(id, previewBitmap) {
+        object : Transformation {
+            override val cacheKey: String = "previewTransformation_${previewBitmap.hashCode()}_$id"
+            val contentRepository = ContentRepository.getInstance(context)
+
+            override suspend fun transform(
+                input: Bitmap,
+                size: Size
+            ): Bitmap {
+                val lutConfig = withContext(Dispatchers.IO) {
+                    contentRepository.lutManager.loadLut(id)
+                }
+                if (lutConfig != null) {
+                    val colorRecipeParams = contentRepository.lutManager.loadColorRecipeParams(id, recipeTarget)
+                    return contentRepository.imageProcessor.applyLut(
+                        bitmap = input,
+                        lutConfig = lutConfig,
+                        colorRecipeParams = colorRecipeParams
+                    )
+                }
+                return input
+            }
+
+        }
+    }
+    val imageRequest = remember(previewBitmap, transformation) {
+        ImageRequest.Builder(context)
+            .data(previewBitmap)
+            .crossfade(true)
+            .transformations(transformation)
+            .build()
+    }
+
+    AsyncImage(
+        model = imageRequest,
+        contentDescription = name,
+        contentScale = ContentScale.Crop,
+        modifier = modifier
+    )
 }

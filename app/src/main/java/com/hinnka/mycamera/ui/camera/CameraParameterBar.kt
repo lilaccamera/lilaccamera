@@ -2,11 +2,18 @@ package com.hinnka.mycamera.ui.camera
 
 import android.hardware.camera2.CameraMetadata
 import android.widget.Toast
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.annotation.StringRes
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,7 +40,15 @@ import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.CameraState
 import com.hinnka.mycamera.camera.CameraUtils
 import com.hinnka.mycamera.video.CaptureMode
+import kotlin.math.abs
+import kotlin.math.ln
 import kotlin.math.roundToLong
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 
 
 @Composable
@@ -41,7 +56,10 @@ fun CameraParameterBar(
     state: CameraState,
     selectedParameter: CameraParameter?,
     onParameterClick: (CameraParameter) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // A sideways drag on a value changes it through its ruler; called first with the dragged value.
+    scrub: RulerScrub? = null,
+    onScrubStart: (CameraParameter) -> Unit = {},
 ) {
     Row(
         modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp),
@@ -52,7 +70,9 @@ fun CameraParameterBar(
                 item = item,
                 isSelected = selectedParameter == item.parameter,
                 onClick = { onParameterClick(item.parameter) },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                scrub = scrub?.takeIf { item.isEnabled },
+                onScrubStart = { onScrubStart(item.parameter) }
             )
         }
     }
@@ -61,56 +81,131 @@ fun CameraParameterBar(
 internal data class CameraParameterItem(
     val parameter: CameraParameter,
     val label: String,
-    val value: String?,
+    val value: String,
     val isEnabled: Boolean = true,
     val isWarning: Boolean = false,
     /** Shown when a disabled item is tapped, so the tap is never silent. */
-    @StringRes val disabledMessage: Int? = null
+    @StringRes val disabledMessage: Int? = null,
+    /** Set by hand rather than by the camera: the value always shows, with an amber dot. */
+    val isManual: Boolean = false,
 )
 
 @Composable
 internal fun cameraParameterItems(state: CameraState): List<CameraParameterItem> {
-    // Match the mode switcher: PHOTO capture also backs the RAW professional mode.
-    val showValues = state.captureMode == CaptureMode.VIDEO ||
+    // The preview's over-exposure warning is about the RAW and video pipelines.
+    val warnPreviewLimit = state.captureMode == CaptureMode.VIDEO ||
         (state.useRaw && state.isRawSupported)
-    return listOf(
+    val evManual = state.exposureCompensation != 0
+    val shutterManual = !state.isShutterSpeedAuto
+    val isoManual = !state.isIsoAuto
+    val focusManual = !state.isAutoFocus
+    val wbManual = state.awbMode != CameraMetadata.CONTROL_AWB_MODE_AUTO
+    // A value on auto shows the camera's live reading. Readings arrive with every preview frame, so they
+    // are sampled a few times a second and shown in standard steps, which keeps the numbers calm.
+    val liveShutter = sampled(state.shutterSpeed)
+    val liveIso = sampled(state.iso)
+    val liveFocus = sampled(state.focusDistance)
+    val liveWb = sampled(state.actualAwbTemperature)
+    // Portrait leads with its aperture, always shown like a value set by hand.
+    val aperture = if (showsPortraitAperture(state)) listOf(
+        CameraParameterItem(
+            CameraParameter.APERTURE,
+            stringResource(R.string.camera_parameter_aperture),
+            stringResource(R.string.virtual_aperture_viewfinder_hint, formatApertureValue(state.virtualAperture)),
+            isManual = true
+        )
+    ) else emptyList()
+    return aperture + listOfNotNull(
         CameraParameterItem(
             CameraParameter.EXPOSURE_COMPENSATION,
             stringResource(R.string.camera_parameter_exposure),
-            if (showValues) CameraUtils.formatExposureCompensation(
-                state.exposureCompensation, state.getExposureCompensationStep()
-            ) else null,
-            isEnabled = state.isAutoExposure
+            CameraUtils.formatExposureCompensation(state.exposureCompensation, state.getExposureCompensationStep()),
+            isEnabled = state.isAutoExposure,
+            isManual = evManual
         ),
         CameraParameterItem(
             CameraParameter.SHUTTER_SPEED,
             stringResource(R.string.camera_parameter_shutter),
-            if (showValues) formatShutterSpeedValue(state.shutterSpeed) else null,
+            if (shutterManual) formatShutterSpeedValue(state.shutterSpeed) else formatShutterReading(liveShutter),
             isEnabled = state.isManualSensorSupported,
-            isWarning = showValues && state.isPreviewExposureLimited(),
-            disabledMessage = R.string.manual_sensor_unavailable
+            isWarning = warnPreviewLimit && state.isPreviewExposureLimited(),
+            disabledMessage = R.string.manual_sensor_unavailable,
+            isManual = shutterManual
         ),
         CameraParameterItem(
             CameraParameter.ISO,
             stringResource(R.string.camera_parameter_iso),
-            if (showValues) state.iso.toString() else null,
+            when {
+                isoManual -> state.iso.toString()
+                // Without manual sensor control (this phone's front camera) the reported ISO barely moves and
+                // lies far outside the camera's own range, so it would read as a fixed number.
+                !state.isManualSensorSupported -> stringResource(R.string.camera_parameter_focus_auto)
+                else -> nearestIsoStep(liveIso).toString()
+            },
             isEnabled = state.isManualSensorSupported,
-            disabledMessage = R.string.manual_sensor_unavailable
+            disabledMessage = R.string.manual_sensor_unavailable,
+            isManual = isoManual
         ),
-        CameraParameterItem(
+        // No manual focus in Portrait; one still set from another mode shows, so it can be reset.
+        if (state.isPortraitMode && !focusManual) null else CameraParameterItem(
             CameraParameter.FOCUS,
             stringResource(R.string.camera_parameter_focus),
-            if (showValues) formatFocusDistance(state.focusDistance) else null,
-            isEnabled = state.minimumFocusDistance > 0f
+            when {
+                focusManual -> formatFocusDistance(state.focusDistance)
+                // Locked by a tap or long press: the distance it locked at.
+                state.isFocusLocked && liveFocus > 0f -> formatFocusDistance(liveFocus)
+                // Focusing on its own: a moving distance says little, so it reads Auto.
+                else -> stringResource(R.string.camera_parameter_focus_auto)
+            },
+            isEnabled = state.minimumFocusDistance > 0f,
+            isManual = focusManual
         ),
         CameraParameterItem(
             CameraParameter.WHITE_BALANCE,
             stringResource(R.string.camera_parameter_white_balance),
-            if (showValues) formatWhiteBalanceValue(state) else null,
-            isEnabled = state.canAdjustWhiteBalance || state.actualAwbTemperature != null
+            formatWhiteBalanceValue(state, liveWb),
+            isEnabled = state.canAdjustWhiteBalance || state.actualAwbTemperature != null,
+            isManual = wbManual
         )
     )
 }
+
+/** [value], sampled at most every [periodMs]. */
+@Composable
+private fun <T> sampled(value: T, periodMs: Long = 250L): T {
+    val latest by rememberUpdatedState(value)
+    var shown by remember { mutableStateOf(value) }
+    LaunchedEffect(periodMs) {
+        while (true) {
+            shown = latest
+            delay(periodMs)
+        }
+    }
+    return shown
+}
+
+// Shutter speeds and ISO in the usual third-stop steps.
+private val ShutterDenominators = intArrayOf(
+    8000, 6400, 5000, 4000, 3200, 2500, 2000, 1600, 1250, 1000, 800, 640, 500, 400, 320, 250, 200, 160,
+    125, 100, 80, 60, 50, 40, 30, 25, 20, 15, 13, 10, 8, 6, 5, 4, 3
+)
+private val IsoSteps = intArrayOf(
+    25, 32, 40, 50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500,
+    3200, 4000, 5000, 6400, 8000, 10000, 12800, 16000, 20000, 25600
+)
+
+/** A live shutter reading as the nearest standard step, such as 1/60; long exposures as seconds. */
+internal fun formatShutterReading(exposureNs: Long): String {
+    if (exposureNs <= 0L) return formatShutterSpeedValue(exposureNs)
+    val denominator = 1_000_000_000.0 / exposureNs
+    if (denominator < 2.5) return CameraUtils.formatShutterSpeed(exposureNs)
+    val nearest = ShutterDenominators.minBy { abs(ln(it / denominator)) }
+    return "1/$nearest"
+}
+
+/** A live ISO reading as the nearest standard third-stop value, such as 400. */
+internal fun nearestIsoStep(iso: Int): Int =
+    if (iso <= 0) iso else IsoSteps.minBy { abs(ln(it.toDouble() / iso)) }
 
 @Composable
 internal fun ParameterItem(
@@ -118,25 +213,28 @@ internal fun ParameterItem(
     isSelected: Boolean,
     onClick: () -> Unit,
     vertical: Boolean = false,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    scrub: RulerScrub? = null,
+    onScrubStart: () -> Unit = {},
 ) {
-    val titleOnly = item.value == null
     val context = LocalContext.current
+    val pressSource = remember { MutableInteractionSource() }
+    val pressed by pressSource.collectIsPressedAsState()
+    val pressAlpha by animateFloatAsState(if (pressed) 0.55f else 1f, tween(if (pressed) 60 else 180), label = "press")
     val valueColor by animateColorAsState(
         targetValue = when {
             item.isWarning -> Color(0xFFFF6666)
             !item.isEnabled -> Color.White.copy(alpha = 0.38f)
-            isSelected -> AccentColor
-            else -> Color.White.copy(alpha = 0.95f)
+            isSelected -> ModeAmber
+            else -> Color.White
         },
         label = "parameterValueColor"
     )
     val labelColor by animateColorAsState(
         targetValue = when {
             !item.isEnabled -> Color.White.copy(alpha = 0.3f)
-            isSelected -> AccentColor.copy(alpha = if (titleOnly) 1f else 0.8f)
-            titleOnly -> Color.White.copy(alpha = 0.9f)
-            else -> Color.White.copy(alpha = 0.6f)
+            isSelected -> Color.White
+            else -> Color.White.copy(alpha = 0.78f)
         },
         label = "parameterLabelColor"
     )
@@ -146,12 +244,38 @@ internal fun ParameterItem(
                 if (vertical) Modifier.size(48.dp, 76.dp)
                 else Modifier.height(CameraControlsLayoutDefaults.ParameterBarHeight)
             )
-            .then(if (titleOnly) Modifier.clip(RoundedCornerShape(8.dp)) else Modifier)
             .semantics { selected = isSelected }
-            .clickable(enabled = item.isEnabled || item.disabledMessage != null, role = Role.Button) {
+            .then(
+                if (scrub != null) {
+                    Modifier.pointerInput(item.parameter) {
+                        detectHorizontalDragGestures(
+                            onDragStart = {
+                                onScrubStart()
+                                scrub.start(item.parameter)
+                            },
+                            onDragEnd = { scrub.end() },
+                            onDragCancel = { scrub.end() },
+                            onHorizontalDrag = { change, delta ->
+                                change.consume()
+                                scrub.dragBy(delta)
+                            }
+                        )
+                    }
+                } else {
+                    Modifier
+                }
+            )
+            // On the picture a pressed box looks out of place: the value dims under the finger instead.
+            .clickable(
+                interactionSource = pressSource,
+                indication = null,
+                enabled = item.isEnabled || item.disabledMessage != null,
+                role = Role.Button
+            ) {
                 if (item.isEnabled) onClick()
                 else item.disabledMessage?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
-            },
+            }
+            .graphicsLayer { alpha = pressAlpha },
         contentAlignment = Alignment.Center
     ) {
         Box(
@@ -162,93 +286,30 @@ internal fun ParameterItem(
             },
             contentAlignment = Alignment.Center
         ) {
-            if (item.value == null) {
-                PhotoParameterTitle(
-                    label = item.label,
+            // Text only, with shadows to read over the picture: a small name above, the value below.
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = item.label,
                     color = labelColor,
-                    isSelected = isSelected,
-                    isEnabled = item.isEnabled
+                    fontSize = 10.5.sp,
+                    style = TextStyle(shadow = ViewfinderTextShadow),
+                    maxLines = 1
                 )
-            } else {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(1.dp)
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = item.value,
                         color = valueColor,
-                        fontSize = 14.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Medium,
                         style = TextStyle(shadow = ViewfinderTextShadow),
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         softWrap = false
                     )
-                    Text(
-                        text = item.label,
-                        color = labelColor,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Medium,
-                        style = TextStyle(shadow = ViewfinderTextShadow),
-                        maxLines = 1
-                    )
+                    if (item.isManual) ManualDot(Modifier.padding(start = 4.dp))
                 }
             }
-            if (isSelected && !titleOnly) {
-                Box(
-                    Modifier.align(Alignment.BottomCenter)
-                        .padding(bottom = 3.dp)
-                        .size(16.dp, 2.dp)
-                        .clip(CircleShape)
-                        .background(AccentColor)
-                )
-            }
         }
-    }
-}
-
-@Composable
-private fun PhotoParameterTitle(
-    label: String,
-    color: Color,
-    isSelected: Boolean,
-    isEnabled: Boolean
-) {
-    val backgroundColor by animateColorAsState(
-        targetValue = when {
-            !isEnabled -> Color.Black.copy(alpha = 0.12f)
-            isSelected -> AccentColor.copy(alpha = 0.16f)
-            else -> Color.Black.copy(alpha = 0.28f)
-        },
-        label = "photoParameterBackground"
-    )
-    val borderColor by animateColorAsState(
-        targetValue = when {
-            !isEnabled -> Color.White.copy(alpha = 0.05f)
-            isSelected -> AccentColor.copy(alpha = 0.6f)
-            else -> Color.White.copy(alpha = 0.12f)
-        },
-        label = "photoParameterBorder"
-    )
-    val shape = RoundedCornerShape(8.dp)
-    Box(
-        modifier = Modifier
-            .padding(horizontal = 4.dp)
-            .fillMaxWidth()
-            .height(34.dp)
-            .background(backgroundColor, shape),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            color = color,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            style = TextStyle(shadow = ViewfinderTextShadow),
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            softWrap = false
-        )
     }
 }
 
@@ -270,11 +331,62 @@ internal fun formatFocusDistance(value: Float): String {
 }
 
 @Composable
-private fun formatWhiteBalanceValue(state: CameraState): String {
-    val measuredValue = state.actualAwbTemperature?.let { "${it}K" }
+private fun formatWhiteBalanceValue(state: CameraState, liveTemperature: Int?): String {
+    // The reading is an estimate from the camera's colour gains: whole hundreds of Kelvin are enough.
+    val measuredValue = liveTemperature?.let { "${(it + 50) / 100 * 100}K" }
     return when (state.awbMode) {
         CameraMetadata.CONTROL_AWB_MODE_OFF -> "${state.awbTemperature}K"
         CameraMetadata.CONTROL_AWB_MODE_AUTO -> measuredValue ?: stringResource(R.string.camera_focus_auto)
         else -> measuredValue ?: stringResource(R.string.unknown)
     }
 }
+
+/** Marks a value set by hand. */
+@Composable
+private fun ManualDot(modifier: Modifier = Modifier) {
+    Box(modifier.size(5.dp).background(ModeAmber, CircleShape))
+}
+
+/**
+ * The values set by hand while the manual panel is closed: plain numbers with an amber dot, centred on the
+ * picture's bottom edge like the active-setting marks on its top edge. A tap opens the panel at that value.
+ */
+@Composable
+internal fun ManualValuesLine(
+    state: CameraState,
+    onValueClick: (CameraParameter) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val items = cameraParameterItems(state).filter { it.isManual }
+    if (items.isEmpty()) return
+    val textStyle = TextStyle(shadow = ViewfinderTextShadow, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, color = Color.White)
+    Row(
+        modifier = modifier.height(TopEdgeLineHeight),
+        horizontalArrangement = Arrangement.spacedBy(20.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        items.forEach { item ->
+            Row(
+                modifier = Modifier
+                    .height(TopEdgeLineHeight)
+                    .clickable(interactionSource = null, indication = null, role = Role.Button) {
+                        onValueClick(item.parameter)
+                    },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // ISO and EV are bare numbers, so they keep their name; the others read by their unit.
+                val text = when (item.parameter) {
+                    CameraParameter.ISO -> "${item.label} ${item.value}"
+                    CameraParameter.EXPOSURE_COMPENSATION -> "${item.value} ${item.label}"
+                    else -> item.value
+                }
+                Text(text, style = textStyle, maxLines = 1, softWrap = false)
+                ManualDot(Modifier.padding(start = 4.dp))
+            }
+        }
+    }
+}
+
+/** Portrait photos show and set their virtual aperture with the manual values. */
+internal fun showsPortraitAperture(state: CameraState): Boolean =
+    state.isPortraitMode && state.captureMode == CaptureMode.PHOTO && state.isVirtualApertureEnabled

@@ -40,8 +40,11 @@
     <string name="camera_parameter_shutter" translatable="false">Tv</string>
     <string name="camera_parameter_iso" translatable="false">ISO</string>
     <string name="camera_parameter_focus" translatable="false">AF</string>
+    <string name="camera_parameter_focus_auto">Auto</string>
     <string name="camera_parameter_white_balance" translatable="false">AWB</string>
+    <string name="camera_parameter_aperture" translatable="false">Av</string>
     <string name="camera_parameter_auto" translatable="false">A</string>
+    <string name="camera_parameter_hyperfocal_mark" translatable="false">H</string>
 
     <!-- Focus -->
     <string name="camera_focus_auto">AUTO</string>
@@ -283,6 +286,10 @@
     <string name="multiple_exposure_finish">Finish</string>
     <string name="multiple_exposure_undo">Undo</string>
     <string name="multiple_exposure_cancel">Cancel Session</string>
+    <string name="multiple_exposure_discard">Discard</string>
+    <string name="multiple_exposure_discard_confirm">Discard %d?</string>
+    <string name="multiple_exposure_done">Done</string>
+    <string name="multiple_exposure_needs_two">Done needs 2 shots</string>
     <string name="settings_multiple_exposure_count">Multiple Exposure Count</string>
     <string name="settings_multiple_exposure_count_description">How many exposures to combine for one final image. Default is 2 for a classic double exposure workflow.</string>
     <string name="settings_raw_max_output_scale">HDR+ output scale</string>
@@ -1162,14 +1169,40 @@
     <string name="portrait_blur_depth">Depth</string>
     <string name="quick_explain_portrait_blur">Quick: even blur, nothing extra needed. Depth: the blur grows with distance; slower, needs the depth model. Long-press for how Portrait works.</string>
     <string name="quick_explain_portrait_bokeh">Natural: round. Swirl: vintage lens. Bubble: bright rings. Change it later in the editor.</string>
-    <string name="portrait_intro_title">Portrait</string>
-    <string name="portrait_intro_viewfinder">Portrait recognises faces. The viewfinder outlines the face and lightly blurs around the head and shoulders. This is only a guide; with no face in view it shows the plain picture.</string>
-    <string name="portrait_intro_blur">Quick blur is even and needs nothing extra. Depth blur grows with distance and looks more natural, but takes longer and needs a depth model of about 100 MB. Choose it at Portrait blur in the quick settings.</string>
-    <string name="portrait_intro_subject">After you shoot, a subject recognition model cuts out the main subject and blurs the rest. It works best on people, and also on pets or objects that stand out.</string>
-    <string name="portrait_intro_edit">The original is kept: change the blur, its focus and the bokeh style later in the photo editor. Long-press Portrait blur in the quick settings to read this again.</string>
-    <string name="portrait_intro_ready">The depth model is installed. Choose Depth at Portrait blur in the quick settings to use it.</string>
     <string name="portrait_intro_download">Download depth model</string>
-    <string name="portrait_intro_quick">Use quick blur</string>
+    <string name="portrait_depth_pill">Get Depth blur · 100 MB</string>
+    <string name="portrait_guide_pill">About Portrait</string>
+    <string name="pro_guide_pill">About Pro</string>
+    <string name="basics_guide_pill">How to use Lilac</string>
+    <string name="basics_guide_modes_title">Modes</string>
+    <string name="basics_guide_modes">Swipe sideways on the shutter to change mode, or tap the mode beside it.</string>
+    <string name="basics_guide_quick_title">Quick settings</string>
+    <string name="basics_guide_quick">Swipe down on the picture for Live, timer, aspect and flash. Tap the sliders button for everything else.</string>
+    <string name="basics_guide_manual_title">Manual controls</string>
+    <string name="basics_guide_manual">Swipe up on the picture for exposure, shutter, ISO, focus and white balance. Drag a value to change it; double-tap it for auto.</string>
+    <string name="basics_guide_zoom_title">Zoom</string>
+    <string name="basics_guide_zoom">Pull the ring above the shutter sideways to zoom. Tap W or T to step.</string>
+    <string name="basics_guide_looks_title">Looks</string>
+    <!-- Describes how looks are changed on the camera screen; update it when the looks panel changes. -->
+    <string name="basics_guide_looks">Swipe sideways on the picture to step through your favourite looks, or tap the film button for all of them.</string>
+    <string name="pro_guide_raw_title">RAW</string>
+    <string name="pro_guide_raw">Pro shoots RAW: the sensor\'s own data, before Sony\'s processing and noise reduction, so fine detail isn\'t smeared away.</string>
+    <string name="pro_guide_merge_title">Merge frames</string>
+    <string name="pro_guide_merge">HDR+ frames merges several shots into one. Noise drops with every frame, so less smoothing is needed. More frames are cleaner but need a steadier hand.</string>
+    <string name="pro_guide_render_title">Rendering</string>
+    <string name="pro_guide_render">Lilac develops the photo itself after the shot; the thumbnail\'s edge shows the progress. Pick the look under Rendering in quick settings.</string>
+    <string name="mode_guide_open">How %1$s works</string>
+    <string name="portrait_guide_next">Next</string>
+    <string name="portrait_guide_faces_title">Faces</string>
+    <string name="portrait_guide_faces">The viewfinder outlines the face and softly blurs around it. It is only a guide.</string>
+    <string name="portrait_guide_blur_title">Blur</string>
+    <string name="portrait_guide_blur">Quick mode blurs evenly and instantly. Depth mode blurs by distance and looks more natural, but needs a 100 MB model.</string>
+    <string name="portrait_guide_use_depth">Use Depth</string>
+    <string name="portrait_guide_depth_on">Depth blur is on.</string>
+    <string name="portrait_guide_subject_title">Subject</string>
+    <string name="portrait_guide_subject">After the shot, the subject is cut out and the rest blurred. Best on people; pets and objects work too.</string>
+    <string name="portrait_guide_edit_title">Edit later</string>
+    <string name="portrait_guide_edit">The original is kept. Change the blur, its focus and the bokeh style in the photo editor.</string>
     <string name="depth_model_download_title">Depth Model</string>
     <string name="depth_model_download_description">Depth-aware blur requires a compatible TFLite depth model with one RGB image input and a single-channel depth output. Download the default Depth Anything V2 model (about 100 MB), or import another TFLite model or a ZIP containing one. The model will be stored privately by the app.</string>
     <string name="depth_model_download_action">Download</string>
@@ -1300,6 +1333,9 @@
     <string name="settings_language_chinese_traditional" translatable="false">繁體中文（台灣）</string>
     <string name="eis_plus_unavailable_title">EIS+ unavailable</string>
     <string name="video_heat_warning_no_temp">Phone hot</string>
+    <string name="video_space_left">left</string>
+    <string name="video_snapshot_saved">Photo saved</string>
+    <string name="video_locked_while_recording">Locked while recording</string>
     <string name="video_heat_degrees">%1$d °C</string>
     <string name="video_heat_gauge_description">%1$s %2$d °C. Recording stops at %3$d °C.</string>
     <string name="video_heat_stopped_title">Recording stopped</string>
@@ -1729,6 +1765,10 @@
         <item quantity="one">%1$d frame</item>
         <item quantity="other">%1$d frames</item>
     </plurals>
+    <plurals name="quick_shot_count">
+        <item quantity="one">%1$d shot</item>
+        <item quantity="other">%1$d shots</item>
+    </plurals>
     <string name="quick_explain_camera_jpeg">Pro and stacked shots also keep the camera’s own JPEG, as a version of the photo.</string>
     <string name="quick_explain_resolution">Photo size in Photo mode. Pro is always full size.</string>
     <string name="quick_explain_metering">Which part of the frame sets the exposure. Auto: the camera decides. Centre: mostly the middle. Spot: a small spot. Avg: the whole frame evenly. High: keeps bright areas from blowing out.</string>
@@ -1797,4 +1837,14 @@
     <string name="zoom_collar">Zoom</string>
     <string name="zoom_collar_wide">Wide</string>
     <string name="zoom_collar_telephoto">Telephoto</string>
+    <!-- FILM panel: the look strip with one sheet for intensity, recipe, frame and presets -->
+    <string name="film_intensity">Intensity</string>
+    <string name="film_color_recipe">Color recipe</string>
+    <string name="film_preset">Preset</string>
+    <string name="film_current">Current</string>
+    <string name="film_log_lut">Log LUT</string>
+    <string name="film_explain_intensity">Strength of the look. Double-tap the slider: 100 %.</string>
+    <string name="film_explain_preset">Look, frame, aspect and rendering, set in one tap.</string>
+    <string name="film_explain_current_new">Saves the current settings as a new preset.</string>
+    <string name="film_explain_current_changed">Changed since the preset. Reset, update it, or save as a new one.</string>
 </resources>

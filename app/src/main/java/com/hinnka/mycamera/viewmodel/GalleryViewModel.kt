@@ -581,11 +581,31 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         return updated
     }
 
+    /**
+     * A blur whose GPU render has started is never cancelled: that work cannot be stopped, so a cancelled
+     * render kept the GPU busy while the next one started. Changes made meanwhile ask for one more render
+     * with the newest settings once it has finished. Before the render starts (loading, subject
+     * detection) the blur is simply replaced by the newest settings.
+     */
+    private var bokehRerunRequested = false
+    @Volatile private var bokehRenderStarted = false
+
     private fun updateBokehPhoto() {
-        bokehJob?.cancel()
+        val running = bokehJob?.takeIf { it.isActive }
+        if (running != null && bokehRenderStarted) {
+            bokehRerunRequested = true
+            _isBokehProcessing.value = true
+            return
+        }
+        running?.cancel()
+        startBokehRender()
+    }
+
+    private fun startBokehRender() {
         val aperture = editComputationalAperture.value
         _isBokehProcessing.value = aperture != null && aperture > 0
-        // LAZY 启动保证 bokehJob 已赋值，被新任务取消的旧任务不会清掉新任务的处理中状态
+        bokehRerunRequested = false
+        bokehRenderStarted = false
         val job = viewModelScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
             try {
                 run {
@@ -614,6 +634,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         focusPointY,
                         aperture,
                         editBokehStyle.value,
+                        onRenderStart = { bokehRenderStarted = true },
                     )
                     if (!isActive) return@run
                     GalleryManager.saveBokehPhoto(context, photoData.id, bokeh)
@@ -627,7 +648,17 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     photoRefreshKeys[photoData.id] = System.currentTimeMillis()
                 }
             } finally {
-                if (bokehJob === coroutineContext[Job]) _isBokehProcessing.value = false
+                val thisJob = coroutineContext[Job]
+                withContext(NonCancellable + Dispatchers.Main) {
+                    // A blur replaced before its render started leaves the state to its replacement.
+                    if (bokehJob !== thisJob) return@withContext
+                    if (bokehRerunRequested) {
+                        bokehRerunRequested = false
+                        startBokehRender()
+                    } else {
+                        _isBokehProcessing.value = false
+                    }
+                }
             }
         }
         bokehJob = job

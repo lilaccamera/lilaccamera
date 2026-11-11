@@ -17,9 +17,12 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
+import com.hinnka.mycamera.utils.VibrationHelper
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
@@ -43,12 +46,76 @@ enum class CameraParameter {
     SHUTTER_SPEED,
     ISO,
     FOCUS,
-    WHITE_BALANCE
+    WHITE_BALANCE,
+    /** Portrait's virtual aperture: the blur strength, in the viewfinder and in the saved photo. */
+    APERTURE
 }
 
-internal val CameraParameterRulerHeight = 64.dp
-private val ParameterRulerTickSpacing = 16.dp
+/** Third stops from f/1.0 to f/16, as on a lens's aperture ring. */
+internal val PortraitApertureStops = listOf(
+    1.0f, 1.1f, 1.2f, 1.4f, 1.6f, 1.8f, 2.0f, 2.2f, 2.5f, 2.8f, 3.2f, 3.5f, 4.0f, 4.5f, 5.0f, 5.6f,
+    6.3f, 7.1f, 8.0f, 9.0f, 10f, 11f, 13f, 14f, 16f
+)
+private val FullApertureStops = setOf(1.0f, 1.4f, 2.0f, 2.8f, 4.0f, 5.6f, 8.0f, 11f, 16f)
 
+internal val CameraParameterRulerHeight = 44.dp
+private val ParameterRulerTickSpacing = 12.dp
+
+/**
+ * A sideways drag on a manual value that moves that value's ruler. The ruler attaches itself while it is
+ * shown; a drag that starts before the ruler appears is kept and applied once it attaches.
+ */
+@Stable
+class RulerScrub {
+    /** A drag on a value is in progress. */
+    var active by mutableStateOf(false)
+        private set
+    private var target: CameraParameter? = null
+    private var pending = 0f
+    private var attached: CameraParameter? = null
+    private var onStart: (() -> Unit)? = null
+    private var onDrag: ((Float) -> Unit)? = null
+
+    fun start(parameter: CameraParameter) {
+        target = parameter
+        pending = 0f
+        active = true
+        if (attached == parameter) onStart?.invoke()
+    }
+
+    fun dragBy(px: Float) {
+        if (attached == target) onDrag?.invoke(px) else pending += px
+    }
+
+    fun end() {
+        active = false
+    }
+
+    internal fun attach(parameter: CameraParameter, start: () -> Unit, drag: (Float) -> Unit) {
+        attached = parameter
+        onStart = start
+        onDrag = drag
+        if (active && target == parameter) {
+            start()
+            if (pending != 0f) drag(pending)
+            pending = 0f
+        }
+    }
+
+    internal fun detach(parameter: CameraParameter) {
+        if (attached != parameter) return
+        attached = null
+        onStart = null
+        onDrag = null
+    }
+}
+
+/**
+ * A slim ruler above the manual values: ticks, numbers on the main steps and an amber needle at the current
+ * value, transparent with shadows. Drag it, or the value below it, to change the value; tap a tick to jump
+ * there; double-tap to go back to auto. The A at its start switches auto; on the focus ruler an H at its end
+ * switches hyperfocal focus.
+ */
 @Composable
 fun ParameterRuler(
     parameter: CameraParameter,
@@ -60,30 +127,33 @@ fun ParameterRuler(
     showAutoButton: Boolean,
     isAutoModeToggleEnabled: Boolean = true,
     valueStep: Float = 1f / 3f,
-    resetValue: Float? = null,
     showHyperfocalButton: Boolean = false,
     hyperfocalEnabled: Boolean = false,
-    hyperfocalDistanceMeters: Float = 0f,
     onHyperfocalToggle: ((Boolean) -> Unit)? = null,
     onValueChange: (Float) -> Unit,
     onAutoModeToggle: () -> Unit,
+    onSetAuto: () -> Unit,
+    scrub: RulerScrub? = null,
     modifier: Modifier = Modifier
 ) {
     val scaleValues = remember(parameter, minValue, maxValue, valueStep) {
         getScaleValues(parameter, minValue, maxValue, valueStep)
     }
-    val accentColor = AccentColor
     var selectedValue by remember(parameter, scaleValues) { mutableFloatStateOf(currentValue) }
     var scrollIndex by remember(parameter, scaleValues) {
         mutableFloatStateOf(closestScaleIndex(scaleValues, currentValue).toFloat())
     }
     var isDragging by remember(parameter, scaleValues) { mutableStateOf(false) }
     val currentValueState by rememberUpdatedState(currentValue)
-    val resetValueState by rememberUpdatedState(resetValue)
     val adjustableState by rememberUpdatedState(isAdjustable && scaleValues.size > 1)
     val autoModeState by rememberUpdatedState(isAutoMode)
     val onValueChangeState by rememberUpdatedState(onValueChange)
-    val haptic = LocalHapticFeedback.current
+    val onSetAutoState by rememberUpdatedState(onSetAuto)
+    val context = LocalContext.current
+    // This phone does not play the system's tick effects: a short pulse, spaced, on the labelled steps only.
+    val ticks = remember(context) { SpacedBuzz(VibrationHelper(context)) }
+    val spacingPx = with(LocalDensity.current) { ParameterRulerTickSpacing.toPx() }
+    val textMeasurer = rememberTextMeasurer()
 
     LaunchedEffect(currentValue, isDragging, scaleValues) {
         // Capture results continue to arrive during a gesture; they must not pull the ruler back.
@@ -97,54 +167,51 @@ fun ParameterRuler(
         val clamped = value.coerceIn(minValue, maxValue)
         val changed = clamped != selectedValue
         selectedValue = clamped
-        if (changed) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        if (changed && isMajorStep(parameter, clamped, scaleValues.indexOf(clamped))) {
+            ticks.buzz(VibrationHelper.LIGHT_TICK_MS)
+        }
         // Manual setters also leave auto mode, including when the selected value is unchanged.
         if (changed || force || autoModeState || clamped != currentValueState) {
             onValueChangeState(clamped)
         }
     }
 
+    fun startDrag() {
+        isDragging = adjustableState
+        if (isDragging) {
+            scrollIndex = closestScaleIndex(scaleValues, currentValueState).toFloat()
+            selectValue(scaleValues[scrollIndex.roundToInt()], force = true)
+        }
+    }
+
+    fun dragBy(delta: Float) {
+        if (!isDragging || !adjustableState) return
+        scrollIndex = (scrollIndex - delta / spacingPx).coerceIn(0f, scaleValues.lastIndex.toFloat())
+        val value = scaleValues[scrollIndex.roundToInt()]
+        if (value != selectedValue) selectValue(value)
+    }
+
+    // A drag on the value below moves this ruler.
+    if (scrub != null) {
+        val startState by rememberUpdatedState(::startDrag)
+        val dragState by rememberUpdatedState<(Float) -> Unit>(::dragBy)
+        DisposableEffect(scrub, parameter, scaleValues) {
+            scrub.attach(parameter, { startState() }, { dragState(it) })
+            onDispose { scrub.detach(parameter) }
+        }
+        LaunchedEffect(scrub.active) {
+            if (!scrub.active) isDragging = false
+        }
+    }
+
     val displayedValue = if (isDragging) selectedValue else currentValue
     Row(
-        modifier = modifier.fillMaxWidth().height(CameraParameterRulerHeight)
-            .padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+        modifier = modifier.fillMaxWidth().height(CameraParameterRulerHeight),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        if (showAutoButton) {
-            RulerModeButton(
-                selected = isAutoMode,
-                enabled = isAutoModeToggleEnabled,
-                onClick = onAutoModeToggle
-            ) {
-                Text(
-                    text = stringResource(R.string.camera_parameter_auto),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-        if (showHyperfocalButton && onHyperfocalToggle != null) {
-            RulerModeButton(
-                selected = hyperfocalEnabled,
-                onClick = { onHyperfocalToggle(!hyperfocalEnabled) },
-                modifier = Modifier.width(64.dp)
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        stringResource(R.string.camera_hyperfocal_label),
-                        fontSize = 10.sp,
-                        lineHeight = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    if (hyperfocalEnabled && hyperfocalDistanceMeters > 0f) {
-                        Text(
-                            formatHyperfocalDistance(hyperfocalDistanceMeters),
-                            fontSize = 9.sp,
-                            lineHeight = 11.sp
-                        )
-                    }
-                }
+        Box(Modifier.width(48.dp), contentAlignment = Alignment.Center) {
+            if (showAutoButton) {
+                RulerMark(text = stringResource(R.string.camera_parameter_auto), on = isAutoMode, enabled = isAutoModeToggleEnabled, onClick = onAutoModeToggle)
             }
         }
         Box(
@@ -165,15 +232,11 @@ fun ParameterRuler(
                 }
                 .pointerInput(parameter, scaleValues) {
                     detectTapGestures(
-                        onDoubleTap = {
-                            if (adjustableState) {
-                                resetValueState?.let { selectValue(it, force = true) }
-                            }
-                        },
+                        onDoubleTap = { onSetAutoState() },
                         onTap = { position ->
                             if (adjustableState) {
-                                val index = (scrollIndex + (position.x - size.width / 2f) /
-                                    ParameterRulerTickSpacing.toPx()).roundToInt().coerceIn(scaleValues.indices)
+                                val index = (scrollIndex + (position.x - size.width / 2f) / spacingPx)
+                                    .roundToInt().coerceIn(scaleValues.indices)
                                 selectValue(scaleValues[index], force = true)
                             }
                         }
@@ -181,102 +244,92 @@ fun ParameterRuler(
                 }
                 .pointerInput(parameter, scaleValues) {
                     detectHorizontalDragGestures(
-                        onDragStart = {
-                            isDragging = adjustableState
-                            if (isDragging) {
-                                scrollIndex = closestScaleIndex(scaleValues, currentValueState).toFloat()
-                                selectValue(scaleValues[scrollIndex.roundToInt()], force = true)
-                            }
-                        },
+                        onDragStart = { startDrag() },
                         onDragEnd = { isDragging = false },
                         onDragCancel = { isDragging = false },
                         onHorizontalDrag = { change, delta ->
-                            if (isDragging && adjustableState) {
-                                change.consume()
-                                scrollIndex = (scrollIndex - delta / ParameterRulerTickSpacing.toPx())
-                                    .coerceIn(0f, scaleValues.lastIndex.toFloat())
-                                val value = scaleValues[scrollIndex.roundToInt()]
-                                if (value != selectedValue) selectValue(value)
-                            }
+                            if (isDragging) change.consume()
+                            dragBy(delta)
                         }
                     )
-                },
-            contentAlignment = Alignment.TopCenter
+                }
         ) {
-            Text(
-                text = formatParameterValue(parameter, displayedValue),
-                modifier = Modifier.padding(top = 3.dp),
-                color = AccentColor,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                style = TextStyle(shadow = ViewfinderTextShadow),
-                maxLines = 1,
-                softWrap = false
-            )
             Canvas(Modifier.fillMaxSize()) {
                 val center = size.width / 2f
-                val spacing = ParameterRulerTickSpacing.toPx()
-                val baseline = size.height - 9.dp.toPx()
-                drawLine(
-                    Color.White.copy(alpha = 0.12f),
-                    Offset(0f, baseline), Offset(size.width, baseline), 1.dp.toPx()
+                val shadow = Color.Black.copy(alpha = 0.6f)
+                val dimmed = if (isAdjustable) 1f else 0.5f
+                val labelStyle = TextStyle(
+                    color = Color.White.copy(alpha = dimmed),
+                    fontSize = 10.5.sp,
+                    shadow = ViewfinderTextShadow
                 )
                 scaleValues.indices.forEach { index ->
-                    val x = center + (index - scrollIndex) * spacing
-                    if (x !in 0f..size.width) return@forEach
-                    val edgeAlpha = (1f - abs(x - center) / center.coerceAtLeast(1f)).coerceIn(0f, 1f)
-                    val major = index % 5 == 0 || index == scaleValues.lastIndex
-                    drawLine(
-                        color = Color.White.copy(alpha = (0.15f + 0.55f * edgeAlpha) * if (isAdjustable) 1f else 0.5f),
-                        start = Offset(x, baseline - if (major) 17.dp.toPx() else 9.dp.toPx()),
-                        end = Offset(x, baseline),
-                        strokeWidth = 1.dp.toPx(),
-                        cap = StrokeCap.Round
-                    )
+                    val x = center + (index - scrollIndex) * spacingPx
+                    if (x < -40.dp.toPx() || x > size.width + 40.dp.toPx()) return@forEach
+                    val major = isMajorStep(parameter, scaleValues[index], index)
+                    val top = if (major) 6.dp.toPx() else 10.dp.toPx()
+                    val bottom = top + if (major) 16.dp.toPx() else 10.dp.toPx()
+                    drawLine(shadow, Offset(x + 1f, top + 1f), Offset(x + 1f, bottom + 1f), 1.dp.toPx())
+                    drawLine(Color.White.copy(alpha = (if (major) 1f else 0.7f) * dimmed), Offset(x, top), Offset(x, bottom), 1.dp.toPx())
+                    if (major) {
+                        val label = textMeasurer.measure(formatParameterValue(parameter, scaleValues[index]), labelStyle)
+                        drawText(label, topLeft = Offset(x - label.size.width / 2f, 26.dp.toPx()))
+                    }
                 }
-                drawLine(
-                    accentColor,
-                    Offset(center, baseline - 23.dp.toPx()), Offset(center, baseline + 2.dp.toPx()),
-                    2.dp.toPx(), StrokeCap.Round
+                // The needle marks the current value.
+                drawLine(shadow, Offset(center + 1f, 2.dp.toPx() + 1f), Offset(center + 1f, 26.dp.toPx() + 1f), 2.5.dp.toPx(), StrokeCap.Round)
+                drawLine(ModeAmber, Offset(center, 2.dp.toPx()), Offset(center, 26.dp.toPx()), 2.5.dp.toPx(), StrokeCap.Round)
+            }
+        }
+        Box(Modifier.width(48.dp), contentAlignment = Alignment.Center) {
+            if (showHyperfocalButton && onHyperfocalToggle != null) {
+                RulerMark(
+                    text = stringResource(R.string.camera_parameter_hyperfocal_mark),
+                    on = hyperfocalEnabled,
+                    enabled = true,
+                    onClick = { onHyperfocalToggle(!hyperfocalEnabled) }
                 )
             }
         }
     }
 }
 
-@Composable
-private fun RulerModeButton(
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    content: @Composable () -> Unit
-) {
-    Box(
-        modifier = modifier.defaultMinSize(minWidth = 44.dp, minHeight = 48.dp)
-            .clip(CircleShape)
-            .toggleable(value = selected, enabled = enabled, role = Role.Switch, onValueChange = { onClick() })
-            .padding(horizontal = 6.dp, vertical = 10.dp)
-            .border(1.dp, if (selected) AccentColor else Color.White.copy(alpha = 0.3f), CircleShape)
-            .background(if (selected) AccentColor else Color.Transparent, CircleShape),
-        contentAlignment = Alignment.Center
-    ) {
-        androidx.compose.runtime.CompositionLocalProvider(
-            androidx.compose.material3.LocalContentColor provides when {
-                !enabled -> Color.White.copy(alpha = 0.3f)
-                selected -> OnAccentColor
-                else -> Color.White
-            },
-            content = content
-        )
+/** The labelled steps: whole EV, full stops of shutter and ISO, every 1000 K, every fifth focus step. */
+private fun isMajorStep(parameter: CameraParameter, value: Float, index: Int): Boolean = when (parameter) {
+    CameraParameter.EXPOSURE_COMPENSATION -> abs(value - value.roundToInt()) < 0.05f
+    CameraParameter.SHUTTER_SPEED -> {
+        val ns = value.toLong()
+        if (ns >= 1_000_000_000L) (ns / 1_000_000_000L).toInt() in setOf(1, 2, 4, 8, 15, 30)
+        else (1_000_000_000.0 / ns).roundToInt() in setOf(8000, 4000, 2000, 1000, 500, 250, 125, 60, 30, 15, 8, 4, 2)
     }
+    CameraParameter.ISO -> value.roundToInt() in setOf(50, 100, 200, 400, 800, 1600, 3200, 6400, 12800)
+    CameraParameter.WHITE_BALANCE -> value.roundToInt() % 1000 == 0
+    CameraParameter.FOCUS -> index % 5 == 0
+    CameraParameter.APERTURE -> value in FullApertureStops
 }
 
+/** A round 30 dp mark at the ruler's ends: amber when on. */
 @Composable
-private fun formatHyperfocalDistance(distanceMeters: Float): String = if (distanceMeters >= 1f) {
-    stringResource(R.string.camera_hyperfocal_distance_meters, distanceMeters)
-} else {
-    stringResource(R.string.camera_hyperfocal_distance_centimeters, (distanceMeters * 100).roundToInt())
+private fun RulerMark(text: String, on: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(CircleShape)
+            .toggleable(value = on, enabled = enabled, role = Role.Switch, onValueChange = { onClick() })
+            .then(
+                if (on) Modifier.background(ModeAmber, CircleShape)
+                else Modifier.border(1.5.dp, Color.White.copy(alpha = if (enabled) 0.85f else 0.3f), CircleShape)
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = if (on) Color(0xFF412402) else Color.White.copy(alpha = if (enabled) 1f else 0.3f),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            style = if (on) TextStyle.Default else TextStyle(shadow = ViewfinderTextShadow)
+        )
+    }
 }
 
 private fun closestScaleIndex(values: List<Float>, value: Float): Int =
@@ -292,7 +345,12 @@ private fun formatParameterValue(parameter: CameraParameter, value: Float): Stri
     CameraParameter.ISO -> value.roundToInt().toString()
     CameraParameter.WHITE_BALANCE -> "${value.roundToInt()}K"
     CameraParameter.FOCUS -> formatFocusDistance(value)
+    CameraParameter.APERTURE -> formatApertureValue(value)
 }
+
+/** 2 and 2.8, not 2.0. */
+internal fun formatApertureValue(value: Float): String =
+    if (value % 1f == 0f) value.toInt().toString() else String.format(java.util.Locale.ROOT, "%.1f", value)
 
 private fun getScaleValues(parameter: CameraParameter, minValue: Float, maxValue: Float, valueStep: Float): List<Float> {
     if (maxValue <= minValue) return listOf(minValue)
@@ -400,6 +458,8 @@ private fun getScaleValues(parameter: CameraParameter, minValue: Float, maxValue
                 .filter { it in minValue..maxValue }
                 .toList()
         }
+
+        CameraParameter.APERTURE -> PortraitApertureStops
 
         CameraParameter.FOCUS -> {
             val steps = 20

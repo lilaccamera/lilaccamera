@@ -32,6 +32,7 @@ import com.hinnka.mycamera.raw.RawCameraCalibration
 import com.hinnka.mycamera.raw.RawColorCalibrationMode
 import com.hinnka.mycamera.raw.RawColorCalibrationPolicy
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.utils.RawProcessor
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -551,6 +552,10 @@ class Camera2Controller(private val context: Context) {
 
     // 场景变化检测：用于替代固定延迟恢复连续对焦
     private var isFocusLockedWaitingForSceneChange = false
+    // A tap that moves the metering region changes exposure itself; the scene reference waits until AE settles.
+    private var sceneExposureReferencePending = false
+    // Results already in flight when a point-focus trigger is sent still report the previous lock.
+    private var pointAfTriggerPending = false
     private var focusLockedReferenceIso: Int = 0
     private var focusLockedReferenceExposureNs: Long = 0L
     private var focusLockedReferenceDistance: Float = 0f
@@ -1280,6 +1285,9 @@ class Camera2Controller(private val context: Context) {
             request: CaptureRequest,
             failure: CaptureFailure,
         ) {
+            if (request.get(CaptureRequest.CONTROL_AF_TRIGGER) == CaptureRequest.CONTROL_AF_TRIGGER_START) {
+                pointAfTriggerPending = false
+            }
             val flashTag = request.tag as? StillFlashRequestTag
             if (flashTag != null) {
                 val pending = stillFlashPrecapture ?: return
@@ -1333,7 +1341,14 @@ class Camera2Controller(private val context: Context) {
             if (afStateChanged) {
                 lastAfState = afState
             }
-            if (_state.value.isAutoFocus && _state.value.isFocusing) {
+            if (pointAfTriggerPending && (
+                    result.request.get(CaptureRequest.CONTROL_AF_TRIGGER) == CaptureRequest.CONTROL_AF_TRIGGER_START ||
+                        afState == CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN
+                    )
+            ) {
+                pointAfTriggerPending = false
+            }
+            if (_state.value.isAutoFocus && _state.value.isFocusing && !pointAfTriggerPending) {
                 when (afState) {
                     CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED -> {
                         logFocusTerminalResult(result, afState)
@@ -1356,7 +1371,7 @@ class Camera2Controller(private val context: Context) {
 
             // 独立测光会主动改变曝光，期间保留用户选定的 AF 点，直到重新点按或解锁。
             // 其余状态在对焦后持续监测曝光变化和焦距跳变。
-            if (_state.value.isAutoFocus && isFocusLockedWaitingForSceneChange && _state.value.meteringPoint == null) {
+            if (_state.value.isAutoFocus && isFocusLockedWaitingForSceneChange && _state.value.meteringPoint == null && !shutterKeyHold) {
                 // 对焦锁定后前几帧镜头还在微调，跳过不检测
                 if (focusLockSettleFrames > 0) {
                     focusLockSettleFrames--
@@ -1366,8 +1381,15 @@ class Camera2Controller(private val context: Context) {
                     val currentFocusDistance = result.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: 0f
                     var sceneChanged = false
 
+                    if (sceneExposureReferencePending &&
+                        result.get(CaptureResult.CONTROL_AE_STATE) != CaptureResult.CONTROL_AE_STATE_SEARCHING
+                    ) {
+                        updateFocusLockSceneReference(result)
+                        sceneExposureReferencePending = false
+                    }
+
                     // 1. 曝光变化检测
-                    if (focusLockedReferenceIso > 0 && focusLockedReferenceExposureNs > 0 &&
+                    if (!sceneExposureReferencePending && focusLockedReferenceIso > 0 && focusLockedReferenceExposureNs > 0 &&
                         currentIso > 0 && currentExposure > 0L
                     ) {
                         val refProduct = focusLockedReferenceIso.toDouble() * focusLockedReferenceExposureNs.toDouble()
@@ -1400,6 +1422,7 @@ class Camera2Controller(private val context: Context) {
                         } else {
                             sceneChangeFrameCount++
                             if (sceneChangeFrameCount >= SCENE_CHANGE_CONFIRM_FRAMES) {
+                                PLog.d(TAG, "Scene changed: tap focus released")
                                 restoreContinuousAf()
                             }
                         }
@@ -2972,11 +2995,19 @@ class Camera2Controller(private val context: Context) {
                     afModes = availableAfModes,
                 )
 
+                // A camera without manual exposure (such as a front camera) always meters on its own. A manual
+                // ISO or shutter left from another camera would otherwise freeze its readings and grey out EV.
+                val supportsManualExposure = isManualSensorSupported &&
+                    availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_OFF)
                 _state.update { currentState ->
                     currentState.copy(
                         useRaw = requestedRawCaptureEnabled,
                         isRawSupported = isRawSupported,
                         isManualSensorSupported = isManualSensorSupported,
+                        isIsoAuto = currentState.isIsoAuto || !supportsManualExposure,
+                        isShutterSpeedAuto = currentState.isShutterSpeedAuto || !supportsManualExposure,
+                        exposureBias = if (supportsManualExposure) currentState.exposureBias
+                        else currentState.exposureCompensation * currentState.getExposureCompensationStep(),
                         isP010Supported = isP010Supported,
                         availableNrModes = selectableNrModes,
                         supportsCctWhiteBalance = supportsCctWhiteBalance(),
@@ -4339,7 +4370,7 @@ class Camera2Controller(private val context: Context) {
         applyFlashSettings(builder, currentState, isCapture, useStillFlashTrigger)
 
         // 4. 变焦设置
-        applyZoomSettings(builder, currentState, isCapture)
+        applyZoomSettings(builder, currentState, isCapture, isRawCapture)
 
         // 5. 对焦设置
         applyFocusSettings(builder, currentState)
@@ -5256,10 +5287,28 @@ class Camera2Controller(private val context: Context) {
             }
 
             else -> {
-                builder.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_OFF)
+                builder.set(
+                    CaptureRequest.FLASH_MODE,
+                    if (selfTimerLampOn && !isCapture) CameraMetadata.FLASH_MODE_TORCH else CameraMetadata.FLASH_MODE_OFF
+                )
             }
         }
     }
+
+    // The flash LED as a self-timer lamp, like a camera's front lamp; only while the flash is off.
+    private var selfTimerLampOn = false
+
+    fun setSelfTimerLamp(on: Boolean) {
+        if (!isFlashSupported || selfTimerLampOn == on) return
+        selfTimerLampOn = on
+        previewRequestBuilder?.apply {
+            applyFlashSettings(this, _state.value, isCapture = false)
+            updatePreview()
+        }
+    }
+
+    /** Whether the camera's own face detection sees a face in the latest preview frame. */
+    fun facesInView(): Boolean = (lastCaptureResult?.get(CaptureResult.STATISTICS_FACES)?.size ?: 0) > 0
 
     /**
      * 应用变焦设置
@@ -5268,6 +5317,7 @@ class Camera2Controller(private val context: Context) {
         builder: CaptureRequest.Builder,
         state: CameraState,
         isCapture: Boolean = false,
+        isRawCapture: Boolean = false,
     ) {
         val openCameraId = getActiveOpenCameraId()
         if (openCameraId.isEmpty()) return
@@ -5281,13 +5331,16 @@ class Camera2Controller(private val context: Context) {
             val userZoomRatio = state.zoomRatio.coerceIn(minZoom, maxSupportedZoom)
             val zoomRatio = userZoomRatio
             val activeRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+            // On lilac a cropped RAW still is sent through the camera's second image front-end, which the RAW
+            // shim cannot copy, and the shim is poisoned. Ask for the full sensor; the RAW is cropped in software.
+            val fullSensorRaw = IS_LILAC && isCapture && isRawCapture
 
             applyZoomRequestSettings(
                 builder = builder,
-                zoomRatio = zoomRatio,
+                zoomRatio = if (fullSensorRaw) 1f else zoomRatio,
                 activeRect = activeRect,
                 zoomRatioRange = zoomRatioRange,
-                resetCropAtUnitZoom = false
+                resetCropAtUnitZoom = fullSensorRaw
             )
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to apply zoom settings", e)
@@ -6368,6 +6421,8 @@ class Camera2Controller(private val context: Context) {
         try {
             val point = if (mode == MeteringMode.HIGHLIGHT_PRIORITY && highlightPointInitialized) {
                 highlightPointSmoothedX to highlightPointSmoothedY
+            } else if (mode == MeteringMode.CENTER_WEIGHTED) {
+                0.5f to 0.5f  // centre-weighted stays centred; a tap only focuses
             } else {
                 currentState.meteringReferencePoint ?: (0.5f to 0.5f)
             }
@@ -6947,6 +7002,7 @@ class Camera2Controller(private val context: Context) {
 
     private fun recordFocusLockExposure(result: CaptureResult) {
         updateFocusLockSceneReference(result)
+        sceneExposureReferencePending = true
         isFocusLockedWaitingForSceneChange = true
         focusLockSettleFrames = FOCUS_LOCK_SETTLE_FRAMES
         sceneChangeFrameCount = 0
@@ -6992,6 +7048,7 @@ class Camera2Controller(private val context: Context) {
         focusLockedReferenceDistance = 0f
         focusLockSettleFrames = 0
         eyeTargetLastSeenElapsedMs = 0L
+        pointAfTriggerPending = false
         _state.value = _state.value.copy(
             focusPoint = null,
             meteringPoint = null,
@@ -7015,15 +7072,37 @@ class Camera2Controller(private val context: Context) {
         )
     }
 
-    fun lockFocusOnPoint(x: Float, y: Float, viewWidth: Int, viewHeight: Int) {
-        if (viewWidth <= 0 || viewHeight <= 0) return
-        PLog.d(TAG, "Lock focus on point: x=$x y=$y w=$viewWidth h=$viewHeight")
+    // A half-pressed camera key holds focus and exposure, like a camera's shutter button with AE lock.
+    private var shutterKeyHold = false
+
+    fun setShutterKeyHold(held: Boolean) {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { setShutterKeyHold(held) }
+            return
+        }
+        shutterKeyHold = held
+        val aeLockAvailable = getActiveOpenCameraCharacteristics()
+            ?.get(CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE) == true
+        previewRequestBuilder?.apply {
+            if (aeLockAvailable) set(CaptureRequest.CONTROL_AE_LOCK, held)
+            updatePreview()
+        }
+        _state.value = _state.value.copy(
+            shutterKeyHeld = held,
+            exposureHeld = held && aeLockAvailable && _state.value.isAutoExposure,
+        )
+    }
+
+    /** Focuses again on the tapped point (a half-press after a miss), keeping the exposure point as it is. */
+    fun refocusTapPoint() {
+        val point = _state.value.focusPoint?.takeIf { _state.value.focusPointSource == FocusPointSource.MANUAL } ?: return
         focusOnNormalizedPoint(
-            normX = x / viewWidth,
-            normY = y / viewHeight,
+            normX = point.first,
+            normY = point.second,
             source = FocusPointSource.MANUAL,
-            lockFocus = true,
-            previewViewAspectRatio = viewWidth.toFloat() / viewHeight,
+            previewViewAspectRatio = pointMeteringViewAspectRatio,
+            preserveMeteringPoint = true,
         )
     }
 
@@ -8032,9 +8111,11 @@ class Camera2Controller(private val context: Context) {
         try {
             builder.set(CaptureRequest.CONTROL_AF_MODE, afMode)
             builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+            pointAfTriggerPending = true
             session.capture(builder.build(), previewCallback, cameraHandler)
             submitted = true
         } catch (e: Exception) {
+            pointAfTriggerPending = false
             PLog.e(TAG, "Failed to submit one-shot AF trigger for $reason", e)
         } finally {
             builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
@@ -9425,6 +9506,12 @@ class Camera2Controller(private val context: Context) {
             var effectiveResult: CaptureResult? = effectivePhysicalCameraId
                 ?.let { physicalId -> result?.physicalCameraResults?.get(physicalId) }
                 ?: result
+            if (IS_LILAC && image.format == ImageFormat.RAW_SENSOR && result != null && shot.state.zoomRatio > 1f) {
+                // The request went out at the full sensor (applyZoomSettings); keep the framed crop for the RAW.
+                shot.characteristics?.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)?.let { activeRect ->
+                    RawProcessor.rememberFramedCrop(result.request, buildCenteredCropRegion(activeRect, shot.state.zoomRatio))
+                }
+            }
 
             // For RAW images, ensure characteristics match image dimensions to avoid DngCreator crash.
             // This is especially important for logical multi-camera devices where the RAW might come from a physical sub-camera.
