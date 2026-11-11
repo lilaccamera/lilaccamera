@@ -2023,6 +2023,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 )
                 cameraController.setPhotoResolutionCapMp(it.photoResolutionCapMp)
                 cameraController.setFrontPhotoResolutionCapMp(it.frontPhotoResolutionCapMp)
+                cameraController.setFrontAccurateColour(it.frontAccurateColour)
                 cameraController.keepRawCompanionJpeg = it.saveCameraJpeg
                 cameraController.setVideoCodec(it.videoCodec)
                 multipleExposureState = multipleExposureState.copy(enabled = it.useMultipleExposure)
@@ -2593,6 +2594,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         )
         cameraController.setPhotoResolutionCapMp(prefs.photoResolutionCapMp)
         cameraController.setFrontPhotoResolutionCapMp(prefs.frontPhotoResolutionCapMp)
+        cameraController.setFrontAccurateColour(prefs.frontAccurateColour)
         cameraController.setUseP010(prefs.useP010)
         cameraController.setUseP3ColorSpace(prefs.useP3ColorSpace)
         cameraController.setPhotoPreviewStabilizationEnabled(prefs.photoPreviewStabilizationEnabled)
@@ -4014,6 +4016,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.setFrontPhotoResolutionCapMp(megapixels)
         viewModelScope.launch {
             userPreferencesRepository.update { frontPhotoResolutionCapMp = megapixels }
+        }
+    }
+
+    fun setFrontAccurateColour(enabled: Boolean) {
+        cameraController.setFrontAccurateColour(enabled)
+        viewModelScope.launch {
+            userPreferencesRepository.update { frontAccurateColour = enabled }
         }
     }
 

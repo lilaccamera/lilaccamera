@@ -182,6 +182,8 @@ internal fun CameraTopSheet(
     photoResolutionAdjustable: Boolean,
     onPhotoResolutionCapChange: (Int) -> Unit,
     onFrontPhotoResolutionCapChange: (Int) -> Unit,
+    frontAccurateColour: Boolean,
+    onFrontAccurateColourChange: (Boolean) -> Unit,
     saveCameraJpeg: Boolean,
     onSaveCameraJpegChange: (Boolean) -> Unit,
     isPortraitMode: Boolean = false,
@@ -682,6 +684,25 @@ internal fun CameraTopSheet(
                                         selected = photoResolutionCapMp == cap,
                                         minWidth = 56.dp,
                                         onClick = { onPhotoResolutionCapChange(cap) }
+                                    )
+                                }
+                            }
+                        }
+                        // Only where the camera's still processing differs from its YUV frames (lilac's front camera).
+                        if (isFrontCamera && !isProfessionalMode && com.hinnka.mycamera.camera.DeviceQuirks.isLilac) {
+                            rows.Setting(
+                                key = "colour",
+                                label = stringResource(R.string.quick_colour),
+                                explanation = stringResource(R.string.quick_explain_colour_front)
+                            ) {
+                                listOf(false, true).forEach { accurate ->
+                                    QuickChoice(
+                                        text = stringResource(
+                                            if (accurate) R.string.quick_colour_accurate else R.string.quick_colour_fast
+                                        ),
+                                        selected = frontAccurateColour == accurate,
+                                        minWidth = 56.dp,
+                                        onClick = { onFrontAccurateColourChange(accurate) }
                                     )
                                 }
                             }

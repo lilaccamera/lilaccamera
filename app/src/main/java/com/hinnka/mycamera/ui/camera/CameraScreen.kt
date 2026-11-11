@@ -2276,6 +2276,8 @@ fun CameraScreen(
             photoResolutionAdjustable = state.photoResolutionAdjustable,
             onPhotoResolutionCapChange = viewModel::setPhotoResolutionCapMp,
             onFrontPhotoResolutionCapChange = viewModel::setFrontPhotoResolutionCapMp,
+            frontAccurateColour = state.frontAccurateColour,
+            onFrontAccurateColourChange = viewModel::setFrontAccurateColour,
             saveCameraJpeg = saveCameraJpeg,
             onSaveCameraJpegChange = { saveCameraJpeg = it },
             isPortraitMode = state.isPortraitMode,

@@ -144,6 +144,8 @@ class UserPreferences internal constructor(
     var photoPreviewStabilizationEnabled by bool("photo_preview_stabilization_enabled", false)
     var photoResolutionCapMp by int("photo_resolution_cap_mp", 0)
     var frontPhotoResolutionCapMp by int("front_photo_resolution_cap_mp", 0)
+    // Front camera Photo mode: Fast (YUV only) or Accurate (Sony's still processing via a small JPEG, slower bursts).
+    var frontAccurateColour by bool("front_accurate_colour", false)
     // Pro: also save the full-size JPEG the camera delivers beside each RAW, in the shot's photo stack.
     var saveCameraJpeg by bool("save_camera_jpeg", false)
     var videoCodec by enum("video_codec", com.hinnka.mycamera.video.VideoCodec.H264)

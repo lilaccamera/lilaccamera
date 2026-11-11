@@ -415,6 +415,8 @@ data class CameraState(
     val photoResolutionCapMp: Int = 0,
     /** The same cap for the front camera, kept apart because its useful sizes differ. */
     val frontPhotoResolutionCapMp: Int = 0,
+    /** Front camera Photo mode on lilac: every still request also targets a small JPEG (see frontStillJpegReader). */
+    val frontAccurateColour: Boolean = false,
     /** False when every cap picks the same size (camera at most 8 MP, e.g. the XZ1 Compact front camera). */
     val photoResolutionAdjustable: Boolean = true,
     val videoConfig: VideoConfig = VideoConfig(),

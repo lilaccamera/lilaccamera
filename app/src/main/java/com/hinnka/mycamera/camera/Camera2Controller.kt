@@ -1074,13 +1074,13 @@ class Camera2Controller(private val context: Context) {
     }
 
     /**
-     * lilac front camera in low light: a small JPEG output whose images are dropped. A still request that targets a
+     * lilac front camera, "Accurate" colour: a small JPEG output whose images are dropped. A still request that targets a
      * JPEG gets Sony's still processing for its YUV output too: about 1/15 s instead of 1/30 s and colours as in
      * Sony's own JPEG, without the violet-magenta black floor of plain YUV requests. It costs about 240 ms per frame,
      * and it holds per request only, so every burst frame carries it.
      */
     private fun frontStillJpegReader(captureFormat: Int, characteristics: CameraCharacteristics): ImageReader? {
-        if (!DeviceQuirks.isLilac || !NightCapturePlanner.enabled ||
+        if (!DeviceQuirks.isLilac || !_state.value.frontAccurateColour ||
             captureFormat == ImageFormat.RAW_SENSOR || captureFormat == ImageFormat.RAW10 ||
             characteristics.get(CameraCharacteristics.LENS_FACING) != CameraCharacteristics.LENS_FACING_FRONT
         ) return null
@@ -2785,7 +2785,8 @@ class Camera2Controller(private val context: Context) {
     private fun surfacelessOpenSettings(): List<Any?> = _state.value.let {
         listOf(
             it.currentCameraId, it.captureMode, it.aspectRatio, requestedRawCaptureEnabled,
-            it.useP010, it.useP3ColorSpace, it.photoResolutionCapMp, it.frontPhotoResolutionCapMp, it.multiFrameOutputScale,
+            it.useP010, it.useP3ColorSpace, it.photoResolutionCapMp, it.frontPhotoResolutionCapMp, it.frontAccurateColour,
+            it.multiFrameOutputScale,
             it.photoPreviewStabilizationEnabled, it.useLivePhoto,
             it.vendorCaptureSettingsByLens, it.customVendorKeySettings,
         )
@@ -7626,26 +7627,33 @@ class Camera2Controller(private val context: Context) {
     fun setPhotoResolutionCapMp(megapixels: Int) {
         if (_state.value.photoResolutionCapMp == megapixels) return
         _state.value = _state.value.copy(photoResolutionCapMp = megapixels)
-        if (!isFrontCameraOpen()) restartForPhotoResolutionCap(megapixels)
+        if (!isFrontCameraOpen()) restartPhotoSession("photo resolution cap: $megapixels MP")
     }
 
     /** Caps the front camera's Photo-mode capture size; 0 = full sensor size. */
     fun setFrontPhotoResolutionCapMp(megapixels: Int) {
         if (_state.value.frontPhotoResolutionCapMp == megapixels) return
         _state.value = _state.value.copy(frontPhotoResolutionCapMp = megapixels)
-        if (isFrontCameraOpen()) restartForPhotoResolutionCap(megapixels)
+        if (isFrontCameraOpen()) restartPhotoSession("front photo resolution cap: $megapixels MP")
+    }
+
+    /** Front camera "Accurate" colour (see frontStillJpegReader); the JPEG output is part of the session. */
+    fun setFrontAccurateColour(enabled: Boolean) {
+        if (_state.value.frontAccurateColour == enabled) return
+        _state.value = _state.value.copy(frontAccurateColour = enabled)
+        if (isFrontCameraOpen()) restartPhotoSession("front accurate colour: $enabled")
     }
 
     private fun isFrontCameraOpen(): Boolean =
         _state.value.getCurrentCameraInfo()?.lensFacing == CameraCharacteristics.LENS_FACING_FRONT
 
-    private fun restartForPhotoResolutionCap(megapixels: Int) {
-        // The capture size is fixed when the camera opens, so a running YUV camera must reopen.
+    private fun restartPhotoSession(reason: String) {
+        // The capture outputs are fixed when the camera opens, so a running YUV camera must reopen.
         val reader = imageReader ?: return
         if (isRawCaptureReader(reader) || _state.value.captureMode != CaptureMode.PHOTO || _state.value.isCapturing) return
         val surfaceTexture = previewSurfaceTexture ?: return
         if (cameraDevice == null) return
-        PLog.i(TAG, "Restarting camera for photo resolution cap: ${megapixels} MP")
+        PLog.i(TAG, "Restarting camera for $reason")
         openCamera(surfaceTexture)
     }
 
