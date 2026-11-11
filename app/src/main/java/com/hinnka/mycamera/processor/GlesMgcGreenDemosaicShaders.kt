@@ -36,7 +36,9 @@ internal object GlesMgcGreenDemosaicShaders {
         int s16(int v) { return (v << 16) >> 16; }
         int u16(int v) { return v & 0xffff; }
         int clz16(int x) { return x == 0 ? 16 : 15 - findMSB(x); }
-        int clz32(uint x) { return x == 0u ? 32 : 31 - findMSB(x); }
+        // Test findMSB's -1, not x: Adreno 540 (V@490) folds `x == 0u ? 32 : 31 - findMSB(x)`
+        // into a native clz that returns -1 for 0.
+        int clz32(uint x) { int msb = findMSB(x); return msb < 0 ? 32 : 31 - msb; }
 
         // SSHL .8h: the shift is the signed low byte of the lane; negative shifts are arithmetic.
         int sshl16(int x, int lane) {
