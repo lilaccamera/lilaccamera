@@ -1,7 +1,10 @@
 package com.hinnka.mycamera.processor
 
 import android.graphics.Bitmap
+import com.hinnka.mycamera.BuildConfig
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.utils.SystemPropertiesUtil
+import java.io.File
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.ln
@@ -84,11 +87,19 @@ object ShadowCastFix {
             )
     }
 
-    /** Corrects [bitmap] in place, 64 rows at a time. Returns the parameters used, or null if skipped. */
-    fun apply(bitmap: Bitmap): Params? {
+    /**
+     * Corrects [bitmap] in place, 64 rows at a time. Returns the parameters used, or null if skipped.
+     * Debug builds with `adb shell setprop debug.lilac.castfix.keep on` first save the image as it came in to
+     * `uncorrected.jpg` in [photoDir], to tune the correction on the app's own output.
+     */
+    fun apply(bitmap: Bitmap, photoDir: File? = null): Params? {
         if (bitmap.config != Bitmap.Config.ARGB_8888 || !bitmap.isMutable) {
             PLog.w(TAG, "skipped: config=${bitmap.config} mutable=${bitmap.isMutable}")
             return null
+        }
+        if (BuildConfig.DEBUG && photoDir != null && SystemPropertiesUtil.get("debug.lilac.castfix.keep")?.trim() == "on") {
+            runCatching { File(photoDir, "uncorrected.jpg").outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it) } }
+                .onFailure { PLog.w(TAG, "could not keep the uncorrected image", it) }
         }
         val start = System.currentTimeMillis()
         val w = bitmap.width

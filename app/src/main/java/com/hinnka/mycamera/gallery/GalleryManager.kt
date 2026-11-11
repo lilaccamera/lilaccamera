@@ -2211,7 +2211,7 @@ object GalleryManager {
             PLog.d(TAG, "saveYuvPhoto processAndToBitmap took ${nativeProcessElapsed}ms, success=${processedPreview != null}")
 
             previewBitmap = processedPreview ?: return@withContext
-            ShadowCastFix.apply(checkNotNull(previewBitmap)) // before the flip, which returns a read-only copy
+            ShadowCastFix.apply(checkNotNull(previewBitmap), photoDir) // before the flip, which returns a read-only copy
 
             if (metadata.isMirrored) {
                 val sourcePreview = checkNotNull(previewBitmap)
@@ -3362,7 +3362,7 @@ object GalleryManager {
             )
 
             if (result == null) return@withContext
-            ShadowCastFix.apply(result) // before the flip, which returns a read-only copy
+            ShadowCastFix.apply(result, photoDir) // before the flip, which returns a read-only copy
 
             if (metadata.isMirrored) {
                 result = BitmapUtils.flipHorizontal(result)
