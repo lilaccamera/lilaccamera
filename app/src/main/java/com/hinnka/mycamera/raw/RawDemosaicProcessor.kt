@@ -95,7 +95,19 @@ internal enum class MgcSpatialGpuDenoiseMode {
  * 7. 结构增强 (Structure/Clarity - L通道高通滤波)
  * 8. 最终锐化 (Unsharp Mask)
  */
+/** The stages of a RAW develop, in order, as the photo editor names them while it waits. */
+enum class RawDevelopStage { Reading, Demosaic, ToneMap, NoiseReduction, Look, Finishing }
+
 class RawDemosaicProcessor {
+    // The last half-size decodes for the editor's previews, by file and decode settings (about 10 MB each).
+    private val previewDecodes = ArrayList<Pair<List<Any>, DngRawData>>()
+
+    /** Lets go of the editor's kept decodes; on the GL thread, after any develop still using them. */
+    suspend fun clearPreviewDecodes() = withContext(glDispatcher) { previewDecodes.clear() }
+
+    /** What the develop running now is doing, for the photo editor's status line; null when none runs. */
+    val developStage = kotlinx.coroutines.flow.MutableStateFlow<RawDevelopStage?>(null)
+
 
     /**
      * DNG 数据容器（包含原始 DngRawData 用于清理）
@@ -1770,6 +1782,8 @@ class RawDemosaicProcessor {
         rawOutputScale: Float = 1f,
         rawOutputUpscaleMode: RawOutputUpscaleMode = RawOutputUpscaleMode.DEFAULT,
         rawPhysicalOutputSize: Size? = null,
+        /** Develop from the mosaic binned to half size: a quick preview for the photo editor. */
+        previewHalfSize: Boolean = false,
         onMetadata: ((RawMetadata) -> Unit)? = null
     ): Bitmap? = withContext(glDispatcher) {
         val dngFile = File(dngFilePath)
@@ -1777,6 +1791,7 @@ class RawDemosaicProcessor {
             PLog.e(TAG, "DNG file not found or not readable: $dngFilePath")
             return@withContext null
         }
+        developStage.value = RawDevelopStage.Reading
 
         try {
             processInternal(
@@ -1823,11 +1838,14 @@ class RawDemosaicProcessor {
                 rawOutputUpscaleMode = rawOutputUpscaleMode,
                 rawPhysicalOutputSize = rawPhysicalOutputSize,
                 dngFile = dngFile,
+                previewHalfSize = previewHalfSize,
                 onMetadata = onMetadata
             )?.sdrBitmap
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to process DNG file: $dngFilePath", e)
             null
+        } finally {
+            developStage.value = null
         }
     }
 
@@ -2332,6 +2350,7 @@ class RawDemosaicProcessor {
         captureExposureInputs: RawCaptureExposureInputs? = null,
         sourceDngRenderPlan: DcpRenderPlan? = null,
         defaultCropIsAuthoritative: Boolean = false,
+        previewHalfSize: Boolean = false,
     ): RawHdrRenderResult? = withContext(glDispatcher) {
         var actualRawData = rawData
         var actualWidth = width
@@ -2410,7 +2429,17 @@ class RawDemosaicProcessor {
                 embeddedDngProfiles,
                 rawEmbeddedDngProfileId,
             )
-            val dngRawData = processDngNative(
+            // The editor's previews reuse the last half-size decodes of the same file and decode settings,
+            // so only the first change after opening reads and decodes the DNG.
+            val decodeKey = listOf(
+                dngFile.absolutePath, dngFile.lastModified(), dngFile.length(),
+                profileWorkingColorSpace.xr, profileWorkingColorSpace.yr, profileWorkingColorSpace.xg,
+                profileWorkingColorSpace.yg, profileWorkingColorSpace.xb, profileWorkingColorSpace.yb,
+                profileWorkingColorSpace.xw, profileWorkingColorSpace.yw,
+                requestedColorEngine.usesCameraInputDomain, RawColorCalibrationPolicy.mode.nativeCode,
+            )
+            val keptDecode = if (previewHalfSize) previewDecodes.firstOrNull { it.first == decodeKey }?.second else null
+            val decodedRawData = keptDecode ?: processDngNative(
                 dngFile.absolutePath,
                 profileWorkingColorSpace.xr, profileWorkingColorSpace.yr,
                 profileWorkingColorSpace.xg, profileWorkingColorSpace.yg,
@@ -2419,7 +2448,7 @@ class RawDemosaicProcessor {
                 embeddedCalibrationOnly = requestedColorEngine.usesCameraInputDomain,
                 colorCalibrationMode = RawColorCalibrationPolicy.mode.nativeCode,
             )
-            if (dngRawData == null) {
+            if (decodedRawData == null) {
                 if (requestedColorEngine.usesCameraInputDomain) {
                     PLog.e(TAG, "Camera RGB engine RAW decode failed; color-converted fallback is disabled")
                     return@withContext null
@@ -2437,7 +2466,19 @@ class RawDemosaicProcessor {
                     )
                 }
             }
-            dngRawDataCleanup = dngRawData
+            dngRawDataCleanup = decodedRawData.takeIf { keptDecode == null }
+            // The editor's preview: every later stage simply sees a sensor half the size.
+            val dngRawData = when {
+                keptDecode != null -> keptDecode
+                previewHalfSize -> halfSizeBayer(decodedRawData)?.also { half ->
+                    decodedRawData.close()
+                    dngRawDataCleanup = null
+                    previewDecodes.removeAll { it.first == decodeKey }
+                    previewDecodes.add(0, decodeKey to half)
+                    while (previewDecodes.size > 2) previewDecodes.removeAt(previewDecodes.lastIndex)
+                } ?: decodedRawData
+                else -> decodedRawData
+            }
             PLog.i(
                 TAG,
                 "RAW_CROP_TRACE stage=DNG_READ raw=${dngRawData.width}x${dngRawData.height} " +
@@ -3294,6 +3335,7 @@ class RawDemosaicProcessor {
                             highlightReconstructionEnabled = rawDomainHighlightReconstructionEnabled
                         )
                     } else {
+                        developStage.value = RawDevelopStage.Demosaic
                         check(ensureVgnPrograms()) {
                             "Unable to initialize Standard Bayer VGN demosaic programs"
                         }
@@ -3755,6 +3797,7 @@ class RawDemosaicProcessor {
                         "sourceBaselineGain=${exactDngBaselineExposureGain(actualMetadata)} " +
                         "statsBounds=$outputSourceBounds",
                 )
+                developStage.value = RawDevelopStage.ToneMap
                 val regeneratedPhotonPgtm = generateProfileGainTableMapOnGpu(
                     mode = DngPhotonProfileGainTableAlgorithm.Mode.HDR_NET,
                     context = context.applicationContext,
@@ -3929,6 +3972,7 @@ class RawDemosaicProcessor {
                 )
             }
 
+            developStage.value = RawDevelopStage.NoiseReduction
             val denoiseProfileTextureId = renderMgcUserAdjustmentDenoise(
                 context = context.applicationContext,
                 sourceTextureId = demosaicTextureId,
@@ -4065,6 +4109,7 @@ class RawDemosaicProcessor {
             val toneGlobalWidth = if (mgcSharpen.guided.isPrepared) mgcSharpen.guided.globalWidth else actualWidth
             val toneGlobalHeight = if (mgcSharpen.guided.isPrepared) mgcSharpen.guided.globalHeight else actualHeight
             setupCombinedFramebuffer(toneWidth, toneHeight)
+            developStage.value = RawDevelopStage.Look
             val combinedStart = System.currentTimeMillis()
             var hdrReferencePreparedFromCombinedInput = false
             val combinedOutput = try {
@@ -4193,6 +4238,7 @@ class RawDemosaicProcessor {
             } else {
                 1f
             }
+            developStage.value = RawDevelopStage.Finishing
             val outputStart = System.currentTimeMillis()
             renderOutputPass(
                 actualRotation,
@@ -4426,6 +4472,7 @@ class RawDemosaicProcessor {
             if (!captureProfilePreparationRequested) releaseTiledRenderFramebuffers()
             embeddedDngJpegPreview?.takeIf { !it.isRecycled }?.recycle()
             dngRawDataCleanup?.close()
+            developStage.value = null
         }
     }
 
@@ -9469,5 +9516,45 @@ class RawDemosaicProcessor {
         isInitialized = false
         instance = null
         PLog.d(TAG, "RawDemosaicProcessor released")
+    }
+
+    /**
+     * A plain Bayer mosaic binned to half size: each 2x2 output cell is the mean of the four same-colour pixels
+     * of a 4x4 block, so the CFA pattern, black and white level stay valid. The crops and the lens-shading
+     * bounds, in pixels, halve with it. Null for mosaics it can't bin (several samples per pixel, quad Bayer).
+     */
+    internal fun halfSizeBayer(d: DngRawData): DngRawData? {
+        if (d.samplesPerPixel != 1 || d.cfaPattern !in 0..3) return null
+        val w = d.width / 4 * 2
+        val h = d.height / 4 * 2
+        if (w < 64 || h < 64) return null
+        val src = d.rawData.duplicate().apply { clear() }.order(ByteOrder.nativeOrder()).asShortBuffer()
+        val stride = d.rowStride / 2
+        val out = ByteBuffer.allocateDirect(w * h * 2).order(ByteOrder.nativeOrder())
+        val dst = out.asShortBuffer()
+        val row = ShortArray(w)
+        for (y in 0 until h) {
+            val r0 = ((y shr 1) * 4 + (y and 1)) * stride
+            val r1 = r0 + 2 * stride
+            for (x in 0 until w) {
+                val c = (x shr 1) * 4 + (x and 1)
+                val sum = (src.get(r0 + c).toInt() and 0xFFFF) + (src.get(r0 + c + 2).toInt() and 0xFFFF) +
+                    (src.get(r1 + c).toInt() and 0xFFFF) + (src.get(r1 + c + 2).toInt() and 0xFFFF)
+                row[x] = ((sum + 2) shr 2).toShort()
+            }
+            dst.put(row)
+        }
+        fun IntArray.half() = IntArray(size) { this[it] / 2 }
+        return d.copy(
+            rawData = out,
+            width = w,
+            height = h,
+            rowStride = w * 2,
+            activeArray = d.activeArray?.half(),
+            defaultCrop = d.defaultCrop?.half(),
+            lensShadingMapGrid = d.lensShadingMapGrid?.let { g -> FloatArray(g.size) { i -> if (i in 4..7) g[i] / 2f else g[i] } },
+            // The develop recycles the embedded preview when it ends; a kept decode must not carry one.
+            embeddedPreview = null,
+        ).also { it.ownsNativeBuffer = false }
     }
 }

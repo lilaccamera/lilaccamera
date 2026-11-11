@@ -153,13 +153,15 @@ class OglBokehProcessor {
         focusOnSubject: Boolean = true,
         focalRangeFromPoint: Boolean = false,
         focalWidthScale: Float = 1f,
+        /** For a smaller copy of a photo: the photo's own long edge, so the blur works at the photo's size. */
+        photoLongEdge: Int? = null,
     ): Bitmap? {
         val startedAtMs = SystemClock.elapsedRealtime()
         try {
             val halfFloatOutput = originalImage.config == Bitmap.Config.RGBA_F16
             val linearInput = originalImage.colorSpace?.id ==
                 ColorSpace.get(ColorSpace.Named.LINEAR_EXTENDED_SRGB).id
-            val (workingWidth, workingHeight) = resolveBokehRenderSize(originalImage.width, originalImage.height)
+            val (workingWidth, workingHeight) = resolveBokehRenderSize(originalImage.width, originalImage.height, photoLongEdge)
             val originalLongEdge = max(originalImage.width, originalImage.height)
             val radiusScale = max(workingWidth, workingHeight).toFloat() / originalLongEdge
             val params = LensBlurParams.forAperture(aperture)
@@ -1268,14 +1270,17 @@ class OglBokehProcessor {
         return resultBitmap
     }
 
-    private fun resolveBokehRenderSize(width: Int, height: Int): Pair<Int, Int> {
+    private fun resolveBokehRenderSize(width: Int, height: Int, photoLongEdge: Int? = null): Pair<Int, Int> {
         val maxEdge = maxOf(width, height)
+        // The editor's 2048 px copy works at the size its photo would (1536 px for 19 MP): at about 620 px the
+        // Adreno 540 faulted mid-render and left black parts, where the photo's own size renders clean.
+        val scaleEdge = photoLongEdge?.coerceAtLeast(maxEdge) ?: maxEdge
         // On the XZ1 Compact a picture under about 2000 px (the 2 MP front camera) was blurred in one
         // full-size pass with radii up to 44 px; that pass outran the GPU's command timeout, the driver
         // reset the GPU and every later GL call in the app failed. The blur is computed at most at the
         // scale a 19 MP photo uses, which keeps each pass as short as for the back camera.
         val limit = if (DeviceQuirks.isLilac) {
-            minOf(MAX_BOKEH_RENDER_EDGE, (maxEdge * LILAC_MAX_RENDER_SCALE).roundToInt().coerceAtLeast(1))
+            minOf(MAX_BOKEH_RENDER_EDGE, (scaleEdge * LILAC_MAX_RENDER_SCALE).roundToInt().coerceAtLeast(1))
         } else {
             MAX_BOKEH_RENDER_EDGE
         }

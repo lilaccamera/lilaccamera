@@ -86,6 +86,8 @@ class DepthBokehProcessor(
         onStage: (BokehStage) -> Unit = {},
         onMaps: (SubjectMask, RelativeDepthMap?) -> Unit = { _, _ -> },
         onRenderStart: () -> Unit = {},
+        /** For a smaller copy of the photo: the photo's own long edge (see OglBokehProcessor.applyBokeh). */
+        photoLongEdge: Int? = null,
     ): Bitmap = mutex.withLock {
         if (aperture > 16.0f || aperture <= 0f) {
             return originalImage
@@ -199,6 +201,7 @@ class DepthBokehProcessor(
                 // The quick blur's depth is the cut-out itself, so only it keeps the subject's own range.
                 focalRangeFromPoint = !quickBlur,
                 focalWidthScale = focalWidthScale,
+                photoLongEdge = photoLongEdge,
             )
             result = bokehResult
         }
