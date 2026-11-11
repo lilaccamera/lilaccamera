@@ -128,6 +128,9 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         }
     }
 
+    /** Called on the camera thread, directly rather than queued: see LutRenderer.setCameraStreamActive. */
+    fun setCameraStreamActive(active: Boolean) = renderer.setCameraStreamActive(active)
+
     fun setStabilizationInputSize(width: Int, height: Int) {
         queueEvent {
             renderer.setStabilizationInputSize(width, height)

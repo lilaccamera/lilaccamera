@@ -351,4 +351,28 @@ class PostEditGeometryTest {
             assertTrue(abs(sourceY) <= height / 2.0 + 0.001)
         }
     }
+
+    @Test
+    fun sourcePointToStraightenedIsTheInverse() {
+        for (degrees in listOf(-45f, -12.5f, 0f, 3f, 30f)) {
+            for ((x, y) in listOf(0.5f to 0.5f, 0.3f to 0.7f, 0.9f to 0.2f)) {
+                val (sx, sy) = PostEditGeometry.mapSourcePointToStraightened(x, y, 4000, 3000, degrees)
+                val (bx, by) = PostEditGeometry.mapStraightenedPointToSource(sx, sy, 4000, 3000, degrees)
+                assertEquals(x, bx, 1e-4f)
+                assertEquals(y, by, 1e-4f)
+            }
+        }
+    }
+
+    @Test
+    fun sourcePointToEditedIsTheInverse() {
+        for (rotation in listOf(0, 90, 180, 270)) {
+            for (mirror in listOf(false, true)) {
+                val (ex, ey) = PostEditGeometry.mapSourcePointToEdited(0.2f, 0.7f, rotation, mirror)
+                val (sx, sy) = PostEditGeometry.mapEditedPointToSource(ex, ey, rotation, mirror)
+                assertEquals(0.2f, sx, 1e-6f)
+                assertEquals(0.7f, sy, 1e-6f)
+            }
+        }
+    }
 }

@@ -58,6 +58,8 @@ private class StripLook(val key: String, val lut: LutInfo, val caption: String?,
  * One row of look thumbnails with their names. The sections (Favorites, Built-in, the categories) scroll past
  * with a small caption over each section's first look; empty sections are left out.
  * A tap picks a look, a tap on the chosen look calls [onSelectedClick], a long press calls [onLongPress].
+ * [compact] is the photo editor's form for its 46 dp control on the photo: 44 dp thumbnails without names or
+ * captions, None first, small gaps between the sections, and a tile at the end for [onManage].
  */
 @Composable
 fun LookStrip(
@@ -68,21 +70,25 @@ fun LookStrip(
     onSelect: (String) -> Unit,
     onSelectedClick: () -> Unit,
     onLongPress: ((String) -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+    onManage: (() -> Unit)? = null,
 ) {
     val favoriteText = stringResource(R.string.favorite)
     val builtInText = stringResource(R.string.built_in)
     val uncategorizedText = stringResource(R.string.uncategorized)
-    val looks = remember(luts, categoryOrder, favoriteText, builtInText, uncategorizedText) {
-        lutCategoryTabs(luts, categoryOrder, favoriteText, builtInText, uncategorizedText).flatMap { tab ->
+    val looks = remember(luts, categoryOrder, favoriteText, builtInText, uncategorizedText, compact) {
+        val none = luts.firstOrNull { it.id == "none" }.takeIf { compact }
+        listOfNotNull(none?.let { StripLook("none", it, null, false) }) +
+            lutCategoryTabs(luts, categoryOrder, favoriteText, builtInText, uncategorizedText).flatMap { tab ->
             val caption = when (tab) {
                 LutCategoryTab.Favorite -> favoriteText
                 LutCategoryTab.BuiltIn -> builtInText
                 LutCategoryTab.Uncategorized -> uncategorizedText
                 is LutCategoryTab.Category -> tab.name
             }
-            luts.filter { tab.contains(it) }.mapIndexed { i, lut ->
-                StripLook("${tab.stableKey()}/${lut.id}", lut, caption.takeIf { i == 0 }, i == 0)
+            luts.filter { tab.contains(it) && it !== none }.mapIndexed { i, lut ->
+                StripLook("${tab.stableKey()}/${lut.id}", lut, caption.takeIf { i == 0 && !compact }, i == 0)
             }
         }
     }
@@ -95,8 +101,9 @@ fun LookStrip(
 
     LazyRow(
         state = listState,
-        contentPadding = PaddingValues(horizontal = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        contentPadding = PaddingValues(horizontal = if (compact) 10.dp else 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
             // The row fades out over 14 dp at both edges.
@@ -113,16 +120,47 @@ fun LookStrip(
             }
     ) {
         items(looks, key = { it.key }) { look ->
-            LookStripItem(
-                lut = look.lut,
-                caption = look.caption,
-                selected = look.lut.id == currentLutId,
-                thumbnail = thumbnail,
-                onClick = { if (look.lut.id == currentLutId) onSelectedClick() else onSelect(look.lut.id) },
-                onLongClick = onLongPress?.let { { it(look.lut.id) } },
-                // 6 dp between looks, 20 dp between sections.
-                modifier = if (look.sectionStart && look !== looks.first()) Modifier.padding(start = 14.dp) else Modifier
-            )
+            val onClick = { if (look.lut.id == currentLutId) onSelectedClick() else onSelect(look.lut.id) }
+            val onLongClick = onLongPress?.let { { it(look.lut.id) } }
+            if (compact) {
+                CompactLookTile(
+                    lut = look.lut,
+                    selected = look.lut.id == currentLutId,
+                    thumbnail = thumbnail,
+                    onClick = onClick,
+                    onLongClick = onLongClick,
+                    // 4 dp between looks, 12 dp between sections (None, favourites, each category).
+                    modifier = if (look.sectionStart && look !== looks.first()) Modifier.padding(start = 8.dp) else Modifier
+                )
+            } else {
+                LookStripItem(
+                    lut = look.lut,
+                    caption = look.caption,
+                    selected = look.lut.id == currentLutId,
+                    thumbnail = thumbnail,
+                    onClick = onClick,
+                    onLongClick = onLongClick,
+                    // 6 dp between looks, 20 dp between sections.
+                    modifier = if (look.sectionStart && look !== looks.first()) Modifier.padding(start = 14.dp) else Modifier
+                )
+            }
+        }
+        if (onManage != null) {
+            item(key = "manage") {
+                val shape = RoundedCornerShape(10.dp)
+                Box(
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .size(44.dp)
+                        .clip(shape)
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .border(1.dp, Color.White.copy(alpha = 0.3f), shape)
+                        .combinedClickable(onClick = onManage),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(AppIcons.AdjustmentsLine, contentDescription = stringResource(R.string.editor_manage_looks), tint = SheetDim, modifier = Modifier.size(20.dp))
+                }
+            }
         }
     }
 }
@@ -204,5 +242,47 @@ private fun LookStripItem(
                 .requiredWidth(60.dp)
                 .height(24.dp)
         )
+    }
+}
+
+/** A look as a bare 44 dp thumbnail, for the photo editor's control on the photo. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CompactLookTile(
+    lut: LutInfo,
+    selected: Boolean,
+    thumbnail: Bitmap?,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(10.dp)
+    Box(
+        modifier = modifier
+            .size(44.dp)
+            .clip(shape)
+            .then(if (thumbnail == null || lut.id == "none") Modifier.background(Color.Black.copy(alpha = 0.4f)) else Modifier)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .border(if (selected) 2.dp else 1.dp, if (selected) ModeAmber else Color.White.copy(alpha = 0.3f), shape),
+        contentAlignment = Alignment.Center
+    ) {
+        if (lut.id == "none") {
+            Icon(AppIcons.CircleOffLine, contentDescription = lut.getName(), tint = SheetDim, modifier = Modifier.size(18.dp))
+        } else if (thumbnail != null) {
+            LutPreviewImage(lut.id, lut.getName(), thumbnail, modifier = Modifier.fillMaxSize())
+        }
+        if (lut.isVip) {
+            Text(
+                text = stringResource(R.string.billing_vip_tag),
+                color = Color.Black,
+                fontSize = 7.sp,
+                fontWeight = FontWeight.Bold,
+                lineHeight = 7.sp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .background(PremiumGold, RoundedCornerShape(bottomStart = 4.dp))
+                    .padding(horizontal = 3.dp, vertical = 1.dp)
+            )
+        }
     }
 }

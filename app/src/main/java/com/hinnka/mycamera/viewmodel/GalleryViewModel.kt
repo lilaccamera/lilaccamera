@@ -43,10 +43,18 @@ import com.hinnka.mycamera.lut.creator.OpenAIApiClient
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.model.CameraPreset
 import com.hinnka.mycamera.model.ColorRecipeParams
+import com.hinnka.mycamera.model.RecipeParam
 import com.hinnka.mycamera.model.toEffectParams
 import com.hinnka.mycamera.model.withoutIndependentEffects
 import com.hinnka.mycamera.processor.DenoiseStrength
 import com.hinnka.mycamera.processor.BokehStyle
+import com.hinnka.mycamera.processor.PortraitBlurMetadata
+import android.os.SystemClock
+import com.hinnka.mycamera.ml.RelativeDepthMap
+import com.hinnka.mycamera.ml.RelativeDepthMapFile
+import com.hinnka.mycamera.ml.SubjectMask
+import com.hinnka.mycamera.processor.BokehStage
+import com.hinnka.mycamera.raw.RawDemosaicProcessor
 import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.raw.HncsFilmCurveMode
 import com.hinnka.mycamera.raw.HncsRenderIntent
@@ -114,6 +122,10 @@ private data class CopiedEditSettings(
 class GalleryViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
+        /** The long edge of the editor's in-memory copy for AI denoise, the blur and noise reduction. */
+        const val EDIT_CHAIN_EDGE = 2048
+        /** How long the editor waits after the last touch before starting heavy work (a blur, a develop). */
+        const val EDITOR_IDLE_MS = 1000L
         private const val TAG = "GalleryViewModel"
         private const val FULL_QUALITY_PREVIEW_MAX_EDGE = 4096
         private const val HDR_DETAIL_MAX_BITMAP_BYTES = 80L * 1024L * 1024L
@@ -272,13 +284,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     var editLutId = MutableStateFlow<String?>(null)
         private set
 
-    var editSyncAdjustmentsToLut by mutableStateOf(false)
-        private set
-
-    private var editLutRecipeSyncJob: Job? = null
-    private val pendingEditLutRecipeSync = mutableMapOf<String, ColorRecipeParams>()
-    private val editLutRecipeSyncMutex = Mutex()
-
     var editApplyEffectsToVideo = MutableStateFlow(false)
         private set
 
@@ -292,7 +297,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             flowOf(ColorRecipeParams.DEFAULT)
         } else {
             contentRepository.lutManager.getColorRecipeParams(id)
-                .map { params -> pendingEditLutRecipeSync[id] ?: params }
         }
     }.stateIn(
         scope = viewModelScope,
@@ -529,6 +533,17 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setFocusPoint(x: Float, y: Float) {
+        val (sourceX, sourceY) = displayPointToSource(x, y)
+        editFocusPointX.value = sourceX
+        editFocusPointY.value = sourceY
+        updateBokehPhoto()
+    }
+
+    /**
+     * Maps a point on the photo as the editor shows it (cropped, straightened, turned and mirrored, without a
+     * frame) to the original image the blur works on, both as fractions of width and height.
+     */
+    fun displayPointToSource(x: Float, y: Float): Pair<Float, Float> {
         val cropRect = editCropRect.value
         val croppedX = cropRect?.let { it.left + x * it.width() } ?: x
         val croppedY = cropRect?.let { it.top + y * it.height() } ?: y
@@ -546,15 +561,165 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 straightenDegrees = editStraightenDegrees.value
             )
         } ?: (croppedX to croppedY)
-        val (sourceX, sourceY) = PostEditGeometry.mapEditedPointToSource(
+        return PostEditGeometry.mapEditedPointToSource(
             x = preStraightenPoint.first,
             y = preStraightenPoint.second,
             rotationDegrees = editRotationDegrees.value,
             mirrorHorizontal = editMirrorHorizontal.value
         )
-        editFocusPointX.value = sourceX
-        editFocusPointY.value = sourceY
+    }
+
+    /**
+     * Where the focus point lies on the photo as the editor shows it (cropped, straightened, turned and
+     * mirrored, without a frame), as fractions of its width and height: the inverse of [setFocusPoint].
+     * A photo without a point of its own is focused at its centre. Null when the point is outside the crop.
+     */
+    fun focusPointOnPhoto(): Pair<Float, Float>? {
+        val (editedX, editedY) = PostEditGeometry.mapSourcePointToEdited(
+            x = editFocusPointX.value ?: 0.5f,
+            y = editFocusPointY.value ?: 0.5f,
+            rotationDegrees = editRotationDegrees.value,
+            mirrorHorizontal = editMirrorHorizontal.value
+        )
+        val (straightX, straightY) = resolveCurrentEditBaseDimensions()?.let { (baseWidth, baseHeight) ->
+            val (width, height) = PostEditGeometry.rotatedDimensions(baseWidth, baseHeight, editRotationDegrees.value)
+            PostEditGeometry.mapSourcePointToStraightened(editedX, editedY, width, height, editStraightenDegrees.value)
+        } ?: (editedX to editedY)
+        val crop = editCropRect.value
+        val x = crop?.let { (straightX - it.left) / it.width() } ?: straightX
+        val y = crop?.let { (straightY - it.top) / it.height() } ?: straightY
+        return if (x in 0f..1f && y in 0f..1f) x to y else null
+    }
+
+    /** Puts back a focus point exactly as stored (Face: the point saved with the shot) and re-renders. */
+    fun restoreFocusPoint(x: Float?, y: Float?) {
+        if (editFocusPointX.value == x && editFocusPointY.value == y) return
+        editFocusPointX.value = x
+        editFocusPointY.value = y
         updateBokehPhoto()
+    }
+
+    /** What the blur render is doing now, and how long that took last time (null before the first time). */
+    data class BlurProgress(val stage: BokehStage, val expectedMs: Long?)
+
+    val blurProgress = MutableStateFlow<BlurProgress?>(null)
+    private val blurStageMs = java.util.concurrent.ConcurrentHashMap<BokehStage, Long>()
+    @Volatile private var blurStageStartedAt = 0L
+
+    private fun onBlurStage(stage: BokehStage?) {
+        val now = SystemClock.elapsedRealtime()
+        blurProgress.value?.let { blurStageMs[it.stage] = now - blurStageStartedAt }
+        blurStageStartedAt = now
+        blurProgress.value = stage?.let { BlurProgress(it, blurStageMs[it]) }
+    }
+
+    /** The subject cut-out and depth map of the photo being edited, from its last blur render. */
+    data class BlurMaps(val photoId: String, val mask: SubjectMask, val depth: RelativeDepthMap?)
+
+    val blurMaps = MutableStateFlow<BlurMaps?>(null)
+    private var blurMapsJob: Job? = null
+
+    /**
+     * Finds the subject cut-out (and reads a saved depth map) for the editor's cheap blur preview, once per
+     * photo, when Portrait opens; a blur render would otherwise be the first to find them. One short GPU job,
+     * under the editor's GPU lock.
+     */
+    fun prepareBlurMaps(photo: MediaData) {
+        if (blurMaps.value?.photoId == photo.id || blurMapsJob?.isActive == true) return
+        blurMapsJob = viewModelScope.launch(Dispatchers.IO) {
+            val context = getApplication<Application>()
+            val depth = GalleryManager.getFloatDepthFile(context, photo.id).takeIf { it.exists() }?.let { file ->
+                runCatching { RelativeDepthMapFile.read(file) }.getOrNull()
+            }
+            val bitmap = GalleryManager.loadOriginalBitmap(context, photo.id, 1600) ?: return@launch
+            val mask = try {
+                editorGpu.light {
+                    com.hinnka.mycamera.ml.SharedSubjectMaskEstimator.estimateMask(context, bitmap, depth)
+                }
+            } finally {
+                bitmap.recycle()
+            } ?: return@launch
+            if (blurMaps.value?.photoId != photo.id) blurMaps.value = BlurMaps(photo.id, mask, depth)
+        }
+    }
+
+    /** The photo's own Quick (true) or Depth (false) blur; null follows the camera's setting. */
+    val editPortraitQuick = MutableStateFlow<Boolean?>(null)
+
+    /** The photo's own depth of field, −10 (shallow) to 10 (deep); null is the automatic one. */
+    val editDepthOfField = MutableStateFlow<Int?>(null)
+
+    fun setDepthOfField(value: Int?) {
+        val v = value?.takeIf { it != 0 }
+        if (editDepthOfField.value == v) return
+        editDepthOfField.value = v
+        updateBokehPhoto()
+    }
+
+    fun setPortraitQuick(quick: Boolean?) {
+        if (editPortraitQuick.value == quick) return
+        editPortraitQuick.value = quick
+        updateBokehPhoto()
+    }
+
+    /**
+     * Discarding the edit: the blur file is written as the settings change, so put the Portrait settings
+     * back as they were when the editor opened and render that once more.
+     */
+    fun restorePortraitOnDiscard() {
+        val open = editOpenState
+        val focus = open["focus"] as? Pair<*, *>
+        val changed = editComputationalAperture.value != open["aperture"] ||
+            editBokehStyle.value != open["bokeh"] ||
+            (editFocusPointX.value to editFocusPointY.value) != focus ||
+            editPortraitQuick.value != open["depth"] ||
+            editDepthOfField.value != open["depthOfField"]
+        if (!changed) return
+        editComputationalAperture.value = open["aperture"] as? Float
+        (open["bokeh"] as? BokehStyle)?.let { editBokehStyle.value = it }
+        editFocusPointX.value = focus?.first as? Float
+        editFocusPointY.value = focus?.second as? Float
+        editPortraitQuick.value = open["depth"] as? Boolean
+        editDepthOfField.value = open["depthOfField"] as? Int
+        updateBokehPhoto()
+    }
+
+    /**
+     * Light › RAW's Reset: its values back as they were when the editor opened. The caller saves them and
+     * re-renders once.
+     */
+    fun restoreRawGroupToOpen() {
+        val open = editOpenState
+        (open["rawLensShading"] as? Boolean)?.let { editRawLensShadingCorrectionEnabled.value = it }
+        (open["rawDro"] as? String)?.let { editRawDROMode.value = it }
+        (open["rawBlackLevel"] as? Pair<*, *>)?.let { (mode, custom) ->
+            (mode as? String)?.let { editRawBlackLevelMode.value = it }
+            (custom as? Float)?.let { editRawCustomBlackLevel.value = it }
+        }
+        (open["rawWhiteLevel"] as? Pair<*, *>)?.let { (mode, custom) ->
+            (mode as? String)?.let { editRawWhiteLevelMode.value = it }
+            (custom as? Float)?.let { editRawCustomWhiteLevel.value = it }
+        }
+        (open["rawCfa"] as? String)?.let { editRawCfaCorrectionMode.value = it }
+        editRawDcpId.value = open["rawDcp"] as? String
+        editRawEmbeddedDngProfileId.value = open["rawEmbeddedProfile"] as? String
+        (open["rawHncs"] as? List<*>)?.let { hncs ->
+            editRawHncsProfileId.value = hncs.getOrNull(0) as? String
+            (hncs.getOrNull(1) as? HncsRenderIntent)?.let { editRawHncsRenderIntent.value = it }
+            (hncs.getOrNull(2) as? HncsFilmCurveMode)?.let { editRawHncsFilmCurveMode.value = it }
+        }
+        editRawBaselineLutId.value = open["rawBaseLook"] as? String
+        (open["rawEngine"] as? RawRenderingEngine)?.let { editRawRenderingEngine.value = it }
+        (open["rawToneMapping"] as? RawToneMappingParameters)?.let { editRawToneMappingParameters.value = it }
+        (open["rawSpectralFilm"] as? List<*>)?.let { film ->
+            editRawSpectralFilmStock.value = film.getOrNull(0) as? String
+            editRawSpectralFilmPrint.value = film.getOrNull(1) as? String
+            (film.getOrNull(2) as? Float)?.let { editRawSpectralFilmCDensityGain.value = it }
+            (film.getOrNull(3) as? Float)?.let { editRawSpectralFilmMDensityGain.value = it }
+            (film.getOrNull(4) as? Float)?.let { editRawSpectralFilmYDensityGain.value = it }
+        }
+        editRawFotufilmDocument.value = open["rawFotufilm"] as? FotufilmDocument
+        (open["rawAutoExposure"] as? Boolean)?.let { editRawAutoExposure.value = it }
     }
 
     private suspend fun updatePhotoMetadata(
@@ -588,9 +753,42 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * detection) the blur is simply replaced by the newest settings.
      */
     private var bokehRerunRequested = false
+
+    /**
+     * The editor's GPU work runs one job at a time: the blur render and the preview render each use their own
+     * GL context, and the Adreno 540 faults ("gpu fault", then every later render fails) when a blur starts
+     * while a preview is still rendering.
+     */
+    private val editorGpu = EditorGpuLock()
+
+    /** When the user last touched the photo or a ruler, and whether a finger is down: heavy work waits for a pause. */
+    @Volatile private var interacting = false
+    @Volatile private var lastInteractionAt = 0L
+
+    fun noteEditorInteraction(active: Boolean) {
+        interacting = active
+        lastInteractionAt = android.os.SystemClock.uptimeMillis()
+    }
+
+    /** Waits until no finger has been on the photo or a ruler for [EDITOR_IDLE_MS], before a heavy job starts. */
+    suspend fun awaitEditorPause() {
+        try {
+            while (interacting || android.os.SystemClock.uptimeMillis() - lastInteractionAt < EDITOR_IDLE_MS) {
+                _waitingForPause.value = true
+                delay(100)
+            }
+        } finally {
+            _waitingForPause.value = false
+        }
+    }
+    private val _waitingForPause = MutableStateFlow(false)
+    /** Heavy work is held back until the user pauses (shown under the edge icons). */
+    val waitingForPause = _waitingForPause.asStateFlow()
     @Volatile private var bokehRenderStarted = false
 
     private fun updateBokehPhoto() {
+        // While editing, the blur renders small in memory (updateEditChain); Save renders it in full.
+        if (deferEditWrites) return
         val running = bokehJob?.takeIf { it.isActive }
         if (running != null && bokehRenderStarted) {
             bokehRerunRequested = true
@@ -626,28 +824,39 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     }
                         ?: GalleryManager.loadBitmap(context, photoData.uri) ?: return@run
                     if (!isActive) return@run
-                    val bokeh = contentRepository.depthBokehProcessor.applyHighQualityBokeh(
-                        context,
-                        photoData.id,
-                        bitmap,
-                        focusPointX,
-                        focusPointY,
-                        aperture,
-                        editBokehStyle.value,
-                        onRenderStart = { bokehRenderStarted = true },
-                    )
-                    if (!isActive) return@run
-                    GalleryManager.saveBokehPhoto(context, photoData.id, bokeh)
-                    GalleryManager.deleteDetailHdrFile(context, photoData.id)
-                    GalleryManager.updateThumbnail(
-                        context = context,
-                        photoId = photoData.id,
-                        photoProcessor = contentRepository.photoProcessor,
-                        metadata = metadata
-                    )
+                    editorGpu.heavy {
+                        val bokeh = contentRepository.depthBokehProcessor.applyHighQualityBokeh(
+                            context,
+                            photoData.id,
+                            bitmap,
+                            focusPointX,
+                            focusPointY,
+                            aperture,
+                            editBokehStyle.value,
+                            quickBlur = editPortraitQuick.value,
+                            focalWidthScale = PortraitBlurMetadata.focalWidthScale(editDepthOfField.value),
+                            onStage = ::onBlurStage,
+                            onMaps = { mask, depth ->
+                                // A Quick render brings no depth map: keep the one a Depth render left.
+                                val previous = blurMaps.value?.takeIf { it.photoId == photoData.id }
+                                blurMaps.value = BlurMaps(photoData.id, mask, depth ?: previous?.depth)
+                            },
+                            onRenderStart = { bokehRenderStarted = true },
+                        )
+                        if (!isActive) return@run
+                        GalleryManager.saveBokehPhoto(context, photoData.id, bokeh)
+                        GalleryManager.deleteDetailHdrFile(context, photoData.id)
+                        GalleryManager.updateThumbnail(
+                            context = context,
+                            photoId = photoData.id,
+                            photoProcessor = contentRepository.photoProcessor,
+                            metadata = metadata
+                        )
+                    }
                     photoRefreshKeys[photoData.id] = System.currentTimeMillis()
                 }
             } finally {
+                onBlurStage(null)
                 val thisJob = coroutineContext[Job]
                 withContext(NonCancellable + Dispatchers.Main) {
                     // A blur replaced before its render started leaves the state to its replacement.
@@ -669,6 +878,233 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         _editAiDenoiseEnabled.value = enabled
     }
 
+    /** The editor's HD preview: full size while editing instead of small copies; remembered for every photo. */
+    fun setEditorHdPreview(on: Boolean) = userPreferencesRepository.updateAsync { editorHdPreview = on }
+
+    /**
+     * While the editor is open, AI denoise, the Portrait blur and JPEG noise reduction run on a copy of at most
+     * [EDIT_CHAIN_EDGE] px in memory, in the order they stack (photo or RAW preview, AI denoise, blur, noise
+     * reduction); each step is kept until something before it changes. Null while the photo's own files show the
+     * edit, that is when none of them changed. Save runs them in full ([commitEditChain]).
+     */
+    val editChainBase = MutableStateFlow<Bitmap?>(null)
+    private val _blurPending = MutableStateFlow(false)
+    /** A blur is asked for and waiting for a pause or rendering: the screen shows the cheap blur meanwhile. */
+    val blurPending = _blurPending.asStateFlow()
+    private val _editChainBusy = MutableStateFlow(false)
+    val editChainBusy = _editChainBusy.asStateFlow()
+    private var editChainJob: Job? = null
+    private val editChainSteps = HashMap<String, Pair<Any, Bitmap>>()
+
+    /** The blur settings the chain's [editChainBase] was made with (null: no blur). */
+    @Volatile var editChainBlurKey: List<Any?>? = null
+        private set
+
+    /** The blur settings as the editor opened, and as they are now (null: no blur). */
+    fun openBlurKey(): List<Any?>? {
+        val open = editOpenState
+        val aperture = (open["aperture"] as? Float)?.takeIf { it > 0f } ?: return null
+        val focus = open["focus"] as? Pair<*, *>
+        return listOf(aperture, focus?.first, focus?.second, open["bokeh"], open["depth"], open["depthOfField"])
+    }
+
+    fun currentBlurKey(): List<Any?>? {
+        val aperture = editComputationalAperture.value?.takeIf { it > 0f } ?: return null
+        return listOf(
+            aperture, editFocusPointX.value, editFocusPointY.value, editBokehStyle.value, editPortraitQuick.value,
+            editDepthOfField.value,
+        )
+    }
+
+    private fun noiseKey(isRaw: Boolean, luma: Float?, chroma: Float?): Pair<Float, Float>? {
+        if (isRaw) return null
+        val l = DenoiseStrength.clamp(luma ?: 0f)
+        val c = DenoiseStrength.clamp(chroma ?: 0f)
+        return (l to c).takeIf { l > 0f || c > 0f }
+    }
+
+    /**
+     * Rebuilds the screen's base when [rawPreview] (the RAW's quick develop, or null), AI denoise, the blur or the
+     * released JPEG noise reduction strengths change.
+     */
+    fun updateEditChain(
+        photo: MediaData,
+        rawPreview: Bitmap?,
+        noiseReduction: Float,
+        chromaNoiseReduction: Float,
+        fullSize: Boolean = false,
+    ) {
+        editChainJob?.cancel()
+        val open = editOpenState
+        val isRaw = isRawInGallery(photo.id)
+        val ai = editAiDenoiseEnabled.value
+        val aiOpen = open["aiDenoise"] as? Boolean ?: false
+        val blur = currentBlurKey()
+        val blurOpen = openBlurKey()
+        val noise = noiseKey(isRaw, noiseReduction, chromaNoiseReduction)
+        val noiseOpen = noiseKey(isRaw, open["noiseReduction"] as? Float, open["chromaNoiseReduction"] as? Float)
+        if (rawPreview == null && ai == aiOpen && blur == blurOpen && noise == noiseOpen) {
+            editChainBase.value = null
+            _editChainBusy.value = false
+            return
+        }
+        _editChainBusy.value = true
+        editChainJob = viewModelScope.launch(Dispatchers.IO) {
+            val chainJob = coroutineContext[Job]
+            val context = getApplication<Application>()
+            val iso = (currentMediaMetadata ?: photo.metadata)?.iso
+            suspend fun step(name: String, key: Any, make: suspend () -> Bitmap?): Bitmap? {
+                editChainSteps[name]?.takeIf { it.first == key }?.let { return it.second }
+                val made = make() ?: return null
+                ensureActive()
+                editChainSteps[name] = key to made
+                return made
+            }
+            // The HD preview works at full size.
+            val edge = if (fullSize) Int.MAX_VALUE else EDIT_CHAIN_EDGE
+            fun small(b: Bitmap): Bitmap {
+                val scale = edge.toFloat() / maxOf(b.width, b.height)
+                return if (scale >= 1f) b
+                else Bitmap.createScaledBitmap(b, (b.width * scale).roundToInt(), (b.height * scale).roundToInt(), true)
+            }
+            // A step still as the photo opened, after nothing changed before it, comes from the photo's own file.
+            val unchangedSoFar = rawPreview == null
+            try {
+                var key: Any = listOf(rawPreview ?: "photo", edge)
+                var bitmap = step("source", key) {
+                    rawPreview?.let(::small) ?: GalleryManager.loadOriginalBitmap(context, photo.id, edge.takeIf { !fullSize })
+                } ?: return@launch
+                if (ai) {
+                    val fromFile = unchangedSoFar && aiOpen
+                    key = listOf(key, "ai")
+                    val input = bitmap
+                    bitmap = step("ai", key) {
+                        if (fromFile) {
+                            GalleryManager.loadBitmap(context, Uri.fromFile(GalleryManager.getAiDenoiseFile(context, photo.id)), edge.takeIf { !fullSize })
+                        } else {
+                            awaitEditorPause()
+                            _isAiDenoising.value = true
+                            _aiDenoiseProgress.value = 0f
+                            try {
+                                editorGpu.heavy {
+                                    com.hinnka.mycamera.ml.AiDenoiser.denoise(context, input) { _aiDenoiseProgress.value = it }
+                                }
+                            } finally {
+                                _isAiDenoising.value = false
+                            }
+                        }
+                    } ?: return@launch
+                }
+                if (blur != null) {
+                    val fromFile = unchangedSoFar && ai == aiOpen && blur == blurOpen
+                    key = listOf(key, blur)
+                    val input = bitmap
+                    bitmap = step("blur", key) {
+                        if (fromFile) {
+                            GalleryManager.loadBitmap(context, Uri.fromFile(GalleryManager.getBokehFile(context, photo.id)), edge.takeIf { !fullSize })
+                        } else {
+                            _blurPending.value = true
+                            try {
+                                awaitEditorPause()
+                                _isBokehProcessing.value = true
+                                editorGpu.heavy {
+                                    contentRepository.depthBokehProcessor.applyHighQualityBokeh(
+                                        context, photo.id, input,
+                                        editFocusPointX.value, editFocusPointY.value, blur[0] as Float, editBokehStyle.value,
+                                        quickBlur = editPortraitQuick.value,
+                                        focalWidthScale = PortraitBlurMetadata.focalWidthScale(editDepthOfField.value),
+                                        onStage = ::onBlurStage,
+                                        onMaps = { mask, depth ->
+                                            val previous = blurMaps.value?.takeIf { it.photoId == photo.id }
+                                            blurMaps.value = BlurMaps(photo.id, mask, depth ?: previous?.depth)
+                                        },
+                                        onRenderStart = {},
+                                        photoLongEdge = (currentMediaMetadata ?: photo.metadata)
+                                            ?.let { maxOf(it.width, it.height) }?.takeIf { it > 0 }
+                                            ?: maxOf(photo.width, photo.height).takeIf { it > 0 },
+                                        // A newer blur (another aperture, focus...) stops this one between bands.
+                                        isCancelled = { chainJob?.isCancelled == true },
+                                    )
+                                }
+                            } finally {
+                                onBlurStage(null)
+                                _isBokehProcessing.value = false
+                                _blurPending.value = false
+                            }
+                        }
+                    } ?: return@launch
+                }
+                if (noise != null) {
+                    key = listOf(key, noise)
+                    val input = bitmap
+                    bitmap = step("noise", key) {
+                        awaitEditorPause()
+                        _isPhotonDenoising.value = true
+                        try {
+                            editorGpu.heavy {
+                                contentRepository.photoProcessor.denoiseBitmap(input, noise.first, noise.second, iso)
+                            }
+                        } finally {
+                            _isPhotonDenoising.value = false
+                        }
+                    } ?: return@launch
+                }
+                ensureActive()
+                editChainBlurKey = blur
+                editChainBase.value = bitmap
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                PLog.e(TAG, "Edit preview chain failed", e)
+            } finally {
+                if (editChainJob === coroutineContext[Job]) _editChainBusy.value = false
+            }
+        }
+    }
+
+    /**
+     * Save: AI denoise, the blur and JPEG noise reduction at full size, writing their files, for whatever changed
+     * since the editor opened or sits after a change ([sourceChanged]: the RAW was developed again). Then [onDone].
+     */
+    fun commitEditChain(photo: MediaData, sourceChanged: Boolean, onDone: (Boolean) -> Unit) {
+        val previewJob = editChainJob
+        previewJob?.cancel()
+        val open = editOpenState
+        val isRaw = isRawInGallery(photo.id)
+        val ai = editAiDenoiseEnabled.value
+        val aiOpen = open["aiDenoise"] as? Boolean ?: false
+        val aiChanged = ai != aiOpen || (ai && sourceChanged)
+        val blurChanged = currentBlurKey() != openBlurKey() || sourceChanged || aiChanged
+        val noise = noiseKey(isRaw, editNoiseReduction.value, editChromaNoiseReduction.value)
+        val noiseOpen = noiseKey(isRaw, open["noiseReduction"] as? Float, open["chromaNoiseReduction"] as? Float)
+        val noiseChanged = noise != null && (noise != noiseOpen || blurChanged)
+        deferEditWrites = false
+        viewModelScope.launch {
+            // A preview step still on the GPU finishes first: it can't stop halfway.
+            previewJob?.join()
+            suspend fun await(run: ((Boolean) -> Unit) -> Unit): Boolean =
+                kotlinx.coroutines.suspendCancellableCoroutine { c -> run { ok -> if (c.isActive) c.resume(ok) {} } }
+            val ok = when {
+                aiChanged && ai -> await { done -> applyAiDenoise(photo, done) }
+                aiChanged -> await { done -> resetAiDenoise(photo, done) }
+                else -> true
+            }
+            if (!ok) {
+                deferEditWrites = true
+                onDone(false)
+                return@launch
+            }
+            // AI denoise starts the blur itself when it ends; otherwise a changed blur starts here.
+            if (blurChanged && !aiChanged) updateBokehPhoto()
+            while (bokehJob?.isActive == true) bokehJob?.join()
+            if (noiseChanged) {
+                refreshPhotonDenoiseBase(photo)
+                photonDenoiseBaseJob?.join()
+            }
+            onDone(true)
+        }
+    }
+
     fun applyAiDenoise(photo: MediaData, onComplete: (Boolean) -> Unit) {
         if (_isAiDenoising.value) return
         _isAiDenoising.value = true
@@ -684,10 +1120,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     return@launch
                 }
 
-                // Runs on this IO thread without suspending: the GPU model is thread-bound.
+                // Runs on this IO thread without suspending: the GPU model is thread-bound. One editor GPU job
+                // at a time.
                 val denoised = try {
-                    com.hinnka.mycamera.ml.AiDenoiser.denoise(context, bitmap) { p ->
-                        _aiDenoiseProgress.value = p
+                    editorGpu.heavy {
+                        com.hinnka.mycamera.ml.AiDenoiser.denoise(context, bitmap) { p ->
+                            _aiDenoiseProgress.value = p
+                        }
                     }
                 } finally {
                     bitmap.recycle()
@@ -700,23 +1139,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
                 
                 // Update metadata to mark that we have an AI denoised base
-                val metadata = currentMediaMetadata ?: photo.metadata ?: MediaMetadata()
-                val aperture = metadata.computationalAperture ?: 0f
-                if (aperture > 0f) {
-                    val bokeh = contentRepository.depthBokehProcessor.applyHighQualityBokeh(
-                        context,
-                        photo.id,
-                        denoised,
-                        metadata.focusPointX,
-                        metadata.focusPointY,
-                        aperture,
-                        BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
-                    )
-                    GalleryManager.saveBokehPhoto(context, photo.id, bokeh)
-                    if (bokeh !== denoised && !bokeh.isRecycled) {
-                        bokeh.recycle()
-                    }
-                }
                 val updatedMetadata = GalleryManager.updateMetadata(context, photo.id) { current ->
                     current.copy(
                         hasAiDenoisedBase = true,
@@ -758,7 +1180,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 )
 
                 _isAiDenoising.value = false
-                withContext(Dispatchers.Main) { onComplete(true) }
+                withContext(Dispatchers.Main) {
+                    // The blur now starts from the denoised photo, with the settings being edited.
+                    updateBokehPhoto()
+                    onComplete(true)
+                }
             } catch (e: Exception) {
                 PLog.e(TAG, "Failed to apply AI denoise", e)
                 _isAiDenoising.value = false
@@ -783,16 +1209,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     return@launch
                 }
 
-                val aperture = updatedMetadata.computationalAperture ?: 0f
-                if (aperture > 0f) {
-                    val originalBitmap = GalleryManager.loadOriginalBitmap(context, photo.id)
-                    if (originalBitmap != null) {
-                        GalleryManager.generateBokehPhoto(context, photo.id, updatedMetadata, originalBitmap)
-                        if (!originalBitmap.isRecycled) originalBitmap.recycle()
-                    }
-                } else {
-                    GalleryManager.getBokehFile(context, photo.id).takeIf { it.exists() }?.delete()
-                }
+                // The blur starts again from the original photo, with the settings being edited.
+                withContext(Dispatchers.Main) { updateBokehPhoto() }
 
                 GalleryManager.deleteDetailHdrFile(context, photo.id)
                 if (updatedMetadata.manualHdrEffectEnabled) {
@@ -1460,7 +1878,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private fun restoreCropEditState(photo: MediaData?, metadata: MediaMetadata?) {
         if (metadata == null) {
             editCropRect.value = null
-            editCropAspectOption.value = CropAspectOption.Free
+            editCropAspectOption.value = CropAspectOption.Original
             return
         }
 
@@ -1485,13 +1903,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
 
-            editCropAspectOption.value = CropAspectOption.Custom(
-                metadata.postCropRegion.width().toFloat(),
-                metadata.postCropRegion.height().toFloat()
-            )
+            val (rw, rh) = PostEditGeometry.rotatedDimensions(baseWidth, baseHeight, metadata.postRotationDegrees)
+            editCropAspectOption.value = cropOptionFor(editCropRect.value, cw, ch, rw.toFloat() / rh.coerceAtLeast(1))
         } else {
             editCropRect.value = null
-            editCropAspectOption.value = CropAspectOption.Free
+            editCropAspectOption.value = CropAspectOption.Original
         }
     }
 
@@ -2147,6 +2563,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      */
     fun enterEditMode() {
         val targetPhoto = getCurrentPhoto() ?: return
+        deferEditWrites = true
+        rawEditsPending = false
         editVideoSourceProfile = null
         editVideoProfileDetected = false
         editVideoProfileOverride = null
@@ -2167,7 +2585,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
 
         isEditing = true
-        editSyncAdjustmentsToLut = false
+        appliedPresetId = null
         independentEditPhotoRecipeParams = ColorRecipeParams.DEFAULT
         // 从当前元数据恢复编辑状态
         currentMediaMetadata?.let { metadata ->
@@ -2223,9 +2641,14 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 editRawCfaCorrectionMode.value = metadata.rawCfaCorrectionMode ?: RawCfaCorrection.MODE_DEFAULT
                 editRawDROMode.value = RawProcessingPreferences.DROMode.fromPersistedName(metadata.droMode).name
                 editComputationalAperture.value = metadata.computationalAperture
-                editBokehStyle.value = BokehStyle.fromPersistedName(
-                    metadata.computationalBokehStyle
-                )
+                // A photo that never had a blur offers the Natural lens look first.
+                editBokehStyle.value = if (metadata.computationalAperture == null) {
+                    BokehStyle.NATURAL
+                } else {
+                    BokehStyle.fromPersistedName(metadata.computationalBokehStyle)
+                }
+                editPortraitQuick.value = PortraitBlurMetadata.quickBlur(metadata)
+                editDepthOfField.value = PortraitBlurMetadata.depthOfField(metadata)?.takeIf { it != 0 }
                 editFocusPointX.value = metadata.focusPointX
                 editFocusPointY.value = metadata.focusPointY
             }
@@ -2270,12 +2693,16 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 editStraightenDegrees.value = 0f
                 editMirrorHorizontal.value = false
                 editComputationalAperture.value = null
-                editBokehStyle.value = BokehStyle.DEFAULT
+                editBokehStyle.value = BokehStyle.NATURAL
+                editPortraitQuick.value = null
+                editDepthOfField.value = null
                 editFocusPointX.value = null
                 editFocusPointY.value = null
                 restoreCropEditState(targetPhoto, null)
             }
         }
+
+        editOpenState = editStateSnapshot()
 
         // Resolve the source from the file before exposing the video effect to the player.
         val manualProfile = VideoColorMetadata.manualProfile(currentMediaMetadata?.customProperties)
@@ -2297,6 +2724,93 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
         }
+    }
+
+    // The edit state as the editor opened, to tell which settings the user has changed since.
+    private var editOpenState: Map<String, Any?> = emptyMap()
+
+    // Keys name the settings the editor shows: each recipe value is "recipe.<RecipeParam>", the look intensity
+    // "lutIntensity", the curves and the colour grading one key each.
+    private fun editStateSnapshot(): Map<String, Any?> {
+        val recipe = editPhotoRecipeParams.value
+        val recipeValues = RecipeParam.entries
+            .filter { it != RecipeParam.LUT_INTENSITY }
+            .associate { "recipe.${it.name}" to recipe?.let(it::getValue) }
+        return recipeValues + mapOf(
+            "look" to CameraPreset.normalizeLutId(editLutId.value),
+            "lutIntensity" to recipe?.lutIntensity,
+            "recipe.curves" to recipe?.let {
+                listOf(it.masterCurvePoints, it.redCurvePoints, it.greenCurvePoints, it.blueCurvePoints).map { a -> a?.toList() }
+            },
+            "recipe.grading" to recipe?.let {
+                listOf(
+                    it.gradingShadowHue, it.gradingShadowAmount, it.gradingShadowLuminance,
+                    it.gradingMidtoneHue, it.gradingMidtoneAmount, it.gradingMidtoneLuminance,
+                    it.gradingHighlightHue, it.gradingHighlightAmount, it.gradingHighlightLuminance,
+                    it.gradingBalance, it.gradingBlending,
+                )
+            },
+            "frame" to editFrameId.value,
+            "applyEffectsToVideo" to editApplyEffectsToVideo.value,
+            "sharpening" to editSharpening.value,
+            "noiseReduction" to editNoiseReduction.value,
+            "chromaNoiseReduction" to editChromaNoiseReduction.value,
+            "aiDenoise" to editAiDenoiseEnabled.value,
+            "rawExposure" to editRawExposureCompensation.value,
+            "rawAutoExposure" to editRawAutoExposure.value,
+            "rawHighlights" to editRawHighlightsAdjustment.value,
+            "rawShadows" to editRawShadowsAdjustment.value,
+            "rawBlackPoint" to editRawBlackPointCorrection.value,
+            "rawWhitePoint" to editRawWhitePointCorrection.value,
+            "rawLensShading" to editRawLensShadingCorrectionEnabled.value,
+            "rawDro" to editRawDROMode.value,
+            "rawBlackLevel" to (editRawBlackLevelMode.value to editRawCustomBlackLevel.value),
+            "rawWhiteLevel" to (editRawWhiteLevelMode.value to editRawCustomWhiteLevel.value),
+            "rawCfa" to editRawCfaCorrectionMode.value,
+            "rawDcp" to editRawDcpId.value,
+            "rawEmbeddedProfile" to editRawEmbeddedDngProfileId.value,
+            "rawHncs" to listOf(editRawHncsProfileId.value, editRawHncsRenderIntent.value, editRawHncsFilmCurveMode.value),
+            "rawBaseLook" to editRawBaselineLutId.value,
+            "rawEngine" to editRawRenderingEngine.value,
+            "rawToneMapping" to editRawToneMappingParameters.value,
+            "rawSpectralFilm" to listOf(
+                editRawSpectralFilmStock.value, editRawSpectralFilmPrint.value,
+                editRawSpectralFilmCDensityGain.value, editRawSpectralFilmMDensityGain.value,
+                editRawSpectralFilmYDensityGain.value,
+            ),
+            "rawFotufilm" to editRawFotufilmDocument.value,
+            "aperture" to editComputationalAperture.value,
+            "bokeh" to editBokehStyle.value,
+            "depth" to editPortraitQuick.value,
+            "depthOfField" to editDepthOfField.value,
+            "focus" to (editFocusPointX.value to editFocusPointY.value),
+            // Rounded, and the whole photo as no crop, so turning four times or straightening and back is no change.
+            "crop" to editCropRect.value?.let { r ->
+                fun round(v: Float) = (v * 10_000f).roundToInt() / 10_000f
+                RectF(round(r.left), round(r.top), round(r.right), round(r.bottom))
+                    .takeUnless { it.left <= 0f && it.top <= 0f && it.right >= 1f && it.bottom >= 1f }
+            },
+            "cropRatio" to editCropAspectOption.value.shapeKey,
+            "rotation" to editRotationDegrees.value,
+            "straighten" to editStraightenDegrees.value,
+            "mirror" to editMirrorHorizontal.value,
+        )
+    }
+
+    /** The whole edit state, by the keys of [editStateSnapshot]; equal maps mean the photo renders the same. */
+    fun editStateKey(): Map<String, Any?> = editStateSnapshot()
+
+    /** The RAW develop's part of the edit state, now or when the editor opened. */
+    fun editRawState(open: Boolean = false): Map<String, Any?> =
+        (if (open) editOpenState else editStateSnapshot()).filterKeys { it.startsWith("raw") }
+
+    /** A setting's value when the editor opened, by its [editStateSnapshot] key: where its reset returns to. */
+    fun editOpenValue(key: String): Any? = editOpenState[key]
+
+    /** The settings changed since the editor opened, by the keys of [editStateSnapshot]. */
+    fun editChangedKeys(): Set<String> {
+        val now = editStateSnapshot()
+        return now.keys.filterTo(HashSet()) { now[it] != editOpenState[it] }
     }
 
     fun prepareCurrentPhotoForEdit(
@@ -2360,14 +2874,18 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * 退出编辑模式
      */
     fun exitEditMode() {
-        viewModelScope.launch {
-            flushPendingEditLutRecipeSync()
-        }
         isEditing = false
+        deferEditWrites = false
+        rawEditsPending = false
+        editChainJob?.cancel()
+        editChainSteps.clear()
+        editChainBase.value = null
+        _editChainBusy.value = false
+        // The RAW kept in memory for quick previews is only for this edit.
+        viewModelScope.launch { RawDemosaicProcessor.getInstance().clearPreviewDecodes() }
         editVideoSourceProfile = null
         editVideoProfileDetected = false
         editVideoProfileOverride = null
-        editSyncAdjustmentsToLut = false
         editLutId.value = null
         editLutConfig = null
         editFrameId.value = null
@@ -2375,7 +2893,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         independentEditPhotoRecipeParams = ColorRecipeParams.DEFAULT
         editApplyEffectsToVideo.value = false
         editCropRect.value = null
-        editCropAspectOption.value = CropAspectOption.Free
+        editCropAspectOption.value = CropAspectOption.Original
         editRotationDegrees.value = 0
         editStraightenDegrees.value = 0f
         editMirrorHorizontal.value = false
@@ -2408,89 +2926,75 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         editRawFotufilmDocument.value = null
     }
 
-    /**
-     * 切换绑定状态时保留当前调节，开启绑定后才将调节写入当前 LUT。
-     */
-    fun setSyncAdjustmentsToLut(enabled: Boolean) {
-        val shouldSync = enabled && editLutId.value != null
-        if (editSyncAdjustmentsToLut == shouldSync) return
-
-        val params = snapshotEditRecipe(editPhotoRecipeParams.value, editLutId.value)
-        editSyncAdjustmentsToLut = shouldSync
-        if (shouldSync) {
-            setPhotoRecipeParams(params)
-        } else {
-            editPhotoRecipeParams.value = params
-        }
-    }
-
     private fun snapshotEditRecipe(params: ColorRecipeParams?, lutId: String?): ColorRecipeParams {
         // 旧照片可能只保存了 LUT 引用。读取一次实际配方后独立编辑，保持进入编辑时的画面。
         // 按 ID 读取也避免快速切换后取消同步时，拿到 StateFlow 尚未更新的上一个 LUT 配方。
         val recipe = params ?: lutId?.let { id ->
-            pendingEditLutRecipeSync[id] ?: runBlocking(Dispatchers.IO) {
+            runBlocking(Dispatchers.IO) {
                 contentRepository.lutManager.loadColorRecipeParams(id)
             }
         } ?: ColorRecipeParams.DEFAULT
         return recipe.deepCopy()
     }
 
-    /** 设置照片调节，并根据本次编辑的绑定状态同步到 LUT。 */
+    /** The photo's own adjustments; the look's saved recipe changes only with [saveRecipeIntoLook]. */
     fun setPhotoRecipeParams(params: ColorRecipeParams) {
         editPhotoRecipeParams.value = params
-        if (!editSyncAdjustmentsToLut) {
-            independentEditPhotoRecipeParams = params.deepCopy()
-        }
-        if (editSyncAdjustmentsToLut) {
-            val lutId = editLutId.value ?: return
-            pendingEditLutRecipeSync[lutId] = params.deepCopy()
-            editLutRecipeSyncJob?.cancel()
-            editLutRecipeSyncJob = viewModelScope.launch {
-                delay(250)
-                editLutRecipeSyncJob = null
-                flushPendingEditLutRecipeSync()
-            }
-        }
+        independentEditPhotoRecipeParams = params.deepCopy()
     }
 
-    private suspend fun flushPendingEditLutRecipeSync() {
-        editLutRecipeSyncJob?.cancel()
-        editLutRecipeSyncJob = null
-        editLutRecipeSyncMutex.withLock {
-            // 按 LUT 保留尚未落盘的调节，快速切换不会覆盖前一个 LUT 的待保存配方。
-            val pending = pendingEditLutRecipeSync.toMap()
-            for ((lutId, params) in pending) {
-                contentRepository.lutManager.saveColorRecipeParams(lutId, params)
-                if (pendingEditLutRecipeSync[lutId] === params) {
-                    pendingEditLutRecipeSync.remove(lutId)
-                }
-            }
+    /**
+     * Writes the photo's current adjustments into its look, so the look (on every photo and in the camera) has
+     * them from now on. One action; nothing follows later edits. False when there is no look.
+     */
+    suspend fun saveRecipeIntoLook(): Boolean {
+        val lutId = editLutId.value ?: return false
+        val recipe = editPhotoRecipeParams.value ?: return false
+        contentRepository.lutManager.saveColorRecipeParams(lutId, recipe.deepCopy())
+        return true
+    }
+
+    /** The camera preset applied to this photo in this edit, if any (photos don't record their preset). */
+    var appliedPresetId by mutableStateOf<String?>(null)
+        private set
+    private var appliedPresetState: Map<String, Any?> = emptyMap()
+
+    /** Applies a camera preset's look, colour recipe and effects, and frame to the photo being edited. */
+    fun applyPresetToEdit(preset: CameraPreset) {
+        setEditLut(preset.lutId)
+        setPhotoRecipeParams(preset.effects.applyTo(preset.colorRecipe))
+        setEditFrame(preset.frameId)
+        appliedPresetId = preset.id
+        appliedPresetState = editStateSnapshot()
+    }
+
+    /** Whether the look, its intensity, the recipe or the frame changed since the preset was applied. */
+    fun appliedPresetChanged(): Boolean {
+        val now = editStateSnapshot()
+        return now.keys.any { key ->
+            (key == "look" || key == "lutIntensity" || key == "frame" || key.startsWith("recipe.")) &&
+                now[key] != appliedPresetState[key]
         }
     }
 
     /**
      * 设置 LUT
      */
-    fun setEditLut(lutId: String?) {
+    fun setEditLut(id: String?) {
+        // The built-in "none" look is stored as no look.
+        val lutId = CameraPreset.normalizeLutId(id)
         if (lutId != null && getCurrentPhoto()?.isVideo == true &&
             (editVideoSourceProfile == null || selectableEditLuts.none { it.id == lutId })
         ) return
-        if (lutId == null) {
-            editSyncAdjustmentsToLut = false
-        }
         if (editLutId.value != lutId) {
             val lutRecipe = lutId?.let { id ->
-                pendingEditLutRecipeSync[id] ?: runBlocking(Dispatchers.IO) {
+                runBlocking(Dispatchers.IO) {
                     contentRepository.lutManager.loadSavedColorRecipeParams(id)
                 }
             }
             // LUT 配方完整应用，但不能覆盖独立调节草稿；离开带配方的 LUT 后恢复草稿。
             editPhotoRecipeParams.value = (
-                lutRecipe ?: if (editSyncAdjustmentsToLut) {
-                    ColorRecipeParams.DEFAULT
-                } else {
-                    independentEditPhotoRecipeParams
-                }
+                lutRecipe ?: independentEditPhotoRecipeParams
             ).deepCopy()
         }
         editLutId.value = lutId
@@ -2512,8 +3016,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     /**
      * 预览下一个滤镜（不切换）
      */
+    // The sideways swipe on the photo steps through the favourites; with fewer than two, through every look.
+    private val swipeLutList: List<LutInfo>
+        get() = selectableEditLuts.let { all -> all.filter { it.isFavorite }.takeIf { it.size >= 2 } ?: all }
+
     fun peekNextLut(): LutInfo? {
-        val availableLuts = selectableEditLuts
+        val availableLuts = swipeLutList
         if (availableLuts.isEmpty()) return null
         val currentLut = editLutId.value
         val currentIndex = availableLuts.indexOfFirst { it.id == currentLut }
@@ -2525,7 +3033,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * 预览上一个滤镜（不切换）
      */
     fun peekPreviousLut(): LutInfo? {
-        val availableLuts = selectableEditLuts
+        val availableLuts = swipeLutList
         if (availableLuts.isEmpty()) return null
         val currentLut = editLutId.value
         val currentIndex = availableLuts.indexOfFirst { it.id == currentLut }
@@ -2667,6 +3175,24 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         )
     }
 
+    /**
+     * The ratio choice a crop of [rect] matches on a turned and straightened [width] x [height] photo: Original
+     * when it has the photo's own shape ([sourceAspect]), a built-in ratio in either orientation, else Free.
+     */
+    private fun cropOptionFor(rect: RectF?, width: Int, height: Int, sourceAspect: Float): CropAspectOption {
+        if (rect == null || width <= 0 || height <= 0 || rect.height() <= 0f) return CropAspectOption.Original
+        val shape = rect.width() * width / (rect.height() * height)
+        fun close(target: Float) = kotlin.math.abs(shape - target) / target < ASPECT_RATIO_MATCH_TOLERANCE
+        if (close(sourceAspect)) return CropAspectOption.Original
+        for (r in AspectRatio.entries) {
+            if (close(r.widthRatio.toFloat() / r.heightRatio)) return CropAspectOption.FromAspectRatio(r)
+            if (close(r.heightRatio.toFloat() / r.widthRatio)) {
+                return CropAspectOption.Custom(r.heightRatio.toFloat(), r.widthRatio.toFloat())
+            }
+        }
+        return CropAspectOption.Free
+    }
+
     /** 按旋转、拉直与裁切后的成片长短边比匹配内置画幅，与方向无关；不命中时返回 null。 */
     private fun resolveEditedAspectRatio(photo: MediaData): AspectRatio? {
         val metadata = photo.metadata
@@ -2780,11 +3306,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         val copied = copiedEditSettings ?: return null
         val settings = copied.metadata
 
-        viewModelScope.launch {
-            flushPendingEditLutRecipeSync()
-        }
-        editSyncAdjustmentsToLut = false
-
         editLutId.value = settings.lutId
         val recipe = snapshotEditRecipe(settings.colorRecipeParams, settings.lutId)
         editPhotoRecipeParams.value = recipe
@@ -2812,9 +3333,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             PostEditGeometry.normalizeStraightenDegrees(settings.postStraightenDegrees)
         editMirrorHorizontal.value = settings.postMirrorHorizontal
         editCropRect.value = copied.normalizedCropRect?.let(::RectF)
-        editCropAspectOption.value = copied.normalizedCropRect?.let {
-            CropAspectOption.Custom(it.width(), it.height())
-        } ?: CropAspectOption.Free
+        editCropAspectOption.value = resolveCurrentEditBaseDimensions()?.let { (bw, bh) ->
+            val (cw, ch) = PostEditGeometry.editedDimensions(bw, bh, editRotationDegrees.value, editStraightenDegrees.value)
+            val (rw, rh) = PostEditGeometry.rotatedDimensions(bw, bh, editRotationDegrees.value)
+            cropOptionFor(editCropRect.value, cw, ch, rw.toFloat() / rh.coerceAtLeast(1))
+        } ?: CropAspectOption.Original
         editApplyEffectsToVideo.value = settings.applyEffectsToVideo
         currentMediaMetadata = (currentMediaMetadata ?: MediaMetadata()).let {
             it.copy(customProperties = PhotoStacks.keepStackOf(it.customProperties, settings.customProperties))
@@ -2874,10 +3397,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun persistRawEditMetadata(
-        mediaData: MediaData,
-        onComplete: ((Boolean) -> Unit)? = null,
-    ) {
+    /**
+     * The editor's RAW settings as they are now, to apply onto a photo's metadata: for writing them, or for the
+     * quick preview develop that writes nothing. [baselineRecipeParams] is the base look's recipe, when known.
+     */
+    private fun rawEditApplier(): (MediaMetadata, ColorRecipeParams?) -> MediaMetadata {
         val sharpening = editSharpening.value
         val noiseReduction = editNoiseReduction.value
         val chromaNoiseReduction = editChromaNoiseReduction.value
@@ -2909,6 +3433,81 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         val spectralFilmYDensityGain = editRawSpectralFilmYDensityGain.value
         val fotufilmDocument = editRawFotufilmDocument.value
 
+        return { current, baselineRecipeParams ->
+            current.copy(
+                sharpening = sharpening,
+                noiseReduction = noiseReduction,
+                chromaNoiseReduction = chromaNoiseReduction,
+                rawExposureCompensation = exposure,
+                rawAutoExposure = autoExposure,
+                rawHighlightsAdjustment = highlights,
+                rawShadowsAdjustment = shadows,
+                rawBlackPointCorrection = blackPoint,
+                rawWhitePointCorrection = whitePoint,
+                rawLensShadingCorrectionEnabled = lensShadingCorrectionEnabled,
+                rawBlackLevelMode = blackLevelMode,
+                rawCustomBlackLevel = customBlackLevel,
+                rawWhiteLevelMode = whiteLevelMode,
+                rawCustomWhiteLevel = customWhiteLevel,
+                rawCfaCorrectionMode = cfaCorrectionMode,
+                droMode = droMode,
+                rawDcpId = dcpId,
+                rawEmbeddedDngProfileId = embeddedDngProfileId,
+                rawHncsProfileId = hncsProfileId,
+                rawHncsRenderIntent = hncsRenderIntent,
+                rawHncsFilmCurveMode = hncsFilmCurveMode,
+                baselineTarget = baselineLutId?.let { BaselineColorCorrectionTarget.RAW },
+                baselineLutId = baselineLutId,
+                baselineColorRecipeParams = baselineRecipeParams,
+                rawRenderingEngine = rawColorEngine,
+                rawToneMappingParameters = rawToneMappingParameters,
+                spectralFilmStock = spectralFilmStock,
+                spectralFilmPrint = spectralFilmPrint,
+                spectralFilmCDensityGain = spectralFilmCDensityGain,
+                spectralFilmMDensityGain = spectralFilmMDensityGain,
+                spectralFilmYDensityGain = spectralFilmYDensityGain,
+                fotufilmDocument = FotufilmDocumentStorage.encode(fotufilmDocument)
+            )
+        }
+    }
+
+    /** While the editor is open, RAW changes only develop a quick preview; Save writes them ([writeRawEdits]). */
+    var deferEditWrites = false
+    var rawEditsPending by mutableStateOf(false)
+        private set
+
+    /** The photo's metadata with the editor's RAW settings, unsaved: what the quick preview develops. */
+    fun editRawPreviewMetadata(mediaData: MediaData): MediaMetadata =
+        rawEditApplier()(mediaData.metadata ?: currentMediaMetadata ?: MediaMetadata(), null)
+
+    /** Writes the editor's RAW settings to the photo (on Save, or before a forced re-render). */
+    fun writeRawEdits(mediaData: MediaData, onComplete: ((Boolean) -> Unit)? = null) {
+        rawEditsPending = false
+        writeRawEditMetadata(mediaData, onComplete)
+    }
+
+    private fun persistRawEditMetadata(
+        mediaData: MediaData,
+        onComplete: ((Boolean) -> Unit)? = null,
+    ) {
+        if (deferEditWrites) {
+            rawEditsPending = true
+            onComplete?.invoke(true)
+            return
+        }
+        writeRawEditMetadata(mediaData, onComplete)
+    }
+
+    private fun writeRawEditMetadata(
+        mediaData: MediaData,
+        onComplete: ((Boolean) -> Unit)? = null,
+    ) {
+        val apply = rawEditApplier()
+        val baselineLutId = editRawBaselineLutId.value
+        val droMode = editRawDROMode.value
+        val noiseReduction = editNoiseReduction.value
+        val chromaNoiseReduction = editChromaNoiseReduction.value
+        val rawToneMappingParameters = editRawToneMappingParameters.value.normalized()
         viewModelScope.launch {
             val context = getApplication<Application>()
             val baselineRecipeParams = loadRawBaselineRecipeParams(baselineLutId)
@@ -2918,42 +3517,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     "chromaNoise=$chromaNoiseReduction, " +
                     "profileToneMap=${rawToneMappingParameters.profileToneMapMode}"
             )
-            val updated = GalleryManager.updateMetadata(context, mediaData.id) { current ->
-                current.copy(
-                    sharpening = sharpening,
-                    noiseReduction = noiseReduction,
-                    chromaNoiseReduction = chromaNoiseReduction,
-                    rawExposureCompensation = exposure,
-                    rawAutoExposure = autoExposure,
-                    rawHighlightsAdjustment = highlights,
-                    rawShadowsAdjustment = shadows,
-                    rawBlackPointCorrection = blackPoint,
-                    rawWhitePointCorrection = whitePoint,
-                    rawLensShadingCorrectionEnabled = lensShadingCorrectionEnabled,
-                    rawBlackLevelMode = blackLevelMode,
-                    rawCustomBlackLevel = customBlackLevel,
-                    rawWhiteLevelMode = whiteLevelMode,
-                    rawCustomWhiteLevel = customWhiteLevel,
-                    rawCfaCorrectionMode = cfaCorrectionMode,
-                    droMode = droMode,
-                    rawDcpId = dcpId,
-                    rawEmbeddedDngProfileId = embeddedDngProfileId,
-                    rawHncsProfileId = hncsProfileId,
-                    rawHncsRenderIntent = hncsRenderIntent,
-                    rawHncsFilmCurveMode = hncsFilmCurveMode,
-                    baselineTarget = baselineLutId?.let { BaselineColorCorrectionTarget.RAW },
-                    baselineLutId = baselineLutId,
-                    baselineColorRecipeParams = baselineRecipeParams,
-                    rawRenderingEngine = rawColorEngine,
-                    rawToneMappingParameters = rawToneMappingParameters,
-                    spectralFilmStock = spectralFilmStock,
-                    spectralFilmPrint = spectralFilmPrint,
-                    spectralFilmCDensityGain = spectralFilmCDensityGain,
-                    spectralFilmMDensityGain = spectralFilmMDensityGain,
-                    spectralFilmYDensityGain = spectralFilmYDensityGain,
-                    fotufilmDocument = FotufilmDocumentStorage.encode(fotufilmDocument)
-                )
-            }
+            val updated = GalleryManager.updateMetadata(context, mediaData.id) { current -> apply(current, baselineRecipeParams) }
             withContext(Dispatchers.Main) {
                 if (updated != null) {
                     withContext(Dispatchers.IO) {
@@ -3019,46 +3583,46 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun saveRawExposureCompensationValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
+    // The RAW render's tone values. They only set the edit state, so a ruler can move through many values
+    // without writing the photo's file each time; the editor saves and re-renders once, when the finger lifts
+    // (persistCurrentRawEditMetadata).
+    fun setRawExposureCompensation(value: Float) {
         editRawExposureCompensation.value = value
-        if (value != 0f) {
-            editRawAutoExposure.value = false
-        }
-        persistRawEditMetadata(mediaData, onComplete)
+        updateRawAutoExposureForTone()
     }
 
-    fun resetRawExposureCompensationValue(mediaData: MediaData, onComplete: ((Boolean) -> Unit)? = null) {
-        editRawAutoExposure.value = false
-        editRawExposureCompensation.value = 0f
-        persistRawEditMetadata(mediaData, onComplete)
-    }
-
-    fun saveRawHighlightsAdjustmentValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
+    fun setRawHighlightsAdjustment(value: Float) {
         editRawHighlightsAdjustment.value = value
-        if (value != 0f) {
-            editRawAutoExposure.value = false
-        }
-        persistRawEditMetadata(mediaData, onComplete)
+        updateRawAutoExposureForTone()
     }
 
-    fun saveRawShadowsAdjustmentValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
+    fun setRawShadowsAdjustment(value: Float) {
         editRawShadowsAdjustment.value = value
-        persistRawEditMetadata(mediaData, onComplete)
+    }
+
+    fun setRawBlackPointCorrection(value: Float) {
+        editRawBlackPointCorrection.value = value
+    }
+
+    fun setRawWhitePointCorrection(value: Float) {
+        editRawWhitePointCorrection.value = value
+    }
+
+    // A manual exposure or highlights value turns the legacy auto exposure off; putting both back as they were
+    // when the editor opened brings back the auto exposure the photo had.
+    private fun updateRawAutoExposureForTone() {
+        val exposure = editRawExposureCompensation.value
+        val highlights = editRawHighlightsAdjustment.value
+        if (exposure == editOpenState["rawExposure"] && highlights == editOpenState["rawHighlights"]) {
+            (editOpenState["rawAutoExposure"] as? Boolean)?.let { editRawAutoExposure.value = it }
+        } else if (exposure != 0f || highlights != 0f) {
+            editRawAutoExposure.value = false
+        }
     }
 
     fun saveRawDROModeValue(mediaData: MediaData, mode: String, onComplete: ((Boolean) -> Unit)? = null) {
         val resolvedMode = RawProcessingPreferences.DROMode.fromPersistedName(mode)
         editRawDROMode.value = resolvedMode.name
-        persistRawEditMetadata(mediaData, onComplete)
-    }
-
-    fun saveRawBlackPointCorrectionValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
-        editRawBlackPointCorrection.value = value
-        persistRawEditMetadata(mediaData, onComplete)
-    }
-
-    fun saveRawWhitePointCorrectionValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
-        editRawWhitePointCorrection.value = value
         persistRawEditMetadata(mediaData, onComplete)
     }
 
@@ -3494,11 +4058,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             try {
                 val metadata = currentMediaMetadata ?: photo.metadata ?: MediaMetadata()
                 val source = photonDenoiseSource(context, photo.id, metadata) ?: return@launch
-                val built = contentRepository.photoProcessor.updatePhotonDenoiseBase(
-                    context, photo.id, source, noiseReduction, chromaNoiseReduction,
-                    sensorIso = metadata.iso,
-                    onBuild = { _isPhotonDenoising.value = true },
-                )
+                val built = editorGpu.heavy {
+                    contentRepository.photoProcessor.updatePhotonDenoiseBase(
+                        context, photo.id, source, noiseReduction, chromaNoiseReduction,
+                        sensorIso = metadata.iso,
+                        onBuild = { _isPhotonDenoising.value = true },
+                    )
+                }
                 val strengths = noiseReduction to chromaNoiseReduction
                 val strengthsChanged = photonDenoiseEditStrengths.put(photo.id, strengths) != strengths
                 if (built || strengthsChanged) {
@@ -3570,10 +4136,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         bitmap: Bitmap? = null,
         ignoreCrop: Boolean = false,
         ignoreStraighten: Boolean = false,
+        ignoreTurn: Boolean = false,
         ignoreFrame: Boolean = false,
         ignoreDenoise: Boolean = false,
         recipeParamsOverride: ColorRecipeParams? = null,
-        maxEdge: Int = FULL_QUALITY_PREVIEW_MAX_EDGE
+        maxEdge: Int = FULL_QUALITY_PREVIEW_MAX_EDGE,
+        ignoreBokeh: Boolean = false,
     ): Bitmap? {
         if (photo.isVideo) return null
         return withContext(Dispatchers.IO) {
@@ -3661,6 +4229,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     if (ignoreStraighten) {
                         finalMetadata = finalMetadata.copy(postStraightenDegrees = 0f)
                     }
+                    if (ignoreTurn) {
+                        finalMetadata = finalMetadata.copy(postRotationDegrees = 0, postMirrorHorizontal = false)
+                    }
                     finalS = editSharpening.value
                     finalNR = editNoiseReduction.value
                     finalCNR = editChromaNoiseReduction.value
@@ -3679,6 +4250,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     if (ignoreStraighten) {
                         finalMetadata = finalMetadata.copy(postStraightenDegrees = 0f)
                     }
+                    if (ignoreTurn) {
+                        finalMetadata = finalMetadata.copy(postRotationDegrees = 0, postMirrorHorizontal = false)
+                    }
                 }
 
                 if (ignoreFrame) {
@@ -3686,7 +4260,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
 
                 // 使用多级缓存优化性能
-                val previewCacheKey = previewCacheKey(photo, finalMetadata, showOrigin, maxEdge)
+                val previewCacheKey = previewCacheKey(photo, finalMetadata, showOrigin, maxEdge) +
+                    if (ignoreBokeh) "_nobokeh" else ""
 
                 val cached = previewBitmapCache.get(previewCacheKey)
                 if (cached != null && !cached.isRecycled) {
@@ -3730,7 +4305,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 } else {
                     val bokehFile = GalleryManager.getBokehFile(context, photo.id)
                     photonDenoiseBase ?: when {
-                        bokehFile.exists() -> GalleryManager.loadBitmap(context, Uri.fromFile(bokehFile), maxEdge)
+                        !ignoreBokeh && bokehFile.exists() -> GalleryManager.loadBitmap(context, Uri.fromFile(bokehFile), maxEdge)
                         finalMetadata.hasAiDenoisedBase -> GalleryManager.loadBitmap(
                             context,
                             Uri.fromFile(GalleryManager.getAiDenoiseFile(context, photo.id)),
@@ -3757,11 +4332,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     val previewSharpening = if (applyBitmapSharpening) finalS else 0f
 
                     // 预览生成
-                    val result = contentRepository.photoProcessor.processBitmap(
-                        context, photo.id, currentBitmap, previewMetadata,
-                        previewSharpening,
-                        false
-                    )
+                    val result = editorGpu.light {
+                        contentRepository.photoProcessor.processBitmap(
+                            context, photo.id, currentBitmap, previewMetadata,
+                            previewSharpening,
+                            false
+                        )
+                    }
                     // 只在全分辨率路径下更新亮度估计（结果更准确）
                     if (maxEdge >= FULL_QUALITY_PREVIEW_MAX_EDGE) {
                         currentBrightness[photo.id] = estimateAverageBrightness(result)
@@ -3947,7 +4524,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             try {
-                flushPendingEditLutRecipeSync()
+                // The blur file is part of what is saved: let a render still running finish first.
+                while (bokehJob?.isActive == true) bokehJob?.join()
                 val context = getApplication<Application>()
                 val wasSystemPhoto = selectedTab == GalleryTab.SYSTEM
 
@@ -4010,6 +4588,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                                 remove(VideoColorMetadata.OVERRIDE_KEY)
                                 editVideoProfileOverride?.let { put(VideoColorMetadata.OVERRIDE_KEY, it.name) }
                             }
+                            remove(PortraitBlurMetadata.QUICK_KEY)
+                            editPortraitQuick.value?.let { put(PortraitBlurMetadata.QUICK_KEY, it.toString()) }
+                            remove(PortraitBlurMetadata.DEPTH_OF_FIELD_KEY)
+                            editDepthOfField.value?.let { put(PortraitBlurMetadata.DEPTH_OF_FIELD_KEY, it.toString()) }
                         },
                         colorRecipeParams = editPhotoRecipeParams.value,
                         sharpening = editSharpening.value,

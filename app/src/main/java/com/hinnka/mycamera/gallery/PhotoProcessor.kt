@@ -25,6 +25,7 @@ import com.hinnka.mycamera.lut.LutImageProcessor
 import com.hinnka.mycamera.lut.LutManager
 import com.hinnka.mycamera.processor.DepthBokehProcessor
 import com.hinnka.mycamera.processor.BokehStyle
+import com.hinnka.mycamera.processor.PortraitBlurMetadata
 import com.hinnka.mycamera.raw.RawOutputScaling
 import com.hinnka.mycamera.raw.RawDigitalZoomResampling
 import com.hinnka.mycamera.raw.RawDemosaicProcessor
@@ -100,6 +101,10 @@ class PhotoProcessor(
      * 已保存的强度与编辑中（未保存）的强度各占一个条目，互不覆盖。真正开始重建前调用 [onBuild]。
      * 两个强度都为 0 时无需基底，返回 false；否则返回是否新建了条目。
      */
+    /** JPEG noise reduction on a bitmap in memory (the editor's small preview); [input] stays as it is. */
+    suspend fun denoiseBitmap(input: Bitmap, noiseReduction: Float, chromaNoiseReduction: Float, sensorIso: Int?): Bitmap =
+        lutImageProcessor.applyBitmapDenoise(input, DenoiseStrength.clamp(noiseReduction), DenoiseStrength.clamp(chromaNoiseReduction), sensorIso)
+
     suspend fun updatePhotonDenoiseBase(
         context: Context,
         photoId: String,
@@ -424,6 +429,8 @@ class PhotoProcessor(
                     metadata.focusPointY,
                     aperture,
                     BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
+                    quickBlur = PortraitBlurMetadata.quickBlur(metadata),
+                    focalWidthScale = PortraitBlurMetadata.focalWidthScale(PortraitBlurMetadata.depthOfField(metadata)),
                 )
                 photoId?.let { id -> GalleryManager.saveBokehPhoto(context, id, sdrBitmap) }
             }
@@ -436,6 +443,8 @@ class PhotoProcessor(
                     metadata.focusPointY,
                     aperture,
                     BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
+                    quickBlur = PortraitBlurMetadata.quickBlur(metadata),
+                    focalWidthScale = PortraitBlurMetadata.focalWidthScale(PortraitBlurMetadata.depthOfField(metadata)),
                 )
             }
         }
@@ -858,7 +867,9 @@ class PhotoProcessor(
                 b = depthBokehProcessor.applyHighQualityBokeh(
                     context, photoId, b,
                     metadata.focusPointX, metadata.focusPointY, aperture,
-                    BokehStyle.fromPersistedName(metadata.computationalBokehStyle)
+                    BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
+                    quickBlur = PortraitBlurMetadata.quickBlur(metadata),
+                    focalWidthScale = PortraitBlurMetadata.focalWidthScale(PortraitBlurMetadata.depthOfField(metadata))
                 )
                 photoId?.let { photoId -> GalleryManager.saveBokehPhoto(context, photoId, b) }
             }
@@ -907,7 +918,9 @@ class PhotoProcessor(
                 result = depthBokehProcessor.applyHighQualityBokeh(
                     context, photoId, result,
                     metadata.focusPointX, metadata.focusPointY, aperture,
-                    BokehStyle.fromPersistedName(metadata.computationalBokehStyle)
+                    BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
+                    quickBlur = PortraitBlurMetadata.quickBlur(metadata),
+                    focalWidthScale = PortraitBlurMetadata.focalWidthScale(PortraitBlurMetadata.depthOfField(metadata))
                 )
                 photoId?.let { photoId -> GalleryManager.saveBokehPhoto(context, photoId, result) }
             }

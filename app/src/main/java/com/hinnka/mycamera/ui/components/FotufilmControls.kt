@@ -359,13 +359,13 @@ private fun FotufilmMenu(
 }
 
 /** Sets a slider's value; the resting value is the field's absence, as upstream stores it. */
-private fun FotufilmDocument.withNumber(control: FotufilmCatalogue.Control, value: Double): FotufilmDocument {
+internal fun FotufilmDocument.withNumber(control: FotufilmCatalogue.Control, value: Double): FotufilmDocument {
     val kind = control.kind as FotufilmCatalogue.Kind.Slider
     return if (value == kind.scale.neutral) without(control.field)
     else with(control.field, FotufilmDocument.Value.Number(value))
 }
 
-private fun FotufilmDocument.withValue(control: FotufilmCatalogue.Control, value: FotufilmDocument.Value?): FotufilmDocument =
+internal fun FotufilmDocument.withValue(control: FotufilmCatalogue.Control, value: FotufilmDocument.Value?): FotufilmDocument =
     if (value == null) without(control.field) else with(control.field, value)
 
 /**
@@ -375,7 +375,7 @@ private fun FotufilmDocument.withValue(control: FotufilmCatalogue.Control, value
  * no development for). Dropping one can change the medium and with it what is offered, so the
  * check repeats until the document is stable; upstream then accepts it or says why not.
  */
-private fun documentForStock(
+internal fun documentForStock(
     context: android.content.Context,
     document: FotufilmDocument,
     stockId: String,
@@ -417,7 +417,7 @@ private fun sectionOf(control: FotufilmCatalogue.Control): String =
 private const val TAG = "FotufilmControls"
 private const val STOCK_MENU = "stocks"
 private const val LIGHT_SECTION = "lightExposure"
-private val SHOWN_SECTIONS = setOf(
+internal val SHOWN_SECTIONS = setOf(
     "filmStock", "filmGrain", "filmHalation", "filmEmulsion", "filmLab", "printPaper", "printLamp",
 )
-private val SHOWN_LIGHT_FIELDS = setOf("cameraPreflash")
+internal val SHOWN_LIGHT_FIELDS = setOf("cameraPreflash")

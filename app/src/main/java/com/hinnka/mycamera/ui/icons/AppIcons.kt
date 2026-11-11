@@ -493,6 +493,106 @@ object AppIcons {
             "M3 5a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2zM7 7h10v8h-10z"
         )
     }
+
+    // Photo editor: edge icons, sections and values.
+    val RedoLine: ImageVector by lazy { lineIcon("AppIcons.RedoLine", "M15 14l4 -4l-4 -4M19 10h-11a4 4 0 1 0 0 8h1") }
+    val MaximizeLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.MaximizeLine",
+            "M4 8v-2a2 2 0 0 1 2 -2h2M4 16v2a2 2 0 0 0 2 2h2M16 4h2a2 2 0 0 1 2 2v2M16 20h2a2 2 0 0 0 2 -2v-2"
+        )
+    }
+    val MinimizeLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.MinimizeLine",
+            "M15 19v-2a2 2 0 0 1 2 -2h2M15 5v2a2 2 0 0 0 2 2h2M5 15h2a2 2 0 0 1 2 2v2M5 9h2a2 2 0 0 0 2 -2v-2"
+        )
+    }
+    val ContrastLine: ImageVector by lazy {
+        lineIcon("AppIcons.ContrastLine", "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M12 17a5 5 0 0 0 0 -10v10")
+    }
+    val LoaderLine: ImageVector by lazy { lineIcon("AppIcons.LoaderLine", "M12 3a9 9 0 1 0 9 9") }
+    val ArrowLeftLine: ImageVector by lazy { lineIcon("AppIcons.ArrowLeftLine", "M5 12h14M5 12l6 6M5 12l6 -6") }
+    val MovieLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.MovieLine",
+            "M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z" +
+                "M8 4v16M16 4v16M4 8h4M4 16h4M4 12h16M16 8h4M16 16h4"
+        )
+    }
+    val SunLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.SunLine",
+            "M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0M3 12h1m8 -9v1m8 8h1m-9 8v1" +
+                "m-6.4 -15.4l.7 .7m12.1 -.7l-.7 .7m0 11.4l.7 .7m-12.1 -.7l-.7 .7"
+        )
+    }
+    val PaletteLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.PaletteLine",
+            "M12 21a9 9 0 0 1 0 -18c4.97 0 9 3.582 9 8c0 1.06 -.474 2.078 -1.318 2.828" +
+                "c-.844 .75 -1.989 1.172 -3.182 1.172h-2.5a2 2 0 0 0 -1 3.75a1.3 1.3 0 0 1 -1 2.25" +
+                "M7.5 10.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M11.5 7.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" +
+                "M15.5 10.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"
+        )
+    }
+    val SparklesLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.SparklesLine",
+            "M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2z" +
+                "m0 -12a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2z" +
+                "m-7 12a6 6 0 0 1 6 -6a6 6 0 0 1 -6 -6a6 6 0 0 1 -6 6a6 6 0 0 1 6 6z"
+        )
+    }
+    val FocusLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.FocusLine",
+            "M11.5 12a.5 .5 0 1 0 1 0a.5 .5 0 1 0 -1 0M5 12a7 7 0 1 0 14 0a7 7 0 1 0 -14 0" +
+                "M12 3v2M3 12h2M12 19v2M19 12h2"
+        )
+    }
+    val CropLine: ImageVector by lazy { lineIcon("AppIcons.CropLine", "M8 5v10a1 1 0 0 0 1 1h10M5 8h10a1 1 0 0 1 1 1v10") }
+    val FiltersLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.FiltersLine",
+            "M7 8a5 5 0 1 0 10 0a5 5 0 1 0 -10 0M8 11a5 5 0 1 0 3.998 1.997M12.002 19.003a5 5 0 1 0 3.998 -8.003"
+        )
+    }
+    val AdjustmentsLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.AdjustmentsLine",
+            "M12 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0M4 6h8M16 6h4M6 12a2 2 0 1 0 4 0a2 2 0 1 0 -4 0M4 12h2M10 12h10" +
+                "M15 18a2 2 0 1 0 4 0a2 2 0 1 0 -4 0M4 18h11M19 18h1"
+        )
+    }
+    val ExposureLine: ImageVector by lazy { lineIcon("AppIcons.ExposureLine", "M3 5a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2zM4.6 19.4l14.8 -14.8M7 9h4m-2 -2v4M13 16h4") }
+    val TemperatureLine: ImageVector by lazy { lineIcon("AppIcons.TemperatureLine", "M10 13.5a4 4 0 1 0 4 0v-8.5a2 2 0 0 0 -4 0v8.5M10 9h4") }
+    val DropletHalfLine: ImageVector by lazy { lineIcon("AppIcons.DropletHalfLine", "M6.8 11a6 6 0 1 0 10.396 0l-5.197 -8l-5.2 8zM5 14h14") }
+    val DropletLine: ImageVector by lazy { lineIcon("AppIcons.DropletLine", "M7.502 19.423c2.602 2.105 6.395 2.105 8.996 0c2.602 -2.105 3.262 -5.708 1.566 -8.546l-4.89 -7.26c-.42 -.625 -1.287 -.803 -1.936 -.397a1.376 1.376 0 0 0 -.41 .397l-4.893 7.26c-1.695 2.838 -1.035 6.441 1.567 8.546z") }
+    val SwatchLine: ImageVector by lazy { lineIcon("AppIcons.SwatchLine", "M19 3h-4a2 2 0 0 0 -2 2v12a4 4 0 0 0 8 0v-12a2 2 0 0 0 -2 -2M13 7.35l-2 -2a2 2 0 0 0 -2.828 0l-2.828 2.828a2 2 0 0 0 0 2.828l9 9M7.3 13h-2.3a2 2 0 0 0 -2 2v4a2 2 0 0 0 2 2h12M17 17v.01") }
+    val ChartLine: ImageVector by lazy { lineIcon("AppIcons.ChartLine", "M4 19h16M4 15l4 -6l4 2l4 -5l4 4") }
+    val PhotoSensorLine: ImageVector by lazy { lineIcon("AppIcons.PhotoSensorLine", "M17 19h2a2 2 0 0 0 2 -2v-2M3 15v2a2 2 0 0 0 2 2h2M17 5h2a2 2 0 0 1 2 2v2M3 9v-2a2 2 0 0 1 2 -2h2M7 9a1 1 0 0 1 1 -1h8a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-8a1 1 0 0 1 -1 -1z") }
+    val CircleHalfLine: ImageVector by lazy { lineIcon("AppIcons.CircleHalfLine", "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M12 3v18M12 14l7 -7M12 19l8.5 -8.5M12 9l4.5 -4.5") }
+    val SlidersLine: ImageVector by lazy { lineIcon("AppIcons.SlidersLine", "M4 10a2 2 0 1 0 4 0a2 2 0 0 0 -4 0M6 4v4M6 12v8M10 16a2 2 0 1 0 4 0a2 2 0 0 0 -4 0M12 4v10M12 18v2M16 7a2 2 0 1 0 4 0a2 2 0 0 0 -4 0M18 4v1M18 9v11") }
+    val GrainLine: ImageVector by lazy { lineIcon("AppIcons.GrainLine", "M3.5 9.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M8.5 4.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M8.5 14.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M3.5 19.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M13.5 9.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M18.5 4.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M13.5 19.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M18.5 14.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0") }
+    val SunHighLine: ImageVector by lazy { lineIcon("AppIcons.SunHighLine", "M14.828 14.828a4 4 0 1 0 -5.656 -5.656a4 4 0 0 0 5.656 5.656zM6.343 17.657l-1.414 1.414M6.343 6.343l-1.414 -1.414M17.657 6.343l1.414 -1.414M17.657 17.657l1.414 1.414M4 12h-2M12 4v-2M20 12h2M12 20v2") }
+    val HalationLine: ImageVector by lazy { lineIcon("AppIcons.HalationLine", "M8 16a4 4 0 1 1 8 0M3 16h1M20 16h1M5.6 9.6l.7 .7M18.4 9.6l-.7 .7M12 7v1M3 20h18") }
+    val BlurLine: ImageVector by lazy { lineIcon("AppIcons.BlurLine", "M12 21a9.01 9.01 0 0 0 2.32 -.302a9.004 9.004 0 0 0 1.74 -16.733a9 9 0 1 0 -4.06 17.035zM12 3v17M12 12h9M12 9h8M12 6h6M12 18h6M12 15h8") }
+    val DropletOffLine: ImageVector by lazy { lineIcon("AppIcons.DropletOffLine", "M8.454 8.458l-1.554 2.42c-1.546 2.839 -1.146 6.442 1.456 8.546c2.602 2.105 6.395 2.105 8.996 0c1.215 -.983 1.97 -2.274 2.264 -3.65M18 14c-.12 -1.093 -.494 -2.134 -1.064 -3.124l-4.936 -7.876l-1.807 2.877M3 3l18 18") }
+    val RainbowLine: ImageVector by lazy { lineIcon("AppIcons.RainbowLine", "M22 17c0 -5.523 -4.477 -10 -10 -10s-10 4.477 -10 10M18 17a6 6 0 1 0 -12 0M14 17a2 2 0 1 0 -4 0") }
+    val TextureLine: ImageVector by lazy { lineIcon("AppIcons.TextureLine", "M6 3l-3 3M21 18l-3 3M11 3l-8 8M16 3l-13 13M21 3l-18 18M21 8l-13 13M21 13l-8 8") }
+    val ClarityLine: ImageVector by lazy { lineIcon("AppIcons.ClarityLine", "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M12 7a5 5 0 0 0 0 10z") }
+    val WandLine: ImageVector by lazy { lineIcon("AppIcons.WandLine", "M6 21l15 -15l-3 -3l-15 15l3 3M15 6l3 3M9 3a2 2 0 0 0 2 2a2 2 0 0 0 -2 2a2 2 0 0 0 -2 -2a2 2 0 0 0 2 -2M19 13a2 2 0 0 0 2 2a2 2 0 0 0 -2 2a2 2 0 0 0 -2 -2a2 2 0 0 0 2 -2") }
+    val ColorFilterLine: ImageVector by lazy { lineIcon("AppIcons.ColorFilterLine", "M13.58 13.79c.27 .68 .42 1.43 .42 2.21c0 1.77 -.77 3.37 -2 4.46a5.94 5.94 0 0 1 -4 1.54c-3.31 0 -6 -2.69 -6 -6c0 -2.76 1.88 -5.1 4.42 -5.79M17.58 10.21c2.54 .69 4.42 3.03 4.42 5.79c0 3.31 -2.69 6 -6 6a5.94 5.94 0 0 1 -4 -1.54M6 8a6 6 0 1 0 12 0a6 6 0 1 0 -12 0") }
+    val FocusCenteredLine: ImageVector by lazy { lineIcon("AppIcons.FocusCenteredLine", "M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M4 8v-2a2 2 0 0 1 2 -2h2M4 16v2a2 2 0 0 0 2 2h2M16 4h2a2 2 0 0 1 2 2v2M16 20h2a2 2 0 0 0 2 -2v-2") }
+    val CirclesLine: ImageVector by lazy { lineIcon("AppIcons.CirclesLine", "M3.5 7a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0M13.5 7a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0M8.5 17a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0") }
+    val MoodSmileLine: ImageVector by lazy { lineIcon("AppIcons.MoodSmileLine", "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M9 10h.01M15 10h.01M9.5 15a3.5 3.5 0 0 0 5 0") }
+    val CircleLine: ImageVector by lazy { lineIcon("AppIcons.CircleLine", "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0") }
+    val CircleDotLine: ImageVector by lazy { lineIcon("AppIcons.CircleDotLine", "M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0") }
+    val RotateClockwiseLine: ImageVector by lazy { lineIcon("AppIcons.RotateClockwiseLine", "M4.05 11a8 8 0 1 1 .5 4m-.5 5v-5h5") }
+    val BookmarkLine: ImageVector by lazy {
+        lineIcon("AppIcons.BookmarkLine", "M18 7v14l-6 -4l-6 4v-14a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4z")
+    }
     // Two overlapping frames: several shots in one picture.
     val MultiExposureLine: ImageVector by lazy {
         lineIcon(

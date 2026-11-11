@@ -28,6 +28,29 @@ data class GyroExposureWindow(
     }
 }
 
+/**
+ * Span a frame's gyro window should cover. Some HALs (for example the Sony XZ1 Compact front
+ * camera) report neither SENSOR_EXPOSURE_TIME nor SENSOR_FRAME_DURATION; the exposure then lies
+ * within the frame interval, so the gap to a neighbouring burst frame stands in for it.
+ */
+internal object GyroWindowSpan {
+    fun exposureNs(
+        resultExposureNs: Long?,
+        manualRequestExposureNs: Long?,
+        frameDurationNs: Long?,
+        startTimestampNs: Long,
+        neighbourStartTimestampsNs: List<Long?>,
+    ): Long {
+        val frameGapNs = neighbourStartTimestampsNs
+            .mapNotNull { it?.let { neighbour -> kotlin.math.abs(startTimestampNs - neighbour) } }
+            .filter { it > 0L }
+            .minOrNull()
+        return listOfNotNull(resultExposureNs, manualRequestExposureNs, frameDurationNs, frameGapNs)
+            .firstOrNull { it > 0L }
+            ?: 0L
+    }
+}
+
 internal data class GyroSample(
     val timestampNs: Long,
     val x: Float,

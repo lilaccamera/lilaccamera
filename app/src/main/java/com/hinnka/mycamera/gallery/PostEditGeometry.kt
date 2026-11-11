@@ -537,6 +537,29 @@ object PostEditGeometry {
             ((sourceY + height / 2.0) / height).toFloat().coerceIn(0f, 1f)
     }
 
+    /** The inverse of [mapStraightenedPointToSource]: a pre-straighten point in the expanded straightened bitmap. */
+    fun mapSourcePointToStraightened(
+        x: Float,
+        y: Float,
+        width: Int,
+        height: Int,
+        straightenDegrees: Float
+    ): Pair<Float, Float> {
+        if (width <= 0 || height <= 0) return x to y
+        val angle = Math.toRadians(normalizeStraightenDegrees(straightenDegrees).toDouble())
+        if (abs(angle) < STRAIGHTEN_EPSILON) return x to y
+
+        val cosine = cos(angle)
+        val sine = sin(angle)
+        val (outputWidth, outputHeight) = expandedDimensions(width, height, straightenDegrees)
+        val sourceX = x * width - width / 2.0
+        val sourceY = y * height - height / 2.0
+        val rotatedX = cosine * sourceX - sine * sourceY
+        val rotatedY = sine * sourceX + cosine * sourceY
+        return ((rotatedX + outputWidth / 2.0) / outputWidth).toFloat() to
+            ((rotatedY + outputHeight / 2.0) / outputHeight).toFloat()
+    }
+
     /**
      * Maps a point selected in the rotated output back to the unrotated image
      * coordinates used by effects that run before post-edit geometry.
@@ -565,6 +588,22 @@ object PostEditGeometry {
             270 -> (1f - y) to transformedX
             else -> transformedX to y
         }
+    }
+
+    /** The inverse of [mapEditedPointToSource]: where a source point lies after rotation and mirroring. */
+    fun mapSourcePointToEdited(
+        x: Float,
+        y: Float,
+        rotationDegrees: Int,
+        mirrorHorizontal: Boolean
+    ): Pair<Float, Float> {
+        val (transformedX, editedY) = when (normalizeRotation(rotationDegrees)) {
+            90 -> (1f - y) to x
+            180 -> (1f - x) to (1f - y)
+            270 -> y to (1f - x)
+            else -> x to y
+        }
+        return (if (mirrorHorizontal) 1f - transformedX else transformedX) to editedY
     }
 
     fun mirrorNormalizedRectHorizontally(rect: RectF): RectF {

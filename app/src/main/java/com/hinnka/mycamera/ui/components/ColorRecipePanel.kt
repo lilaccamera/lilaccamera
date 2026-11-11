@@ -106,7 +106,7 @@ private enum class BasicRecipeControl(
 private val basicRecipeControls = BasicRecipeControl.entries
 
 /** 曝光参数常见 1/3 EV 档位列表 */
-private val exposureSteps = listOf(
+internal val exposureSteps = listOf(
     -2.0f, -1.7f, -1.3f, -1.0f, -0.7f, -0.3f,
     0.0f,
     0.3f, 0.7f, 1.0f, 1.3f, 1.7f, 2.0f
@@ -651,17 +651,17 @@ private fun basicRawValue(control: BasicRecipeControl, displayValue: Float): Flo
     }
 }
 
-private fun RecipeParam.usesSignedDisplayScale(): Boolean =
+internal fun RecipeParam.usesSignedDisplayScale(): Boolean =
     (minValue < 0f && maxValue > 0f) ||
         (defaultValue > minValue && defaultValue < maxValue)
 
-private fun RecipeParam.displayValueRange(): ClosedFloatingPointRange<Float> = when {
+internal fun RecipeParam.displayValueRange(): ClosedFloatingPointRange<Float> = when {
     this == RecipeParam.EXPOSURE -> minValue..maxValue
     usesSignedDisplayScale() -> -10f..10f
     else -> 0f..10f
 }
 
-private fun RecipeParam.toDisplayValue(rawValue: Float): Float {
+internal fun RecipeParam.toDisplayValue(rawValue: Float): Float {
     val value = clamp(rawValue)
     if (this == RecipeParam.EXPOSURE) return value
     if (!usesSignedDisplayScale()) {
@@ -677,7 +677,7 @@ private fun RecipeParam.toDisplayValue(rawValue: Float): Float {
     }
 }
 
-private fun RecipeParam.fromDisplayValue(displayValue: Float): Float {
+internal fun RecipeParam.fromDisplayValue(displayValue: Float): Float {
     if (this == RecipeParam.EXPOSURE) return clamp(displayValue)
     if (!usesSignedDisplayScale()) {
         val fraction = (displayValue / 10f).coerceIn(0f, 1f)
@@ -700,7 +700,7 @@ private fun formatBasicDisplayValue(control: BasicRecipeControl, value: Float): 
     return if (intVal > 0 && basicDisplayRange(control).start < 0f) "+$intVal" else "$intVal"
 }
 
-private fun formatExposureValue(value: Float): String {
+internal fun formatExposureValue(value: Float): String {
     return if (abs(value) < 0.04f) "0.0" else String.format(Locale.getDefault(), "%+.1f", value)
 }
 
@@ -1569,7 +1569,7 @@ fun ColorRecipeSlider(
 /**
  * 获取参数对应的强调色
  */
-private fun getParamColor(param: RecipeParam): Color {
+internal fun getParamColor(param: RecipeParam): Color {
     return when (param) {
         RecipeParam.EXPOSURE -> Color(0xFFFFEB3B)
         RecipeParam.TONALITY -> Color(0xFFFFC46B)

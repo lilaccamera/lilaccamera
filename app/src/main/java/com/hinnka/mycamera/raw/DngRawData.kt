@@ -73,6 +73,9 @@ data class DngRawData @Keep constructor(
     @Volatile
     private var isClosed = false
 
+    /** False for a copy whose [rawData] the JVM allocated (the editor's half-size preview): nothing native to free. */
+    internal var ownsNativeBuffer = true
+
     /**
      * 释放 native 堆内存
      *
@@ -83,7 +86,7 @@ data class DngRawData @Keep constructor(
         if (!isClosed) {
             synchronized(this) {
                 if (!isClosed) {
-                    freeNativeBuffer(rawData)
+                    if (ownsNativeBuffer) freeNativeBuffer(rawData)
                     isClosed = true
                 }
             }

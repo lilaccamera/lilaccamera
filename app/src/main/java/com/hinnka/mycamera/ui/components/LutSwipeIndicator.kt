@@ -208,6 +208,30 @@ class LutSwipeState internal constructor(
         }
     }
 
+    /**
+     * Shows [name] in the middle of the picture as after a swipe, without the curtain: for a look picked some
+     * other way (a thumbnail, a preset), so its full name can be read.
+     */
+    fun announce(name: String) {
+        settleJob?.cancel()
+        reset()
+        committedName = name
+        active = true
+        committing = true
+        // A curtain wider than any picture puts the label in the middle; it is never drawn.
+        curtainOffset = -1e6f
+        curtainAlpha = 0f
+        settleJob = coroutineScope.launch {
+            delay(CommittedLabelHoldMillis)
+            animate(
+                initialValue = 1f,
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = CommittedLabelFadeMillis),
+            ) { value, _ -> labelAlpha = value }
+            reset()
+        }
+    }
+
     /** 取消：幕布弹回。 */
     fun cancel() {
         if (!active) return

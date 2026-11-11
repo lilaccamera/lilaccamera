@@ -492,6 +492,11 @@ data class CameraState(
         return availableCameras.find { it.cameraId == currentCameraId }
     }
 
+    /** The front camera has no flash LED, so Flash on lights the face with the screen instead. */
+    val usesScreenFlash: Boolean
+        get() = flashMode == 1 && captureMode == CaptureMode.PHOTO &&
+            getCurrentCameraInfo()?.lensType == LensType.FRONT
+
     /**
      * 获取曝光补偿范围
      */

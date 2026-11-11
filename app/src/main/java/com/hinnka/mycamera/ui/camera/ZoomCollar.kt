@@ -298,6 +298,10 @@ internal fun ZoomCollar(
         val endStyle = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium)
         val wLayout = remember(textMeasurer) { textMeasurer.measure("W", endStyle) }
         val tLayout = remember(textMeasurer) { textMeasurer.measure("T", endStyle) }
+        val lineColor = CameraControlsLayoutDefaults.LineColor.onFooter()
+        val litColor = Color.White.onFooter()
+        // The band's shade and the knob's glow swap places on a white footer.
+        val light = LocalLightFooter.current
         Spacer(
             Modifier
                 .fillMaxSize()
@@ -308,9 +312,9 @@ internal fun ZoomCollar(
                     val stroke = Stroke(CameraControlsLayoutDefaults.LineWidth.toPx())
                     val mid = MidRadius.toPx()
                     onDrawBehind {
-                        drawPath(band, Color.Black.copy(alpha = 0.4f))
-                        drawPath(band, CameraControlsLayoutDefaults.LineColor, style = stroke)
-                        drawPath(knob, Color.White.copy(alpha = 0.16f))
+                        drawPath(band, (if (light) Color.White else Color.Black).copy(alpha = 0.4f))
+                        drawPath(band, lineColor, style = stroke)
+                        drawPath(knob, (if (light) Color.Black else Color.White).copy(alpha = 0.16f))
                         for ((layout, angle, lit) in listOf(
                             Triple(wLayout, -END_ANGLE, turn < -0.05f),
                             Triple(tLayout, END_ANGLE, turn > 0.05f)
@@ -319,7 +323,7 @@ internal fun ZoomCollar(
                             rotate(angle, pivot = p) {
                                 drawText(
                                     layout,
-                                    color = if (lit) Color.White else EndColor,
+                                    color = if (lit) litColor else EndColor,
                                     topLeft = p - Offset(layout.size.width / 2f, layout.size.height / 2f)
                                 )
                             }
@@ -337,7 +341,7 @@ internal fun ZoomCollar(
         ) {
             Text(
                 text = label,
-                color = Color.White,
+                color = litColor,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,

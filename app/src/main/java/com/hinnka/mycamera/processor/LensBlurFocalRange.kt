@@ -50,7 +50,7 @@ internal data class LensBlurFocalRange(
          * Point focus: `GetAreaDepthRangeFromNegative` (p1 / p99 of the area)
          * followed by `cr_1d_range::SetFromSample(lo, hi, 0.2, 0.5, 0.8, 0.1)`.
          */
-        fun forPoint(depth: RelativeDepthMap, focusX: Float, focusY: Float): LensBlurFocalRange {
+        fun forPoint(depth: RelativeDepthMap, focusX: Float, focusY: Float, widthScale: Float = 1f): LensBlurFocalRange {
             val radius = max((min(depth.width, depth.height) * FOCUS_AREA_RADIUS).roundToInt(), 1)
             val centerX = (focusX.coerceIn(0f, 1f) * (depth.width - 1)).roundToInt()
             val centerY = (focusY.coerceIn(0f, 1f) * (depth.height - 1)).roundToInt()
@@ -63,7 +63,7 @@ internal data class LensBlurFocalRange(
                 }
             }
             val (lo, hi) = if (total > 0f) percentileRange(histogram, total) else 0f to 0f
-            return fromSample(lo, hi)
+            return fromSample(lo, hi).scaledWidth(widthScale)
         }
 
         /** The renderer's relative disparity is nearer-is-larger; Lens Blur depth is nearer-is-smaller. */
@@ -110,6 +110,19 @@ internal data class LensBlurFocalRange(
                 .limitSize(SAMPLE_MIN_SIZE, SAMPLE_MAX_SIZE)
                 .rounded()
         }
+    }
+
+    /**
+     * The same range with its in-focus width and both ramps times [scale], around the same middle: a chosen
+     * depth of field. The in-focus width stays between 5 % and 90 % of the depth range.
+     */
+    private fun scaledWidth(scale: Float): LensBlurFocalRange {
+        if (scale == 1f) return this
+        val middle = (lowerFull + upperFull) / 2f
+        val half = ((upperFull - lowerFull) * scale).coerceIn(0.05f, 0.9f) / 2f
+        val r1 = middle - half
+        val r2 = middle + half
+        return LensBlurFocalRange(r1 - (lowerFull - lowerNone) * scale, r1, r2, r2 + (upperNone - upperFull) * scale).rounded()
     }
 
     /** `cr_1d_range::LimitSize`: keeps the in-focus width within [minSize, maxSize] inside [0, 1]. */

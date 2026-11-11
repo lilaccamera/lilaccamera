@@ -514,7 +514,7 @@ private fun DrawScope.drawImageHistogram(
  * 如果由于邻近点距离太近而导致 minX > maxX，则退而使用极小缓冲值 (0.0001f)。
  * 如果仍无法满足，则直接限制在两个相邻点之间，或返回相邻点的中点。
  */
-private fun safeCoerceX(
+internal fun safeCoerceX(
     rawX: Float,
     dragIdx: Int,
     current: List<Pair<Float, Float>>
@@ -535,7 +535,7 @@ private fun safeCoerceX(
 }
 
 /** 解析 FloatArray 为控制点列表 */
-private fun parsePoints(points: FloatArray): List<Pair<Float, Float>> {
+internal fun parsePoints(points: FloatArray): List<Pair<Float, Float>> {
     val n = points.size / 2
     return (0 until n).map { Pair(points[it * 2], points[it * 2 + 1]) }.sortedBy { it.first }
 }
@@ -544,7 +544,7 @@ private fun parsePoints(points: FloatArray): List<Pair<Float, Float>> {
 fun identityPoints(): FloatArray = floatArrayOf(0f, 0f, 1f, 1f)
 
 /** 将控制点列表转换为 FloatArray */
-private fun List<Pair<Float, Float>>.toFloatArray(): FloatArray =
+internal fun List<Pair<Float, Float>>.toFloatArray(): FloatArray =
     FloatArray(size * 2) { i -> if (i % 2 == 0) this[i / 2].first else this[i / 2].second }
 
 /** 恒等曲线返回 null，否则返回 FloatArray */
@@ -619,4 +619,4 @@ fun ColorRecipeParams.getCurvePoints(channel: CurveChannel): FloatArray? = when 
     CurveChannel.BLUE -> blueCurvePoints
 }
 
-private const val CURVE_DRAG_SENSITIVITY = 0.55f
+internal const val CURVE_DRAG_SENSITIVITY = 0.55f

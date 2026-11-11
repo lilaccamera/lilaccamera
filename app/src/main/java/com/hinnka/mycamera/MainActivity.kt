@@ -1164,7 +1164,12 @@ fun NavigationHost(
                     imageFrame = backStackEntry.arguments?.getBoolean("imageFrame") ?: false,
                     onBack = { navController.popBackStack() },
                     onSaved = { savedId ->
-                        cameraViewModel.setFrame(savedId)
+                        // Opened from the photo editor, the saved frame (a copy of a built-in one) is the photo's.
+                        if (navController.previousBackStackEntry?.destination?.route == Routes.PHOTO_EDIT) {
+                            galleryViewModel.setEditFrame(savedId)
+                        } else {
+                            cameraViewModel.setFrame(savedId)
+                        }
                         navController.popBackStack()
                     }
                 )

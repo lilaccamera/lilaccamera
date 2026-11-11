@@ -17,6 +17,7 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import androidx.core.graphics.createBitmap
 import androidx.exifinterface.media.ExifInterface
+import com.hinnka.mycamera.camera.RawBlackBorderCrop
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.CaptureInfo
 import com.hinnka.mycamera.camera.HdrBracketConfig
@@ -45,6 +46,7 @@ import com.hinnka.mycamera.processor.MultiFrameStacker
 import com.hinnka.mycamera.raw.RawNoiseProfileManager
 import com.hinnka.mycamera.processor.RawStackBufferLayout
 import com.hinnka.mycamera.processor.RawStackFrame
+import com.hinnka.mycamera.processor.ShadowCastFix
 import com.hinnka.mycamera.processor.YuvHdrStackFrame
 import com.hinnka.mycamera.processor.YuvHdrStackFrameRole
 import com.hinnka.mycamera.raw.DngEmbeddedProfile
@@ -2163,6 +2165,10 @@ object GalleryManager {
             focusPointY,
             aperture,
             BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
+            quickBlur = com.hinnka.mycamera.processor.PortraitBlurMetadata.quickBlur(metadata),
+            focalWidthScale = com.hinnka.mycamera.processor.PortraitBlurMetadata.focalWidthScale(
+                com.hinnka.mycamera.processor.PortraitBlurMetadata.depthOfField(metadata)
+            ),
         )
         saveBokehPhoto(context, photoId, bokeh)
         return bokeh
@@ -2210,6 +2216,7 @@ object GalleryManager {
             PLog.d(TAG, "saveYuvPhoto processAndToBitmap took ${nativeProcessElapsed}ms, success=${processedPreview != null}")
 
             previewBitmap = processedPreview ?: return@withContext
+            ShadowCastFix.apply(checkNotNull(previewBitmap), photoDir) // before the flip, which returns a read-only copy
 
             if (metadata.isMirrored) {
                 val sourcePreview = checkNotNull(previewBitmap)
@@ -3362,6 +3369,7 @@ object GalleryManager {
             )
 
             if (result == null) return@withContext
+            ShadowCastFix.apply(result, photoDir) // before the flip, which returns a read-only copy
 
             if (metadata.isMirrored) {
                 result = BitmapUtils.flipHorizontal(result)
@@ -6116,6 +6124,100 @@ object GalleryManager {
         }
     }
 
+    /**
+     * Develops the photo's DNG with [meta]'s RAW settings. [preview]: from the mosaic binned to half size, with the
+     * noise reduction halved (binning already halves the noise), for the editor's screen; nothing is written.
+     */
+    private suspend fun developRaw(
+        context: Context,
+        dngFile: File,
+        meta: MediaMetadata?,
+        forceRegeneratePhotonPgtm: Boolean,
+        preview: Boolean,
+        onMetadata: (RawMetadata) -> Unit,
+    ): Bitmap? {
+        val rawMetadata = meta ?: MediaMetadata()
+        val noiseScale = if (preview) 0.5f else 1f
+        val rawNoiseReduction = resolveNoiseReduction(rawMetadata, 0f) * noiseScale
+        val rawChromaNoiseReduction = (rawMetadata.chromaNoiseReduction
+            ?: ChromaDenoiseDefaults.RAW_CAPTURE_DEFAULT_STRENGTH) * noiseScale
+        // The preview's sensor is half the size: so are the pixel crops.
+        val cropRegion = meta?.cropRegion?.let { if (preview) Rect(it.left / 2, it.top / 2, it.right / 2, it.bottom / 2) else it }
+        val borderCrop = rawMetadata.rawBlackBorderCrop.let {
+            if (preview) RawBlackBorderCrop(it.leftPx / 2, it.topPx / 2, it.rightPx / 2, it.bottomPx / 2) else it
+        }
+        return RawDemosaicProcessor.getInstance().process(
+            context,
+            dngFile.absolutePath, meta?.ratio, cropRegion, 0,
+            rawExposureCompensation = meta?.rawExposureCompensation ?: 0f,
+            rawHighlightsAdjustment = meta?.rawHighlightsAdjustment ?: 0f,
+            rawShadowsAdjustment = meta?.rawShadowsAdjustment ?: 0f,
+            rawBlackPointCorrection = meta?.rawBlackPointCorrection ?: 0f,
+            rawWhitePointCorrection = meta?.rawWhitePointCorrection ?: 0f,
+            applyLensShadingCorrection = resolveRawLensShadingCorrectionEnabled(context, meta),
+            mgcTuningSnr = RawMgcTuningSnr.read(rawMetadata.customProperties),
+            rawBlackLevelMode = meta?.rawBlackLevelMode,
+            rawCustomBlackLevel = meta?.rawCustomBlackLevel,
+            rawWhiteLevelMode = meta?.rawWhiteLevelMode,
+            rawCustomWhiteLevel = meta?.rawCustomWhiteLevel,
+            sharpeningValue = meta?.sharpening
+                ?: RawSharpeningDefaults.DEFAULT_STRENGTH,
+            denoiseValue = rawNoiseReduction,
+            chromaDenoiseValue = rawChromaNoiseReduction,
+            rawDcpId = meta?.rawDcpId,
+            rawEmbeddedDngProfileId = meta?.rawEmbeddedDngProfileId,
+            rawNoiseProfileId = resolveRawNoiseProfileId(context, meta),
+            rawHncsProfileId = meta?.rawHncsProfileId,
+            rawHncsRenderIntent = meta?.rawHncsRenderIntent
+                ?: MediaMetadata().rawHncsRenderIntent,
+            rawHncsFilmCurveMode = meta?.rawHncsFilmCurveMode
+                ?: MediaMetadata().rawHncsFilmCurveMode,
+            rawRenderingEngine = meta?.rawRenderingEngine ?: MediaMetadata().rawRenderingEngine,
+            rawToneMappingParameters = meta?.rawToneMappingParameters ?: MediaMetadata().rawToneMappingParameters,
+            forceRegeneratePhotonPgtm = forceRegeneratePhotonPgtm,
+            photonHdrRatio = RawPhotonHdrMetadata.read(
+                rawMetadata.customProperties,
+            ),
+            photonSourceToShortGain = RawPhotonHdrMetadata.readFinalShortGain(
+                rawMetadata.customProperties,
+            ),
+            photonHdrNetPostExposureEv = RawPhotonHdrMetadata.readPostExposureEv(
+                rawMetadata.customProperties,
+            ),
+            photonHdrNetInputExposureEv = RawPhotonHdrMetadata.readInputExposureEv(
+                rawMetadata.customProperties,
+            ),
+            rawCfaCorrectionMode = meta?.rawCfaCorrectionMode,
+            rawBlackBorderCrop = borderCrop,
+            rawOutputScale = RawOutputScaling.read(rawMetadata.customProperties),
+            rawOutputUpscaleMode = rawMetadata.rawOutputUpscaleMode,
+            rawPhysicalOutputSize = RawDigitalZoomResampling.readPhysicalSize(rawMetadata.customProperties),
+            spectralFilmStock = meta?.spectralFilmStock,
+            spectralFilmPrint = meta?.spectralFilmPrint,
+            spectralFilmTuning = SpectralFilmTuning(
+                cDensityGain = meta?.spectralFilmCDensityGain ?: 1f,
+                mDensityGain = meta?.spectralFilmMDensityGain ?: 1f,
+                yDensityGain = meta?.spectralFilmYDensityGain ?: 1f
+            ),
+            fotufilmDocument = FotufilmDocumentStorage.decode(meta?.fotufilmDocument, "photo metadata"),
+            previewHalfSize = preview,
+            onMetadata = onMetadata,
+        )
+    }
+
+    /**
+     * The editor's RAW preview: [meta] (the edit state, not saved) developed at half size, or at full size for the
+     * HD preview ([halfSize] false); writes nothing.
+     */
+    suspend fun developRawPreview(context: Context, photoId: String, meta: MediaMetadata, halfSize: Boolean = true): Bitmap? =
+        withContext(Dispatchers.IO) {
+            val dngFile = File(getPhotoDir(context, photoId, true), DNG_FILE)
+            if (!dngFile.exists()) return@withContext null
+            runCatching { developRaw(context, dngFile, meta, forceRegeneratePhotonPgtm = false, preview = halfSize) {} }
+                .onFailure { PLog.e(TAG, "RAW preview develop failed for $photoId", it) }
+                .getOrNull()
+        }
+
     suspend fun refreshRawPreview(
         context: Context,
         photoId: String,
@@ -6141,64 +6243,9 @@ object GalleryManager {
                 val rawNoiseReduction = resolveNoiseReduction(rawMetadata, 0f)
                 val rawChromaNoiseReduction = rawMetadata.chromaNoiseReduction
                     ?: ChromaDenoiseDefaults.RAW_CAPTURE_DEFAULT_STRENGTH
-                val processedBitmap = RawDemosaicProcessor.getInstance().process(
-                    context,
-                    dngFile.absolutePath, metadata?.ratio, metadata?.cropRegion, 0,
-                    rawExposureCompensation = updatedMetadata?.rawExposureCompensation ?: 0f,
-                    rawHighlightsAdjustment = updatedMetadata?.rawHighlightsAdjustment ?: 0f,
-                    rawShadowsAdjustment = updatedMetadata?.rawShadowsAdjustment ?: 0f,
-                    rawBlackPointCorrection = updatedMetadata?.rawBlackPointCorrection ?: 0f,
-                    rawWhitePointCorrection = updatedMetadata?.rawWhitePointCorrection ?: 0f,
-                    applyLensShadingCorrection = resolveRawLensShadingCorrectionEnabled(context, updatedMetadata),
-                    mgcTuningSnr = RawMgcTuningSnr.read(rawMetadata.customProperties),
-                    rawBlackLevelMode = updatedMetadata?.rawBlackLevelMode,
-                    rawCustomBlackLevel = updatedMetadata?.rawCustomBlackLevel,
-                    rawWhiteLevelMode = updatedMetadata?.rawWhiteLevelMode,
-                    rawCustomWhiteLevel = updatedMetadata?.rawCustomWhiteLevel,
-                    sharpeningValue = updatedMetadata?.sharpening
-                        ?: RawSharpeningDefaults.DEFAULT_STRENGTH,
-                    denoiseValue = rawNoiseReduction,
-                    chromaDenoiseValue = rawChromaNoiseReduction,
-                    rawDcpId = updatedMetadata?.rawDcpId,
-                    rawEmbeddedDngProfileId = updatedMetadata?.rawEmbeddedDngProfileId,
-                    rawNoiseProfileId = resolveRawNoiseProfileId(context, updatedMetadata),
-                    rawHncsProfileId = updatedMetadata?.rawHncsProfileId,
-                    rawHncsRenderIntent = updatedMetadata?.rawHncsRenderIntent
-                        ?: MediaMetadata().rawHncsRenderIntent,
-                    rawHncsFilmCurveMode = updatedMetadata?.rawHncsFilmCurveMode
-                        ?: MediaMetadata().rawHncsFilmCurveMode,
-                    rawRenderingEngine = updatedMetadata?.rawRenderingEngine ?: MediaMetadata().rawRenderingEngine,
-                    rawToneMappingParameters = updatedMetadata?.rawToneMappingParameters ?: MediaMetadata().rawToneMappingParameters,
-                    forceRegeneratePhotonPgtm = forceRegeneratePhotonPgtm,
-                    photonHdrRatio = RawPhotonHdrMetadata.read(
-                        rawMetadata.customProperties,
-                    ),
-                    photonSourceToShortGain = RawPhotonHdrMetadata.readFinalShortGain(
-                        rawMetadata.customProperties,
-                    ),
-                    photonHdrNetPostExposureEv = RawPhotonHdrMetadata.readPostExposureEv(
-                        rawMetadata.customProperties,
-                    ),
-                    photonHdrNetInputExposureEv = RawPhotonHdrMetadata.readInputExposureEv(
-                        rawMetadata.customProperties,
-                    ),
-                    rawCfaCorrectionMode = updatedMetadata?.rawCfaCorrectionMode,
-                    rawBlackBorderCrop = rawMetadata.rawBlackBorderCrop,
-                    rawOutputScale = RawOutputScaling.read(rawMetadata.customProperties),
-                    rawOutputUpscaleMode = rawMetadata.rawOutputUpscaleMode,
-                    rawPhysicalOutputSize = RawDigitalZoomResampling.readPhysicalSize(rawMetadata.customProperties),
-                    spectralFilmStock = updatedMetadata?.spectralFilmStock,
-                    spectralFilmPrint = updatedMetadata?.spectralFilmPrint,
-                    spectralFilmTuning = SpectralFilmTuning(
-                        cDensityGain = updatedMetadata?.spectralFilmCDensityGain ?: 1f,
-                        mDensityGain = updatedMetadata?.spectralFilmMDensityGain ?: 1f,
-                        yDensityGain = updatedMetadata?.spectralFilmYDensityGain ?: 1f
-                    ),
-                    fotufilmDocument = FotufilmDocumentStorage.decode(updatedMetadata?.fotufilmDocument, "photo metadata"),
-                    onMetadata = { raw ->
-                        updatedMetadata = updatedMetadata?.merge(raw) ?: MediaMetadata().merge(raw)
-                    }
-                )
+                val processedBitmap = developRaw(context, dngFile, updatedMetadata, forceRegeneratePhotonPgtm, preview = false) { raw ->
+                    updatedMetadata = updatedMetadata?.merge(raw) ?: MediaMetadata().merge(raw)
+                }
 
                 if (processedBitmap != null) {
                     // 先写临时文件再替换，避免详情页或 HDR 任务读到半写入的 original.jpg。

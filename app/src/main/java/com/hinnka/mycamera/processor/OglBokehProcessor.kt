@@ -151,20 +151,29 @@ class OglBokehProcessor {
         aperture: Float,
         bokehStyle: BokehStyle = BokehStyle.DEFAULT,
         focusOnSubject: Boolean = true,
+        focalRangeFromPoint: Boolean = false,
+        focalWidthScale: Float = 1f,
+        /** For a smaller copy of a photo: the photo's own long edge, so the blur works at the photo's size. */
+        photoLongEdge: Int? = null,
+        /** Asked between bands: true stops the render there (a newer blur replaced it). */
+        isCancelled: () -> Boolean = { false },
     ): Bitmap? {
         val startedAtMs = SystemClock.elapsedRealtime()
         try {
             val halfFloatOutput = originalImage.config == Bitmap.Config.RGBA_F16
             val linearInput = originalImage.colorSpace?.id ==
                 ColorSpace.get(ColorSpace.Named.LINEAR_EXTENDED_SRGB).id
-            val (workingWidth, workingHeight) = resolveBokehRenderSize(originalImage.width, originalImage.height)
+            val (workingWidth, workingHeight) = resolveBokehRenderSize(originalImage.width, originalImage.height, photoLongEdge)
             val originalLongEdge = max(originalImage.width, originalImage.height)
             val radiusScale = max(workingWidth, workingHeight).toFloat() / originalLongEdge
             val params = LensBlurParams.forAperture(aperture)
             val layout = LensBlurLayout(originalLongEdge, radiusScale, params)
             val depthMap = DepthLayerMasks.median3(lowResDepthMap)
-            val focalRange = (if (focusOnSubject) LensBlurFocalRange.forSubject(depthMap, subjectMask) else null)
-                ?: LensBlurFocalRange.forPoint(depthMap, focusX, focusY)
+            // With a real depth map, the in-focus depths come from around the focus point even when the focus is on
+            // the subject (the subject itself stays sharp through its mask): the subject's whole depth range
+            // reaches far into the background when the cut-out strays, and then the background barely blurs.
+            val focalRange = (if (focusOnSubject && !focalRangeFromPoint) LensBlurFocalRange.forSubject(depthMap, subjectMask) else null)
+                ?: LensBlurFocalRange.forPoint(depthMap, focusX, focusY, focalWidthScale)
             // PSF banks are first read by the scatter and layer interiors by the
             // layered depth: both are built on CPU workers while the GPU starts.
             val banks = layout.domains.map { domain ->
@@ -264,6 +273,7 @@ class OglBokehProcessor {
                 renderStrips(
                     targets, layout, params, style, nearBands, farBands, inputTex, guideTex, guideScale,
                     workingLod, workingWidth, workingHeight, nearTex, farTex, radiusScale, originalImage, linearInput,
+                    isCancelled,
                 )
                 release(guideTex)
                 val highlightTex = style?.let {
@@ -918,6 +928,7 @@ class OglBokehProcessor {
         radiusScale: Float,
         originalImage: Bitmap,
         linearInput: Boolean,
+        isCancelled: () -> Boolean = { false },
     ) {
         val stripPixels = width.toLong() * STRIP_ROWS
         val deltaBuffers = targets.map { target ->
@@ -985,6 +996,12 @@ class OglBokehProcessor {
                     )
                     // Submit each band on its own so the UI renderer is not queued behind a strip.
                     GlesGpuScheduler.yieldToUiRenderer()
+                    // A replaced blur stops here, with the GPU idle: the band ended in a barrier that waits for it
+                    // on this phone. The render's cleanup releases everything.
+                    if (isCancelled()) {
+                        GLES30.glFinish()
+                        throw java.util.concurrent.CancellationException("lens blur replaced by a newer one")
+                    }
                 }
             }
             store(nearBuffer, farBuffer, nearTex, farTex, width, stripRow, stripRows)
@@ -1263,14 +1280,17 @@ class OglBokehProcessor {
         return resultBitmap
     }
 
-    private fun resolveBokehRenderSize(width: Int, height: Int): Pair<Int, Int> {
+    private fun resolveBokehRenderSize(width: Int, height: Int, photoLongEdge: Int? = null): Pair<Int, Int> {
         val maxEdge = maxOf(width, height)
+        // The editor's 2048 px copy works at the size its photo would (1536 px for 19 MP): at about 620 px the
+        // Adreno 540 faulted mid-render and left black parts, where the photo's own size renders clean.
+        val scaleEdge = photoLongEdge?.coerceAtLeast(maxEdge) ?: maxEdge
         // On the XZ1 Compact a picture under about 2000 px (the 2 MP front camera) was blurred in one
         // full-size pass with radii up to 44 px; that pass outran the GPU's command timeout, the driver
         // reset the GPU and every later GL call in the app failed. The blur is computed at most at the
         // scale a 19 MP photo uses, which keeps each pass as short as for the back camera.
         val limit = if (DeviceQuirks.isLilac) {
-            minOf(MAX_BOKEH_RENDER_EDGE, (maxEdge * LILAC_MAX_RENDER_SCALE).roundToInt().coerceAtLeast(1))
+            minOf(MAX_BOKEH_RENDER_EDGE, (scaleEdge * LILAC_MAX_RENDER_SCALE).roundToInt().coerceAtLeast(1))
         } else {
             MAX_BOKEH_RENDER_EDGE
         }

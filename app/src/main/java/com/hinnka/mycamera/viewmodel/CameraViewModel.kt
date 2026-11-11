@@ -1854,6 +1854,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
+        cameraController.onPreviewStreamActive = { active -> glSurfaceView?.setCameraStreamActive(active) }
+
         cameraController.onCameraError = { code, message, canRetry ->
             // 只记录错误日志，不在这里重试打开相机
             // 相机恢复应该由 CameraScreen 的 ON_RESUME 生命周期事件处理
@@ -3391,7 +3393,44 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         multipleExposure = multipleExposureState.enabled,
     )
 
+    /** True while the screen lights the face for a front camera shot. */
+    var screenFlashLit by mutableStateOf(false)
+        private set
+    private var screenFlashJob: Job? = null
+
     private fun submitPhotoCapture() {
+        if (!state.value.usesScreenFlash) return submitPhotoCaptureNow()
+        if (state.value.isCapturing || screenFlashJob?.isActive == true) return
+        screenFlashJob = viewModelScope.launch {
+            screenFlashLit = true
+            try {
+                awaitExposureSettled()
+                submitPhotoCaptureNow()
+                // The frames of the shot, a stack too, are taken until the capture sequence ends.
+                withTimeoutOrNull(2_000) { state.first { it.isCapturing } }
+                withTimeoutOrNull(30_000) { state.first { !it.isCapturing } }
+            } finally {
+                screenFlashLit = false
+            }
+        }
+    }
+
+    /** Waits for auto exposure to adapt to the screen light: 0.6 s at least, then until it stops changing, 1.5 s at most. */
+    private suspend fun awaitExposureSettled() {
+        fun brightness() = state.value.iso.toDouble() * state.value.shutterSpeed
+        delay(600)
+        var last = brightness()
+        var waited = 600L
+        while (waited < 1_500) {
+            delay(150)
+            waited += 150
+            val now = brightness()
+            if (abs(now - last) <= 0.03 * last) break
+            last = now
+        }
+    }
+
+    private fun submitPhotoCaptureNow() {
         val settings = snapshotCaptureSettings()
         cameraController.capture { id ->
             // Only Pro: a RAW capture beside a render got renders killed; Photo mode stacking never did.
@@ -4176,11 +4215,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleFlash() {
+        // The screen has no torch: on the front camera Flash is just off or on.
+        val front = state.value.getCurrentCameraInfo()?.lensType == LensType.FRONT
         cameraController.setFlashMode(
             when (state.value.flashMode) {
                 0 -> 1
-                1 -> 2
-                2 -> 0
+                1 -> if (front) 0 else 2
                 else -> 0
             }
         )
@@ -6039,21 +6079,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * Index of the steadiest of the first [GYRO_REFERENCE_CANDIDATES] frames, scored by gyro
      * angular energy times exposure time (an upper bound on the squared angle swept during the
-     * exposure). Returns 0, the first frame as before, when any candidate lacks gyro coverage or
-     * no other frame is clearly steadier.
+     * exposure). Frames without gyro coverage are left out; see [steadiestGyroScoreIndex].
      */
     private fun steadiestGyroReferenceIndex(frames: List<PendingRawStackFrame>): Int {
-        val windows = frames.take(GYRO_REFERENCE_CANDIDATES).map { it.frame.gyroWindow }
+        // one spare candidate stands in when frame 0 has no gyro data (see steadiestGyroScoreIndex)
+        val windows = frames.take(GYRO_REFERENCE_CANDIDATES + 1).map { it.frame.gyroWindow }
         val scores = windows.map(::gyroShakeScore)
         PLog.i(
             TAG,
             "YUV burst gyro: coverage=${windows.joinToString { "%.2f".format(it?.coverageRatio ?: 0f) }} " +
                 "score=${scores.joinToString { it?.let { s -> "%.2e".format(s) } ?: "-" }}",
         )
-        if (scores.size < 2 || scores.any { it == null }) return 0
-        val validScores = scores.map { it!! }
-        val best = validScores.indices.minBy { validScores[it] }
-        return if (validScores[best] < validScores[0] * GYRO_REFERENCE_MIN_GAIN) best else 0
+        return steadiestGyroScoreIndex(scores, GYRO_REFERENCE_MIN_GAIN, GYRO_REFERENCE_CANDIDATES)
     }
 
     /** Gyro angular energy times exposure time: an upper bound on the squared angle swept while exposing. */
@@ -6929,4 +6966,20 @@ private fun shouldIncludeCropRegionInOutputSize(imageFormat: Int): Boolean {
 
         else -> false
     }
+}
+
+/**
+ * Index of the lowest gyro motion score among the first [candidates] frames that have one. While
+ * the first frame has a score it stays the reference unless another frame's score is below
+ * [minGain] times its own. Without one (the gyro can start after the first frame when the burst
+ * follows the tap at once) the first frame gives its place to the next one and the steadiest
+ * covered frame wins: the first frame carries the tap's shake, so it is a poor default anyway.
+ * Returns 0 when no frame has a score.
+ */
+internal fun steadiestGyroScoreIndex(scores: List<Float?>, minGain: Float, candidates: Int): Int {
+    if (scores.isEmpty()) return 0
+    val considered = scores.take(if (scores[0] == null) candidates + 1 else candidates)
+    val best = considered.indices.filter { considered[it] != null }.minByOrNull { considered[it]!! } ?: return 0
+    val first = considered[0] ?: return best
+    return if (considered[best]!! < first * minGain) best else 0
 }

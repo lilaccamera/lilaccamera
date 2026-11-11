@@ -345,6 +345,8 @@ internal fun ModeLine(
         stringResource(R.string.capture_mode_video)
     )
 
+    // On a white footer the soft backdrop is white too, so the dark marks stay readable.
+    val backdrop = if (LocalLightFooter.current) Color.White else Color.Black
     Box(
         modifier = modifier.drawBehind {
             val lift = state.lift.value
@@ -358,7 +360,7 @@ internal fun ModeLine(
             drawRect(
                 Brush.verticalGradient(
                     0f to Color.Transparent,
-                    0.45f to Color.Black.copy(alpha = 0.72f),
+                    0.45f to backdrop.copy(alpha = 0.72f),
                     startY = backdropTop,
                     endY = bottom
                 ),
@@ -558,7 +560,7 @@ internal fun ModeLine(
 /** A mark in the style of a camera's mode dial. */
 @Composable
 private fun ModeMark(index: Int, current: Boolean) {
-    val color = if (current) ModeAmber else CameraControlsLayoutDefaults.MarkColor
+    val color = if (current) ModeAmber else CameraControlsLayoutDefaults.MarkColor.onFooter()
     val icon = Modifier.size(24.dp)
     when (index) {
         NIGHT -> Icon(AppIcons.MoonStars, contentDescription = null, tint = color, modifier = icon)
