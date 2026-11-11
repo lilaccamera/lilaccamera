@@ -1854,6 +1854,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
+        cameraController.onPreviewStreamActive = { active -> glSurfaceView?.setCameraStreamActive(active) }
+
         cameraController.onCameraError = { code, message, canRetry ->
             // 只记录错误日志，不在这里重试打开相机
             // 相机恢复应该由 CameraScreen 的 ON_RESUME 生命周期事件处理
