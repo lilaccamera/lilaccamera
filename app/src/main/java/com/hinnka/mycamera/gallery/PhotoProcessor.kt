@@ -25,6 +25,7 @@ import com.hinnka.mycamera.lut.LutImageProcessor
 import com.hinnka.mycamera.lut.LutManager
 import com.hinnka.mycamera.processor.DepthBokehProcessor
 import com.hinnka.mycamera.processor.BokehStyle
+import com.hinnka.mycamera.processor.PortraitBlurMetadata
 import com.hinnka.mycamera.raw.RawOutputScaling
 import com.hinnka.mycamera.raw.RawDigitalZoomResampling
 import com.hinnka.mycamera.raw.RawDemosaicProcessor
@@ -424,6 +425,7 @@ class PhotoProcessor(
                     metadata.focusPointY,
                     aperture,
                     BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
+                    quickBlur = PortraitBlurMetadata.quickBlur(metadata),
                 )
                 photoId?.let { id -> GalleryManager.saveBokehPhoto(context, id, sdrBitmap) }
             }
@@ -436,6 +438,7 @@ class PhotoProcessor(
                     metadata.focusPointY,
                     aperture,
                     BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
+                    quickBlur = PortraitBlurMetadata.quickBlur(metadata),
                 )
             }
         }
@@ -858,7 +861,8 @@ class PhotoProcessor(
                 b = depthBokehProcessor.applyHighQualityBokeh(
                     context, photoId, b,
                     metadata.focusPointX, metadata.focusPointY, aperture,
-                    BokehStyle.fromPersistedName(metadata.computationalBokehStyle)
+                    BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
+                    quickBlur = PortraitBlurMetadata.quickBlur(metadata)
                 )
                 photoId?.let { photoId -> GalleryManager.saveBokehPhoto(context, photoId, b) }
             }
@@ -907,7 +911,8 @@ class PhotoProcessor(
                 result = depthBokehProcessor.applyHighQualityBokeh(
                     context, photoId, result,
                     metadata.focusPointX, metadata.focusPointY, aperture,
-                    BokehStyle.fromPersistedName(metadata.computationalBokehStyle)
+                    BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
+                    quickBlur = PortraitBlurMetadata.quickBlur(metadata)
                 )
                 photoId?.let { photoId -> GalleryManager.saveBokehPhoto(context, photoId, result) }
             }

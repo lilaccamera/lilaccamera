@@ -101,7 +101,7 @@ internal enum class EditorSection(@StringRes val label: Int, val keys: Set<Strin
     Color(R.string.editor_section_color),
     Effects(R.string.editor_section_effects),
     Detail(R.string.editor_section_detail),
-    Portrait(R.string.editor_section_portrait, setOf("aperture", "bokeh", "focus"), gap = true),
+    Portrait(R.string.editor_section_portrait, setOf("aperture", "bokeh", "focus", "depth"), gap = true),
     Crop(R.string.editor_section_crop, setOf("crop", "cropRatio", "rotation", "straighten", "mirror"));
 
     val icon: ImageVector
@@ -324,6 +324,8 @@ internal data class EditorValue(
     val fraction: Float = 0f,
     /** A group: shown as "Name ›", and a tap goes one level deeper. */
     val group: Boolean = false,
+    /** Shown faint: it still works, but has no effect right now (the blur's options while the blur is Off). */
+    val dimmed: Boolean = false,
 )
 
 /** The settings of the current level, side by side; the row scrolls sideways with faded edges when they don't fit. */
@@ -398,6 +400,7 @@ private fun EditorValueItem(
         modifier = Modifier
             .width(width)
             .height(84.dp)
+            .graphicsLayer { alpha = if (item.dimmed) 0.45f else 1f }
             // A tap, or a long press that lasts while the finger stays down. A drag belongs to the row's sideways
             // scroll, which takes the pointer and ends either.
             .pointerInput(Unit) {
@@ -626,4 +629,43 @@ internal fun EditorExplanationCard(name: String, text: String, modifier: Modifie
             .border(1.dp, Color.White.copy(alpha = 0.08f), shape)
             .padding(horizontal = 16.dp, vertical = 12.dp)
     )
+}
+
+/** Portrait's focus point: the camera's thin 42 dp ring, dashed while the blur is Off. */
+@Composable
+internal fun PortraitFocusRing(center: androidx.compose.ui.geometry.Offset, off: Boolean) {
+    androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+        val radius = 21.dp.toPx()
+        val dash = if (off) androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())) else null
+        val alpha = if (off) 0.6f else 1f
+        drawCircle(
+            Color.Black.copy(alpha = 0.45f * alpha), radius, center,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), pathEffect = dash)
+        )
+        drawCircle(
+            Color.White.copy(alpha = alpha), radius, center,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.25.dp.toPx(), pathEffect = dash)
+        )
+    }
+}
+
+/** A short note on the photo's bottom edge with one action chip, for a control that can't act yet. */
+@Composable
+internal fun PortraitNote(text: String, action: String, onAction: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().height(EDITOR_CONTROL_DP.dp).padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text, color = LilacText, fontSize = 12.5.sp, style = LilacTextStyle, maxLines = 1)
+        com.hinnka.mycamera.ui.components.LilacChip(
+            text = action,
+            selected = true,
+            onClick = onAction,
+            height = 36.dp,
+            fill = Color(0xB8141413),
+            fontSize = 13.sp,
+            horizontalPadding = 13.dp,
+        )
+    }
 }

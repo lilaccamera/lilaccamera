@@ -2163,6 +2163,7 @@ object GalleryManager {
             focusPointY,
             aperture,
             BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
+            quickBlur = com.hinnka.mycamera.processor.PortraitBlurMetadata.quickBlur(metadata),
         )
         saveBokehPhoto(context, photoId, bokeh)
         return bokeh

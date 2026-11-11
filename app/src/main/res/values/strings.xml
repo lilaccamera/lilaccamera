@@ -1146,8 +1146,6 @@
     <string name="settings_default_virtual_aperture">Default Virtual Aperture</string>
     <string name="settings_default_virtual_aperture_description">Automatically enable virtual aperture with the selected f-stop value for new photos.</string>
     <string name="virtual_aperture_depth_model_description">Uses the installed compatible depth model. Download the default model or import another compatible TFLite model on first use.</string>
-    <string name="gallery_large_aperture_blur_title">Wide-Aperture Blur</string>
-    <string name="gallery_large_aperture_blur_description">Uses the installed compatible depth model to estimate scene depth and simulate a shallow depth of field, background blur, and soft bokeh highlights. Tap the image to change the focus point. Lower f-numbers produce stronger blur. Download the default model or import another compatible TFLite model on first use.</string>
     <string name="gallery_bokeh_style_title">Bokeh style</string>
     <string name="gallery_bokeh_processing">Applying bokeh…</string>
     <string name="gallery_denoise_processing">Applying noise reduction…</string>
@@ -1879,4 +1877,26 @@
     <string name="editor_look_also_sets">The look also sets %1$s to %2$s.</string>
     <string name="editor_explain_intensity">How strongly the look is applied.</string>
     <string name="editor_compare_one_unavailable">This one re-renders the photo, so it can\'t be held to compare. Hold Compare at the top instead.</string>
+    <string name="editor_aperture">Aperture</string>
+    <string name="editor_focus">Focus</string>
+    <string name="editor_bokeh">Bokeh</string>
+    <string name="editor_blur">Blur</string>
+    <string name="editor_face">Face</string>
+    <string name="editor_point">Point</string>
+    <string name="editor_focus_tap_hint">Tap the photo or drag the ring</string>
+    <string name="editor_explain_aperture">Lower f-numbers give a stronger blur; Off removes it. Tap the photo or drag the ring to set the focus.</string>
+    <string name="editor_explain_focus">Face: the face found when the photo was taken. Point: the place you tapped.</string>
+    <string name="editor_explain_bokeh">Natural: round. Swirl: vintage lens. Bubble: bright rings.</string>
+    <string name="editor_explain_depth">Quick: even blur, nothing extra needed. Depth: the blur grows with distance; slower, needs the depth model. Tap the chosen one again to turn the blur off.</string>
+    <string name="editor_blur_off">The blur is Off</string>
+    <string name="editor_turn_on">Turn on</string>
+    <string name="editor_subject">Subject</string>
+    <string name="editor_quick_keeps_subject">Quick keeps the subject sharp</string>
+    <string name="editor_use_depth">Use Depth</string>
+    <string name="editor_quick_focus_hint">Quick keeps the subject sharp. Choose Depth to focus elsewhere.</string>
+    <string name="editor_blur_subject">Blur · finding the subject</string>
+    <string name="editor_blur_depth">Blur · estimating depth</string>
+    <string name="editor_blur_render">Blur · rendering</string>
+    <string name="editor_blur_loading">Blur · loading the result</string>
+    <string name="editor_about_seconds">%1$s, about %2$d s</string>
 </resources>

@@ -48,6 +48,12 @@ import com.hinnka.mycamera.model.toEffectParams
 import com.hinnka.mycamera.model.withoutIndependentEffects
 import com.hinnka.mycamera.processor.DenoiseStrength
 import com.hinnka.mycamera.processor.BokehStyle
+import com.hinnka.mycamera.processor.PortraitBlurMetadata
+import android.os.SystemClock
+import com.hinnka.mycamera.ml.RelativeDepthMap
+import com.hinnka.mycamera.ml.RelativeDepthMapFile
+import com.hinnka.mycamera.ml.SubjectMask
+import com.hinnka.mycamera.processor.BokehStage
 import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.raw.HncsFilmCurveMode
 import com.hinnka.mycamera.raw.HncsRenderIntent
@@ -530,6 +536,17 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setFocusPoint(x: Float, y: Float) {
+        val (sourceX, sourceY) = displayPointToSource(x, y)
+        editFocusPointX.value = sourceX
+        editFocusPointY.value = sourceY
+        updateBokehPhoto()
+    }
+
+    /**
+     * Maps a point on the photo as the editor shows it (cropped, straightened, turned and mirrored, without a
+     * frame) to the original image the blur works on, both as fractions of width and height.
+     */
+    fun displayPointToSource(x: Float, y: Float): Pair<Float, Float> {
         val cropRect = editCropRect.value
         val croppedX = cropRect?.let { it.left + x * it.width() } ?: x
         val croppedY = cropRect?.let { it.top + y * it.height() } ?: y
@@ -547,14 +564,114 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 straightenDegrees = editStraightenDegrees.value
             )
         } ?: (croppedX to croppedY)
-        val (sourceX, sourceY) = PostEditGeometry.mapEditedPointToSource(
+        return PostEditGeometry.mapEditedPointToSource(
             x = preStraightenPoint.first,
             y = preStraightenPoint.second,
             rotationDegrees = editRotationDegrees.value,
             mirrorHorizontal = editMirrorHorizontal.value
         )
-        editFocusPointX.value = sourceX
-        editFocusPointY.value = sourceY
+    }
+
+    /**
+     * Where the focus point lies on the photo as the editor shows it (cropped, straightened, turned and
+     * mirrored, without a frame), as fractions of its width and height: the inverse of [setFocusPoint].
+     * A photo without a point of its own is focused at its centre. Null when the point is outside the crop.
+     */
+    fun focusPointOnPhoto(): Pair<Float, Float>? {
+        val (editedX, editedY) = PostEditGeometry.mapSourcePointToEdited(
+            x = editFocusPointX.value ?: 0.5f,
+            y = editFocusPointY.value ?: 0.5f,
+            rotationDegrees = editRotationDegrees.value,
+            mirrorHorizontal = editMirrorHorizontal.value
+        )
+        val (straightX, straightY) = resolveCurrentEditBaseDimensions()?.let { (baseWidth, baseHeight) ->
+            val (width, height) = PostEditGeometry.rotatedDimensions(baseWidth, baseHeight, editRotationDegrees.value)
+            PostEditGeometry.mapSourcePointToStraightened(editedX, editedY, width, height, editStraightenDegrees.value)
+        } ?: (editedX to editedY)
+        val crop = editCropRect.value
+        val x = crop?.let { (straightX - it.left) / it.width() } ?: straightX
+        val y = crop?.let { (straightY - it.top) / it.height() } ?: straightY
+        return if (x in 0f..1f && y in 0f..1f) x to y else null
+    }
+
+    /** Puts back a focus point exactly as stored (Face: the point saved with the shot) and re-renders. */
+    fun restoreFocusPoint(x: Float?, y: Float?) {
+        if (editFocusPointX.value == x && editFocusPointY.value == y) return
+        editFocusPointX.value = x
+        editFocusPointY.value = y
+        updateBokehPhoto()
+    }
+
+    /** What the blur render is doing now, and how long that took last time (null before the first time). */
+    data class BlurProgress(val stage: BokehStage, val expectedMs: Long?)
+
+    val blurProgress = MutableStateFlow<BlurProgress?>(null)
+    private val blurStageMs = java.util.concurrent.ConcurrentHashMap<BokehStage, Long>()
+    @Volatile private var blurStageStartedAt = 0L
+
+    private fun onBlurStage(stage: BokehStage?) {
+        val now = SystemClock.elapsedRealtime()
+        blurProgress.value?.let { blurStageMs[it.stage] = now - blurStageStartedAt }
+        blurStageStartedAt = now
+        blurProgress.value = stage?.let { BlurProgress(it, blurStageMs[it]) }
+    }
+
+    /** The subject cut-out and depth map of the photo being edited, from its last blur render. */
+    data class BlurMaps(val photoId: String, val mask: SubjectMask, val depth: RelativeDepthMap?)
+
+    val blurMaps = MutableStateFlow<BlurMaps?>(null)
+    private var blurMapsJob: Job? = null
+
+    /**
+     * Finds the subject cut-out (and reads a saved depth map) for the editor's cheap blur preview, once per
+     * photo, when Portrait opens; a blur render would otherwise be the first to find them. One short GPU job,
+     * under the editor's GPU lock.
+     */
+    fun prepareBlurMaps(photo: MediaData) {
+        if (blurMaps.value?.photoId == photo.id || blurMapsJob?.isActive == true) return
+        blurMapsJob = viewModelScope.launch(Dispatchers.IO) {
+            val context = getApplication<Application>()
+            val depth = GalleryManager.getFloatDepthFile(context, photo.id).takeIf { it.exists() }?.let { file ->
+                runCatching { RelativeDepthMapFile.read(file) }.getOrNull()
+            }
+            val bitmap = GalleryManager.loadOriginalBitmap(context, photo.id, 1600) ?: return@launch
+            val mask = try {
+                editorGpuMutex.withLock {
+                    com.hinnka.mycamera.ml.SharedSubjectMaskEstimator.estimateMask(context, bitmap, depth)
+                }
+            } finally {
+                bitmap.recycle()
+            } ?: return@launch
+            if (blurMaps.value?.photoId != photo.id) blurMaps.value = BlurMaps(photo.id, mask, depth)
+        }
+    }
+
+    /** The photo's own Quick (true) or Depth (false) blur; null follows the camera's setting. */
+    val editPortraitQuick = MutableStateFlow<Boolean?>(null)
+
+    fun setPortraitQuick(quick: Boolean?) {
+        if (editPortraitQuick.value == quick) return
+        editPortraitQuick.value = quick
+        updateBokehPhoto()
+    }
+
+    /**
+     * Discarding the edit: the blur file is written as the settings change, so put the Portrait settings
+     * back as they were when the editor opened and render that once more.
+     */
+    fun restorePortraitOnDiscard() {
+        val open = editOpenState
+        val focus = open["focus"] as? Pair<*, *>
+        val changed = editComputationalAperture.value != open["aperture"] ||
+            editBokehStyle.value != open["bokeh"] ||
+            (editFocusPointX.value to editFocusPointY.value) != focus ||
+            editPortraitQuick.value != open["depth"]
+        if (!changed) return
+        editComputationalAperture.value = open["aperture"] as? Float
+        (open["bokeh"] as? BokehStyle)?.let { editBokehStyle.value = it }
+        editFocusPointX.value = focus?.first as? Float
+        editFocusPointY.value = focus?.second as? Float
+        editPortraitQuick.value = open["depth"] as? Boolean
         updateBokehPhoto()
     }
 
@@ -589,6 +706,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * detection) the blur is simply replaced by the newest settings.
      */
     private var bokehRerunRequested = false
+
+    /**
+     * The editor's GPU work runs one job at a time: the blur render and the preview render each use their own
+     * GL context, and the Adreno 540 faults ("gpu fault", then every later render fails) when a blur starts
+     * while a preview is still rendering.
+     */
+    private val editorGpuMutex = Mutex()
     @Volatile private var bokehRenderStarted = false
 
     private fun updateBokehPhoto() {
@@ -627,28 +751,38 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     }
                         ?: GalleryManager.loadBitmap(context, photoData.uri) ?: return@run
                     if (!isActive) return@run
-                    val bokeh = contentRepository.depthBokehProcessor.applyHighQualityBokeh(
-                        context,
-                        photoData.id,
-                        bitmap,
-                        focusPointX,
-                        focusPointY,
-                        aperture,
-                        editBokehStyle.value,
-                        onRenderStart = { bokehRenderStarted = true },
-                    )
-                    if (!isActive) return@run
-                    GalleryManager.saveBokehPhoto(context, photoData.id, bokeh)
-                    GalleryManager.deleteDetailHdrFile(context, photoData.id)
-                    GalleryManager.updateThumbnail(
-                        context = context,
-                        photoId = photoData.id,
-                        photoProcessor = contentRepository.photoProcessor,
-                        metadata = metadata
-                    )
+                    editorGpuMutex.withLock {
+                        val bokeh = contentRepository.depthBokehProcessor.applyHighQualityBokeh(
+                            context,
+                            photoData.id,
+                            bitmap,
+                            focusPointX,
+                            focusPointY,
+                            aperture,
+                            editBokehStyle.value,
+                            quickBlur = editPortraitQuick.value,
+                            onStage = ::onBlurStage,
+                            onMaps = { mask, depth ->
+                                // A Quick render brings no depth map: keep the one a Depth render left.
+                                val previous = blurMaps.value?.takeIf { it.photoId == photoData.id }
+                                blurMaps.value = BlurMaps(photoData.id, mask, depth ?: previous?.depth)
+                            },
+                            onRenderStart = { bokehRenderStarted = true },
+                        )
+                        if (!isActive) return@run
+                        GalleryManager.saveBokehPhoto(context, photoData.id, bokeh)
+                        GalleryManager.deleteDetailHdrFile(context, photoData.id)
+                        GalleryManager.updateThumbnail(
+                            context = context,
+                            photoId = photoData.id,
+                            photoProcessor = contentRepository.photoProcessor,
+                            metadata = metadata
+                        )
+                    }
                     photoRefreshKeys[photoData.id] = System.currentTimeMillis()
                 }
             } finally {
+                onBlurStage(null)
                 val thisJob = coroutineContext[Job]
                 withContext(NonCancellable + Dispatchers.Main) {
                     // A blur replaced before its render started leaves the state to its replacement.
@@ -701,23 +835,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
                 
                 // Update metadata to mark that we have an AI denoised base
-                val metadata = currentMediaMetadata ?: photo.metadata ?: MediaMetadata()
-                val aperture = metadata.computationalAperture ?: 0f
-                if (aperture > 0f) {
-                    val bokeh = contentRepository.depthBokehProcessor.applyHighQualityBokeh(
-                        context,
-                        photo.id,
-                        denoised,
-                        metadata.focusPointX,
-                        metadata.focusPointY,
-                        aperture,
-                        BokehStyle.fromPersistedName(metadata.computationalBokehStyle),
-                    )
-                    GalleryManager.saveBokehPhoto(context, photo.id, bokeh)
-                    if (bokeh !== denoised && !bokeh.isRecycled) {
-                        bokeh.recycle()
-                    }
-                }
                 val updatedMetadata = GalleryManager.updateMetadata(context, photo.id) { current ->
                     current.copy(
                         hasAiDenoisedBase = true,
@@ -759,7 +876,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 )
 
                 _isAiDenoising.value = false
-                withContext(Dispatchers.Main) { onComplete(true) }
+                withContext(Dispatchers.Main) {
+                    // The blur now starts from the denoised photo, with the settings being edited.
+                    updateBokehPhoto()
+                    onComplete(true)
+                }
             } catch (e: Exception) {
                 PLog.e(TAG, "Failed to apply AI denoise", e)
                 _isAiDenoising.value = false
@@ -784,16 +905,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     return@launch
                 }
 
-                val aperture = updatedMetadata.computationalAperture ?: 0f
-                if (aperture > 0f) {
-                    val originalBitmap = GalleryManager.loadOriginalBitmap(context, photo.id)
-                    if (originalBitmap != null) {
-                        GalleryManager.generateBokehPhoto(context, photo.id, updatedMetadata, originalBitmap)
-                        if (!originalBitmap.isRecycled) originalBitmap.recycle()
-                    }
-                } else {
-                    GalleryManager.getBokehFile(context, photo.id).takeIf { it.exists() }?.delete()
-                }
+                // The blur starts again from the original photo, with the settings being edited.
+                withContext(Dispatchers.Main) { updateBokehPhoto() }
 
                 GalleryManager.deleteDetailHdrFile(context, photo.id)
                 if (updatedMetadata.manualHdrEffectEnabled) {
@@ -2224,9 +2337,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 editRawCfaCorrectionMode.value = metadata.rawCfaCorrectionMode ?: RawCfaCorrection.MODE_DEFAULT
                 editRawDROMode.value = RawProcessingPreferences.DROMode.fromPersistedName(metadata.droMode).name
                 editComputationalAperture.value = metadata.computationalAperture
-                editBokehStyle.value = BokehStyle.fromPersistedName(
-                    metadata.computationalBokehStyle
-                )
+                // A photo that never had a blur offers the Natural lens look first.
+                editBokehStyle.value = if (metadata.computationalAperture == null) {
+                    BokehStyle.NATURAL
+                } else {
+                    BokehStyle.fromPersistedName(metadata.computationalBokehStyle)
+                }
+                editPortraitQuick.value = PortraitBlurMetadata.quickBlur(metadata)
                 editFocusPointX.value = metadata.focusPointX
                 editFocusPointY.value = metadata.focusPointY
             }
@@ -2271,7 +2388,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 editStraightenDegrees.value = 0f
                 editMirrorHorizontal.value = false
                 editComputationalAperture.value = null
-                editBokehStyle.value = BokehStyle.DEFAULT
+                editBokehStyle.value = BokehStyle.NATURAL
+                editPortraitQuick.value = null
                 editFocusPointX.value = null
                 editFocusPointY.value = null
                 restoreCropEditState(targetPhoto, null)
@@ -2357,6 +2475,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             "rawFotufilm" to editRawFotufilmDocument.value,
             "aperture" to editComputationalAperture.value,
             "bokeh" to editBokehStyle.value,
+            "depth" to editPortraitQuick.value,
             "focus" to (editFocusPointX.value to editFocusPointY.value),
             "crop" to editCropRect.value?.let { RectF(it) },
             "cropRatio" to editCropAspectOption.value,
@@ -3649,7 +3768,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         ignoreFrame: Boolean = false,
         ignoreDenoise: Boolean = false,
         recipeParamsOverride: ColorRecipeParams? = null,
-        maxEdge: Int = FULL_QUALITY_PREVIEW_MAX_EDGE
+        maxEdge: Int = FULL_QUALITY_PREVIEW_MAX_EDGE,
+        ignoreBokeh: Boolean = false,
     ): Bitmap? {
         if (photo.isVideo) return null
         return withContext(Dispatchers.IO) {
@@ -3762,7 +3882,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
 
                 // 使用多级缓存优化性能
-                val previewCacheKey = previewCacheKey(photo, finalMetadata, showOrigin, maxEdge)
+                val previewCacheKey = previewCacheKey(photo, finalMetadata, showOrigin, maxEdge) +
+                    if (ignoreBokeh) "_nobokeh" else ""
 
                 val cached = previewBitmapCache.get(previewCacheKey)
                 if (cached != null && !cached.isRecycled) {
@@ -3806,7 +3927,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 } else {
                     val bokehFile = GalleryManager.getBokehFile(context, photo.id)
                     photonDenoiseBase ?: when {
-                        bokehFile.exists() -> GalleryManager.loadBitmap(context, Uri.fromFile(bokehFile), maxEdge)
+                        !ignoreBokeh && bokehFile.exists() -> GalleryManager.loadBitmap(context, Uri.fromFile(bokehFile), maxEdge)
                         finalMetadata.hasAiDenoisedBase -> GalleryManager.loadBitmap(
                             context,
                             Uri.fromFile(GalleryManager.getAiDenoiseFile(context, photo.id)),
@@ -3833,11 +3954,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     val previewSharpening = if (applyBitmapSharpening) finalS else 0f
 
                     // 预览生成
-                    val result = contentRepository.photoProcessor.processBitmap(
-                        context, photo.id, currentBitmap, previewMetadata,
-                        previewSharpening,
-                        false
-                    )
+                    val result = editorGpuMutex.withLock {
+                        contentRepository.photoProcessor.processBitmap(
+                            context, photo.id, currentBitmap, previewMetadata,
+                            previewSharpening,
+                            false
+                        )
+                    }
                     // 只在全分辨率路径下更新亮度估计（结果更准确）
                     if (maxEdge >= FULL_QUALITY_PREVIEW_MAX_EDGE) {
                         currentBrightness[photo.id] = estimateAverageBrightness(result)
@@ -4023,6 +4146,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             try {
+                // The blur file is part of what is saved: let a render still running finish first.
+                while (bokehJob?.isActive == true) bokehJob?.join()
                 flushPendingEditLutRecipeSync()
                 val context = getApplication<Application>()
                 val wasSystemPhoto = selectedTab == GalleryTab.SYSTEM
@@ -4086,6 +4211,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                                 remove(VideoColorMetadata.OVERRIDE_KEY)
                                 editVideoProfileOverride?.let { put(VideoColorMetadata.OVERRIDE_KEY, it.name) }
                             }
+                            remove(PortraitBlurMetadata.QUICK_KEY)
+                            editPortraitQuick.value?.let { put(PortraitBlurMetadata.QUICK_KEY, it.toString()) }
                         },
                         colorRecipeParams = editPhotoRecipeParams.value,
                         sharpening = editSharpening.value,

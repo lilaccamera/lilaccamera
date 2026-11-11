@@ -148,7 +148,8 @@ internal fun lilacRulerLabelEvery(stepDp: Float): Int = RulerNiceSteps.firstOrNu
  * [stops] every value is a labelled stop that clicks (an aperture ring); otherwise the ruler clicks only when
  * the value crosses [start]. Untouched for 1.6 s, the ruler fades back so the picture shows through.
  * [labelEvery] overrides how many steps lie between two labels (for example 3 for ⅓ EV steps, so the labels
- * fall on whole EVs).
+ * fall on whole EVs). [onScroll] follows the finger between the stops while it drags, as a fractional index
+ * into [values] (2.5 is half way from the third value to the fourth), and gets null when the finger lifts.
  */
 @Composable
 internal fun LilacRuler(
@@ -163,6 +164,7 @@ internal fun LilacRuler(
     stops: Boolean = false,
     labelEvery: Int? = null,
     onTouch: (Boolean) -> Unit = {},
+    onScroll: (Float?) -> Unit = {},
 ) {
     if (values.isEmpty()) return
     val context = LocalContext.current
@@ -173,6 +175,7 @@ internal fun LilacRuler(
     val currentOnChange by rememberUpdatedState(onChange)
     val currentOnRelease by rememberUpdatedState(onRelease)
     val currentOnTouch by rememberUpdatedState(onTouch)
+    val currentOnScroll by rememberUpdatedState(onScroll)
     val currentStart by rememberUpdatedState(start)
 
     val stepDp = lilacRulerStepDp(values.size, stops)
@@ -259,6 +262,7 @@ internal fun LilacRuler(
                             val last = values.size - 1
                             val s = (shift0 + dx).coerceIn(-last * stepPx - 24.dp.toPx(), 24.dp.toPx())
                             scope.launch { shift.snapTo(s) }
+                            currentOnScroll((-s / stepPx).coerceIn(0f, last.toFloat()))
                             val i = (-s / stepPx).roundToInt().coerceIn(0, last)
                             if (i != index) {
                                 index = i
@@ -268,6 +272,7 @@ internal fun LilacRuler(
                             }
                         }
                         currentOnTouch(false)
+                        currentOnScroll(null)
                         touchedAt = System.nanoTime()
                         if (moved) {
                             dragging = false

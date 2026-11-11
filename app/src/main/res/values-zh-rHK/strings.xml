@@ -1091,8 +1091,6 @@
     <string name="settings_default_virtual_aperture">預設虛擬光圈</string>
     <string name="settings_default_virtual_aperture_description">開啟后，拍攝及匯入相片將自動應用所選光圈值的虛化效果。</string>
     <string name="virtual_aperture_depth_model_description">使用目前已安裝的兼容深度模型。首次使用時可下載預設模型，或匯入其他兼容的 TFLite 模型。</string>
-    <string name="gallery_large_aperture_blur_title">大光圈虛化</string>
-    <string name="gallery_large_aperture_blur_description">使用目前已安裝的兼容深度模型估計畫面深度，模擬大光圈的淺景深、背景虛化和柔和散景光斑。輕點畫面可改變對焦位置；光圈值越小，虛化越強。首次使用時可下載預設模型，或匯入其他兼容的 TFLite 模型。</string>
     <string name="edit_panel_title">編輯面板</string>
     <string name="edit_panel_expand">展開編輯面板</string>
     <string name="edit_panel_minimize">最小化編輯面板</string>

@@ -570,6 +570,12 @@ object AppIcons {
     val ClarityLine: ImageVector by lazy { lineIcon("AppIcons.ClarityLine", "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M12 7a5 5 0 0 0 0 10z") }
     val WandLine: ImageVector by lazy { lineIcon("AppIcons.WandLine", "M6 21l15 -15l-3 -3l-15 15l3 3M15 6l3 3M9 3a2 2 0 0 0 2 2a2 2 0 0 0 -2 2a2 2 0 0 0 -2 -2a2 2 0 0 0 2 -2M19 13a2 2 0 0 0 2 2a2 2 0 0 0 -2 2a2 2 0 0 0 -2 -2a2 2 0 0 0 2 -2") }
     val ColorFilterLine: ImageVector by lazy { lineIcon("AppIcons.ColorFilterLine", "M13.58 13.79c.27 .68 .42 1.43 .42 2.21c0 1.77 -.77 3.37 -2 4.46a5.94 5.94 0 0 1 -4 1.54c-3.31 0 -6 -2.69 -6 -6c0 -2.76 1.88 -5.1 4.42 -5.79M17.58 10.21c2.54 .69 4.42 3.03 4.42 5.79c0 3.31 -2.69 6 -6 6a5.94 5.94 0 0 1 -4 -1.54M6 8a6 6 0 1 0 12 0a6 6 0 1 0 -12 0") }
+    val FocusCenteredLine: ImageVector by lazy { lineIcon("AppIcons.FocusCenteredLine", "M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M4 8v-2a2 2 0 0 1 2 -2h2M4 16v2a2 2 0 0 0 2 2h2M16 4h2a2 2 0 0 1 2 2v2M16 20h2a2 2 0 0 0 2 -2v-2") }
+    val CirclesLine: ImageVector by lazy { lineIcon("AppIcons.CirclesLine", "M3.5 7a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0M13.5 7a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0M8.5 17a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0") }
+    val MoodSmileLine: ImageVector by lazy { lineIcon("AppIcons.MoodSmileLine", "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M9 10h.01M15 10h.01M9.5 15a3.5 3.5 0 0 0 5 0") }
+    val CircleLine: ImageVector by lazy { lineIcon("AppIcons.CircleLine", "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0") }
+    val CircleDotLine: ImageVector by lazy { lineIcon("AppIcons.CircleDotLine", "M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0") }
+    val RotateClockwiseLine: ImageVector by lazy { lineIcon("AppIcons.RotateClockwiseLine", "M4.05 11a8 8 0 1 1 .5 4m-.5 5v-5h5") }
     val BookmarkLine: ImageVector by lazy {
         lineIcon("AppIcons.BookmarkLine", "M18 7v14l-6 -4l-6 4v-14a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4z")
     }

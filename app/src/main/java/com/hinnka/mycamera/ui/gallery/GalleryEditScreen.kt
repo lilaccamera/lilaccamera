@@ -22,6 +22,10 @@ import androidx.compose.ui.unit.IntSize
 import kotlin.math.roundToInt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.ImageBitmap
+import com.hinnka.mycamera.processor.BokehStage
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalView
@@ -129,12 +133,14 @@ import kotlin.math.max
 import kotlin.math.sign
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 
+// How long the explanation card stays open.
+private const val EXPLANATION_CARD_MS = 4000L
+
 // Two taps on the same setting closer than this are a double tap.
 private const val DOUBLE_TAP_MS = 300L
 
 // Look intensity, 0 to 200 % in 5 % steps.
 private val IntensitySteps = List(41) { it * 5 / 100f }
-private const val DEFAULT_COMPUTATIONAL_APERTURE = 1.4f
 
 private data class EmbeddedDngProfileUiState(
     val options: List<RawEmbeddedDngProfileOption> = emptyList(),
@@ -183,6 +189,7 @@ private data class PreviewRenderSignature(
     val editMirrorHorizontal: Boolean,
     val showOrigin: Boolean,
     val cropView: Boolean,
+    val portraitView: Boolean,
 )
 
 /**
@@ -210,18 +217,21 @@ fun GalleryEditScreen(
     }.collectAsState()
     val isDepthModelInstalled = DepthModelManager.isInstalled(context)
     var showDepthModelDownloadDialog by remember { mutableStateOf(false) }
-    var pendingVirtualAperture by remember { mutableStateOf<Float?>(null) }
+    // Depth was chosen while its model is missing: applied once the model is installed.
+    var pendingDepth by remember { mutableStateOf(false) }
     val depthModelImportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let { DepthModelManager.importModel(context, it) }
     }
 
-    LaunchedEffect(depthModelState, pendingVirtualAperture) {
-        val pendingAperture = pendingVirtualAperture
-        if (depthModelState is DepthModelDownloadState.Ready && pendingAperture != null) {
-            viewModel.setComputationalAperture(pendingAperture)
-            pendingVirtualAperture = null
+    LaunchedEffect(depthModelState, pendingDepth) {
+        if (depthModelState is DepthModelDownloadState.Ready && pendingDepth) {
+            viewModel.setPortraitQuick(false)
+            if ((viewModel.editComputationalAperture.value ?: 0f) <= 0f) {
+                viewModel.setComputationalAperture((viewModel.editOpenValue("aperture") as? Float)?.takeIf { it > 0f } ?: 2f)
+            }
+            pendingDepth = false
             showDepthModelDownloadDialog = false
         }
     }
@@ -394,6 +404,12 @@ fun GalleryEditScreen(
     var lastTapKey by remember { mutableStateOf<String?>(null) }
     var lastTapAt by remember { mutableLongStateOf(0L) }
     var pendingCard by remember { mutableStateOf<Job?>(null) }
+    // Portrait: the aperture while the ruler moves (rendered once, on release), the photo's place on screen
+    // inside the zoomable view, and the focus ring while a finger drags it.
+    var apertureDrag by remember { mutableStateOf<Float?>(null) }
+    var contentBounds by remember { mutableStateOf<Rect?>(null) }
+    var ringGrab by remember { mutableStateOf(false) }
+    var ringDrag by remember { mutableStateOf<Offset?>(null) }
     // The recipe as it was when a long press on one setting began, to put back when it ends.
     var heldRecipe by remember { mutableStateOf<ColorRecipeParams?>(null) }
     var showDiscardDialog by remember { mutableStateOf(false) }
@@ -461,7 +477,8 @@ fun GalleryEditScreen(
             editStraightenDegrees = if (section == EditorSection.Crop) 0f else editStraightenDegrees,
             editMirrorHorizontal = editMirrorHorizontal,
             showOrigin = showOrigin,
-            cropView = section == EditorSection.Crop
+            cropView = section == EditorSection.Crop,
+            portraitView = section == EditorSection.Portrait
         )
     }
 
@@ -479,7 +496,8 @@ fun GalleryEditScreen(
                 showOrigin = showOrigin,
                 ignoreCrop = isCropPreview,
                 ignoreStraighten = isCropPreview,
-                ignoreFrame = isCropPreview,
+                // Portrait shows the photo without its frame, so the focus ring lands on the photo itself.
+                ignoreFrame = isCropPreview || section == EditorSection.Portrait,
                 maxEdge = maxEdge
             )
         }
@@ -491,8 +509,9 @@ fun GalleryEditScreen(
             } else {
                 previewBitmap = bitmap
             }
-            isLoadingPreview = false
         }
+        // The newest render ends the wait, also when it produced nothing, so the spinner can't stay on.
+        if (requestId == previewRenderRequestId) isLoadingPreview = false
     }
 
 
@@ -557,6 +576,9 @@ fun GalleryEditScreen(
     LaunchedEffect(editSourcePhoto?.id, refreshKey) {
         val photo = editSourcePhoto ?: return@LaunchedEffect
         if (photo.isVideo) return@LaunchedEffect
+        // A new refresh key means the photo's files changed (a finished blur, a RAW re-render): the spinner
+        // stays on until the preview shows them, not only while they were being made.
+        isLoadingPreview = true
         snapshotFlow {
             currentPreviewSignature()
         }
@@ -636,6 +658,7 @@ fun GalleryEditScreen(
     // Reading every edit value here makes this recompute on the frame a value changes, so a change dot
     // appears and goes at once rather than with the next unrelated recomposition.
     val applyEffectsToVideo by viewModel.editApplyEffectsToVideo.collectAsState()
+    val editPortraitQuick by viewModel.editPortraitQuick.collectAsState()
     val changedKeys = remember(
         editLutId, editPhotoRecipeParams, editFrameId, applyEffectsToVideo, editSharpening, editNoiseReduction,
         editChromaNoiseReduction, editAiDenoiseEnabled, editRawExposureCompensation, editRawAutoExposure,
@@ -646,13 +669,123 @@ fun GalleryEditScreen(
         editRawToneMappingParameters, editRawSpectralFilmStock, editRawSpectralFilmPrint, editRawSpectralFilmCDensityGain,
         editRawSpectralFilmMDensityGain, editRawSpectralFilmYDensityGain, editRawFotufilmDocument, editComputationalAperture,
         editBokehStyle, editFocusX, editFocusY, editCropRect, editCropAspectOption, editRotationDegrees,
-        editStraightenDegrees, editMirrorHorizontal,
+        editStraightenDegrees, editMirrorHorizontal, editPortraitQuick,
     ) { viewModel.editChangedKeys() }
     val openIntensity = remember(currentEditSourcePhoto.id) { (editPhotoRecipeParams ?: editLutRecipeParams).lutIntensity }
     val isAiDenoising by viewModel.isAiDenoising.collectAsState()
     val aiDenoiseProgress by viewModel.aiDenoiseProgress.collectAsState()
     LaunchedEffect(fullView) {
         if (fullView) explainKey = null
+    }
+    // The explanation card closes by itself once there has been time to read it.
+    LaunchedEffect(explainKey) {
+        if (explainKey != null) {
+            delay(EXPLANATION_CARD_MS)
+            explainKey = null
+        }
+    }
+
+    val portraitQuick = editPortraitQuick ?: userPreferences.portraitQuickBlur
+    // Gesture handlers on the photo are set up once and outlive this composition: they read the mode here.
+    val currentPortraitQuick by rememberUpdatedState(portraitQuick)
+    val blurProgress by viewModel.blurProgress.collectAsState()
+    val blurMaps by viewModel.blurMaps.collectAsState()
+
+    // A blur was asked for and its result isn't on screen yet: from the render's start until the preview
+    // has reloaded with it.
+    var awaitingBlur by remember { mutableStateOf(false) }
+    LaunchedEffect(isBokehProcessing, isLoadingPreview) {
+        if (isBokehProcessing) awaitingBlur = true else if (!isLoadingPreview) awaitingBlur = false
+    }
+
+    // Portrait's cheap preview: the photo as edited but without the blur, small, loaded once per edit state
+    // (one ordinary preview render, never while dragging), then blurred on the CPU from the subject cut-out.
+    val portraitOpen = section == EditorSection.Portrait && !currentPhoto.isVideo
+    var sharpBase by remember(currentEditSourcePhoto.id) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(
+        portraitOpen, currentEditSourcePhoto.id, editPhotoRecipeParams, editLutId,
+        editCropRect, editRotationDegrees, editStraightenDegrees, editMirrorHorizontal,
+    ) {
+        if (!portraitOpen) return@LaunchedEffect
+        viewModel.prepareBlurMaps(currentEditSourcePhoto)
+        sharpBase = withContext(Dispatchers.IO) {
+            viewModel.getPreviewBitmap(
+                currentEditSourcePhoto,
+                useGlobalEdit = true,
+                ignoreFrame = true,
+                ignoreBokeh = true,
+                maxEdge = 720,
+            )
+        }
+    }
+    // The ruler's place between two stops while it is dragged, so the preview's blur grows with the finger.
+    var apertureScroll by remember { mutableStateOf<Float?>(null) }
+    val previewStrength = apertureScroll?.let { position ->
+        val lower = position.toInt().coerceIn(0, ApertureStops.lastIndex)
+        val upper = (lower + 1).coerceAtMost(ApertureStops.lastIndex)
+        val t = position - lower
+        BlurPreview.strength(ApertureStops[lower]) * (1 - t) + BlurPreview.strength(ApertureStops[upper]) * t
+    } ?: BlurPreview.strength(apertureDrag ?: editComputationalAperture ?: 0f)
+
+    // The preview at each of BlurPreview.LEVELS, made on the CPU whenever the photo, the focus or the mode
+    // changes; the strength in use comes first so the preview shows at once, the rest follow for scrolling.
+    var blurLayers by remember { mutableStateOf<List<ImageBitmap?>>(emptyList()) }
+    LaunchedEffect(portraitOpen, sharpBase, blurMaps, ringDrag, editFocusX, editFocusY, portraitQuick) {
+        val base = sharpBase
+        val maps = blurMaps?.takeIf { it.photoId == currentEditSourcePhoto.id }
+        if (!portraitOpen || base == null || maps == null) {
+            blurLayers = emptyList()
+            return@LaunchedEffect
+        }
+        delay(60)  // a burst of drags only computes the last one
+        val bounds = contentBounds
+        val focus = ringDrag?.takeIf { bounds != null && bounds.width > 0f }?.let { p ->
+            viewModel.displayPointToSource(
+                ((p.x - bounds!!.left) / bounds.width).coerceIn(0f, 1f),
+                ((p.y - bounds.top) / bounds.height).coerceIn(0f, 1f),
+            )
+        } ?: ((editFocusX ?: 0.5f) to (editFocusY ?: 0.5f))
+        val prepared = withContext(Dispatchers.Default) {
+            BlurPreview.prepare(
+                base = base,
+                toSource = viewModel::displayPointToSource,
+                mask = maps.mask,
+                depth = maps.depth,
+                focusX = focus.first,
+                focusY = focus.second,
+                quick = portraitQuick,
+            )
+        }
+        val layers = MutableList<ImageBitmap?>(BlurPreview.LEVELS.size) { null }
+        for (level in BlurPreview.LEVELS.indices.sortedBy { abs(BlurPreview.LEVELS[it] - previewStrength) }) {
+            layers[level] = withContext(Dispatchers.Default) {
+                BlurPreview.layer(prepared, BlurPreview.LEVELS[level]).asImageBitmap()
+            }
+            blurLayers = layers.toList()
+        }
+    }
+
+    // Portrait's focus ring: where the focus point is on the photo, and on screen inside the zoomable view.
+    val focusOnPhoto = remember(
+        editFocusX, editFocusY, editCropRect, editRotationDegrees, editStraightenDegrees, editMirrorHorizontal,
+    ) { viewModel.focusPointOnPhoto() }
+
+    fun ringCenter(focus: Pair<Float, Float>?): Offset? {
+        val b = contentBounds?.takeIf { it.width > 0f && it.height > 0f } ?: return null
+        return focus?.let { (x, y) -> Offset(b.left + x * b.width, b.top + y * b.height) }
+    }
+
+    // Sets the focus at a place on screen, mapped onto the photo, and renders the blur once.
+    fun placeFocus(position: Offset) {
+        if (currentPortraitQuick) {
+            Toast.makeText(context, R.string.editor_quick_focus_hint, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val b = contentBounds?.takeIf { it.width > 0f && it.height > 0f } ?: return
+        viewModel.setFocusPoint(
+            ((position.x - b.left) / b.width).coerceIn(0f, 1f),
+            ((position.y - b.top) / b.height).coerceIn(0f, 1f),
+        )
     }
 
     fun leaveEditor() {
@@ -1003,12 +1136,42 @@ fun GalleryEditScreen(
                             }
                         }
                     }
+                    .pointerInput(section, fullView) {
+                        if (section != EditorSection.Portrait || fullView || currentPhoto.isVideo) return@pointerInput
+                        val grabRadius = 30.dp.toPx()
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            if (currentPortraitQuick) return@awaitEachGesture
+                            val ring = ringCenter(viewModel.focusPointOnPhoto()) ?: return@awaitEachGesture
+                            if ((down.position - ring).getDistance() > grabRadius) return@awaitEachGesture
+                            // The press is the ring's: zoom and pan leave it alone, and so do tap and long press.
+                            ringGrab = true
+                            down.consume()
+                            var position = down.position
+                            try {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    if (event.changes.size > 1) return@awaitEachGesture  // a second finger: no move
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+                                    change.consume()
+                                    if (!change.pressed) break
+                                    position = change.position
+                                    ringDrag = position
+                                }
+                                // One render, when the finger lifts.
+                                placeFocus(position)
+                            } finally {
+                                ringGrab = false
+                                ringDrag = null
+                            }
+                        }
+                    }
                     .pointerInput(currentPhoto.isVideo) {
                         if (!currentPhoto.isVideo) awaitPointerEventScope {
                             while (true) {
                                 // 确认第一个手指按下，且当前只有一个指针
                                 val downEvent = awaitPointerEvent(PointerEventPass.Initial)
-                                if (downEvent.type == PointerEventType.Press && downEvent.changes.size == 1) {
+                                if (downEvent.type == PointerEventType.Press && downEvent.changes.size == 1 && !ringGrab) {
                                     // A press while a tap waits out the double-tap window is the double tap's
                                     // second half: the zoom handles it, and the waiting tap is dropped.
                                     val secondTap = pendingPhotoTap?.isActive == true
@@ -1046,10 +1209,16 @@ fun GalleryEditScreen(
                                     if (!isMultiTouch && !isMoved) {
                                         if (upEvent != null) {
                                             if (!secondTap) {
+                                                val tapAt = upEvent!!.changes[0].position
                                                 pendingPhotoTap = scope.launch {
                                                     delay(300)
-                                                    // A tap opens full view, and a tap in full view comes back.
-                                                    if (fullView) fullView = false else if (section != EditorSection.Crop) fullView = true
+                                                    // A tap opens full view, and a tap in full view comes back. In
+                                                    // Portrait a tap sets the focus instead; full view is the edge icon.
+                                                    when {
+                                                        fullView -> fullView = false
+                                                        section == EditorSection.Portrait -> placeFocus(tapAt)
+                                                        section != EditorSection.Crop -> fullView = true
+                                                    }
                                                 }
                                             }
                                         } else {
@@ -1156,11 +1325,47 @@ fun GalleryEditScreen(
                         onZoomChange = {
                             isZoomed = it
                         },
+                        onContentBounds = { contentBounds = it },
                         modifier = previewMediaModifier
                     )
                 }
 
                 LutSwipeIndicator(state = lutSwipeState)
+
+                // Portrait: the cheap preview while the blur renders or a control is dragged, cross-fading between
+                // the two prepared strengths around the one wanted, so it feels like more steps than there are.
+                val previewBounds = contentBounds
+                val layers = blurLayers
+                if (
+                    layers.isNotEmpty() && previewBounds != null && portraitOpen && !fullView &&
+                    (previewStrength > 0f || apertureScroll != null) &&
+                    (awaitingBlur || apertureDrag != null || apertureScroll != null || ringDrag != null)
+                ) {
+                    val levels = BlurPreview.LEVELS
+                    val upper = levels.indexOfFirst { it >= previewStrength }.let { if (it < 0) levels.lastIndex else it }
+                    val lower = (upper - 1).coerceAtLeast(0)
+                    val t = if (upper == lower) 1f else ((previewStrength - levels[lower]) / (levels[upper] - levels[lower])).coerceIn(0f, 1f)
+                    val under = layers[lower] ?: layers[upper]
+                    val over = layers[upper] ?: layers[lower]
+                    val dstOffset = IntOffset(previewBounds.left.roundToInt(), previewBounds.top.roundToInt())
+                    val dstSize = IntSize(previewBounds.width.roundToInt(), previewBounds.height.roundToInt())
+                    androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                        under?.let { drawImage(it, dstOffset = dstOffset, dstSize = dstSize) }
+                        if (over != null && over !== under) drawImage(over, dstOffset = dstOffset, dstSize = dstSize, alpha = t)
+                    }
+                }
+
+                // Portrait: the focus ring, on the photo the whole time the section is open (not in Quick,
+                // which keeps the cut-out subject sharp wherever the focus is).
+                if (portraitOpen && !fullView && !portraitQuick) {
+                    val center = ringDrag ?: ringCenter(focusOnPhoto)
+                    if (center != null) {
+                        PortraitFocusRing(
+                            center = center,
+                            off = (apertureDrag ?: editComputationalAperture ?: 0f) <= 0f
+                        )
+                    }
+                }
             }
 
             if (!fullView) {
@@ -1179,12 +1384,21 @@ fun GalleryEditScreen(
                     EditorSetting.NoiseReduction -> editNoiseReduction
                     EditorSetting.ColorNoise -> editChromaNoiseReduction
                     EditorSetting.AiDenoise -> if (editAiDenoiseEnabled) 1f else 0f
+                    EditorSetting.Aperture -> apertureDrag ?: editComputationalAperture ?: 0f
+                    EditorSetting.Focus, EditorSetting.Bokeh, EditorSetting.Depth -> 0f
                     else -> s.param!!.getValue(effectiveRecipe)
                 }
 
                 // Where a setting's reset returns: its value when the editor opened.
-                fun openValue(s: EditorSetting): Float =
-                    viewModel.editOpenValue(s.key) as? Float ?: s.param?.defaultValue ?: 0f
+                fun openValue(s: EditorSetting): Float {
+                    val open = viewModel.editOpenValue(s.key) as? Float ?: s.param?.defaultValue ?: 0f
+                    // A shot's own aperture lands on the nearest stop of the ring.
+                    return if (s.kind == SettingKind.Aperture && open !in ApertureStops) {
+                        ApertureStops.filter { it > 0f }.minBy { abs(it - open) }
+                    } else {
+                        open
+                    }
+                }
 
                 fun setSetting(s: EditorSetting, v: Float) {
                     when (s) {
@@ -1195,6 +1409,8 @@ fun GalleryEditScreen(
                         EditorSetting.Blacks -> viewModel.setRawBlackPointCorrection(v)
                         EditorSetting.NoiseReduction -> viewModel.setNoiseReduction(v)
                         EditorSetting.ColorNoise -> viewModel.setChromaNoiseReduction(v)
+                        // The aperture only moves the ruler; the blur renders once, on release.
+                        EditorSetting.Aperture -> apertureDrag = v
                         else -> s.param?.let { param ->
                             val recipe = editPhotoRecipeParams ?: editLutRecipeParams
                             // The effects go through their own group, as they always have: it also clears the
@@ -1217,6 +1433,10 @@ fun GalleryEditScreen(
                                 if (success) requestRawPreviewRefresh()
                             }
                         s.kind == SettingKind.Denoise -> viewModel.refreshPhotonDenoiseBase(currentEditSourcePhoto)
+                        s.kind == SettingKind.Aperture -> apertureDrag?.let { v ->
+                            apertureDrag = null
+                            viewModel.setComputationalAperture(v.takeIf { it > 0f })
+                        }
                     }
                 }
 
@@ -1235,6 +1455,84 @@ fun GalleryEditScreen(
                     }
                 }
 
+                val faceText = stringResource(R.string.editor_face)
+                val pointText = stringResource(R.string.editor_point)
+                val naturalText = stringResource(R.string.gallery_bokeh_style_natural)
+                val swirlText = stringResource(R.string.gallery_bokeh_style_default)
+                val bubbleText = stringResource(R.string.gallery_bokeh_style_bubble)
+                val quickText = stringResource(R.string.portrait_blur_quick)
+                val depthText = stringResource(R.string.portrait_blur_depth)
+                val blurOff = (apertureDrag ?: editComputationalAperture ?: 0f) <= 0f
+                val openFocus = viewModel.editOpenValue("focus") as? Pair<*, *>
+                val focusMoved = (editFocusX to editFocusY) != openFocus
+                val quick = portraitQuick
+                // Aperture is the blur's on/off switch: turning it on starts at the shot's own aperture.
+                fun turnBlurOn() {
+                    val open = viewModel.editOpenValue("aperture") as? Float
+                    viewModel.setComputationalAperture(open?.takeIf { it > 0f } ?: 2f)
+                }
+
+                fun chooseDepth() {
+                    if (DepthModelManager.isInstalled(context)) {
+                        viewModel.setPortraitQuick(false)
+                        if (blurOff) turnBlurOn()
+                    } else {
+                        // The depth model is downloaded (or imported) the first time it is chosen.
+                        pendingDepth = true
+                        showDepthModelDownloadDialog = true
+                    }
+                }
+
+
+                fun choiceOptions(s: EditorSetting): List<EditorChoice> = when (s) {
+                    // Face: the point saved with the shot. Point: a place you tapped or dragged the ring to.
+                    EditorSetting.Focus -> listOf(
+                        EditorChoice(faceText, AppIcons.MoodSmileLine, !focusMoved) {
+                            viewModel.restoreFocusPoint(openFocus?.first as? Float, openFocus?.second as? Float)
+                        },
+                        EditorChoice(pointText, AppIcons.FocusCenteredLine, focusMoved) {
+                            if (!focusMoved) Toast.makeText(context, R.string.editor_focus_tap_hint, Toast.LENGTH_SHORT).show()
+                        },
+                    )
+                    EditorSetting.Bokeh -> listOf(
+                        Triple(BokehStyle.NATURAL, naturalText, AppIcons.CircleLine),
+                        Triple(BokehStyle.DEFAULT, swirlText, AppIcons.RotateClockwiseLine),
+                        Triple(BokehStyle.BUBBLE, bubbleText, AppIcons.CircleDotLine),
+                    ).map { (style, label, icon) ->
+                        EditorChoice(label, icon, editBokehStyle == style) { viewModel.setBokehStyle(style) }
+                    }
+                    // Blur: picking a mode while the blur is Off turns it on in that mode; tapping the mode in use
+                    // turns the blur off.
+                    EditorSetting.Depth -> listOf(
+                        EditorChoice(quickText, AppIcons.BoltLine, !blurOff && quick) {
+                            when {
+                                blurOff -> {
+                                    viewModel.setPortraitQuick(true)
+                                    turnBlurOn()
+                                }
+                                quick -> viewModel.setComputationalAperture(null)
+                                else -> viewModel.setPortraitQuick(true)
+                            }
+                        },
+                        EditorChoice(depthText, AppIcons.StackLine, !blurOff && !quick) {
+                            when {
+                                !blurOff && !quick -> viewModel.setComputationalAperture(null)
+                                else -> chooseDepth()
+                            }
+                        },
+                    )
+                    else -> emptyList()
+                }
+
+                fun resetChoice(s: EditorSetting) {
+                    when (s) {
+                        EditorSetting.Focus -> viewModel.restoreFocusPoint(openFocus?.first as? Float, openFocus?.second as? Float)
+                        EditorSetting.Bokeh -> (viewModel.editOpenValue("bokeh") as? BokehStyle)?.let(viewModel::setBokehStyle)
+                        EditorSetting.Depth -> viewModel.setPortraitQuick(viewModel.editOpenValue("depth") as? Boolean)
+                        else -> Unit
+                    }
+                }
+
                 val settings = if (group == null) {
                     EditorSetting.forSection(section, isRaw, currentPhoto.isVideo)
                 } else {
@@ -1242,6 +1540,7 @@ fun GalleryEditScreen(
                 }
                 val groups = if (group == null) EditorGroup.forSection(section, isRaw) else emptyList()
                 val offText = stringResource(R.string.editor_off)
+                val subjectText = stringResource(R.string.editor_subject)
                 val onText = stringResource(R.string.editor_on)
                 val values = when {
                     group != null -> emptyList()
@@ -1268,6 +1567,10 @@ fun GalleryEditScreen(
                             key = s.key,
                             name = stringResource(s.label),
                             value = when {
+                                s.kind == SettingKind.Aperture -> if (v > 0f) "f/${formatAperture(v)}" else offText
+                                s == EditorSetting.Focus && quick -> subjectText
+                                s == EditorSetting.Depth && blurOff -> offText
+                                s.kind == SettingKind.Choice -> choiceOptions(s).firstOrNull { it.selected }?.label.orEmpty()
                                 s.kind != SettingKind.AiDenoise -> s.format(v)
                                 isAiDenoising -> "${(aiDenoiseProgress * 100).roundToInt()}%"
                                 editAiDenoiseEnabled -> onText
@@ -1277,6 +1580,8 @@ fun GalleryEditScreen(
                             changed = s.key in changedKeys,
                             glyph = s.glyph,
                             fraction = s.fraction(v),
+                            dimmed = s.section == EditorSection.Portrait && s != EditorSetting.Aperture &&
+                                s != EditorSetting.Depth && blurOff,
                         )
                     } + groups.map { g ->
                         EditorValue(
@@ -1330,6 +1635,29 @@ fun GalleryEditScreen(
                     },
                     modifier = Modifier.align(Alignment.TopCenter)
                 )
+
+                // What the blur is doing, under the edge icons, while it works.
+                val blurStatus = when (blurProgress?.stage) {
+                    BokehStage.Subject -> stringResource(R.string.editor_blur_subject)
+                    BokehStage.Depth -> stringResource(R.string.editor_blur_depth)
+                    BokehStage.Render -> stringResource(R.string.editor_blur_render)
+                    null -> if (awaitingBlur && isLoadingPreview) stringResource(R.string.editor_blur_loading) else null
+                }?.let { text ->
+                    val seconds = blurProgress?.expectedMs?.let { ((it + 500) / 1000).toInt() }
+                        ?: if (blurProgress?.stage == BokehStage.Depth) 15 else null
+                    if (seconds != null && seconds >= 1) stringResource(R.string.editor_about_seconds, text, seconds) else text
+                }
+                if (blurStatus != null) {
+                    Text(
+                        text = blurStatus,
+                        color = LilacText,
+                        fontSize = 12.sp,
+                        style = LilacTextStyle,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = EDITOR_EDGE_DP.dp)
+                    )
+                }
 
                 // The explanation of the selected setting, on a second tap on it.
                 val explained = settings.firstOrNull { it.key == explainKey }
@@ -1394,14 +1722,48 @@ fun GalleryEditScreen(
                                 )
                             }
                         }
+                        // With the blur Off its options have nothing to act on: say so, and offer to turn it on.
+                        selectedSetting?.kind == SettingKind.Choice && selectedSetting != EditorSetting.Depth && blurOff -> PortraitNote(
+                            text = stringResource(R.string.editor_blur_off),
+                            action = stringResource(R.string.editor_turn_on),
+                            onAction = ::turnBlurOn
+                        )
+                        selectedSetting == EditorSetting.Focus && quick -> PortraitNote(
+                            text = stringResource(R.string.editor_quick_keeps_subject),
+                            action = stringResource(R.string.editor_use_depth),
+                            onAction = ::chooseDepth
+                        )
+                        selectedSetting?.kind == SettingKind.Choice -> Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer { alpha = if (blurOff && selectedSetting != EditorSetting.Depth) 0.5f else 1f },
+                            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            choiceOptions(selectedSetting).forEach { option ->
+                                LilacChip(
+                                    text = option.label,
+                                    selected = option.selected,
+                                    onClick = option.onClick,
+                                    height = 36.dp,
+                                    fill = Color(0xB8141413),
+                                    fontSize = 13.sp,
+                                    horizontalPadding = 13.dp,
+                                    icon = option.icon,
+                                )
+                            }
+                        }
                         selectedSetting != null -> {
+                            val aperture = selectedSetting.kind == SettingKind.Aperture
                             val start = openValue(selectedSetting)
-                            val steps = selectedSetting.steps.let { if (start in it) it else (it + start).sorted() }
+                            val steps = selectedSetting.steps.let { if (aperture || start in it) it else (it + start).sorted() }
                             LilacRuler(
                                 values = steps,
                                 value = settingValue(selectedSetting),
                                 start = start,
-                                label = selectedSetting::tickLabel,
+                                label = { if (aperture && it == 0f) offText else selectedSetting.tickLabel(it) },
+                                stops = aperture,
+                                onScroll = { if (aperture) apertureScroll = it },
                                 onChange = { setSetting(selectedSetting, it) },
                                 onRelease = { releaseSetting(selectedSetting) },
                                 onReset = {
@@ -1476,7 +1838,9 @@ fun GalleryEditScreen(
                                     doubleTap -> {
                                         explainKey = null
                                         settings.firstOrNull { it.key == item.key }?.let { s ->
-                                            if (s.kind == SettingKind.AiDenoise) {
+                                            if (s.kind == SettingKind.Choice) {
+                                                resetChoice(s)
+                                            } else if (s.kind == SettingKind.AiDenoise) {
                                                 setAiDenoise(openValue(s) == 1f || viewModel.editOpenValue(s.key) == true)
                                             } else {
                                                 setSetting(s, openValue(s))
@@ -1557,6 +1921,7 @@ fun GalleryEditScreen(
                     onKeep = { showDiscardDialog = false },
                     onDiscard = {
                         showDiscardDialog = false
+                        viewModel.restorePortraitOnDiscard()
                         leaveEditor()
                     }
                 )
@@ -1627,7 +1992,7 @@ fun GalleryEditScreen(
             onImport = { depthModelImportLauncher.launch(arrayOf("*/*")) },
             onDismiss = {
                 showDepthModelDownloadDialog = false
-                pendingVirtualAperture = null
+                pendingDepth = false
             }
         )
     }
@@ -1652,6 +2017,7 @@ private fun ZoomableEditImage(
     resetKey: Any?,
     contentDescription: String,
     onZoomChange: (isZoomed: Boolean) -> Unit = {},
+    onContentBounds: (Rect) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1666,6 +2032,13 @@ private fun ZoomableEditImage(
 
     LaunchedEffect(resetKey) {
         zoomableState.zoomableState.resetZoom()
+    }
+
+    // Where the photo is drawn, zoomed and panned, so marks on it (the focus ring) follow it.
+    val currentOnContentBounds by rememberUpdatedState(onContentBounds)
+    LaunchedEffect(zoomableState) {
+        snapshotFlow { zoomableState.zoomableState.transformedContentBounds }
+            .collect { currentOnContentBounds(it) }
     }
 
     val model = ImageRequest.Builder(context)

@@ -1,5 +1,7 @@
 package com.hinnka.mycamera.processor
 
+import com.hinnka.mycamera.ml.SubjectMask
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -20,6 +22,17 @@ import kotlinx.coroutines.currentCoroutineContext
  * This class coordinates the GPU compute pipeline for edge refinement (Guided Filter)
  * and realistic bokeh convolution.
  */
+/** What a blur render is doing, for the editor's status line. */
+enum class BokehStage { Subject, Depth, Render }
+
+/** A photo's own Quick or Depth blur choice, kept in its custom properties; none follows the camera's setting. */
+object PortraitBlurMetadata {
+    const val QUICK_KEY = "lilac.portrait.quickBlur"
+
+    fun quickBlur(metadata: com.hinnka.mycamera.gallery.MediaMetadata?): Boolean? =
+        metadata?.customProperties?.get(QUICK_KEY)?.toBooleanStrictOrNull()
+}
+
 class DepthBokehProcessor(
     context: Context,
     /** True when the user chose the quick blur, which never uses the depth model. */
@@ -40,6 +53,10 @@ class DepthBokehProcessor(
      * @param focusPoint The normalized coordinates (0.0 - 1.0) where the user focused.
      * @param aperture The simulated aperture value (e.g., 1.4 for heavy blur, 16.0 for none).
      * @param bokehStyle The optical point-spread profile used for defocused highlights.
+     * @param quickBlur The photo's own Quick (true) or Depth (false) choice; null follows the camera's setting.
+     * @param onStage Called as the render moves on to finding the subject, estimating depth and rendering.
+     * @param onMaps Called with the subject cut-out and, for Depth, the depth map, once both are known; they
+     *        describe the original image and let a caller show a cheap preview while the GPU renders.
      * @param onRenderStart Called right before the GPU render, which cannot be cancelled once started;
      *        until then the call can still be cancelled.
      * @return A new Bitmap with the bokeh applied.
@@ -52,6 +69,9 @@ class DepthBokehProcessor(
         focusY: Float?,
         aperture: Float,
         bokehStyle: BokehStyle = BokehStyle.DEFAULT,
+        quickBlur: Boolean? = null,
+        onStage: (BokehStage) -> Unit = {},
+        onMaps: (SubjectMask, RelativeDepthMap?) -> Unit = { _, _ -> },
         onRenderStart: () -> Unit = {},
     ): Bitmap = mutex.withLock {
         if (aperture > 16.0f || aperture <= 0f) {
@@ -60,7 +80,7 @@ class DepthBokehProcessor(
 
         var depthMap: RelativeDepthMap? = null
         var floatDepthFile: java.io.File? = null
-        val quickRequested = quickBlurRequested()
+        val quickRequested = quickBlur ?: quickBlurRequested()
         if (!quickRequested && photoId != null) {
             floatDepthFile = GalleryManager.getFloatDepthFile(context, photoId)
             if (floatDepthFile.exists()) {
@@ -94,6 +114,7 @@ class DepthBokehProcessor(
         if (quickRequested || (depthMap == null && !DepthModelManager.isInstalled(appContext))) {
             quickBlur = true
         } else if (depthMap == null) {
+            onStage(BokehStage.Depth)
             depthMap = SharedDepthEstimator.estimateDepth(appContext, originalImage)
 
             if (depthMap != null && floatDepthFile != null) {
@@ -114,6 +135,7 @@ class DepthBokehProcessor(
 
         var result: Bitmap? = null
         if (depthMap != null || quickBlur) {
+            onStage(BokehStage.Subject)
             val subjectMask = SharedSubjectMaskEstimator.estimateMask(appContext, originalImage, depthMap)
             if (subjectMask == null) {
                 PLog.e(TAG, "U2NetP subject mask unavailable; bokeh was not applied")
@@ -121,6 +143,7 @@ class DepthBokehProcessor(
             }
             // The subject is near, everything else far. The mask itself is the stand-in depth, and
             // it is not cached: an installed depth model must be able to replace it.
+            onMaps(subjectMask, if (quickBlur) null else depthMap)
             if (quickBlur) {
                 depthMap = RelativeDepthMap(subjectMask.width, subjectMask.height, subjectMask.values.copyOf())
             }
@@ -128,6 +151,12 @@ class DepthBokehProcessor(
             val resolvedFocusX = focusX ?: 0.5f
             val resolvedFocusY = focusY ?: 0.5f
             val focusMask = subjectMask.sample(resolvedFocusX, resolvedFocusY)
+            // The strongest subject coverage within 3 % of the focus point: tells a tap just off the
+            // subject (high nearby) from a hole in the cut-out at the subject (low everywhere).
+            var focusMaskNear = 0f
+            for (dy in -3..3) for (dx in -3..3) {
+                focusMaskNear = maxOf(focusMaskNear, subjectMask.sample(resolvedFocusX + dx * 0.01f, resolvedFocusY + dy * 0.01f))
+            }
             val preparedDepth = DepthBokehDepthPreprocessor.prepare(
                 resolvedDepth,
                 resolvedFocusX,
@@ -136,9 +165,12 @@ class DepthBokehProcessor(
             )
             PLog.d(
                 TAG,
-                "Prepared bokeh depth: inverted=${preparedDepth.inverted} focusDepth=${preparedDepth.focusDepth} focusMask=$focusMask normalScore=${preparedDepth.normalScore} invertedScore=${preparedDepth.invertedScore}"
+                "Prepared bokeh depth: focus=($resolvedFocusX,$resolvedFocusY) image=${originalImage.width}x${originalImage.height} " +
+                    "quick=$quickBlur inverted=${preparedDepth.inverted} focusDepth=${preparedDepth.focusDepth} " +
+                    "focusMask=$focusMask focusMaskNear=$focusMaskNear maskRegion=${subjectMask.region} normalScore=${preparedDepth.normalScore} invertedScore=${preparedDepth.invertedScore}"
             )
             currentCoroutineContext().ensureActive()
+            onStage(BokehStage.Render)
             onRenderStart()
             val bokehResult = processor.applyBokeh(
                 originalImage,

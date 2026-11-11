@@ -26,7 +26,20 @@ internal enum class SettingKind {
 
     /** AI denoise: Off or On. */
     AiDenoise,
+
+    /** The background blur's aperture: stops that render once, when the finger lifts. */
+    Aperture,
+
+    /** A choice among a few options, shown as chips. */
+    Choice,
 }
+
+/** The aperture ring's stops, with Off (0) as the last stop past f/16. */
+internal val ApertureStops = listOf(1.2f, 1.4f, 1.8f, 2f, 2.8f, 3.5f, 4f, 5.6f, 8f, 11f, 16f, 0f)
+
+/** "1.4", "2.0", "8", "16": one decimal below f/8, as the camera writes apertures. */
+internal fun formatAperture(value: Float): String =
+    if (value >= 8f) value.roundToInt().toString() else String.format(Locale.ROOT, "%.1f", value)
 
 /**
  * The settings of Light, Color, Effects and Detail, in their order on screen. One exposure set per photo:
@@ -76,7 +89,13 @@ internal enum class EditorSetting(
     Clarity(EditorSection.Detail, SettingKind.Recipe, R.string.recipe_param_clarity, R.string.editor_explain_clarity, "recipe.CLARITY", RecipeParam.CLARITY, EditorGlyph.Clarity),
     NoiseReduction(EditorSection.Detail, SettingKind.Denoise, R.string.editor_noise_reduction, R.string.settings_noise_reduction_description, "noiseReduction", glyph = EditorGlyph.NoiseReduction),
     ColorNoise(EditorSection.Detail, SettingKind.Denoise, R.string.editor_color_noise, R.string.settings_chroma_noise_reduction_description, "chromaNoiseReduction", glyph = EditorGlyph.ColorNoise),
-    AiDenoise(EditorSection.Detail, SettingKind.AiDenoise, R.string.editor_ai_denoise, R.string.editor_explain_ai_denoise, "aiDenoise", glyph = EditorGlyph.AiDenoise);
+    AiDenoise(EditorSection.Detail, SettingKind.AiDenoise, R.string.editor_ai_denoise, R.string.editor_explain_ai_denoise, "aiDenoise", glyph = EditorGlyph.AiDenoise),
+
+    Aperture(EditorSection.Portrait, SettingKind.Aperture, R.string.editor_aperture, R.string.editor_explain_aperture, "aperture"),
+    Focus(EditorSection.Portrait, SettingKind.Choice, R.string.editor_focus, R.string.editor_explain_focus, "focus"),
+    Bokeh(EditorSection.Portrait, SettingKind.Choice, R.string.editor_bokeh, R.string.editor_explain_bokeh, "bokeh"),
+    // Quick or Depth; also an on/off switch for the blur, next to the aperture.
+    Depth(EditorSection.Portrait, SettingKind.Choice, R.string.editor_blur, R.string.editor_explain_depth, "depth");
 
     val icon: ImageVector
         get() = when (this) {
@@ -97,6 +116,10 @@ internal enum class EditorSetting(
             NoiseReduction -> AppIcons.WandLine
             ColorNoise -> AppIcons.ColorFilterLine
             AiDenoise -> AppIcons.SparklesLine
+            Aperture -> AppIcons.ApertureLine
+            Focus -> AppIcons.FocusCenteredLine
+            Bokeh -> AppIcons.CirclesLine
+            Depth -> AppIcons.StackLine
             else -> AppIcons.AdjustmentsLine  // drawn settings use their glyph instead
         }
 
@@ -114,6 +137,7 @@ internal enum class EditorSetting(
             this == RawExposure -> (-40..40).map { it / 10f }
             kind == SettingKind.RawTone -> (-10..10).map { it / 10f }
             kind == SettingKind.Denoise -> (0..20).map { it / 10f }
+            kind == SettingKind.Aperture -> ApertureStops
             else -> emptyList()
         }
 
@@ -142,7 +166,9 @@ internal enum class EditorSetting(
     }
 
     /** A tick label on the ruler: like [format], without the plus sign or a trailing ".0". */
-    fun tickLabel(value: Float): String = format(value).removePrefix("+").removeSuffix(".0")
+    fun tickLabel(value: Float): String =
+        if (kind == SettingKind.Aperture) formatAperture(value).removeSuffix(".0")
+        else format(value).removePrefix("+").removeSuffix(".0")
 
     /** The value as a fraction of the far end of its range on its side, for the drawn icons (−1 to 1). */
     fun fraction(value: Float): Float {
@@ -225,3 +251,11 @@ internal enum class EditorGroup(
             entries.filter { it.section == section && (!it.rawOnly || isRaw) }
     }
 }
+
+/** One option of a choice setting, shown as a chip on the photo's bottom edge. */
+internal data class EditorChoice(
+    val label: String,
+    val icon: ImageVector,
+    val selected: Boolean,
+    val onClick: () -> Unit,
+)
