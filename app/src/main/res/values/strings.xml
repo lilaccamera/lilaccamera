@@ -1328,6 +1328,7 @@
     <string name="settings_language_chinese_traditional" translatable="false">繁體中文（台灣）</string>
     <string name="eis_plus_unavailable_title">EIS+ unavailable</string>
     <string name="video_heat_warning_no_temp">Phone hot</string>
+    <string name="video_space_left">left</string>
     <string name="video_heat_degrees">%1$d °C</string>
     <string name="video_heat_gauge_description">%1$s %2$d °C. Recording stops at %3$d °C.</string>
     <string name="video_heat_stopped_title">Recording stopped</string>

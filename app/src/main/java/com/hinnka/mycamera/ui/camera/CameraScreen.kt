@@ -1878,8 +1878,9 @@ fun CameraScreen(
                 )
             }
 
-            // Active settings and the histogram on the picture's top edge, while quick settings are closed and
-            // nothing records (the recording line takes their place). A tap opens quick settings.
+            // Active settings and the histogram on the picture's top edge, while quick settings are closed.
+            // While recording the time sits in a pill at the centre, the marks to its left and the space left,
+            // when it runs low, to its right; the heat gauge is a second line under it when the phone is hot. A tap opens quick settings, unless recording.
             val topEdgeMarks = buildList {
                 if (isVideoMode) {
                     if (state.videoConfig.torchEnabled && state.videoCapabilities.supportsTorch) {
@@ -1899,41 +1900,40 @@ fun CameraScreen(
                 }
             }
             val topEdgeHistogram = state.histogram.takeIf { isPhotoStyleMode && showHistogram }
+            val recordingLine = isVideoMode && state.videoRecordingState.isRecording
+            val recordingSecondsLeft = rememberRecordingSecondsLeft(recordingLine, state.videoConfig)
             AnimatedVisibility(
                 visible = activePanel != ActivePanel.SETTINGS && activePanel != ActivePanel.FILTERS &&
-                    !state.videoRecordingState.isRecording && !everydayRowShown && (topEdgeMarks.isNotEmpty() || topEdgeHistogram != null),
+                    !everydayRowShown && (recordingLine || topEdgeMarks.isNotEmpty() || topEdgeHistogram != null),
                 enter = fadeIn(tween(150)),
                 exit = fadeOut(tween(150)),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = viewfinderTop)
             ) {
-                TopEdgeLine(
-                    marks = topEdgeMarks,
-                    histogram = topEdgeHistogram,
-                    onClick = { everydayRowShown = true }
-                )
-            }
-
-            // While recording: time, heat and format, centred just below the picture's top edge.
-            // It drops in a few dp and fades in when recording starts, and leaves the same way.
-            val recordingHudDrop = with(LocalDensity.current) { 8.dp.roundToPx() }
-            AnimatedVisibility(
-                visible = isVideoMode && state.videoRecordingState.isRecording,
-                enter = slideInVertically(tween(200, easing = FastOutSlowInEasing)) { -recordingHudDrop } +
-                    fadeIn(tween(200)),
-                exit = slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { -recordingHudDrop } +
-                    fadeOut(tween(200)),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = viewfinderTop + 8.dp)
-            ) {
-                RecordingHud(
-                    elapsedMs = state.videoRecordingState.elapsedMs,
-                    isHot = state.videoRecordingState.isHot,
-                    heatGauge = state.videoRecordingState.heatGauge,
-                    videoConfig = state.videoConfig
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    TopEdgeLine(
+                        marks = topEdgeMarks,
+                        histogram = topEdgeHistogram,
+                        onClick = { if (!recordingLine) everydayRowShown = true },
+                        center = if (recordingLine) {
+                            {
+                                RecordingPill(
+                                    elapsedMs = state.videoRecordingState.elapsedMs,
+                                    isPaused = state.videoRecordingState.isPaused,
+                                    isHot = state.videoRecordingState.isHot,
+                                    heatGauge = state.videoRecordingState.heatGauge
+                                )
+                            }
+                        } else null,
+                        trailing = recordingSecondsLeft?.takeIf { recordingLine && it < 20 * 60 }?.let { left ->
+                            { SpaceLeftMark(left) }
+                        }
+                    )
+                    if (recordingLine && state.videoRecordingState.isHot) {
+                        HeatGauge(state.videoRecordingState.heatGauge, barWidth = 64.dp)
+                    }
+                }
             }
 
             // Portrait offers its guide in a pill centred just above the picture's bottom, the manual
