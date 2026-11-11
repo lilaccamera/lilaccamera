@@ -106,7 +106,16 @@ internal fun cameraParameterItems(state: CameraState): List<CameraParameterItem>
     val liveIso = sampled(state.iso)
     val liveFocus = sampled(state.focusDistance)
     val liveWb = sampled(state.actualAwbTemperature)
-    return listOf(
+    // Portrait leads with its aperture, always shown like a value set by hand.
+    val aperture = if (showsPortraitAperture(state)) listOf(
+        CameraParameterItem(
+            CameraParameter.APERTURE,
+            stringResource(R.string.camera_parameter_aperture),
+            stringResource(R.string.virtual_aperture_viewfinder_hint, formatApertureValue(state.virtualAperture)),
+            isManual = true
+        )
+    ) else emptyList()
+    return aperture + listOfNotNull(
         CameraParameterItem(
             CameraParameter.EXPOSURE_COMPENSATION,
             stringResource(R.string.camera_parameter_exposure),
@@ -137,7 +146,8 @@ internal fun cameraParameterItems(state: CameraState): List<CameraParameterItem>
             disabledMessage = R.string.manual_sensor_unavailable,
             isManual = isoManual
         ),
-        CameraParameterItem(
+        // No manual focus in Portrait; one still set from another mode shows, so it can be reset.
+        if (state.isPortraitMode && !focusManual) null else CameraParameterItem(
             CameraParameter.FOCUS,
             stringResource(R.string.camera_parameter_focus),
             when {
@@ -376,3 +386,7 @@ internal fun ManualValuesLine(
         }
     }
 }
+
+/** Portrait photos show and set their virtual aperture with the manual values. */
+internal fun showsPortraitAperture(state: CameraState): Boolean =
+    state.isPortraitMode && state.captureMode == CaptureMode.PHOTO && state.isVirtualApertureEnabled

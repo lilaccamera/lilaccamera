@@ -2,6 +2,7 @@ package com.hinnka.mycamera.lut
 
 import android.opengl.GLES30
 import com.hinnka.mycamera.preview.PortraitFace
+import com.hinnka.mycamera.processor.LensBlurParams
 import com.hinnka.mycamera.utils.PLog
 
 /**
@@ -33,6 +34,18 @@ internal class PortraitBlurGl(
 ) {
     @Volatile
     var target: PortraitFace? = null
+
+    // Follows the saved photo's blur for the chosen f-number: how much blur, and how far it spreads.
+    @Volatile
+    private var apertureAmount = 1f
+    @Volatile
+    private var apertureSpread = 1f
+
+    fun setAperture(aperture: Float) {
+        val params = LensBlurParams.forAperture(aperture)
+        apertureAmount = params.blurAmount
+        apertureSpread = params.radiusGain.coerceAtMost(MAX_APERTURE_SPREAD)
+    }
 
     private var centerX = 0.5f
     private var centerY = 0.5f
@@ -99,7 +112,8 @@ internal class PortraitBlurGl(
 
         GLES30.glDisable(GLES30.GL_BLEND)
         GLES30.glUseProgram(blurProgram)
-        val blurAmount = portraitBlurForFaceSize(kotlin.math.sqrt(faceWidth * faceHeight))
+        val blurAmount = portraitBlurForFaceSize(kotlin.math.sqrt(faceWidth * faceHeight)) * apertureAmount
+        val spread = apertureSpread
         // Two passes, across and down into the small texture: a light blur that keeps the frame readable.
         // Skipped for a distant face, which keeps only its outline.
         var input = sourceTextureId
@@ -115,7 +129,7 @@ internal class PortraitBlurGl(
             // The first pass reads the full-size frame, the others the small one.
             val texelX = 1f / (if (index == 0) inputWidth else smallWidth)
             val texelY = 1f / (if (index == 0) height else smallHeight)
-            GLES30.glUniform2f(blurStep, direction[0] * texelX, direction[1] * texelY)
+            GLES30.glUniform2f(blurStep, direction[0] * texelX * spread, direction[1] * texelY * spread)
             drawQuad(blurProgram)
             input = smallTexture[destination]
             inputWidth = smallWidth
@@ -307,6 +321,8 @@ internal class PortraitBlurGl(
         // How fast the face and the fade follow, per frame.
         const val FOLLOW = 0.3f
         const val FADE = 0.18f
+        // Wider spacing of the nine blur taps would break the blur into separate copies.
+        const val MAX_APERTURE_SPREAD = 2f
         const val FADE_OUT_FLOOR = 0.01f
         // The blur reaches full strength this far outside the sharp shapes, in their radii.
         const val FEATHER = 0.3f
