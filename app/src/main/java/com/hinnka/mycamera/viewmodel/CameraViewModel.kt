@@ -6025,7 +6025,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * exposure). Frames without gyro coverage are left out; see [steadiestGyroScoreIndex].
      */
     private fun steadiestGyroReferenceIndex(frames: List<PendingRawStackFrame>): Int {
-        val windows = frames.take(GYRO_REFERENCE_CANDIDATES).map { it.frame.gyroWindow }
+        val windows = frames.take(GYRO_REFERENCE_CANDIDATES + 1).map { it.frame.gyroWindow }
         val scores = windows.map { window ->
             if (window == null || window.sampleCount < 2 || window.coverageRatio < GYRO_REFERENCE_MIN_COVERAGE) {
                 null
@@ -6038,7 +6038,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             "YUV burst gyro: coverage=${windows.joinToString { "%.2f".format(it?.coverageRatio ?: 0f) }} " +
                 "score=${scores.joinToString { it?.let { s -> "%.2e".format(s) } ?: "-" }}",
         )
-        return steadiestGyroScoreIndex(scores, GYRO_REFERENCE_MIN_GAIN)
+        return steadiestGyroScoreIndex(scores, GYRO_REFERENCE_MIN_GAIN, GYRO_REFERENCE_CANDIDATES)
     }
 
     private fun rawStackFrame(
@@ -6908,14 +6908,17 @@ private fun shouldIncludeCropRegionInOutputSize(imageFormat: Int): Boolean {
 }
 
 /**
- * Index of the lowest gyro motion score among frames that have one. While the first frame has a
- * score it stays the reference unless another frame's score is below [minGain] times its own.
- * Without one (the gyro can start after the first frame when the burst follows the tap at once)
- * the steadiest covered frame wins: the first frame carries the tap's shake, so it is a poor
- * default anyway. Returns 0 when no frame has a score.
+ * Index of the lowest gyro motion score among the first [candidates] frames that have one. While
+ * the first frame has a score it stays the reference unless another frame's score is below
+ * [minGain] times its own. Without one (the gyro can start after the first frame when the burst
+ * follows the tap at once) the first frame gives its place to the next one and the steadiest
+ * covered frame wins: the first frame carries the tap's shake, so it is a poor default anyway.
+ * Returns 0 when no frame has a score.
  */
-internal fun steadiestGyroScoreIndex(scores: List<Float?>, minGain: Float): Int {
-    val best = scores.indices.filter { scores[it] != null }.minByOrNull { scores[it]!! } ?: return 0
-    val first = scores[0] ?: return best
-    return if (scores[best]!! < first * minGain) best else 0
+internal fun steadiestGyroScoreIndex(scores: List<Float?>, minGain: Float, candidates: Int): Int {
+    if (scores.isEmpty()) return 0
+    val considered = scores.take(if (scores[0] == null) candidates + 1 else candidates)
+    val best = considered.indices.filter { considered[it] != null }.minByOrNull { considered[it]!! } ?: return 0
+    val first = considered[0] ?: return best
+    return if (considered[best]!! < first * minGain) best else 0
 }
