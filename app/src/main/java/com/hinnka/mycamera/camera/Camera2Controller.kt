@@ -57,6 +57,7 @@ import com.hinnka.mycamera.stabilization.normalizeStabilizationStrength
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.slowmotion.SlowMotionRecorder
+import com.hinnka.mycamera.slowmotion.BurstPhase
 import com.hinnka.mycamera.slowmotion.SlowMotionSpec
 import com.hinnka.mycamera.slowmotion.SonyBridgeClient
 import com.hinnka.mycamera.video.CaptureMode
@@ -9060,11 +9061,24 @@ class Camera2Controller(private val context: Context) {
                     }
                 }
 
+                override fun onBurstProgress(frames: Int) {
+                    _state.update { st -> st.copy(slowMotion = st.slowMotion.copy(burstPhase = BurstPhase.CAPTURING, burstFrames = frames, burstTotal = spec.frames)) }
+                }
+
                 override fun onBurstDone(arrived: Boolean) {
                     PLog.i(TAG, "Slow-motion burst done, arrived=$arrived")
                     cameraHandler?.post {
                         slowMotionBursts++
-                        _state.update { s -> s.copy(slowMotion = s.slowMotion.copy(bursts = slowMotionBursts, canTrigger = slowMotionBursts < SlowMotionSpec.MAX_BURSTS)) }
+                        _state.update { s -> s.copy(slowMotion = s.slowMotion.copy(
+                            bursts = slowMotionBursts,
+                            canTrigger = slowMotionBursts < SlowMotionSpec.MAX_BURSTS,
+                            burstPhase = if (arrived) BurstPhase.DONE else BurstPhase.NONE,
+                            burstFrames = if (arrived) spec.frames else 0
+                        )) }
+                        // the check mark stays for a moment
+                        cameraHandler?.postDelayed({
+                            _state.update { s -> if (s.slowMotion.burstPhase == BurstPhase.DONE) s.copy(slowMotion = s.slowMotion.copy(burstPhase = BurstPhase.NONE)) else s }
+                        }, 2000)
                     }
                 }
 
@@ -9195,7 +9209,7 @@ class Camera2Controller(private val context: Context) {
         slowMotionTexture = null
         slowMotionCycling = false
         stopVideoRecordingTicker()
-        _state.update { s -> s.copy(videoRecordingState = VideoRecordingState(), slowMotion = s.slowMotion.copy(active = false, canTrigger = false)) }
+        _state.update { s -> s.copy(videoRecordingState = VideoRecordingState(), slowMotion = s.slowMotion.copy(active = false, canTrigger = false, burstPhase = BurstPhase.NONE)) }
         previewSurfaceTexture?.setDefaultBufferSize(previewBufferSize.width, previewBufferSize.height)
         if (reopen && cameraDevice != null && previewSurface != null) {
             createPreviewSession(openGeneration = cameraOpenGeneration)

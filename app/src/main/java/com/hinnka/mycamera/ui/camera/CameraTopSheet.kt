@@ -925,7 +925,8 @@ private fun RowScope.VideoEverydayItems(
     EverydayItem(
         label = "${stringResource(R.string.video_torch_chip)} ${stringResource(if (torch) R.string.quick_on else R.string.quick_off)}",
         active = torch,
-        enabled = videoCapabilities.supportsTorch,
+        // Slow motion's camera session carries no torch and no stabilisation setting.
+        enabled = videoCapabilities.supportsTorch && !slowMotionEnabled,
         onClick = onTorchToggle,
         modifier = itemModifier
     ) { color ->
@@ -941,6 +942,7 @@ private fun RowScope.VideoEverydayItems(
         EverydayItem(
             label = stringResource(R.string.quick_stabilise),
             active = false,
+            enabled = !slowMotionEnabled,
             onClick = {
                 onStabilizationModeChange(modes[(modes.indexOf(videoConfig.stabilizationMode) + 1).mod(modes.size)])
             },

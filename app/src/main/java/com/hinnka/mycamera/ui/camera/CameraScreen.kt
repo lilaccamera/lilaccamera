@@ -106,6 +106,7 @@ import com.hinnka.mycamera.utils.StartupGate
 import com.hinnka.mycamera.utils.VibrationHelper
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
+import com.hinnka.mycamera.slowmotion.BurstPhase
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoFpsPreset
@@ -2011,11 +2012,11 @@ fun CameraScreen(
                 exposureCount < multipleExposureState.targetCount
             val topEdgeMarks = buildList {
                 if (isVideoMode) {
-                    if (state.videoConfig.torchEnabled && state.videoCapabilities.supportsTorch) {
+                    if (state.videoConfig.torchEnabled && state.videoCapabilities.supportsTorch && !state.slowMotion.enabled) {
                         add(TopEdgeMark(AppIcons.BulbLine))
                     }
                     if (state.videoConfig.logProfile != VideoLogProfile.OFF) add(TopEdgeMark(null, "LOG"))
-                    if (state.slowMotion.enabled) add(TopEdgeMark(null, "960"))
+                    if (state.slowMotion.enabled) add(TopEdgeMark(null, stringResource(R.string.slow_motion_mark)))
                 } else {
                     if (useLivePhoto) add(TopEdgeMark(AppIcons.LivePhotoLine))
                     if (state.timerSeconds > 0) add(TopEdgeMark(AppIcons.StopwatchLine, "${state.timerSeconds}s"))
@@ -2180,6 +2181,35 @@ fun CameraScreen(
                     onClick = {},
                     modifier = guidePillPlacement
                 )
+            }
+            // While the burst is read out the viewfinder stands still: count the frames that have arrived, then check them off.
+            val burst = state.slowMotion
+            AnimatedVisibility(
+                visible = state.captureMode == CaptureMode.VIDEO && burst.burstPhase != BurstPhase.NONE,
+                enter = fadeIn(tween(150)),
+                exit = fadeOut(tween(300)),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .autoRotate()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .padding(start = 12.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (burst.burstPhase == BurstPhase.CAPTURING) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                    } else {
+                        Icon(AppIcons.CheckLine, contentDescription = null, tint = ModeAmber, modifier = Modifier.size(20.dp))
+                    }
+                    Text(
+                        "${burst.burstFrames} / ${burst.burstTotal}",
+                        color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                        style = TextStyle(shadow = ViewfinderTextShadow)
+                    )
+                }
             }
             // Photo mode offers the camera basics the same way, on every launch until opened once.
             if (

@@ -38,6 +38,9 @@ class SlowMotionRecorder(
         /** Ordinary video is being recorded; the trigger may be pressed. */
         fun onRecording()
 
+        /** Burst frames that have arrived so far (at most the burst length). */
+        fun onBurstProgress(frames: Int)
+
         /** The burst's frames have arrived (false: not all of them within the timeout). */
         fun onBurstDone(arrived: Boolean)
 
@@ -110,7 +113,9 @@ class SlowMotionRecorder(
         var arrived = false
         while (!arrived && SystemClock.elapsedRealtimeNanos() - triggerNs < BURST_TIMEOUT_MS * 1_000_000L) {
             Thread.sleep(100)
-            arrived = bridge.frameCount() >= before + spec.frames
+            val count = bridge.frameCount()
+            listener.onBurstProgress((count - before).coerceIn(0, spec.frames))
+            arrived = count >= before + spec.frames
         }
         PLog.i(TAG, "Burst ${triggerFrames.size}: arrived=$arrived after ${(SystemClock.elapsedRealtimeNanos() - triggerNs) / 1_000_000} ms, frames before=$before now=${bridge.frameCount()}")
         if (state == State.TRIGGERED) state = State.RECORDING
