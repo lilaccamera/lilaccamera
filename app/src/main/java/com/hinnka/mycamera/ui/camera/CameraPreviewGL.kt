@@ -30,6 +30,8 @@ import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
 import com.hinnka.mycamera.stabilization.RealtimeStabilizationCoordinator
 import com.hinnka.mycamera.stabilization.StabilizationUseCase
 import com.hinnka.mycamera.ui.components.FocusIndicator
+import com.hinnka.mycamera.ui.components.SubjectFrames
+import com.hinnka.mycamera.camera.SubjectOverlay
 import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoLogProfile
@@ -66,6 +68,7 @@ fun CameraPreviewGL(
     fixedFocus: Boolean = false,
     focusHeld: Boolean = false,
     onFocusIdle: () -> Unit = {},
+    subjectOverlay: SubjectOverlay = SubjectOverlay(),
     meteringCircleMode: MeteringMode = MeteringMode.SYSTEM_DEFAULT,
     meteringMode: MeteringMode = MeteringMode.SYSTEM_DEFAULT,
     onSurfaceTextureReady: (SurfaceTexture) -> Unit,
@@ -339,6 +342,8 @@ fun CameraPreviewGL(
                     modifier = Modifier.fillMaxSize()
                 )
             }
+
+            SubjectFrames(subjectOverlay, Modifier.fillMaxSize())
 
             // 对焦指示器
             FocusIndicator(

@@ -104,6 +104,8 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
     /** The tracked face for the Portrait viewfinder; null once no face has been seen for a few frames. */
     var onPortraitFace: ((PortraitFace?) -> Unit)? = null
     var onTargetLost: (() -> Unit)? = null
+    /** Every face box found in a frame asked for with reportFaces (viewfinder coordinates), and the inference time. */
+    var onFaces: ((List<RectF>, Long) -> Unit)? = null
 
     /** Down for the person: across the eye line, on the side of the face centre (below the eyes). */
     private fun portraitFaceOf(candidate: FaceCandidate, inputWidth: Int, inputHeight: Int): PortraitFace {
@@ -152,9 +154,10 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
         trackPortraitFace: Boolean = false,
         /** Clockwise turn that makes faces in [frame] upright, from the phone's rotation. */
         uprightRotationDegrees: Int = 0,
+        reportFaces: Boolean = false,
     ): Boolean {
         val detectorPathAvailable =
-            (detectEyeTarget || createFaceMask || trackPortraitFace) && !detectorInitializationFailed
+            (detectEyeTarget || createFaceMask || trackPortraitFace || reportFaces) && !detectorInitializationFailed
         if (
             released.get() ||
             !detectorPathAvailable ||
@@ -177,6 +180,7 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
                     createFaceMask = createFaceMask,
                     trackPortraitFace = trackPortraitFace,
                     uprightRotationDegrees = uprightRotationDegrees,
+                    reportFaces = reportFaces,
                 )
             }
             return true
@@ -254,11 +258,13 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
         createFaceMask: Boolean,
         trackPortraitFace: Boolean,
         uprightRotationDegrees: Int,
+        reportFaces: Boolean,
     ) {
         var frameFinished = false
         try {
             if (released.get()) return
             val detector = getOrCreateDetector() ?: return
+            val startedMs = SystemClock.elapsedRealtime()
             val detections = try {
                 detectUpright(detector, bitmap, uprightRotationDegrees)
             } catch (error: RuntimeException) {
@@ -266,6 +272,7 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
                 onError?.invoke(error)
                 return
             }
+            if (reportFaces) onFaces?.invoke(detections.map { it.box }, SystemClock.elapsedRealtime() - startedMs)
             frameFinished = true
             handleResult(
                 detections = detections,

@@ -1468,6 +1468,8 @@ fun CameraScreen(
                         },
                 ) {
                     val currentCameraId = state.currentCameraId
+                    val subjectOverlay by viewModel.subjectOverlay.collectAsState()
+                    val faceCheckReason by viewModel.faceCheckReason.collectAsState()
                     val calibrationOffset by viewModel.getCameraOrientationOffset(currentCameraId)
                         .collectAsState(initial = 0)
                     val eyeFocusActive = eyeFocusEnabled &&
@@ -1511,6 +1513,7 @@ fun CameraScreen(
                             fixedFocus = !state.supportsPointAutoFocus,
                             focusHeld = state.shutterKeyHeld,
                             onFocusIdle = viewModel::unlockFocus,
+                            subjectOverlay = subjectOverlay,
                             meteringMode = state.effectiveMeteringMode,
                             onSurfaceTextureReady = { surfaceTexture ->
                                 previewSurfaceTexture = surfaceTexture
@@ -1547,7 +1550,7 @@ fun CameraScreen(
                                     hy
                                 )
                             },
-                            onEyeFocusInputAvailable = if (eyeFocusActive || portraitMaskActive || state.isPortraitMode) {
+                            onEyeFocusInputAvailable = if (eyeFocusActive || portraitMaskActive || state.isPortraitMode || faceCheckReason != null) {
                                 viewModel::handleEyeFocusInputUpdate
                             } else {
                                 null
