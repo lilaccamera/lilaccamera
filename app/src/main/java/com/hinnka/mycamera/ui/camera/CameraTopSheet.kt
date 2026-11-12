@@ -677,6 +677,8 @@ internal fun CameraTopSheet(
                             when {
                                 // Pro (RAW) is always full size: the RAW stream only exists at full sensor size.
                                 isProfessionalMode -> QuickFixed(stringResource(R.string.quick_resolution_full_raw))
+                                // Night always shoots the front camera's binned 2 MP; Photo's choice comes back after.
+                                isFrontCamera && isNightMode -> QuickFixed(resolutionLabel(2))
                                 isFrontCamera -> listOf(0, 2).forEach { cap ->
                                     QuickChoice(
                                         text = resolutionLabel(cap),

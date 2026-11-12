@@ -458,6 +458,10 @@ data class CameraState(
     val nightFrames: Int
         get() = if (nightFrameCount > 0) nightFrameCount else NightCapturePlanner.AUTO_FRAMES
 
+    /** The front camera's size cap in use: Night always shoots 2 MP (lilac's binned mode); Photo keeps its choice. */
+    val activeFrontPhotoResolutionCapMp: Int
+        get() = if (nightStacks) 2 else frontPhotoResolutionCapMp
+
     /** lilac front camera: whether still requests carry the small JPEG (Night follows its own Fast/Accurate). */
     val frontStillJpeg: Boolean
         get() = if (nightStacks) !nightFast else frontAccurateColour

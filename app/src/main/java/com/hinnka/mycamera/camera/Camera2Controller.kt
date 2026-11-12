@@ -2806,7 +2806,7 @@ class Camera2Controller(private val context: Context) {
     private fun surfacelessOpenSettings(): List<Any?> = _state.value.let {
         listOf(
             it.currentCameraId, it.captureMode, it.aspectRatio, requestedRawCaptureEnabled,
-            it.useP010, it.useP3ColorSpace, it.photoResolutionCapMp, it.frontPhotoResolutionCapMp, it.frontStillJpeg,
+            it.useP010, it.useP3ColorSpace, it.photoResolutionCapMp, it.activeFrontPhotoResolutionCapMp, it.frontStillJpeg,
             it.multiFrameOutputScale,
             it.photoPreviewStabilizationEnabled, it.useLivePhoto,
             it.vendorCaptureSettingsByLens, it.customVendorKeySettings,
@@ -3185,7 +3185,7 @@ class Camera2Controller(private val context: Context) {
                             outputCharacteristicsForStreams.get(CameraCharacteristics.LENS_FACING) ==
                             CameraCharacteristics.LENS_FACING_FRONT
                         ) {
-                            _state.value.frontPhotoResolutionCapMp
+                            _state.value.activeFrontPhotoResolutionCapMp
                         } else {
                             _state.value.photoResolutionCapMp
                         },
@@ -7658,35 +7658,34 @@ class Camera2Controller(private val context: Context) {
     }
 
     /** Caps the front camera's Photo-mode capture size; 0 = full sensor size. */
-    fun setFrontPhotoResolutionCapMp(megapixels: Int) {
-        if (_state.value.frontPhotoResolutionCapMp == megapixels) return
-        _state.update { s -> s.copy(frontPhotoResolutionCapMp = megapixels) }
-        if (isFrontCameraOpen()) restartPhotoSession("front photo resolution cap: $megapixels MP")
+    fun setFrontPhotoResolutionCapMp(megapixels: Int) = updateFrontSession("front photo resolution cap: $megapixels MP") {
+        it.copy(frontPhotoResolutionCapMp = megapixels)
     }
 
     /** Front camera "Accurate" colour (see frontStillJpegReader); the JPEG output is part of the session. */
-    fun setFrontAccurateColour(enabled: Boolean) = updateFrontStillJpeg("front accurate colour: $enabled") {
+    fun setFrontAccurateColour(enabled: Boolean) = updateFrontSession("front accurate colour: $enabled") {
         it.copy(frontAccurateColour = enabled)
     }
 
     /** Night on the mode dial: every Photo shot is a stack planned for low light (see planNightCapture). */
-    fun setNightMode(enabled: Boolean) = updateFrontStillJpeg("night mode: $enabled") {
+    fun setNightMode(enabled: Boolean) = updateFrontSession("night mode: $enabled") {
         it.copy(isNightMode = enabled)
     }
 
     /** Night's Fast choice: 1/30 s frames on the back camera; on lilac's front camera, no JPEG in the requests. */
-    fun setNightFast(fast: Boolean) = updateFrontStillJpeg("night fast: $fast") { it.copy(nightFast = fast) }
+    fun setNightFast(fast: Boolean) = updateFrontSession("night fast: $fast") { it.copy(nightFast = fast) }
 
     /** Night's frame count; 0 = Auto. */
     fun setNightFrameCount(frames: Int) {
         _state.update { s -> s.copy(nightFrameCount = if (frames > 0) MultiFrameConfig.normalizeDenoiseFrameCount(frames) else 0) }
     }
 
-    // The front still JPEG is part of the session, so a change to it reopens a running front camera.
-    private fun updateFrontStillJpeg(reason: String, change: (CameraState) -> CameraState) {
-        val before = _state.value.frontStillJpeg
+    // The front camera's still JPEG and capture size are part of the session, so a change to either reopens it.
+    private fun updateFrontSession(reason: String, change: (CameraState) -> CameraState) {
+        val session = { s: CameraState -> s.frontStillJpeg to s.activeFrontPhotoResolutionCapMp }
+        val before = session(_state.value)
         _state.update(change)
-        if (_state.value.frontStillJpeg != before && isFrontCameraOpen()) restartPhotoSession(reason)
+        if (session(_state.value) != before && isFrontCameraOpen()) restartPhotoSession(reason)
     }
 
     private fun isFrontCameraOpen(): Boolean =
