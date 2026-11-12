@@ -236,6 +236,7 @@ class RawDemosaicProcessor {
             afRegions = baseMetadata?.afRegions,
             defaultCrop = defaultCrop,
             frameCount = baseMetadata?.frameCount ?: 1,
+            mergedFrameCount = baseMetadata?.mergedFrameCount ?: 1,
             mgcDenoiseCorrelation = baseMetadata?.mgcDenoiseCorrelation,
             mgcDenoiseReadNoise = baseMetadata?.mgcDenoiseReadNoise,
             mgcDenoiseShotNoise = baseMetadata?.mgcDenoiseShotNoise,
