@@ -1169,8 +1169,10 @@ class Camera2Controller(private val context: Context) {
         return result.get(CaptureResult.SENSOR_TIMESTAMP) ?: startedTimestamp
     }
 
-    private fun stopShotSensors() {
-        burstGyroRecorder.stop()
+    private fun stopShotSensors(closingCamera: Boolean = false) {
+        // Bracketing reads the gyro at the press to size its long shutter, so it keeps running with the viewfinder.
+        // shortcut: turning bracketing off leaves it on until the next shot or camera close; fine for a test switch.
+        if (closingCamera || !_state.value.isJpgMaxHdrEnabled) burstGyroRecorder.stop()
         ambientLightReader.stop()
     }
 
@@ -3794,6 +3796,7 @@ class Camera2Controller(private val context: Context) {
 
             // Android 9+ 使用 SessionConfiguration
             val readerFormat = reader?.imageFormat ?: ImageFormat.YUV_420_888
+            if (_state.value.isJpgMaxHdrEnabled) burstGyroRecorder.start(cameraHandler)
             PLog.i(
                 TAG,
                 "Creating preview session: readerFormat=${imageFormatToString(readerFormat)}, " +
@@ -9489,17 +9492,6 @@ class Camera2Controller(private val context: Context) {
                 // Measure how steady the phone is before choosing the exposure.
                 val start = { startNightCapture(device, reader, baseExposureResult) }
                 cameraHandler?.postDelayed(start, NightCapturePlanner.STEADINESS_WINDOW_MS) ?: start()
-            } else if (shouldUseJpgMaxHdrCapture(currentState, isRawCaptureReader(reader))) {
-                // The bracket's long shutter is sized from the gyro, which needs a moment of samples first.
-                val start = {
-                    if (cameraDevice === device && imageReader === reader && captureSession != null) {
-                        prepareCaptureLighting(device, reader, baseExposureResult)
-                    } else {
-                        _state.update { s -> s.copy(isCapturing = false) }
-                        stopShotSensors()
-                    }
-                }
-                cameraHandler?.postDelayed(start, NightCapturePlanner.STEADINESS_WINDOW_MS) ?: start()
             } else {
                 prepareCaptureLighting(device, reader, baseExposureResult)
             }
@@ -10668,7 +10660,7 @@ class Camera2Controller(private val context: Context) {
             pendingCameraOpenRequest = null
         }
         try {
-            stopShotSensors()
+            stopShotSensors(closingCamera = true)
             pendingFrameMetadata.clear()
             cameraOpenGeneration++
             val lifecycleBeforeClose = cameraDeviceLifecycle
