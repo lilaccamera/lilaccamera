@@ -58,6 +58,7 @@ import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.slowmotion.SlowMotionRecorder
 import com.hinnka.mycamera.slowmotion.SlowMotionSpec
+import com.hinnka.mycamera.slowmotion.SonyBridgeClient
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VIDEO_AUDIO_INPUT_AUTO
@@ -104,6 +105,9 @@ class Camera2Controller(private val context: Context) {
 
     companion object {
         private const val COMPANION_JPEG_SHOTS_KEPT = 8
+        private const val SLOW_MOTION_DEFAULT_FRAMES = 177
+        // Exposure the scene would need at 1/960 s, as an ISO: above this the burst comes out dark and noisy.
+        private const val SLOW_MOTION_DARK_ISO = 1600
         private const val TAG = "Camera2Controller"
 
         // 自定义错误代码
@@ -1471,6 +1475,7 @@ class Camera2Controller(private val context: Context) {
             result: TotalCaptureResult
         ) {
             super.onCaptureCompleted(session, request, result)
+            if (session === captureSession && _state.value.captureMode == CaptureMode.VIDEO) updateSlowMotionDark(result)
 
             if (session === captureSession && _state.value.previewFirstFrameTimestampNs == null) {
                 result.get(CaptureResult.SENSOR_TIMESTAMP)?.let { timestamp ->
@@ -3128,6 +3133,7 @@ class Camera2Controller(private val context: Context) {
                             !isPhysicalOutputProfileFailed(it, ImageFormat.YCBCR_P010)
                         } ?: true)
                 val resolvedVideoPreviewSize = refreshVideoCapabilities(openCharacteristics)
+                if (captureMode == CaptureMode.VIDEO) checkSlowMotionAvailable()
                 previewSize = when (captureMode) {
                     CaptureMode.VIDEO -> resolvedVideoPreviewSize
                     CaptureMode.PHOTO -> CameraUtils.getFixedPreviewSize(openCharacteristics, _state.value.aspectRatio)
@@ -8876,6 +8882,10 @@ class Camera2Controller(private val context: Context) {
         creativeRecipeParams: ColorRecipeParams? = null,
         orientationOffsetDegrees: Int = 0
     ) {
+        if (_state.value.slowMotion.enabled && _state.value.slowMotion.available && !isCurrentCameraFrontFacing()) {
+            startSlowMotion(SlowMotionSpec(frames = SLOW_MOTION_DEFAULT_FRAMES))
+            return
+        }
         if (_state.value.captureMode != CaptureMode.VIDEO ||
             _state.value.videoRecordingState.isRecording ||
             _state.value.videoRecordingState.isProcessing
@@ -9041,7 +9051,10 @@ class Camera2Controller(private val context: Context) {
 
                 override fun onRecording() {
                     cameraHandler?.post {
-                        _state.update { s -> s.copy(videoRecordingState = VideoRecordingState(isRecording = true, elapsedMs = 0L)) }
+                        _state.update { s -> s.copy(
+                            videoRecordingState = VideoRecordingState(isRecording = true, elapsedMs = 0L),
+                            slowMotion = s.slowMotion.copy(active = true, canTrigger = true)
+                        ) }
                         videoRecordingPausedMs = 0L
                         startVideoRecordingTicker()
                     }
@@ -9049,6 +9062,7 @@ class Camera2Controller(private val context: Context) {
 
                 override fun onBurstDone(arrived: Boolean) {
                     PLog.i(TAG, "Slow-motion burst done, arrived=$arrived")
+                    cameraHandler?.post { slowMotionBursts++; setSlowMotionCanTrigger(slowMotionBursts < SlowMotionSpec.MAX_BURSTS) }
                 }
 
                 override fun onFinished(uri: Uri?) {
@@ -9069,6 +9083,7 @@ class Camera2Controller(private val context: Context) {
         val texture = previewSurfaceTexture ?: return false
         slowMotion = recorder
         slowMotionSpec = spec
+        slowMotionBursts = 0
         slowMotionTexture = texture
         // Sony's service changes mode only while no camera device is open (with one open, even without a session,
         // the mode change does not return until it is closed): close the camera, change the mode, reopen the camera
@@ -9104,12 +9119,52 @@ class Camera2Controller(private val context: Context) {
 
     /** Fires the 960 fps burst of the running slow-motion recording. */
     fun triggerSlowMotion() {
+        if (!_state.value.slowMotion.canTrigger) return
+        setSlowMotionCanTrigger(false) // until this burst has arrived
         slowMotion?.trigger()
+    }
+
+    private fun setSlowMotionCanTrigger(value: Boolean) {
+        _state.update { s -> s.copy(slowMotion = s.slowMotion.copy(canTrigger = value)) }
+    }
+
+    /** The switch next to resolution and fps; it only takes effect for the next recording. */
+    fun setSlowMotionEnabled(enabled: Boolean) {
+        if (_state.value.videoRecordingState.isRecording || _state.value.videoRecordingState.isProcessing) return
+        _state.update { s -> s.copy(slowMotion = s.slowMotion.copy(enabled = enabled && s.slowMotion.available)) }
+    }
+
+    /** Asks the companion once whether 960 fps exists here (off the main thread); the switch appears when it does. */
+    private fun checkSlowMotionAvailable() {
+        if (slowMotionChecked || !DeviceQuirks.isLilac) return
+        slowMotionChecked = true
+        Thread {
+            val caps = SonyBridgeClient.queryCapabilities(context)
+            val ok = caps != null && (SlowMotionSpec.VIEWFINDER_WIDTH to SlowMotionSpec.VIEWFINDER_HEIGHT) in caps.sizes
+            PLog.i(TAG, "Slow motion available: $ok ($caps)")
+            _state.update { s -> s.copy(slowMotion = s.slowMotion.copy(available = ok)) }
+        }.apply { isDaemon = true }.start()
+    }
+
+    private var slowMotionChecked = false
+    private var slowMotionBursts = 0
+    private var darkSmoothedIso = 0f
+
+    /** Watches how much light the scene gives: the ISO it would need at 1/960 s, from the viewfinder's own exposure. */
+    private fun updateSlowMotionDark(result: TotalCaptureResult) {
+        val sm = _state.value.slowMotion
+        if (!sm.available || !sm.enabled) return
+        val iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: return
+        val exposureNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: return
+        val needed = iso * exposureNs / SlowMotionSpec(frames = 91).exposureLimitNs.toFloat()
+        darkSmoothedIso = if (darkSmoothedIso == 0f) needed else darkSmoothedIso * 0.9f + needed * 0.1f
+        val dark = if (sm.dark) darkSmoothedIso > SLOW_MOTION_DARK_ISO * 0.8f else darkSmoothedIso > SLOW_MOTION_DARK_ISO
+        if (dark != sm.dark) _state.update { s -> s.copy(slowMotion = s.slowMotion.copy(dark = dark)) }
     }
 
     private fun stopSlowMotion() {
         stopVideoRecordingTicker()
-        _state.update { s -> s.copy(videoRecordingState = s.videoRecordingState.copy(isRecording = false, isProcessing = true)) }
+        _state.update { s -> s.copy(videoRecordingState = s.videoRecordingState.copy(isRecording = false, isProcessing = true), slowMotion = s.slowMotion.copy(canTrigger = false)) }
         slowMotion?.stop()
     }
 
@@ -9128,7 +9183,7 @@ class Camera2Controller(private val context: Context) {
         slowMotionTexture = null
         slowMotionCycling = false
         stopVideoRecordingTicker()
-        _state.update { s -> s.copy(videoRecordingState = VideoRecordingState()) }
+        _state.update { s -> s.copy(videoRecordingState = VideoRecordingState(), slowMotion = s.slowMotion.copy(active = false, canTrigger = false)) }
         previewSurfaceTexture?.setDefaultBufferSize(previewBufferSize.width, previewBufferSize.height)
         if (reopen && cameraDevice != null && previewSurface != null) {
             createPreviewSession(openGeneration = cameraOpenGeneration)

@@ -58,8 +58,7 @@ class SlowMotionRecorder(
     private var state = State.NEW
     private var dateTakenMs = 0L
     private var hasSound = false
-    private var triggerNs = 0L
-    private var framesBeforeTrigger = 0
+    private val triggerFrames = ArrayList<Int>() // frames the encoder had delivered when each burst was fired
 
     private enum class State { NEW, ENTERED, RECORDING, TRIGGERED, STOPPING, DONE }
 
@@ -98,21 +97,23 @@ class SlowMotionRecorder(
         listener.onRecording()
     }
 
-    /** Fires the burst; only works while ordinary video is recording, once per recording. */
+    /** Fires a burst; only works while ordinary video is recording and no other burst is arriving. */
     fun trigger() = post {
-        if (state != State.RECORDING) return@post
+        if (state != State.RECORDING || triggerFrames.size >= SlowMotionSpec.MAX_BURSTS) return@post
         val bridge = client.bridge ?: return@post fail("The slow-motion service stopped")
-        framesBeforeTrigger = bridge.frameCount()
-        triggerNs = SystemClock.elapsedRealtimeNanos()
+        val before = bridge.frameCount()
+        val triggerNs = SystemClock.elapsedRealtimeNanos()
         if (bridge.trigger() != 0) return@post fail("Sony's photo service did not start the burst")
+        triggerFrames += before
         state = State.TRIGGERED
         // The service reports no completion: the burst has arrived once the encoder has delivered its frames.
         var arrived = false
         while (!arrived && SystemClock.elapsedRealtimeNanos() - triggerNs < BURST_TIMEOUT_MS * 1_000_000) {
             Thread.sleep(100)
-            arrived = bridge.frameCount() >= framesBeforeTrigger + spec.frames
+            arrived = bridge.frameCount() >= before + spec.frames
         }
-        PLog.i(TAG, "Burst: arrived=$arrived after ${(SystemClock.elapsedRealtimeNanos() - triggerNs) / 1_000_000} ms, frames before=$framesBeforeTrigger now=${bridge.frameCount()}")
+        PLog.i(TAG, "Burst ${triggerFrames.size}: arrived=$arrived after ${(SystemClock.elapsedRealtimeNanos() - triggerNs) / 1_000_000} ms, frames before=$before now=${bridge.frameCount()}")
+        if (state == State.TRIGGERED) state = State.RECORDING
         listener.onBurstDone(arrived)
     }
 
@@ -129,8 +130,7 @@ class SlowMotionRecorder(
         var uri: Uri? = null
         if (videoFile.length() > 0) {
             val finished = SlowMotionRemux.finish(
-                videoFile, frameTimes, if (triggerNs != 0L) framesBeforeTrigger else 0,
-                spec.frames, audio.takeIf { hasSound }, orientationDegrees, File(dir, "final.mp4")
+                videoFile, frameTimes, triggerFrames, spec.frames, audio.takeIf { hasSound }, orientationDegrees, File(dir, "final.mp4")
             )
             uri = runBlocking {
                 VideoMediaStoreWriter.publishVideo(appContext, finished ?: videoFile, dateTakenMs, recordingPath, recordingTreeUri, "_960fps")

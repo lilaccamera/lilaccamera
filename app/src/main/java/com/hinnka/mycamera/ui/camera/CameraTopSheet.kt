@@ -155,6 +155,9 @@ internal fun CameraTopSheet(
     onVideoFpsClick: () -> Unit,
     onVideoTorchToggle: () -> Unit,
     onVideoStabilizationModeChange: (VideoStabilizationMode) -> Unit,
+    slowMotionAvailable: Boolean,
+    slowMotionEnabled: Boolean,
+    onSlowMotionToggle: () -> Unit,
     // List
     showHistogram: Boolean,
     onHistogramChange: (Boolean) -> Unit,
@@ -298,6 +301,9 @@ internal fun CameraTopSheet(
                 onFpsClick = onVideoFpsClick,
                 onTorchToggle = onVideoTorchToggle,
                 onStabilizationModeChange = onVideoStabilizationModeChange,
+                slowMotionAvailable = slowMotionAvailable,
+                slowMotionEnabled = slowMotionEnabled,
+                onSlowMotionToggle = onSlowMotionToggle,
                 itemModifier = itemModifier
             )
         } else {
@@ -891,6 +897,9 @@ private fun RowScope.VideoEverydayItems(
     onFpsClick: () -> Unit,
     onTorchToggle: () -> Unit,
     onStabilizationModeChange: (VideoStabilizationMode) -> Unit,
+    slowMotionAvailable: Boolean,
+    slowMotionEnabled: Boolean,
+    onSlowMotionToggle: () -> Unit,
     itemModifier: Modifier
 ) {
     val resolution = if (videoConfig.resolution == VideoResolutionPreset.MAX) {
@@ -903,6 +912,14 @@ private fun RowScope.VideoEverydayItems(
     }
     EverydayItem(stringResource(R.string.quick_fps), active = false, onClick = onFpsClick, modifier = itemModifier) { color ->
         EverydayValue(videoConfig.fps.fps.toString(), color)
+    }
+    if (slowMotionAvailable) {
+        EverydayItem(
+            label = "${stringResource(R.string.slow_motion_chip)} ${stringResource(if (slowMotionEnabled) R.string.quick_on else R.string.quick_off)}",
+            active = slowMotionEnabled,
+            onClick = onSlowMotionToggle,
+            modifier = itemModifier
+        ) { color -> EverydayValue("960", color) }
     }
     val torch = videoConfig.torchEnabled
     EverydayItem(

@@ -7,7 +7,6 @@ import android.media.MediaMuxer
 import com.hinnka.mycamera.utils.PLog
 import java.io.File
 import java.nio.ByteBuffer
-import kotlin.math.abs
 
 /**
  * Writes the final file from the companion's video-only MP4: sets the rotation, closes the hole the camera
@@ -29,11 +28,12 @@ object SlowMotionRemux {
 
     /**
      * [frameTimes]: the companion's pairs (file time stamp in microseconds, arrival in elapsed-realtime nanoseconds)
-     * for every frame; [framesBeforeTrigger] frames came before the burst, [burstFrames] frames are the burst.
-     * [audio] is null or has no samples when there is no sound. Returns the finished file, or null on failure.
+     * for every frame; [triggerFrames] holds, per burst, how many frames had come before it, and [burstFrames] is
+     * the length of a burst. [audio] is null or has no samples when there is no sound.
+     * Returns the finished file, or null on failure.
      */
     fun finish(
-        video: File, frameTimes: LongArray, framesBeforeTrigger: Int, burstFrames: Int,
+        video: File, frameTimes: LongArray, triggerFrames: List<Int>, burstFrames: Int,
         audio: SlowMotionAudio?, orientationDegrees: Int, out: File,
     ): File? {
         val extractor = MediaExtractor()
@@ -48,35 +48,46 @@ object SlowMotionRemux {
             val n = frameTimes.size / 2
             val p = LongArray(n) { frameTimes[2 * it] - frameTimes[0] } // file time of frame i, from 0
             val arrival = LongArray(n) { frameTimes[2 * it + 1] }
-            val frameUs = if (n > 1) 1_000_000L / 30 else 0L
-            val triggered = framesBeforeTrigger in 1 until n
-            // the first frame after the largest step following the burst
-            var jump = -1
-            if (triggered) {
-                val from = (framesBeforeTrigger + burstFrames).coerceAtMost(n - 1).coerceAtLeast(1)
-                var best = JUMP_MIN_US
-                for (i in from until n) if (p[i] - p[i - 1] > best) { best = p[i] - p[i - 1]; jump = i }
-            }
-            val shiftUs = if (CLOSE_JUMP && jump > 0) p[jump] - p[jump - 1] - frameUs else 0L
+            val frameUs = 1_000_000L / 30
 
-            // file time = arrival - offset, per ordinary stretch
-            fun offset(range: IntRange): Long = range.map { arrival[it] - p[it] * 1000 }.sorted().let { it[it.size / 2] }
+            // Ordinary stretches as frame ranges [from, to): before the first burst, between bursts, after the last.
+            // A burst is followed by the read-out jump: the largest step in the stamps after its frames.
+            class Stretch(val from: Int, val to: Int, val shiftUs: Long)
+            val stretches = ArrayList<Stretch>()
+            var from = 0
+            var shift = 0L
+            val triggers = triggerFrames.filter { it in 1 until n }.sorted()
+            for ((k, trigger) in triggers.withIndex()) {
+                val limit = if (k + 1 < triggers.size) triggers[k + 1] else n
+                val search = (trigger + burstFrames).coerceAtMost(limit - 1).coerceAtLeast(trigger + 1)
+                var jump = -1
+                var best = JUMP_MIN_US
+                for (i in search until limit) if (p[i] - p[i - 1] > best) { best = p[i] - p[i - 1]; jump = i }
+                if (jump < 0) break
+                stretches += Stretch(from, trigger, shift)
+                if (CLOSE_JUMP) shift += p[jump] - p[jump - 1] - frameUs
+                from = jump
+            }
+            stretches += Stretch(from, n, shift)
+            // new file time of frame i
+            fun newTime(i: Int): Long = p[i] - stretches.last { i >= it.from }.shiftUs
+
+            // file time = arrival - offset, per ordinary stretch; the sound outside the stretches is dropped
             val sound = audio?.takeIf { it.samples.isNotEmpty() && it.format != null && n > 0 }
             val audioFile = ArrayList<Pair<Long, SlowMotionAudio.Sample>>() // new file time, sample
             if (sound != null) {
-                val offA = offset(0 until (if (jump > 0) framesBeforeTrigger else n))
-                val offC = if (jump > 0) offset(jump until n) else 0L
-                val endA = if (jump > 0) p[framesBeforeTrigger - 1] + frameUs else Long.MAX_VALUE
+                val ranges = stretches.filter { it.to > it.from }.map { st ->
+                    val offset = (st.from until st.to).map { arrival[it] - p[it] * 1000 }.sorted().let { it[it.size / 2] }
+                    Triple(st, offset, p[st.from] to p[st.to - 1] + frameUs)
+                }
                 for (s in sound.samples) {
                     val real = sound.startElapsedNs + s.timeUs * 1000
-                    val a = (real - offA) / 1000
-                    if (a in 0 until endA) { audioFile += a to s; continue }
-                    if (jump > 0) {
-                        val c = (real - offC) / 1000
-                        if (c >= p[jump]) audioFile += (c - shiftUs) to s
+                    for ((st, offset, span) in ranges) {
+                        val t = (real - offset) / 1000
+                        if (t >= span.first && t < span.second) { audioFile += (t - st.shiftUs) to s; break }
                     }
                 }
-                PLog.i(TAG, "Sound: ${audioFile.size} of ${sound.samples.size} samples kept, jump at frame $jump, shift $shiftUs us")
+                PLog.i(TAG, "Sound: ${audioFile.size} of ${sound.samples.size} samples kept, ${stretches.size} ordinary stretches")
             }
 
             val muxer = MediaMuxer(out.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
@@ -101,7 +112,7 @@ object SlowMotionRemux {
                 buffer.clear()
                 val size = extractor.readSampleData(buffer, 0)
                 if (size < 0) break
-                val t = extractor.sampleTime - (if (jump in 1..k) shiftUs else 0L)
+                val t = if (k < n) newTime(k) else extractor.sampleTime
                 if (audioTrack >= 0) writeAudioUpTo(t)
                 info.set(0, size, t, extractor.sampleFlags)
                 muxer.writeSampleData(videoTrack, buffer, info)

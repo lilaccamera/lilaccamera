@@ -2014,6 +2014,7 @@ fun CameraScreen(
                         add(TopEdgeMark(AppIcons.BulbLine))
                     }
                     if (state.videoConfig.logProfile != VideoLogProfile.OFF) add(TopEdgeMark(null, "LOG"))
+                    if (state.slowMotion.enabled) add(TopEdgeMark(null, "960"))
                 } else {
                     if (useLivePhoto) add(TopEdgeMark(AppIcons.LivePhotoLine))
                     if (state.timerSeconds > 0) add(TopEdgeMark(AppIcons.StopwatchLine, "${state.timerSeconds}s"))
@@ -2166,6 +2167,43 @@ fun CameraScreen(
                     },
                     modifier = guidePillPlacement
                 )
+            }
+            // Slow motion caps the exposure at 1/960 s: say so when the scene gives too little light for that.
+            if (
+                state.captureMode == CaptureMode.VIDEO && state.slowMotion.enabled && state.slowMotion.dark &&
+                guidePillBottom != null && activePanel == ActivePanel.NONE && !noteLine.shown
+            ) {
+                ModeGuidePill(
+                    icon = AppIcons.CandleLine,
+                    text = stringResource(R.string.slow_motion_dark_pill),
+                    onClick = {},
+                    modifier = guidePillPlacement
+                )
+            }
+            // The on-screen trigger for the slow-motion burst, above the shutter; the camera key does the same.
+            if (state.slowMotion.active) {
+                captureButtonBounds?.let { shutter ->
+                    val density = LocalDensity.current
+                    val size = 56.dp
+                    Box(
+                        modifier = Modifier
+                            .offset {
+                                androidx.compose.ui.unit.IntOffset(
+                                    (shutter.center.x - (cameraScreenBounds?.left ?: 0f) - size.toPx() / 2).roundToInt(),
+                                    (shutter.top - cameraScreenTop - size.toPx() - 14.dp.toPx()).roundToInt()
+                                )
+                            }
+                            .size(size)
+                            .graphicsLayer { alpha = if (state.slowMotion.canTrigger) 1f else 0.4f }
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .border(2.dp, ModeAmber, CircleShape)
+                            .clickable(enabled = state.slowMotion.canTrigger) { viewModel.triggerSlowMotion() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("960", color = ModeAmber, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.autoRotate())
+                    }
+                }
             }
             // Photo mode offers the camera basics the same way, on every launch until opened once.
             if (
@@ -2376,6 +2414,9 @@ fun CameraScreen(
             onVideoFpsClick = { cycleVideoFps(state)?.let(viewModel::setVideoFps) },
             onVideoTorchToggle = { videoTorchEnabled = !state.videoConfig.torchEnabled },
             onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
+            slowMotionAvailable = state.slowMotion.available && !state.videoRecordingState.isRecording,
+            slowMotionEnabled = state.slowMotion.enabled,
+            onSlowMotionToggle = { viewModel.setSlowMotionEnabled(!state.slowMotion.enabled) },
             showHistogram = showHistogram,
             onHistogramChange = { showHistogram = it },
             videoAspectRatio = state.videoConfig.aspectRatio,

@@ -4351,8 +4351,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun onShutterKeyFullPress() {
-        if (state.value.isPreviewActive) capture()
+        if (!state.value.isPreviewActive) return
+        // During a slow-motion recording the camera key fires the burst; the on-screen shutter stops the recording.
+        if (state.value.slowMotion.active) cameraController.triggerSlowMotion() else capture()
     }
+
+    fun triggerSlowMotion() = cameraController.triggerSlowMotion()
+
+    fun setSlowMotionEnabled(enabled: Boolean) = cameraController.setSlowMotionEnabled(enabled)
 
     fun toggleFlash() {
         // The screen has no torch: on the front camera Flash is just off or on.

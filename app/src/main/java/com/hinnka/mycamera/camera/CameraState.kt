@@ -432,6 +432,7 @@ data class CameraState(
     val videoConfig: VideoConfig = VideoConfig(),
     val videoCapabilities: VideoCapabilities = VideoCapabilities(),
     val videoRecordingState: VideoRecordingState = VideoRecordingState(),
+    val slowMotion: com.hinnka.mycamera.slowmotion.SlowMotionUiState = com.hinnka.mycamera.slowmotion.SlowMotionUiState(),
 ) {
     val effectiveMeteringMode: MeteringMode
         get() = if (meteringPoint != null) MeteringMode.SPOT else meteringMode
