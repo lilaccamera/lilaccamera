@@ -10,8 +10,8 @@ data class SlowMotionSpec(val width: Int = 1280, val height: Int = 720, val fram
     companion object {
         const val FPS = 960
 
-        /** Bursts fired in one recording. */
-        const val MAX_BURSTS = 3
+        /** Bursts per recording: a second trigger in the same recording returns 0 but captures nothing (tested). */
+        const val MAX_BURSTS = 1
 
         /** Camera2 session shape the service accepts: always this viewfinder and this reader, whatever the video size. */
         const val VIEWFINDER_WIDTH = 1280

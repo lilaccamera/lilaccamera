@@ -1,7 +1,7 @@
 #!/bin/bash
 # One slow-motion recording on the phone through the debug broadcast of a Lilac debug build, then a check of the
 # saved file with ffprobe (resolution, frame count, time stamp jumps, sound) and of the camera service processes.
-# Needs the camera open in video mode in the foreground. Usage: slowmo-test.sh [package] [width] [height] [frames] [out dir]
+# TRIGGERS=n fires n bursts, 10 s apart. Needs the camera open in video mode in the foreground. Usage: slowmo-test.sh [package] [width] [height] [frames] [out dir]
 # Only metadata and statistics are read; the video is never looked at.
 set -euo pipefail
 PKG=${1:-com.mdomokos.lilaccamera.debug.slowmo}; W=${2:-1280}; H=${3:-720}; N=${4:-91}
@@ -16,7 +16,7 @@ last=$(newest)
 cmd start
 # wait for the ordinary video to run (the recorder logs it), then let it run 2.5 s like Sony's app before the trigger
 for i in $(seq 40); do adb logcat -d -s LilacSonyBridge | grep -q "startVideo -> 0" && break; sleep 0.5; done
-sleep 2.5; cmd trigger; sleep 9; cmd stop
+for t in $(seq ${TRIGGERS:-1}); do sleep 2.5; cmd trigger; sleep 8; done; sleep 1; cmd stop
 for i in $(seq 40); do f=$(newest); [ -n "$f" ] && [ "$f" != "$last" ] && break; sleep 1; done
 [ "$f" = "$last" ] && { echo "NO NEW FILE; bridge log:"; adb logcat -d -s LilacSonyBridge PLog_SlowMotionRecorder | tail -15; exit 1; }
 sleep 2

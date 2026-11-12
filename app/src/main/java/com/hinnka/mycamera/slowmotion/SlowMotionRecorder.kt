@@ -108,7 +108,7 @@ class SlowMotionRecorder(
         state = State.TRIGGERED
         // The service reports no completion: the burst has arrived once the encoder has delivered its frames.
         var arrived = false
-        while (!arrived && SystemClock.elapsedRealtimeNanos() - triggerNs < BURST_TIMEOUT_MS * 1_000_000) {
+        while (!arrived && SystemClock.elapsedRealtimeNanos() - triggerNs < BURST_TIMEOUT_MS * 1_000_000L) {
             Thread.sleep(100)
             arrived = bridge.frameCount() >= before + spec.frames
         }

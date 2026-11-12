@@ -9149,6 +9149,7 @@ class Camera2Controller(private val context: Context) {
     private var slowMotionChecked = false
     private var slowMotionBursts = 0
     private var darkSmoothedIso = 0f
+    private var lastDarkLogMs = 0L
 
     /** Watches how much light the scene gives: the ISO it would need at 1/960 s, from the viewfinder's own exposure. */
     private fun updateSlowMotionDark(result: TotalCaptureResult) {
@@ -9158,6 +9159,10 @@ class Camera2Controller(private val context: Context) {
         val exposureNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: return
         val needed = iso * exposureNs / SlowMotionSpec(frames = 91).exposureLimitNs.toFloat()
         darkSmoothedIso = if (darkSmoothedIso == 0f) needed else darkSmoothedIso * 0.9f + needed * 0.1f
+        if (SystemClock.elapsedRealtime() - lastDarkLogMs > 1000) {
+            lastDarkLogMs = SystemClock.elapsedRealtime()
+            PLog.d(TAG, "Slow-motion light: iso=$iso exposure=${exposureNs / 1000} us, needs ISO ${darkSmoothedIso.toInt()} at 1/960 s")
+        }
         val dark = if (sm.dark) darkSmoothedIso > SLOW_MOTION_DARK_ISO * 0.8f else darkSmoothedIso > SLOW_MOTION_DARK_ISO
         if (dark != sm.dark) _state.update { s -> s.copy(slowMotion = s.slowMotion.copy(dark = dark)) }
     }
