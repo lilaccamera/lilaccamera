@@ -94,7 +94,7 @@ class CameraGLSurfaceView @JvmOverloads constructor(
 
         // 设置渲染请求回调（当有新帧可用时由 LutRenderer 调用）
         renderer.onRequestRender = {
-            requestRender()
+            requestFrameRender()
         }
 
         renderer.onHistogramUpdated = { histogram ->
@@ -132,6 +132,15 @@ class CameraGLSurfaceView @JvmOverloads constructor(
 
     /** Called on the camera thread, directly rather than queued: see LutRenderer.setCameraStreamActive. */
     fun setCameraStreamActive(active: Boolean) = renderer.setCameraStreamActive(active)
+
+    // On lilac an interface change is not redrawn while the camera frame may be freed (see
+    // LutRenderer.canRedrawCameraFrame): the screen keeps the last picture, and the next camera frame brings the change.
+    override fun requestRender() {
+        if (renderer.canRedrawCameraFrame()) super.requestRender()
+    }
+
+    // A new camera frame is always taken in, or the camera waits for its buffer back.
+    private fun requestFrameRender() = super.requestRender()
 
     fun setCastFixEnabled(enabled: Boolean) {
         queueEvent {
