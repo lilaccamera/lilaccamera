@@ -452,7 +452,9 @@ fun GalleryEditScreen(
             editLutId = editLutId,
             editPhotoRecipeParams = editPhotoRecipeParams,
             editLutRecipeParams = editLutRecipeParams,
-            editLutConfig = editLutConfig,
+            // Read here, not from the screen's local copy: the render effects keep this function from their first
+            // composition, so a look loaded later never matched the screen's state and Crop never showed.
+            editLutConfig = viewModel.editLutConfig,
             editFrameId = editFrameId,
             editFrameCustomProperties = editFrameCustomProperties.toMap(),
             editSharpening = if (rawDevelopIsBaked) 0f else editSharpening,
@@ -496,7 +498,7 @@ fun GalleryEditScreen(
             editMirrorHorizontal = if (inCrop) false else editMirrorHorizontal,
             showOrigin = showOrigin,
             cropView = section == EditorSection.Crop,
-            portraitView = section == EditorSection.Portrait,
+            portraitView = section == EditorSection.Portrait && !fullView,
             rawToneStandIn = rawToneStandIn(),
         )
     }
@@ -527,8 +529,9 @@ fun GalleryEditScreen(
                 ignoreCrop = isCropPreview,
                 ignoreStraighten = isCropPreview,
                 ignoreTurn = isCropPreview,
-                // Portrait shows the photo without its frame, so the focus ring lands on the photo itself.
-                ignoreFrame = isCropPreview || section == EditorSection.Portrait,
+                // Portrait shows the photo without its frame, so the focus ring lands on the photo itself; full
+                // view has no ring and shows the frame.
+                ignoreFrame = isCropPreview || (section == EditorSection.Portrait && !fullView),
                 bitmap = (editChainBase ?: ui.rawPreviewBase.takeIf { isRaw }).takeIf { !showOrigin },
                 recipeParamsOverride = renderedFor?.rawToneStandIn,
                 maxEdge = maxEdge
@@ -965,10 +968,11 @@ fun GalleryEditScreen(
             }
             val showCrop = if (viewReady) cropView else ui.lastShownCrop && cropPreviewBitmap != null
             SideEffect { ui.lastShownCrop = showCrop }
-            val targetRect = if (showCrop) {
-                EditorRect(0f, EDITOR_EDGE_DP, screenW, screenH - EDITOR_BLOCK_DP - EDITOR_CONTROL_DP - EDITOR_EDGE_DP)
-            } else {
-                editorPhotoRect(photoAspect, screenW, screenH, fullView)
+            // Full view: the box is the whole screen and the photo fits inside it, so a zoom can fill the screen.
+            val targetRect = when {
+                showCrop -> EditorRect(0f, EDITOR_EDGE_DP, screenW, screenH - EDITOR_BLOCK_DP - EDITOR_CONTROL_DP - EDITOR_EDGE_DP)
+                fullView -> EditorRect(0f, 0f, screenW, screenH)
+                else -> editorPhotoRect(photoAspect, screenW, screenH, false)
             }
             val photoMotion = tween<Float>(250)
             val photoX by animateFloatAsState(targetRect.x, photoMotion, label = "photoX")
