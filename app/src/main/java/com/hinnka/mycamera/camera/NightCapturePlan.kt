@@ -57,8 +57,7 @@ object NightCapturePlanner {
     ): NightCapturePlan {
         // As bright as auto exposure.
         val target = aeIso.toDouble() * aeExposureNs
-        val steadyNs = BLUR_BUDGET_PX / (max(angularSpeedRadS, 1e-4f) * focalLengthPx) * NS_PER_S
-        var shutter = if (fast) MIN_SHUTTER_NS else steadyNs.toLong().coerceIn(MIN_SHUTTER_NS, MAX_SHUTTER_NS)
+        var shutter = if (fast) MIN_SHUTTER_NS else steadyShutterNs(angularSpeedRadS, focalLengthPx)
         // A brighter scene does not need the longest shutter: stop where the lowest ISO is enough.
         shutter = min(shutter, (target / isoRange.lower).toLong())
         exposureRangeNs?.let { shutter = shutter.coerceIn(it.lower, it.upper) }
@@ -75,6 +74,11 @@ object NightCapturePlanner {
         val gain = neededGain.coerceIn(1f, maxGain)
         return NightCapturePlan(count, iso, shutter, gain)
     }
+
+    /** Longest shutter that blurs at most [BLUR_BUDGET_PX] at this shake, within 1/30 to 1/4 s. */
+    fun steadyShutterNs(angularSpeedRadS: Float, focalLengthPx: Float): Long =
+        (BLUR_BUDGET_PX / (max(angularSpeedRadS, 1e-4f) * focalLengthPx) * NS_PER_S).toLong()
+            .coerceIn(MIN_SHUTTER_NS, MAX_SHUTTER_NS)
 
     /** Auto: merging N frames allows brightening by sqrt(N) without more noise, so N = gain squared. */
     internal fun autoFrames(neededGain: Float): Int =

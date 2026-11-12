@@ -9489,6 +9489,17 @@ class Camera2Controller(private val context: Context) {
                 // Measure how steady the phone is before choosing the exposure.
                 val start = { startNightCapture(device, reader, baseExposureResult) }
                 cameraHandler?.postDelayed(start, NightCapturePlanner.STEADINESS_WINDOW_MS) ?: start()
+            } else if (shouldUseJpgMaxHdrCapture(currentState, isRawCaptureReader(reader))) {
+                // The bracket's long shutter is sized from the gyro, which needs a moment of samples first.
+                val start = {
+                    if (cameraDevice === device && imageReader === reader && captureSession != null) {
+                        prepareCaptureLighting(device, reader, baseExposureResult)
+                    } else {
+                        _state.update { s -> s.copy(isCapturing = false) }
+                        stopShotSensors()
+                    }
+                }
+                cameraHandler?.postDelayed(start, NightCapturePlanner.STEADINESS_WINDOW_MS) ?: start()
             } else {
                 prepareCaptureLighting(device, reader, baseExposureResult)
             }
@@ -9609,6 +9620,8 @@ class Camera2Controller(private val context: Context) {
             }
             val manualBaseExposure = resolveHdrBracketManualBaseExposure(currentState, baseExposureResult)
             logHdrBracketBaseExposure(currentState, baseExposureResult, manualBaseExposure)
+            val longShutterLimitNs = hdrBracketLongShutterLimitNs(reader, manualBaseExposure?.second)
+            PLog.i(TAG, "HDR bracket plan: evs=$evOffsets longShutterLimit=${longShutterLimitNs / 1e6}ms")
             val requests = evOffsets.mapIndexed { index, evOffset ->
                 device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                     setTag(index)
@@ -9619,7 +9632,7 @@ class Camera2Controller(private val context: Context) {
                         isRawCapture = false,
                         disableZslForHdrCapture = true
                     )
-                    applyHdrBracketExposure(this, currentState, evOffset, manualBaseExposure)
+                    applyHdrBracketExposure(this, currentState, evOffset, manualBaseExposure, longShutterLimitNs)
                     setAePrecaptureTriggerIfSupported(
                         this,
                         CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_IDLE,
@@ -9658,10 +9671,11 @@ class Camera2Controller(private val context: Context) {
 
     private fun buildHdrBracketEvOffsets(zeroEvFrameCount: Int): List<Float> {
         val zeroCount = zeroEvFrameCount.coerceAtLeast(1)
+        val (shortEv, longEv) = HdrBracketConfig.adaptiveEvs(_state.value.histogram)
         return buildList {
             add(0f)
-            add(HdrBracketConfig.YUV_LONG_EV)
-            add(HdrBracketConfig.YUV_SHORT_EV)
+            add(longEv)
+            add(shortEv)
             repeat((zeroCount - 1).coerceAtLeast(0)) {
                 add(0f)
             }
@@ -9731,14 +9745,16 @@ class Camera2Controller(private val context: Context) {
         builder: CaptureRequest.Builder,
         state: CameraState,
         evOffset: Float,
-        manualBaseExposure: Pair<Int, Long>?
+        manualBaseExposure: Pair<Int, Long>?,
+        longShutterLimitNs: Long,
     ) {
         if (manualBaseExposure != null) {
             val (iso, shutter) = calculateHdrBracketManualExposure(
                 baseIso = manualBaseExposure.first,
                 baseShutter = manualBaseExposure.second,
                 evOffset = evOffset,
-                state = state
+                state = state,
+                longShutterLimitNs = longShutterLimitNs,
             )
             builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
             builder.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
@@ -9757,7 +9773,8 @@ class Camera2Controller(private val context: Context) {
         baseIso: Int,
         baseShutter: Long,
         evOffset: Float,
-        state: CameraState
+        state: CameraState,
+        longShutterLimitNs: Long,
     ): Pair<Int, Long> {
         val isoRange = state.getIsoRange()
         val shutterRange = state.getShutterSpeedRange()
@@ -9769,7 +9786,25 @@ class Camera2Controller(private val context: Context) {
             isoUpper = isoRange.upper,
             shutterLowerNs = shutterRange.lower,
             shutterUpperNs = shutterRange.upper,
+            longShutterLimitNs = longShutterLimitNs,
         )
+    }
+
+    /**
+     * The long frame lights the shadows. Rather than 1/100 s plus ISO gain, it may take as long a shutter as
+     * the hands allow (Night's gyro rule): more light, less noise. Never shorter than the base frame.
+     */
+    private fun hdrBracketLongShutterLimitNs(reader: ImageReader, baseShutterNs: Long?): Long {
+        val floor = maxOf(HdrBracketConfig.YUV_LONG_MAX_SHUTTER_NS, baseShutterNs ?: 0L)
+        val characteristics = getActiveOpenCameraCharacteristics() ?: return floor
+        val focalMm = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+            ?.firstOrNull()?.takeIf { it > 0f } ?: return floor
+        val sensorWidthMm = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+            ?.width?.takeIf { it > 0f } ?: return floor
+        val shake = burstGyroRecorder.recentAngularSpeed(NightCapturePlanner.STEADINESS_WINDOW_MS * 1_000_000L)
+            ?: return floor
+        val focalPx = focalMm / sensorWidthMm * maxOf(reader.width, reader.height)
+        return maxOf(floor, NightCapturePlanner.steadyShutterNs(shake, focalPx))
     }
 
     private fun calculateHdrBracketExposureCompensation(state: CameraState, evOffset: Float): Int {
