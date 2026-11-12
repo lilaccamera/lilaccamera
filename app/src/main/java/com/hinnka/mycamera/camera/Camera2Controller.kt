@@ -149,6 +149,11 @@ class Camera2Controller(private val context: Context) {
         private const val TRACK_STOP_MS = 3_000L
         private const val TRACK_BOX_FOLLOW = 0.6f
         private const val TRACK_GROWTH_LIMIT = 4f
+        // A tap on no real object: in its first moments the driver's box wanders off or is lost. Results in the first
+        // TRACK_SETTLE_MS may still carry the previous object's box.
+        private const val TRACK_SETTLE_MS = 300L
+        private const val TRACK_CHECK_MS = 1_500L
+        private const val TRACK_DRIFT_LIMIT = 0.10f
         private const val TRACK_FACE_TAKEOVER_MS = 200L
         private const val TAP_CHECK_WAIT_MS = 150L
         private const val FACE_FRAME_SCALE = 1.2f
@@ -7141,6 +7146,7 @@ class Camera2Controller(private val context: Context) {
             // 解锁触屏 AF 不能改变用户选择的手动对焦模式。
             applyFocusSettings(this, _state.value)
             clearCustomAfRegions(this)
+            applySonySubjectKeys(this)
             applyMeteringRegions()
             updatePreview()
         }
@@ -7467,6 +7473,8 @@ class Camera2Controller(private val context: Context) {
 
             if (maxAfRegions > 0) {
                 builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(afRegion))
+                // Sony's driver steers AF to the region only in its user AF region mode.
+                if (subjectAfRegion == null) applySonySubjectKeys(builder)
             }
             // 人眼跟踪只接管 AF，不移动用户当前的测光区域。
             if (source == FocusPointSource.MANUAL && !preserveMeteringPoint) {
@@ -7547,6 +7555,7 @@ class Camera2Controller(private val context: Context) {
     private var trackingSinceMs = 0L
     private var trackingLostSinceMs = 0L
     private var trackStart: Pair<Float, Float>? = null
+    private var trackViewAspectRatio: Float? = null
     private var subjectAfLocked = false
     private var trackBox: ViewRect? = null
     // Area of the first box the driver found; a box grown far past it has usually lost the object.
@@ -7703,7 +7712,7 @@ class Camera2Controller(private val context: Context) {
             if (sonyFeatures.afUserRegion) {
                 builder.set(
                     SonySubjectKeys.AF_REGION_MODE,
-                    if (subjectAfRegion != null) SonySubjectKeys.AF_REGION_MODE_USER else afRegionModeBaseline,
+                    if (subjectAfRegion != null || _state.value.focusPoint != null) SonySubjectKeys.AF_REGION_MODE_USER else afRegionModeBaseline,
                 )
             }
         } catch (e: Exception) {
@@ -7923,12 +7932,23 @@ class Camera2Controller(private val context: Context) {
         trackingLostSinceMs = 0L
         subjectAfLocked = false
         trackStart = normX to normY
+        trackViewAspectRatio = viewAspectRatio
         trackBox = null
         trackFirstArea = 0f
         trackTooBig = false
         trackFaceSinceMs = 0L
         if (faceAeActive) setFaceAe(false)
         _subjectOverlay.update { it.copy(tracking = true, trackStart = trackStart, trackBox = null, trackLost = false) }
+    }
+
+    /** Tracking found no real object at the tap: focus on the tapped spot as a fixed point instead. */
+    private fun trackToTapPoint(point: Pair<Float, Float>, reason: String) {
+        if (trackStart != point) return
+        val aspect = trackViewAspectRatio
+        stopTracking("no object ($reason)")
+        subjectAfRegion = null
+        afKickPending = false
+        focusOnNormalizedPoint(point.first, point.second, FocusPointSource.MANUAL, previewViewAspectRatio = aspect)
     }
 
     /** Ends tracking, back to plain continuous AF; [reason] goes to the log. */
@@ -8207,6 +8227,18 @@ class Camera2Controller(private val context: Context) {
                 } else if (now - trackFaceSinceMs >= TRACK_FACE_TAKEOVER_MS) {
                     selectFace(SubjectFace(face.id, face.box), null)
                 }
+            }
+            val age = now - trackingSinceMs
+            val start = trackStart
+            if (start != null && age in TRACK_SETTLE_MS..TRACK_CHECK_MS) {
+                val reason = when {
+                    box != null && (abs(box.centerX - start.first) > TRACK_DRIFT_LIMIT ||
+                        abs(box.centerY - start.second) > TRACK_DRIFT_LIMIT) -> "drifted to ${box.centerX},${box.centerY}"
+                    trackingLostSinceMs > 0L && now - trackingLostSinceMs >= TRACK_SETTLE_MS -> "lost"
+                    else -> null
+                }
+                // After this result is handled, so its subject AF does not undo the tap's region.
+                if (reason != null) cameraHandler?.post { trackToTapPoint(start, reason) }
             }
         }
 
