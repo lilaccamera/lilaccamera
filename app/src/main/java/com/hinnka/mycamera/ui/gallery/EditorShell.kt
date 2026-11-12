@@ -725,6 +725,9 @@ internal class EditorUiState {
     var previewAgain by mutableStateOf(false)
     // Save is developing the RAW in full before the edit saves.
     var savingRaw by mutableStateOf(false)
+    // A RAW develop asked for while the files were still being developed: it runs once they are done.
+    var pendingRawRefresh by mutableStateOf(false)
+    var pendingPgtmRegeneration by mutableStateOf(false)
     // RAW: this session's small renders by edit state, the state last developed (null: as opened), and whether an
     // earlier look is on screen.
     val rawLooks = mutableListOf<Pair<Map<String, Any?>, android.graphics.Bitmap>>()
