@@ -6,6 +6,7 @@ import android.graphics.PointF
 import android.graphics.SurfaceTexture
 import android.opengl.*
 import android.os.SystemClock
+import com.hinnka.mycamera.camera.DeviceQuirks
 import com.hinnka.mycamera.livephoto.LivePhotoRecorder
 import com.hinnka.mycamera.livephoto.resolveLivePhotoRotationDegrees
 import com.hinnka.mycamera.preview.EyeFocusPreviewFrame
@@ -247,6 +248,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private var latchedStreamToken = 0
     // Stream whose images cameraTextureId has held; 0 while the texture is still fresh.
     private var textureStreamToken = 0
+    // Frames latched from the current stream, counted up to 2.
+    private var streamFramesLatched = 0
     private var stabilizationCoordinator: RealtimeStabilizationCoordinator? = null
     @Volatile
     private var stabilizationSession: RealtimeStabilizationCoordinator.Session? = null
@@ -617,6 +620,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         cameraTextureId = 0
         latchedStreamToken = 0
         textureStreamToken = 0
+        streamFramesLatched = 0
         currentCameraTextureId = 0
         currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
         currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
@@ -1106,10 +1110,14 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         if (streamToken != 0 && streamToken != textureStreamToken) {
             if (textureStreamToken != 0) renewCameraTexture()
             textureStreamToken = streamToken
+            streamFramesLatched = 0
         }
         val oesFrameUpdated = streamToken != 0 &&
             frameAvailable.getAndSet(false) && acquireLatestCameraFrame()
-        if (oesFrameUpdated) latchedStreamToken = streamToken
+        if (oesFrameUpdated) {
+            latchedStreamToken = streamToken
+            streamFramesLatched = minOf(streamFramesLatched + 1, 2)
+        }
         var cameraFrameUpdated = oesFrameUpdated
 
         if (delayedStabilizationEnabled) {
@@ -1166,6 +1174,18 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 PLog.d(TAG, "Camera stream stopped: not drawing its released image")
                 latchedStreamToken = 0
             }
+            return
+        }
+        if (currentCameraTextureSource == PreviewColorTextureSource.EXTERNAL_OES && DeviceQuirks.isLilac &&
+            (streamFramesLatched < 2 || !oesFrameUpdated)
+        ) {
+            // Sony's camera HAL on lilac frees preview buffers that are still bound here, with no stream change the
+            // app can see: when a stream starts it sends one frame, then restarts the stream (0.1 to 2.4 s without
+            // frames) and frees that frame; when a RAW burst starts it pauses preview for about 1.8 s and frees the
+            // last frame. Drawing such a frame, or redrawing it for a UI change while no new frame comes, faulted
+            // the GPU after 15 of 60 Pro/Photo switches and at burst starts; four faults within 3 s make the driver
+            // drop this context. So the camera image is drawn only right after a new frame is latched, from the
+            // second frame of a stream on, and the screen keeps the last picture in between.
             return
         }
 
