@@ -2076,14 +2076,20 @@ fun CameraScreen(
                 parameterBarTop.takeIf { multipleExposureActionsShown || !isXpan && (manualControlsShown || anyManualValue) },
                 captureButtonBounds?.top,
             ).minOrNull()?.let { it - cameraScreenTop }
+            // The pill fades while a manual value's ruler is open over it, and comes back when it closes.
+            val guidePillAlpha by animateFloatAsState(if (rulerShown) 0f else 1f, tween(160), label = "guidePillAlpha")
             val guidePillPlacement = Modifier
                 .align(Alignment.TopCenter)
                 .layout { measurable, constraints ->
                     val placeable = measurable.measure(constraints)
                     layout(placeable.width, placeable.height) {
-                        placeable.place(0, ((guidePillBottom ?: 0f) - 8.dp.toPx()).roundToInt() - placeable.height)
+                        // Left unplaced once faded, so it takes no taps.
+                        if (guidePillAlpha > 0f) {
+                            placeable.place(0, ((guidePillBottom ?: 0f) - 8.dp.toPx()).roundToInt() - placeable.height)
+                        }
                     }
                 }
+                .graphicsLayer { alpha = guidePillAlpha }
             if (
                 state.isPortraitMode && state.captureMode == CaptureMode.PHOTO &&
                 (!portraitIntroSeen || showDepthReminder) &&
