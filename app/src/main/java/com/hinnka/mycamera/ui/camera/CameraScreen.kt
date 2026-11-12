@@ -1179,20 +1179,25 @@ fun CameraScreen(
         val cardWidth = viewfinderContentWidth + viewfinderFramePadding
         val cardHeight = viewfinderContentWidth / previewAspectRatio + viewfinderFramePadding
         val xpanSideWidth = ((width - cardWidth) / 2).coerceAtLeast(0.dp)
-        val placeViewfinderBelowInset = contentHeight - cardHeight >= topInset
-        // Balance small previews between the top edge and the collapsed controls. Reserving the
-        // controls first prevents the downward shift from pushing parameters back into the image.
-        val extraViewfinderTopSpacing = if (isXpan) {
-            0.dp
-        } else {
-            ((contentHeight - topInset - cardHeight -
-                CameraControlsLayoutDefaults.CollapsedControlsHeight) / 2).coerceAtLeast(0.dp)
-        }
-        val viewfinderTop = if (placeViewfinderBelowInset) {
-            topInset + extraViewfinderTopSpacing
-        } else {
-            ((contentHeight - cardHeight) / 2).coerceAtLeast(0.dp)
-        }
+        fun viewfinderTopFor(pictureHeight: Dp, balance: Boolean): Dp =
+            if (contentHeight - pictureHeight >= topInset) {
+                // Balance small previews between the top edge and the collapsed controls. Reserving the
+                // controls first prevents the downward shift from pushing parameters back into the image.
+                topInset + if (balance) {
+                    ((contentHeight - topInset - pictureHeight -
+                        CameraControlsLayoutDefaults.CollapsedControlsHeight) / 2).coerceAtLeast(0.dp)
+                } else {
+                    0.dp
+                }
+            } else {
+                ((contentHeight - pictureHeight) / 2).coerceAtLeast(0.dp)
+            }
+        val viewfinderTop = viewfinderTopFor(cardHeight, balance = !isXpan)
+        // The top line, the swipe-down row, the manual values and the guide pills stay where a 4:3 picture's
+        // edges would put them, so they don't move when the aspect ratio changes.
+        val overlayCardHeight = minOf(width * 4f / 3f, contentHeight)
+        val overlayTop = viewfinderTopFor(overlayCardHeight, balance = true)
+        val overlayBottom = overlayTop + overlayCardHeight
 
         val parameterRuler = @Composable { rulerModifier: Modifier ->
             val whiteBalanceCurrentValue = if (
@@ -2030,7 +2035,7 @@ fun CameraScreen(
                 exit = fadeOut(tween(150)),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = viewfinderTop)
+                    .padding(top = overlayTop)
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     TopEdgeLine(
@@ -2064,12 +2069,13 @@ fun CameraScreen(
             val depthModelMissing = depthModelState is DepthModelDownloadState.Missing ||
                 depthModelState is DepthModelDownloadState.Failed
             val showDepthReminder = portraitIntroSeen && !portraitDepthReminderSeen && depthModelMissing
-            // Guide pills sit 8 dp above the highest of the picture's bottom, the manual values and the shutter.
+            // Guide pills sit 8 dp above the highest of a 4:3 picture's bottom, the manual values and the shutter.
+            val cameraScreenTop = cameraScreenBounds?.top ?: 0f
             val guidePillBottom = listOfNotNull(
-                previewBounds?.bottom,
+                with(LocalDensity.current) { overlayBottom.toPx() } + cameraScreenTop,
                 parameterBarTop.takeIf { multipleExposureActionsShown || !isXpan && (manualControlsShown || anyManualValue) },
                 captureButtonBounds?.top,
-            ).minOrNull()?.let { it - (cameraScreenBounds?.top ?: 0f) }
+            ).minOrNull()?.let { it - cameraScreenTop }
             val guidePillPlacement = Modifier
                 .align(Alignment.TopCenter)
                 .layout { measurable, constraints ->
@@ -2146,7 +2152,7 @@ fun CameraScreen(
             }
 
             CameraBottomControlsLayout(
-                viewfinderBottom = viewfinderTop + cardHeight,
+                viewfinderBottom = overlayBottom,
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
@@ -2448,7 +2454,7 @@ fun CameraScreen(
             onMultipleExposureCountChange = { preferencesRepository.updateAsync { this.multipleExposureCount = it } },
             onDismiss = { activePanel = ActivePanel.NONE },
             everydayRowOnTop = everydayRowShown && activePanel == ActivePanel.NONE,
-            everydayRowOnTopModifier = Modifier.align(Alignment.TopCenter).padding(top = viewfinderTop),
+            everydayRowOnTopModifier = Modifier.align(Alignment.TopCenter).padding(top = overlayTop),
             modifier = Modifier.align(Alignment.BottomCenter)
         )
 
