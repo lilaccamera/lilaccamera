@@ -6,6 +6,7 @@ import android.graphics.PointF
 import android.graphics.SurfaceTexture
 import android.opengl.*
 import android.os.SystemClock
+import com.hinnka.mycamera.camera.DeviceQuirks
 import com.hinnka.mycamera.livephoto.LivePhotoRecorder
 import com.hinnka.mycamera.livephoto.resolveLivePhotoRotationDegrees
 import com.hinnka.mycamera.preview.EyeFocusPreviewFrame
@@ -247,6 +248,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private var latchedStreamToken = 0
     // Stream whose images cameraTextureId has held; 0 while the texture is still fresh.
     private var textureStreamToken = 0
+    // Frames latched from the current stream, counted up to 2.
+    private var streamFramesLatched = 0
     private var stabilizationCoordinator: RealtimeStabilizationCoordinator? = null
     @Volatile
     private var stabilizationSession: RealtimeStabilizationCoordinator.Session? = null
@@ -526,6 +529,16 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     var onMeteringUpdated: ((Double, Double) -> Unit)? = null
     var onHighlightPointUpdated: ((Float, Float) -> Unit)? = null
     var onFirstFrameRendered: (() -> Unit)? = null
+
+    /**
+     * Called on the GL thread when the driver has dropped this context after GPU faults. Adreno reports this
+     * through no EGL or GL error, and eglSwapBuffers keeps succeeding, so GLSurfaceView never recreates the
+     * context by itself; only fences fail (GL_WAIT_FAILED).
+     */
+    var onGlContextLost: (() -> Unit)? = null
+    private var frameFence = 0L
+    private var failedFrameFences = 0
+    private var glContextLostReported = false
     // 仅在有等待者时安装；时间戳属于已经完成所有预览 pass 的画面。
     var onPreviewFrameRendered: ((Long) -> Unit)? = null
 
@@ -566,6 +579,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         cameraTextureId = GlUtils.createOESTexture()
 
         // 创建 SurfaceTexture
+        // After a lost context the old SurfaceTexture still receives frames until the camera moves to the new one.
+        surfaceTexture?.setOnFrameAvailableListener(null)
         frameAvailable.set(false)
         surfaceTexture = SurfaceTexture(cameraTextureId).apply {
             setDefaultBufferSize(previewWidth, previewHeight)
@@ -615,8 +630,12 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         mgcEisHardwareBufferRenderer.resetAfterContextLoss()
         mgcEisYuvRenderer.resetAfterContextLoss()
         cameraTextureId = 0
+        frameFence = 0L
+        failedFrameFences = 0
+        glContextLostReported = false
         latchedStreamToken = 0
         textureStreamToken = 0
+        streamFramesLatched = 0
         currentCameraTextureId = 0
         currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
         currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
@@ -1106,10 +1125,14 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         if (streamToken != 0 && streamToken != textureStreamToken) {
             if (textureStreamToken != 0) renewCameraTexture()
             textureStreamToken = streamToken
+            streamFramesLatched = 0
         }
         val oesFrameUpdated = streamToken != 0 &&
             frameAvailable.getAndSet(false) && acquireLatestCameraFrame()
-        if (oesFrameUpdated) latchedStreamToken = streamToken
+        if (oesFrameUpdated) {
+            latchedStreamToken = streamToken
+            streamFramesLatched = minOf(streamFramesLatched + 1, 2)
+        }
         var cameraFrameUpdated = oesFrameUpdated
 
         if (delayedStabilizationEnabled) {
@@ -1166,6 +1189,18 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 PLog.d(TAG, "Camera stream stopped: not drawing its released image")
                 latchedStreamToken = 0
             }
+            return
+        }
+        if (currentCameraTextureSource == PreviewColorTextureSource.EXTERNAL_OES && DeviceQuirks.isLilac &&
+            (streamFramesLatched < 2 || !oesFrameUpdated)
+        ) {
+            // Sony's camera HAL on lilac frees preview buffers that are still bound here, with no stream change the
+            // app can see: when a stream starts it sends one frame, then restarts the stream (0.1 to 2.4 s without
+            // frames) and frees that frame; when a RAW burst starts it pauses preview for about 1.8 s and frees the
+            // last frame. Drawing such a frame, or redrawing it for a UI change while no new frame comes, faulted
+            // the GPU after 15 of 60 Pro/Photo switches and at burst starts; four faults within 3 s make the driver
+            // drop this context. So the camera image is drawn only right after a new frame is latched, from the
+            // second frame of a stream on, and the screen keeps the last picture in between.
             return
         }
 
@@ -1409,12 +1444,28 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 compositeFinalDisplay = false
             )
         }
+        checkGlContextAlive()
         if (cameraFrameUpdated && !firstFrameRendered) {
             firstFrameRendered = true
             onFirstFrameRendered?.invoke()
         }
         if (currentFrameTimestampNs > 0L) {
             onPreviewFrameRendered?.invoke(currentFrameTimestampNs)
+        }
+    }
+
+    /** Two failed frame fences in a row: the driver has dropped this context (see [onGlContextLost]). */
+    private fun checkGlContextAlive() {
+        if (frameFence != 0L) {
+            val result = GLES30.glClientWaitSync(frameFence, 0, 0L)
+            GLES30.glDeleteSync(frameFence)
+            failedFrameFences = if (result == GLES30.GL_WAIT_FAILED) failedFrameFences + 1 else 0
+        }
+        frameFence = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
+        if (failedFrameFences >= 2 && !glContextLostReported) {
+            glContextLostReported = true
+            PLog.w(TAG, "GL context lost after GPU faults: recreating it")
+            onGlContextLost?.invoke()
         }
     }
 

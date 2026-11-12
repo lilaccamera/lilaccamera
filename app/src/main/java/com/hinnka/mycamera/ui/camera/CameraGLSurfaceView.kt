@@ -109,6 +109,8 @@ class CameraGLSurfaceView @JvmOverloads constructor(
             onHighlightPointUpdated?.invoke(hx, hy)
         }
 
+        renderer.onGlContextLost = { post { recreateGlContext() } }
+
         renderer.onFirstFrameRendered = {
             post { onFirstPreviewFrame?.invoke() }
         }
@@ -476,13 +478,30 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         requestRender()
     }
 
+    private var lifecyclePaused = false
+
+    /**
+     * Pausing without keeping the context makes GLSurfaceView destroy it, and resuming builds a new one with a new
+     * SurfaceTexture, which the preview hands to the camera like any new SurfaceTexture.
+     */
+    private fun recreateGlContext() {
+        if (lifecyclePaused || !isAttachedToWindow) return
+        preserveEGLContextOnPause = false
+        super.onPause()
+        super.onResume()
+        preserveEGLContextOnPause = true
+        requestRender()
+    }
+
     override fun onPause() {
+        lifecyclePaused = true
         renderer.setRenderingPaused(true)
         super.onPause()
         PLog.d(TAG, "onPause")
     }
 
     override fun onResume() {
+        lifecyclePaused = false
         renderer.setRenderingPaused(false)
         super.onResume()
         // Resume redraws independently of whether the CPU engine plan changed.

@@ -3488,21 +3488,49 @@ private const val SeeThroughFaceAlpha = 0.3f
 
 @Composable
 private fun rememberPhotoCaptureProgress(progress: PhotoCaptureProgress?): State<Float> {
-    // Keyed on the shot, not the estimate: when the estimate is corrected mid-burst the ring slows down or speeds
-    // up, it never runs backwards.
-    val fraction = remember(progress?.captureId) {
-        mutableFloatStateOf(progress?.fractionAt(SystemClock.elapsedRealtimeNanos()) ?: 0f)
-    }
-    LaunchedEffect(progress) {
+    // Keyed on the shot, not the estimate: the ring keeps one position and speed per shot, and each new estimate
+    // only steers its speed, so it never stops, jumps or runs backwards.
+    val fraction = remember(progress?.captureId) { mutableFloatStateOf(0f) }
+    val latest = rememberUpdatedState(progress)
+    LaunchedEffect(progress?.captureId) {
         if (progress == null) return@LaunchedEffect
+        var lastFrameNs = 0L
+        var speed = -1f // ring fractions per second; set from the first estimate
         while (isActive && fraction.floatValue < 1f) {
-            withFrameNanos {
-                fraction.floatValue = maxOf(fraction.floatValue, progress.fractionAt(SystemClock.elapsedRealtimeNanos()))
+            withFrameNanos { frameNs ->
+                val estimate = latest.value ?: return@withFrameNanos
+                val dtS = if (lastFrameNs == 0L) 0f else (frameNs - lastFrameNs) / 1e9f
+                lastFrameNs = frameNs
+                val needed: Float
+                if (estimate.lastFrameArrived) {
+                    // close promptly from wherever the ring is
+                    needed = (1f - fraction.floatValue) / CaptureRingCloseS
+                    speed = maxOf(speed, needed)
+                } else {
+                    // Aims to fill as the last frame arrives; if that comes later than estimated, the ring waits
+                    // just short of full instead of closing early.
+                    val remainingS = maxOf(
+                        (estimate.estimatedEndElapsedNs - SystemClock.elapsedRealtimeNanos()) / 1e9f,
+                        CaptureRingCloseS * 2f,
+                    )
+                    needed = (1f - fraction.floatValue) / remainingS
+                    speed = if (speed < 0f) needed else speed + (needed - speed) * (1f - exp(-dtS / CaptureRingSpeedSmoothingS))
+                }
+                val limit = if (estimate.lastFrameArrived) 1f else CaptureRingOpenUntilArrival
+                fraction.floatValue = minOf(limit, fraction.floatValue + speed * dtS)
             }
         }
     }
     return fraction
 }
+
+// Tuned in a simulation of 3 and 13 frame bursts with lilac's 0.27 to 0.36 s RAW frame spacing: the ring never
+// drops below about 0.6 of its average speed and fills within 0.1 s of the last frame ending.
+private const val CaptureRingSpeedSmoothingS = 0.4f
+// The ring closes over about this long once the last frame has arrived.
+private const val CaptureRingCloseS = 0.12f
+// Until the last frame arrives the ring stays just short of full.
+private const val CaptureRingOpenUntilArrival = 0.99f
 
 private fun cycleVideoResolution(state: CameraState): VideoResolutionPreset? {
     return nextOption(state.videoConfig.resolution, state.videoCapabilities.availableResolutions)
