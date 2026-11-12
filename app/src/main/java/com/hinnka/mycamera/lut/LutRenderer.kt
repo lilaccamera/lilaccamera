@@ -529,6 +529,16 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     var onMeteringUpdated: ((Double, Double) -> Unit)? = null
     var onHighlightPointUpdated: ((Float, Float) -> Unit)? = null
     var onFirstFrameRendered: (() -> Unit)? = null
+
+    /**
+     * Called on the GL thread when the driver has dropped this context after GPU faults. Adreno reports this
+     * through no EGL or GL error, and eglSwapBuffers keeps succeeding, so GLSurfaceView never recreates the
+     * context by itself; only fences fail (GL_WAIT_FAILED).
+     */
+    var onGlContextLost: (() -> Unit)? = null
+    private var frameFence = 0L
+    private var failedFrameFences = 0
+    private var glContextLostReported = false
     // 仅在有等待者时安装；时间戳属于已经完成所有预览 pass 的画面。
     var onPreviewFrameRendered: ((Long) -> Unit)? = null
 
@@ -569,6 +579,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         cameraTextureId = GlUtils.createOESTexture()
 
         // 创建 SurfaceTexture
+        // After a lost context the old SurfaceTexture still receives frames until the camera moves to the new one.
+        surfaceTexture?.setOnFrameAvailableListener(null)
         frameAvailable.set(false)
         surfaceTexture = SurfaceTexture(cameraTextureId).apply {
             setDefaultBufferSize(previewWidth, previewHeight)
@@ -618,6 +630,9 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         mgcEisHardwareBufferRenderer.resetAfterContextLoss()
         mgcEisYuvRenderer.resetAfterContextLoss()
         cameraTextureId = 0
+        frameFence = 0L
+        failedFrameFences = 0
+        glContextLostReported = false
         latchedStreamToken = 0
         textureStreamToken = 0
         streamFramesLatched = 0
@@ -1429,12 +1444,28 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 compositeFinalDisplay = false
             )
         }
+        checkGlContextAlive()
         if (cameraFrameUpdated && !firstFrameRendered) {
             firstFrameRendered = true
             onFirstFrameRendered?.invoke()
         }
         if (currentFrameTimestampNs > 0L) {
             onPreviewFrameRendered?.invoke(currentFrameTimestampNs)
+        }
+    }
+
+    /** Two failed frame fences in a row: the driver has dropped this context (see [onGlContextLost]). */
+    private fun checkGlContextAlive() {
+        if (frameFence != 0L) {
+            val result = GLES30.glClientWaitSync(frameFence, 0, 0L)
+            GLES30.glDeleteSync(frameFence)
+            failedFrameFences = if (result == GLES30.GL_WAIT_FAILED) failedFrameFences + 1 else 0
+        }
+        frameFence = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
+        if (failedFrameFences >= 2 && !glContextLostReported) {
+            glContextLostReported = true
+            PLog.w(TAG, "GL context lost after GPU faults: recreating it")
+            onGlContextLost?.invoke()
         }
     }
 
