@@ -143,6 +143,7 @@ class SlowMotionRecorder(
             val times1 = runCatching { bridge.frameTimes() }.getOrNull()?.size?.div(2)
             PLog.i(TAG, "Segment 1 ended: stop=$s1, frames=$times1, file ${seg1.length()} bytes")
             runBlocking { VideoMediaStoreWriter.publishVideo(appContext, seg1, dateTakenMs, recordingPath, recordingTreeUri, "_seg1") }
+            if ('c' in variant && 'r' !in variant && timed("mode change") { bridge.enterSuperSlow(spec.width, spec.height, SlowMotionSpec.FPS, spec.frames) } != 0) return@post
             videoFile = File(dir, "video2.mp4")
             val fd = ParcelFileDescriptor.open(videoFile, ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE)
             val p2 = try { timed("prepare segment 2") { bridge.prepare(fd) } } finally { fd.close() }

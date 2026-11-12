@@ -5,7 +5,7 @@
 # Only metadata and logs are read. Needs the Lilac debug app in the foreground in video mode.
 set -uo pipefail
 VAR=${1:-none}; GAP=${2:-3}; PKG=${3:-com.mdomokos.lilaccamera.debug.slowmo}
-b() { adb shell am broadcast -a com.mdomokos.lilaccamera.SLOWMO -p "$PKG" --es cmd "$1" --es variant "${2:-}" --ei width 1280 --ei height 720 --ei frames 177 >/dev/null; }
+b() { adb shell am broadcast -a com.mdomokos.lilaccamera.SLOWMO -p "$PKG" --es cmd "$1" --es variant "${2:-x}" --ei width 1280 --ei height 720 --ei frames 177 >/dev/null; }
 if [ "${RESTART:-0}" = 1 ]; then
   adb shell am force-stop "$PKG"; adb shell am force-stop com.mdomokos.lilaccamera.sonybridge
   adb shell 'stop cacaoserver; start cacaoserver'; sleep 4
