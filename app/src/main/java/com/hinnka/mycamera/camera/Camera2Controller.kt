@@ -56,6 +56,8 @@ import com.hinnka.mycamera.stabilization.normalizeStabilizationLookahead
 import com.hinnka.mycamera.stabilization.normalizeStabilizationStrength
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.utils.OrientationObserver
+import com.hinnka.mycamera.slowmotion.SlowMotionRecorder
+import com.hinnka.mycamera.slowmotion.SlowMotionSpec
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VIDEO_AUDIO_INPUT_AUTO
@@ -462,7 +464,10 @@ class Camera2Controller(private val context: Context) {
     private val enhancedStabilizationUnavailableCameraIds =
         ConcurrentHashMap.newKeySet<String>()
 
+    private var slowMotionDebugReceiver: android.content.BroadcastReceiver? = null
+
     init {
+        if (BuildConfig.DEBUG && DeviceQuirks.isLilac) registerSlowMotionDebugReceiver()
         realtimeStabilizationCoordinator.onEnhancedStabilizationUnavailable = {
             handleEnhancedStabilizationUnavailable(
                 reason = "Camera HAL stabilization conflicts with algorithmic stabilization"
@@ -3636,6 +3641,10 @@ class Camera2Controller(private val context: Context) {
         // createCaptureSession closes the previous session before onConfigured runs.
         // Stop exposing it while the replacement is being configured.
         invalidateCaptureSession(captureSession, "preview session replacement")
+        if (captureMode == CaptureMode.VIDEO && slowMotionSpec != null && surface != null) {
+            createSlowMotionSession(device, surface, handler, openGeneration)
+            return
+        }
         val reader = imageReader
         val stabilizationReader = ensureStabilizationImageReader()
         val useEnhancedStabilization = shouldUseVideoEnhancedStabilization()
@@ -8993,6 +9002,225 @@ class Camera2Controller(private val context: Context) {
             _state.value.getCurrentCameraInfo()?.lensType == LensType.FRONT
     }
 
+    // ==================== 960 fps slow motion (lilac, through the Sony bridge companion app) ====================
+
+    private var slowMotion: SlowMotionRecorder? = null
+    private var slowMotionSpec: SlowMotionSpec? = null
+    private var slowMotionReader: ImageReader? = null
+    private var slowMotionTexture: SurfaceTexture? = null
+    private var slowMotionCycling = false // the camera is being closed and reopened on purpose
+    /**
+     * Starts a slow-motion recording: ordinary video, then a 960 fps burst on [triggerSlowMotion], then ordinary
+     * video until [stopVideoRecording]. Rear camera of the lilac phone, video mode, camera open. Returns false when
+     * it cannot start. While it runs the camera session has the shape Sony's service needs (see [SlowMotionSpec]).
+     */
+    fun startSlowMotion(spec: SlowMotionSpec): Boolean {
+        val state = _state.value
+        if (!DeviceQuirks.isLilac || state.captureMode != CaptureMode.VIDEO || slowMotion != null ||
+            state.videoRecordingState.isRecording || state.videoRecordingState.isProcessing ||
+            cameraDevice == null || previewSurface == null || isCurrentCameraFrontFacing()
+        ) {
+            PLog.w(TAG, "Slow motion cannot start now")
+            return false
+        }
+        if (CameraHeat.read(context).level == CameraHeat.Level.STOP) {
+            PLog.w(TAG, "Not starting slow motion: too hot")
+            return false
+        }
+        val recorder = SlowMotionRecorder(
+            context, spec, state.videoConfig.recordingPath, state.videoConfig.recordingTreeUri, channels = 1,
+            orientationDegrees = slowMotionOrientationDegrees(),
+            listener = object : SlowMotionRecorder.Listener {
+                override fun onEntered() {
+                    // the service now waits for a camera session of its shape: reopen the camera, its first session is that one
+                    cameraHandler?.post {
+                        slowMotionCycling = false
+                        slowMotionTexture?.let { openCamera(it) }
+                    }
+                }
+
+                override fun onRecording() {
+                    cameraHandler?.post {
+                        _state.update { s -> s.copy(videoRecordingState = VideoRecordingState(isRecording = true, elapsedMs = 0L)) }
+                        videoRecordingPausedMs = 0L
+                        startVideoRecordingTicker()
+                    }
+                }
+
+                override fun onBurstDone(arrived: Boolean) {
+                    PLog.i(TAG, "Slow-motion burst done, arrived=$arrived")
+                }
+
+                override fun onFinished(uri: Uri?) {
+                    cameraHandler?.post {
+                        endSlowMotion()
+                        onVideoSaved?.invoke(uri)
+                    }
+                }
+
+                override fun onError(message: String) {
+                    cameraHandler?.post {
+                        endSlowMotion()
+                        onCameraError?.invoke(-1, message, false)
+                    }
+                }
+            }
+        )
+        val texture = previewSurfaceTexture ?: return false
+        slowMotion = recorder
+        slowMotionSpec = spec
+        slowMotionTexture = texture
+        // Sony's service changes mode only while no camera device is open (with one open, even without a session,
+        // the mode change does not return until it is closed): close the camera, change the mode, reopen the camera
+        // in the session shape the service expects.
+        slowMotionCycling = true
+        closeCameraInternal(preserveVideoRecording = false, clearPendingOpen = false)
+        whenCameraClosed { recorder.enter() }
+        return true
+    }
+
+    /**
+     * Rotation for the finished file. Sony's service draws the frames in the camera's own orientation (no
+     * SurfaceTexture transform as in the normal video path), so the sensor orientation is added to the phone's rotation.
+     */
+    private fun slowMotionOrientationDegrees(): Int {
+        val deviceRotation = OrientationObserver.captureRotationDegrees.toInt()
+        val sensor = _state.value.getCurrentCameraInfo()?.sensorOrientation ?: cachedSensorOrientation
+        return Math.floorMod(deviceRotation + sensor, 360)
+    }
+
+    private fun whenCameraClosed(attemptsLeft: Int = 60, action: () -> Unit) {
+        when {
+            cameraDeviceLifecycle == CameraDeviceLifecycle.CLOSED -> action()
+            attemptsLeft > 0 -> cameraHandler?.postDelayed({ whenCameraClosed(attemptsLeft - 1, action) }, 50)
+            else -> {
+                PLog.e(TAG, "The camera did not close for slow motion")
+                slowMotion?.abort()
+                endSlowMotion()
+                onCameraError?.invoke(-1, "The camera would not start slow motion", false)
+            }
+        }
+    }
+
+    /** Fires the 960 fps burst of the running slow-motion recording. */
+    fun triggerSlowMotion() {
+        slowMotion?.trigger()
+    }
+
+    private fun stopSlowMotion() {
+        stopVideoRecordingTicker()
+        _state.update { s -> s.copy(videoRecordingState = s.videoRecordingState.copy(isRecording = false, isProcessing = true)) }
+        slowMotion?.stop()
+    }
+
+    /** Camera closing or screen left before a normal stop: give Sony's service back at once, no file is saved. */
+    private fun abortSlowMotion() {
+        slowMotion?.abort()
+        endSlowMotion(reopen = false)
+    }
+
+    /** Back to the ordinary video session once slow motion is over (saved, failed or aborted). */
+    private fun endSlowMotion(reopen: Boolean = true) {
+        val reader = slowMotionReader
+        slowMotion = null
+        slowMotionSpec = null
+        slowMotionReader = null
+        slowMotionTexture = null
+        slowMotionCycling = false
+        stopVideoRecordingTicker()
+        _state.update { s -> s.copy(videoRecordingState = VideoRecordingState()) }
+        previewSurfaceTexture?.setDefaultBufferSize(previewBufferSize.width, previewBufferSize.height)
+        if (reopen && cameraDevice != null && previewSurface != null) {
+            createPreviewSession(openGeneration = cameraOpenGeneration)
+        }
+        // the old session is closed by the new one; the reader goes after it
+        cameraHandler?.post { reader?.close() } ?: reader?.close()
+    }
+
+    /**
+     * The only session shape Sony's service accepts: a 1280x720 viewfinder and a 1280x720 YUV reader, nothing else,
+     * opened in vendor mode 0x8000, with the exposure capped to one frame of the 960 fps capture.
+     */
+    private fun createSlowMotionSession(device: CameraDevice, surface: Surface, handler: Handler, openGeneration: Long) {
+        val spec = slowMotionSpec ?: return
+        val sessionGeneration = ++previewSessionGeneration
+        pendingVendorSessionParameterRestart = false
+        previewSurfaceTexture?.setDefaultBufferSize(SlowMotionSpec.VIEWFINDER_WIDTH, SlowMotionSpec.VIEWFINDER_HEIGHT)
+        val reader = slowMotionReader ?: ImageReader.newInstance(
+            SlowMotionSpec.VIEWFINDER_WIDTH, SlowMotionSpec.VIEWFINDER_HEIGHT, ImageFormat.YUV_420_888, 2
+        ).also { r ->
+            r.setOnImageAvailableListener({ it.acquireLatestImage()?.close() }, handler)
+            slowMotionReader = r
+        }
+        try {
+            previewRequestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                addTarget(surface)
+                addTarget(reader.surface)
+                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                set(CaptureRequest.Key(SlowMotionSpec.EXPOSURE_LIMIT_KEY, Long::class.javaObjectType), spec.exposureLimitNs)
+            }
+            PLog.i(TAG, "Creating slow-motion session: mode 0x${SlowMotionSpec.SESSION_MODE.toString(16)}, exposure cap ${spec.exposureLimitNs} ns")
+            device.createCaptureSession(SessionConfiguration(
+                SlowMotionSpec.SESSION_MODE,
+                listOf(createOutputConfiguration(surface), createOutputConfiguration(reader.surface)),
+                Executor { handler.post(it) },
+                object : CameraCaptureSession.StateCallback() {
+                    override fun onClosed(session: CameraCaptureSession) {
+                        invalidateCaptureSession(session, "slow-motion session closed")
+                    }
+
+                    override fun onConfigured(session: CameraCaptureSession) {
+                        if (openGeneration != cameraOpenGeneration || sessionGeneration != previewSessionGeneration) {
+                            safeCloseCaptureSession(session, "stale slow-motion session")
+                            return
+                        }
+                        onSessionConfigured(session, openGeneration, sessionGeneration)
+                        // the service wants a settled viewfinder before the recording starts
+                        handler.postDelayed({
+                            if (sessionGeneration == previewSessionGeneration) slowMotion?.startRecording()
+                        }, SlowMotionSpec.VIEWFINDER_SETTLE_MS)
+                    }
+
+                    override fun onConfigureFailed(session: CameraCaptureSession) {
+                        PLog.e(TAG, "Slow-motion session configuration failed")
+                        safeCloseCaptureSession(session, "slow-motion configure failure")
+                        slowMotion?.abort()
+                        endSlowMotion()
+                        onCameraError?.invoke(-1, "The camera would not start slow motion", false)
+                    }
+                }
+            ))
+        } catch (e: Exception) {
+            PLog.e(TAG, "Failed to create the slow-motion session", e)
+            slowMotion?.abort()
+            endSlowMotion()
+            onCameraError?.invoke(-1, "The camera would not start slow motion", false)
+        }
+    }
+
+    /**
+     * Debug builds on lilac: `adb shell am broadcast -a com.mdomokos.lilaccamera.SLOWMO -p <package> --es cmd start`
+     * (extras `--ei frames 91`, `--ei width 1280 --ei height 720`), then `--es cmd trigger`, then `--es cmd stop`.
+     * Needs the camera open in video mode.
+     */
+    private fun registerSlowMotionDebugReceiver() {
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, intent: android.content.Intent) {
+                when (intent.getStringExtra("cmd")) {
+                    "start" -> cameraHandler?.post {
+                        startSlowMotion(SlowMotionSpec(
+                            intent.getIntExtra("width", 1280), intent.getIntExtra("height", 720), intent.getIntExtra("frames", 91)
+                        ))
+                    }
+                    "trigger" -> triggerSlowMotion()
+                    "stop" -> cameraHandler?.post { stopVideoRecording() }
+                }
+            }
+        }
+        context.registerReceiver(receiver, android.content.IntentFilter("com.mdomokos.lilaccamera.SLOWMO"), Context.RECEIVER_EXPORTED)
+        slowMotionDebugReceiver = receiver
+    }
+
     private fun resolveVideoSessionOperatingMode(): Int {
         if (!oppoSuperStabilizationEnabled || !DeviceUtil.isOppo) {
             return SessionConfiguration.SESSION_REGULAR
@@ -9083,6 +9311,10 @@ class Camera2Controller(private val context: Context) {
 
     fun stopVideoRecording() {
         if (!_state.value.videoRecordingState.isRecording) return
+        if (slowMotion != null) {
+            stopSlowMotion()
+            return
+        }
         videoCaptureStatsWindowStartMs = 0L
         videoCaptureStatsFrames = 0
         videoCaptureStatsFirstTimestampNs = 0L
@@ -10572,6 +10804,7 @@ class Camera2Controller(private val context: Context) {
             pendingFrameMetadata.clear()
             cameraOpenGeneration++
             val lifecycleBeforeClose = cameraDeviceLifecycle
+            if (slowMotion != null && !slowMotionCycling && !_state.value.videoRecordingState.isRecording) abortSlowMotion()
             val keepVideoRecording = preserveVideoRecording && _state.value.videoRecordingState.isRecording
             if (keepVideoRecording) {
                 PLog.d(TAG, "Closing camera while keeping active video recording")
@@ -10868,6 +11101,8 @@ class Camera2Controller(private val context: Context) {
      * 释放资源
      */
     fun release() {
+        slowMotionDebugReceiver?.let { runCatching { context.unregisterReceiver(it) } }
+        slowMotionDebugReceiver = null
         val handler = cameraHandler
         if (handler != null) {
             val latch = java.util.concurrent.CountDownLatch(1)

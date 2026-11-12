@@ -119,13 +119,14 @@ object VideoMediaStoreWriter {
         sourceFile: File,
         dateTakenMs: Long = System.currentTimeMillis(),
         recordingPath: VideoRecordingPath = VideoRecordingPath.DCIM_PHOTON,
-        recordingTreeUri: String? = null
+        recordingTreeUri: String? = null,
+        nameSuffix: String = ""
     ): Uri? = withContext(Dispatchers.IO) {
         if (!sourceFile.exists() || sourceFile.length() <= 0L) {
             return@withContext null
         }
 
-        val fileName = buildFileName(dateTakenMs)
+        val fileName = buildFileName(dateTakenMs, nameSuffix)
         if (recordingPath == VideoRecordingPath.EXTERNAL_TREE) {
             val output = createTreeVideo(context, recordingTreeUri, fileName)
                 ?: return@withContext null
@@ -170,9 +171,9 @@ object VideoMediaStoreWriter {
         }
     }
 
-    private fun buildFileName(dateTakenMs: Long): String {
+    private fun buildFileName(dateTakenMs: Long, nameSuffix: String = ""): String {
         return "LilacCamera_${
             SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(dateTakenMs))
-        }.mp4"
+        }$nameSuffix.mp4"
     }
 }

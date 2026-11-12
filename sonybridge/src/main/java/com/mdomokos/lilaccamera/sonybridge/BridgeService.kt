@@ -11,6 +11,7 @@ import android.os.Binder
 import android.os.Bundle
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import android.os.Process
 import android.util.Log
 import android.view.Surface
@@ -32,6 +33,7 @@ class BridgeService : Service() {
     private var videoH = 0
     private var fps = 960
     @Volatile private var frames = 0
+    private val times = ArrayList<Long>() // pairs: file time stamp in microseconds, arrival in elapsed-realtime nanoseconds
 
     private fun log(message: String) = Log.i(TAG, message)
 
@@ -60,6 +62,7 @@ class BridgeService : Service() {
     private fun startEncoder(file: ParcelFileDescriptor): Surface {
         out = file
         frames = 0
+        synchronized(times) { times.clear() }
         val format = MediaFormat.createVideoFormat("video/avc", videoW, videoH).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, 40_000_000)
@@ -83,6 +86,7 @@ class BridgeService : Service() {
                     val data = enc.getOutputBuffer(i)
                     if (data != null && info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0 && track >= 0) {
                         mux.writeSampleData(track, data, info); frames++
+                        synchronized(times) { times.add(info.presentationTimeUs); times.add(SystemClock.elapsedRealtimeNanos()) }
                     }
                     enc.releaseOutputBuffer(i, false)
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return@Thread
@@ -128,10 +132,10 @@ class BridgeService : Service() {
 
         override fun trigger() = call("trigger") { camera.trigger() }
 
-        // Not under the lock: the caller polls frameCount while it waits.
-        override fun waitBurstDone(timeoutMs: Int): Int { enforceCaller(); return if (camera.waitBurstDone(timeoutMs.toLong())) 1 else 0 }
-
+        // Not under the lock: the caller polls it while the burst arrives.
         override fun frameCount(): Int { enforceCaller(); return frames }
+
+        override fun frameTimes(): LongArray { enforceCaller(); return synchronized(times) { times.toLongArray() } }
 
         // Sony's order: wait, end the encoder and close the file, then stop the native recording.
         override fun stop() = call("stop") { Thread.sleep(500); finishEncoder(); camera.stopVideo() }

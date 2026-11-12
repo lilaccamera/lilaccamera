@@ -10,7 +10,7 @@ import android.os.ParcelFileDescriptor;
  * photo service may only call back into a privileged process. Every method returns the native result: 0 is success.
  *
  * Call order: open, enterSuperSlow, (caller opens its camera session and waits for the viewfinder),
- * prepare, startVideo, trigger, waitBurstDone, stop, release. Always call release.
+ * prepare, startVideo, trigger, stop, frameTimes, release. Always call release.
  */
 interface ISonyBridge {
     /** Protocol version, 1. */
@@ -38,14 +38,18 @@ interface ISonyBridge {
     /** Starts the ordinary video recording; the trigger only works while it runs. */
     int startVideo();
 
-    /** Fires the 960 fps burst. */
+    /** Fires the 960 fps burst. The service reports no completion; the burst has arrived when frameCount has grown by its length. */
     int trigger();
-
-    /** Blocks until the service reports the burst finished: 1 when it did, 0 on timeout. */
-    int waitBurstDone(int timeoutMs);
 
     /** Frames the encoder has delivered so far. */
     int frameCount();
+
+    /**
+     * One pair per frame the encoder delivered, in order: its time stamp in the file (microseconds) and the time the
+     * frame arrived (SystemClock.elapsedRealtimeNanos). Lets the caller match sound to the video. Valid after stop,
+     * until the next prepare.
+     */
+    long[] frameTimes();
 
     /** Ends the encoder, waits, closes the muxer and the file, then stops the native recording. */
     int stop();

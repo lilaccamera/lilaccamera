@@ -75,7 +75,8 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
+            // -PdebugIdSuffix=name installs a debug build beside the others as <id>.debug.name
+            applicationIdSuffix = ".debug" + ((project.findProperty("debugIdSuffix") as? String)?.let { ".$it" } ?: "")
             signingConfig = signingConfigs.getByName("debug")
         }
         release {
@@ -125,6 +126,7 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        aidl = true
     }
 
     androidResources {
@@ -132,6 +134,10 @@ android {
     }
 
     sourceSets {
+        // the interface of the Sony bridge companion app (slow motion), shared as source
+        getByName("main") {
+            aidl.srcDir("../sonybridge/src/main/aidl")
+        }
         getByName("dev") {
             java {
                 srcDir("src/default/java")

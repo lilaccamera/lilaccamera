@@ -57,16 +57,14 @@ class BypassCamera {
     private external fun nativeRequestStartVideoRecording(handle: Long): Int
     private external fun nativeRequestStopVideoRecording(handle: Long): Int
 
-    // Callback types seen so far: 4 right after prepare, 3 about 1.5 s after the trigger (burst finished).
+    // Callback types seen so far: 4 right after prepare, 0 after the video start, 3 and 1 at the stop; none for the trigger.
     @Volatile private var prepareLatch = CountDownLatch(1)
-    @Volatile private var burstLatch = CountDownLatch(1)
     @Volatile private var logger: (String) -> Unit = {}
 
     @Suppress("unused")
     private fun callbackFromNativeVideo(type: Int) {
         logger("native callback type=$type")
         if (type == 4) prepareLatch.countDown()
-        if (type == 3) burstLatch.countDown()
     }
 
     private var handle = -1L
@@ -96,12 +94,7 @@ class BypassCamera {
 
     fun startVideo(): Int = nativeRequestStartVideoRecording(handle)
 
-    fun trigger(): Int {
-        burstLatch = CountDownLatch(1)
-        return nativeRequestStartSuperSlowRecording(handle)
-    }
-
-    fun waitBurstDone(timeoutMs: Long): Boolean = burstLatch.await(timeoutMs, TimeUnit.MILLISECONDS)
+    fun trigger(): Int = nativeRequestStartSuperSlowRecording(handle)
 
     fun stopVideo(): Int = nativeRequestStopVideoRecording(handle)
 
