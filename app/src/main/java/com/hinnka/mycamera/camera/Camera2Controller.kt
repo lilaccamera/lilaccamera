@@ -168,6 +168,8 @@ class Camera2Controller(private val context: Context) {
         private const val AF_KICK_EVERY_MS = 1_500L
         // At 10 fps a full search takes up to 25 frames after a 6-frame wait; 2 s cut searches short.
         private const val AF_KICK_TIMEOUT_MS = 4_000L
+        // Too dark to find focus: after this many misses in a row the lens stops sweeping until the subject changes.
+        private const val AF_KICK_MISS_LIMIT = 2
         // In dim light a small AF region holds too little detail for the driver's search; it grows to this share.
         private const val DIM_AF_ISO = 1600
         private const val DIM_AF_REGION_FRACTION = 0.20f
@@ -7603,6 +7605,7 @@ class Camera2Controller(private val context: Context) {
     // A search the app started (kick, half-press) reads no lock until its own trigger's result: results already in
     // flight still carry the previous lock.
     private var afTriggerAwaited = false
+    private var afKickMisses = 0
     // The laser's last reading (-1 none) and zone, [left, right, top, bottom] in percent of the frame.
     private var laserStrength = -1
     private var laserZone: IntArray? = null
@@ -7881,6 +7884,7 @@ class Camera2Controller(private val context: Context) {
         stopTracking("face chosen")
         if (_state.value.focusPoint != null) restoreContinuousAf()
         mainFaceId = face.id
+        afKickMisses = 0
         mainFaceUserChosen = true
         rivalFaceId = -1
         Log.i(SonySubjectKeys.LOG_TAG, "main face=${face.id} (chosen)")
@@ -7930,6 +7934,7 @@ class Camera2Controller(private val context: Context) {
         if (!sent) return
         trackingSinceMs = SystemClock.elapsedRealtime()
         trackingLostSinceMs = 0L
+        afKickMisses = 0
         subjectAfLocked = false
         trackStart = normX to normY
         trackViewAspectRatio = viewAspectRatio
@@ -8044,6 +8049,7 @@ class Camera2Controller(private val context: Context) {
             if (last == null) {
                 afFocusedMs = now
                 afKickArea = 0f
+                afKickMisses = 0
             }
             subjectAfRegion = rect
             subjectAfSentMs = now
@@ -8057,6 +8063,7 @@ class Camera2Controller(private val context: Context) {
 
         if (afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED || afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED) {
             afFocusedMs = now
+            afKickMisses = 0
             if (afKickArea == 0f) afKickArea = area
         }
         if (afKickPending) {
@@ -8065,6 +8072,8 @@ class Camera2Controller(private val context: Context) {
             if (locked || now - afKickMs > AF_KICK_TIMEOUT_MS) {
                 afKickPending = false
                 afKickArea = area
+                afKickMisses = if (locked && afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED) 0 else afKickMisses + 1
+                if (afKickMisses == AF_KICK_MISS_LIMIT) Log.i(SonySubjectKeys.LOG_TAG, "AF kicks paused after $afKickMisses misses")
                 if (afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED && locked &&
                     parkLensIfFar("subject search missed after ${now - afKickMs} ms")
                 ) {
@@ -8085,9 +8094,10 @@ class Camera2Controller(private val context: Context) {
         val reason = when {
             afKickArea > 0f && abs(area / afKickArea - 1f) > AF_KICK_RESIZE_FRACTION -> "size ${area / afKickArea}x"
             parked && laserStrength > 0 -> "laser return $laserStrength"
-            now - afFocusedMs > AF_KICK_UNFOCUSED_MS -> "unfocused ${now - afFocusedMs} ms"
+            afKickMisses < AF_KICK_MISS_LIMIT && now - afFocusedMs > AF_KICK_UNFOCUSED_MS -> "unfocused ${now - afFocusedMs} ms"
             else -> return
         }
+        if (reason.startsWith("size")) afKickMisses = 0
         unparkLens()
         afKickMs = now
         afTriggerAwaited = true
