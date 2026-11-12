@@ -2016,7 +2016,7 @@ fun CameraScreen(
                         add(TopEdgeMark(AppIcons.BulbLine))
                     }
                     if (state.videoConfig.logProfile != VideoLogProfile.OFF) add(TopEdgeMark(null, "LOG"))
-                    if (state.slowMotion.enabled) add(TopEdgeMark(null, stringResource(R.string.slow_motion_mark)))
+                    if (state.slowMotion.enabled && !state.videoRecordingState.isRecording && !state.videoRecordingState.isProcessing) add(TopEdgeMark(null, stringResource(R.string.slow_motion_mark)))
                 } else {
                     if (useLivePhoto) add(TopEdgeMark(AppIcons.LivePhotoLine))
                     if (state.timerSeconds > 0) add(TopEdgeMark(AppIcons.StopwatchLine, "${state.timerSeconds}s"))
