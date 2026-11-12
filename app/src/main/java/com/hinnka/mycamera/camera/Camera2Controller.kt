@@ -1414,7 +1414,10 @@ class Camera2Controller(private val context: Context) {
             // 处理拍照状态机
             processStillFlashPrecapture(request, result)
             processMultiFrameTorchWarmupState(request, result)
-            if (session === captureSession) handleSubjectResult(result)
+            if (session === captureSession) {
+                readLaser(result)
+                handleSubjectResult(result)
+            }
 
             // 监听对焦状态
             val afState = result.get(CaptureResult.CONTROL_AF_STATE)
@@ -1445,6 +1448,11 @@ class Camera2Controller(private val context: Context) {
                         _state.update { s -> s.copy(isFocusing = false, focusSuccess = false) }
                         if (!_state.value.isFocusLocked && !isFocusLockedWaitingForSceneChange) {
                             recordFocusLockExposure(result)
+                        }
+                        if (_state.value.focusPointSource == FocusPointSource.MANUAL && parkLensIfFar("tap focus missed")) {
+                            // The parked lens is the new reference, so the scene watch does not read the move as a change.
+                            focusLockedReferenceDistance = previewRequestBuilder?.get(CaptureRequest.LENS_FOCUS_DISTANCE) ?: 0f
+                            focusLockSettleFrames = FOCUS_LOCK_SETTLE_FRAMES
                         }
                     }
                 }
@@ -7218,6 +7226,7 @@ class Camera2Controller(private val context: Context) {
         } else {
             halfPressCheck?.let { cameraHandler?.removeCallbacks(it) }
             halfPressCheck = null
+            unparkLens()
             if (subjectAfLocked) {
                 subjectAfLocked = false
                 submitOneShot(
@@ -7585,6 +7594,9 @@ class Camera2Controller(private val context: Context) {
     // A search the app started (kick, half-press) reads no lock until its own trigger's result: results already in
     // flight still carry the previous lock.
     private var afTriggerAwaited = false
+    // The laser's last reading (-1 none) and zone, [left, right, top, bottom] in percent of the frame.
+    private var laserStrength = -1
+    private var laserZone: IntArray? = null
 
     private fun resetSubjectState() {
         trackingSinceMs = 0L
@@ -7626,6 +7638,52 @@ class Camera2Controller(private val context: Context) {
         return CameraCoordinateRect(left, top, left + w, top + h).intersect(visible) ?: rect
     }
 
+    private fun readLaser(result: CaptureResult) {
+        if (!sonyFeatures.laser) return
+        val area = SonySubjectKeys.read(result, SonySubjectKeys.TOF_MEASURE_AREA) ?: return
+        if (area.size < 5 || area[4] < 0 || area[1] <= area[0] || area[3] <= area[2]) return
+        laserStrength = area[4]
+        laserZone = area.copyOf(4)
+    }
+
+    private fun isLensParked(): Boolean = _state.value.isAutoFocus &&
+        previewRequestBuilder?.get(CaptureRequest.CONTROL_AF_MODE) == CaptureRequest.CONTROL_AF_MODE_OFF
+
+    /**
+     * A search that failed on a subject inside the laser's zone with no laser return was looking at something beyond
+     * about 2 m (a black surface at 30 cm still returns): park the lens at the hyperfocal distance, sharp from about
+     * half that distance to infinity, instead of where the sweep gave up. The next tap, search or scene change resumes AF.
+     */
+    private fun parkLensIfFar(reason: String): Boolean {
+        val zone = laserZone
+        if (!sonyFeatures.laser || laserStrength != 0 || zone == null || isCaptureFocusFrozen) return false
+        val builder = previewRequestBuilder ?: return false
+        val region = builder.get(CaptureRequest.CONTROL_AF_REGIONS)?.firstOrNull()?.rect ?: return false
+        val characteristics = getActiveOpenCameraCharacteristics() ?: return false
+        val array = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return false
+        val x = region.exactCenterX() * 100f / array.width()
+        val y = region.exactCenterY() * 100f / array.height()
+        if (x < zone[0] || x > zone[1] || y < zone[2] || y > zone[3]) return false
+        val diopters = characteristics.get(CameraCharacteristics.LENS_INFO_HYPERFOCAL_DISTANCE)?.takeIf { it > 0f }
+            ?: calculateHyperfocalFocusResult()?.focusDistanceDiopters
+            ?: return false
+        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+        builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, diopters)
+        updatePreview()
+        Log.i(SonySubjectKeys.LOG_TAG, "laser far: lens parked at $diopters D ($reason, region at $x,$y %)")
+        return true
+    }
+
+    /** Back to the AF mode the settings ask for, if [parkLensIfFar] parked the lens. */
+    private fun unparkLens() {
+        if (!isLensParked()) return
+        previewRequestBuilder?.let {
+            applyFocusSettings(it, _state.value)
+            updatePreview()
+        }
+        Log.i(SonySubjectKeys.LOG_TAG, "lens unparked")
+    }
+
     private fun applySonySubjectKeys(builder: CaptureRequest.Builder) {
         try {
             if (sonyFeatures.objectTracking) {
@@ -7637,6 +7695,7 @@ class Camera2Controller(private val context: Context) {
                     if (faceAeActive) SonySubjectKeys.AE_REGION_MODE_FACE else aeRegionModeBaseline,
                 )
             }
+            if (sonyFeatures.laser) builder.set(SonySubjectKeys.TOF_MEASURE_MODE, 1.toByte())
             subjectAfRegion?.let {
                 val region = dimLightAfRegion(it)
                 builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(MeteringRectangle(region.toAndroidRect(), MeteringRectangle.METERING_WEIGHT_MAX)))
@@ -7796,6 +7855,7 @@ class Camera2Controller(private val context: Context) {
         mainFaceUserChosen = false
         mainFaceId = -1
         rivalFaceId = -1
+        unparkLens()
         if (subjectAfRegion != null) {
             subjectAfRegion = null
             afKickPending = false
@@ -7944,6 +8004,7 @@ class Camera2Controller(private val context: Context) {
             if (subjectAfRegion != null) {
                 subjectAfRegion = null
                 afKickPending = false
+                unparkLens()
                 if (state.focusPoint == null) clearCustomAfRegions(builder)
                 applySonySubjectKeys(builder)
                 updatePreview()
@@ -7984,6 +8045,12 @@ class Camera2Controller(private val context: Context) {
             if (locked || now - afKickMs > AF_KICK_TIMEOUT_MS) {
                 afKickPending = false
                 afKickArea = area
+                if (afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED && locked &&
+                    parkLensIfFar("subject search missed after ${now - afKickMs} ms")
+                ) {
+                    afFocusedMs = now
+                    return
+                }
                 submitOneShot(
                     "AF cancel after kick: af=$afState after ${now - afKickMs} ms",
                     set = { it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL) },
@@ -7993,11 +8060,15 @@ class Camera2Controller(private val context: Context) {
             return
         }
         if (now - afKickMs < AF_KICK_EVERY_MS) return
+        val parked = isLensParked()
+        if (parked) afFocusedMs = now
         val reason = when {
             afKickArea > 0f && abs(area / afKickArea - 1f) > AF_KICK_RESIZE_FRACTION -> "size ${area / afKickArea}x"
+            parked && laserStrength > 0 -> "laser return $laserStrength"
             now - afFocusedMs > AF_KICK_UNFOCUSED_MS -> "unfocused ${now - afFocusedMs} ms"
             else -> return
         }
+        unparkLens()
         afKickMs = now
         afTriggerAwaited = true
         afKickPending = submitOneShot(
@@ -8172,6 +8243,7 @@ class Camera2Controller(private val context: Context) {
             halfPressOutcomePending = false
             val focusedLock = afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED
             Log.i(SonySubjectKeys.LOG_TAG, "half-press lock: ${if (focusedLock) "focused" else "missed"} after ${now - subjectAfSentMs} ms")
+            if (!focusedLock) parkLensIfFar("half-press missed")
         }
         _faceCheckReason.value = when {
             halfPressCheck != null -> "half"
@@ -8203,7 +8275,7 @@ class Camera2Controller(private val context: Context) {
                     "afMode=${result.get(CaptureResult.CONTROL_AF_MODE)} af=$afState " +
                     "lens=${result.get(CaptureResult.LENS_FOCUS_DISTANCE)} " +
                     "aeMode=${if (sonyFeatures.faceAe) SonySubjectKeys.read(result, SonySubjectKeys.AE_REGION_MODE_RESULT) else "-"} " +
-                    "faceAe=$faceAeActive iso=${result.get(CaptureResult.SENSOR_SENSITIVITY)} " +
+                    "faceAe=$faceAeActive laser=$laserStrength iso=${result.get(CaptureResult.SENSOR_SENSITIVITY)} " +
                     "exp=${result.get(CaptureResult.SENSOR_EXPOSURE_TIME)}"
             )
         }
