@@ -555,6 +555,8 @@ class Camera2Controller(private val context: Context) {
 
     private var nextPhotoCaptureId = 0L
     private var activePhotoCapture: PhotoCaptureContext? = null
+    // Focus releases asked for while a still capture runs, sent once it has ended.
+    private val focusReleasesAfterCapture = ArrayList<() -> Unit>()
     // Exposure for the YUV burst being captured, when it is planned for low light.
     private var nightPlan: NightCapturePlan? = null
     private var pendingContinuousBurstCapture: PhotoCaptureContext? = null
@@ -1153,6 +1155,16 @@ class Camera2Controller(private val context: Context) {
         }
         session.captureBurst(requests, callback, cameraHandler)
         shot.submitted = true
+        // A HAL that silently drops a frame never ends the sequence; fail the shot rather than wait forever.
+        // RAW bursts on the XZ1 Compact run about 0.3 s per frame beyond the exposure, so allow 1 s per frame.
+        val estimatedDurationNs = maxOf(exposureDurationNs, guessedFrameNs * requests.size)
+        val stallTimeoutMs = estimatedDurationNs / 1_000_000 + requests.size * 1_000L + CAPTURE_IMAGE_DELIVERY_TIMEOUT_MS
+        cameraHandler?.postDelayed({
+            if (shot.sequenceCompleted || shot.failed || shot.delivered) return@postDelayed
+            PLog.e(TAG, "Capture sequence stalled: id=${shot.id} after ${stallTimeoutMs} ms")
+            markRawHalPoisoned(shot, "capture sequence stalled")
+            failPhotoCapture(shot, "capture sequence stalled")
+        }, stallTimeoutMs)
     }
 
     private fun trackImage(image: Image?): SafeImage? {
@@ -2523,6 +2535,7 @@ class Camera2Controller(private val context: Context) {
             disposeFailedPhotoCapture(it)
         }
         activePhotoCapture = null
+        runFocusReleasesAfterCapture()
         pendingContinuousBurstCapture = null
         pendingImages.values.toList().forEach(SafeImage::close)
         pendingImages.clear()
@@ -7279,8 +7292,29 @@ class Camera2Controller(private val context: Context) {
             handler.post { unlockFocus() }
             return
         }
+        if (deferWhileCapturing(::unlockFocus)) return
         PLog.d(TAG, "Unlock focus")
         restoreContinuousAf()
+    }
+
+    /**
+     * Holds [action] until the still capture in progress has ended. An AF cancel or AF mode change sent during a
+     * burst reaches the camera right after the burst's last request; the XZ1 Compact HAL then drops the RAW frame
+     * still in flight, the capture sequence never completes, and the camera stays stuck until the camera service
+     * restarts.
+     */
+    private fun deferWhileCapturing(action: () -> Unit): Boolean {
+        if (activePhotoCapture == null) return false
+        focusReleasesAfterCapture += action
+        return true
+    }
+
+    private fun runFocusReleasesAfterCapture() {
+        if (activePhotoCapture != null || focusReleasesAfterCapture.isEmpty()) return
+        val actions = focusReleasesAfterCapture.toList()
+        focusReleasesAfterCapture.clear()
+        PLog.d(TAG, "Sending ${actions.size} focus release(s) held during the capture")
+        actions.forEach { it() }
     }
 
     private fun clearPointFocusState(spot: Pair<Float, Float>? = null, spotViewAspectRatio: Float? = null) {
@@ -7340,6 +7374,7 @@ class Camera2Controller(private val context: Context) {
             handler.post { setShutterKeyHold(held) }
             return
         }
+        if (!held && deferWhileCapturing { setShutterKeyHold(false) }) return
         shutterKeyHold = held
         if (held) {
             // A half-press locks focus on the subject: the tracked object (a driver that tracks during the lock keeps
@@ -10424,6 +10459,7 @@ class Camera2Controller(private val context: Context) {
         if (device == null || session == null || builder == null) {
             PLog.v(TAG, "resetPreviewAfterCapture: camera not ready, skipping")
             clearCaptureFocusState("preview unavailable after capture")
+            runFocusReleasesAfterCapture()
             return
         }
 
@@ -10458,6 +10494,7 @@ class Camera2Controller(private val context: Context) {
             PLog.e(TAG, "Failed to reset preview", e)
             clearCaptureFocusState("preview reset failure")
         }
+        runFocusReleasesAfterCapture()
     }
 
     private fun clearCaptureFocusState(reason: String) {
