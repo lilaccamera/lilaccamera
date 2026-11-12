@@ -163,6 +163,9 @@ class Camera2Controller(private val context: Context) {
         private const val AF_KICK_EVERY_MS = 1_500L
         // At 10 fps a full search takes up to 25 frames after a 6-frame wait; 2 s cut searches short.
         private const val AF_KICK_TIMEOUT_MS = 4_000L
+        // In dim light a small AF region holds too little detail for the driver's search; it grows to this share.
+        private const val DIM_AF_ISO = 1600
+        private const val DIM_AF_REGION_FRACTION = 0.20f
         // A late answer can still turn the new track into a face; after this it is ignored.
         private const val TAP_CHECK_GIVE_UP_MS = 1_000L
         private const val TAP_FACE_MARGIN = 0.15f
@@ -7433,11 +7436,11 @@ class Camera2Controller(private val context: Context) {
                 focusSuccess = null
             ) }
             // AF 区域保持为可见画面的 10%，避免 SCALER_CROP_REGION 变焦后区域相对画面膨胀。
-            val afRect = PreviewMeteringMapper.buildCenteredRegion(
+            val afRect = dimLightAfRegion(PreviewMeteringMapper.buildCenteredRegion(
                 mapping = mapping,
                 widthFraction = AF_REGION_WIDTH_FRACTION,
                 heightFraction = AF_REGION_HEIGHT_FRACTION,
-            ).toAndroidRect()
+            ), mapping.visibleRegion).toAndroidRect()
             val afRegion = MeteringRectangle(afRect, MeteringRectangle.METERING_WEIGHT_MAX)
 
             if (triggerFocus) {
@@ -7609,6 +7612,20 @@ class Camera2Controller(private val context: Context) {
         _subjectOverlay.value = SubjectOverlay()
     }
 
+    /** Dim light: an AF region smaller than [DIM_AF_REGION_FRACTION] of the visible frame grows around its centre. */
+    private fun dimLightAfRegion(
+        rect: CameraCoordinateRect,
+        visible: CameraCoordinateRect? = mapPreviewMeteringPoint(0.5f, 0.5f, null)?.visibleRegion,
+    ): CameraCoordinateRect {
+        if (visible == null || _state.value.iso < DIM_AF_ISO) return rect
+        val w = maxOf(rect.width, (visible.width * DIM_AF_REGION_FRACTION).toInt())
+        val h = maxOf(rect.height, (visible.height * DIM_AF_REGION_FRACTION).toInt())
+        if (w == rect.width && h == rect.height) return rect
+        val left = ((rect.left + rect.right) / 2 - w / 2).coerceIn(visible.left, maxOf(visible.left, visible.right - w))
+        val top = ((rect.top + rect.bottom) / 2 - h / 2).coerceIn(visible.top, maxOf(visible.top, visible.bottom - h))
+        return CameraCoordinateRect(left, top, left + w, top + h).intersect(visible) ?: rect
+    }
+
     private fun applySonySubjectKeys(builder: CaptureRequest.Builder) {
         try {
             if (sonyFeatures.objectTracking) {
@@ -7621,7 +7638,8 @@ class Camera2Controller(private val context: Context) {
                 )
             }
             subjectAfRegion?.let {
-                builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(MeteringRectangle(it.toAndroidRect(), MeteringRectangle.METERING_WEIGHT_MAX)))
+                val region = dimLightAfRegion(it)
+                builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(MeteringRectangle(region.toAndroidRect(), MeteringRectangle.METERING_WEIGHT_MAX)))
             }
             if (sonyFeatures.afUserRegion) {
                 builder.set(
