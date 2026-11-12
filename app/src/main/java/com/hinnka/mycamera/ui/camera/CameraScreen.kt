@@ -326,6 +326,8 @@ fun CameraScreen(
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
     var captureButtonBounds by remember { mutableStateOf<Rect?>(null) }
     val noteLine = remember { NoteLineState() }
+    // The shutter shows a cross while it waits for smiles; the note says why.
+    LaunchedEffect(viewModel.smileWaiting) { if (viewModel.smileWaiting) noteLine.say(R.string.smile_waiting) }
     // Multiple exposure shots counted from the shutter press, so the actions, the count and the shutter ring answer
     // at once instead of when each frame is saved.
     var exposuresPressed by remember { mutableIntStateOf(0) }
@@ -1469,6 +1471,7 @@ fun CameraScreen(
                 ) {
                     val currentCameraId = state.currentCameraId
                     val subjectOverlay by viewModel.subjectOverlay.collectAsState()
+                    val smileScore by viewModel.smileScore.collectAsState()
                     val faceCheckReason by viewModel.faceCheckReason.collectAsState()
                     val calibrationOffset by viewModel.getCameraOrientationOffset(currentCameraId)
                         .collectAsState(initial = 0)
@@ -1514,6 +1517,8 @@ fun CameraScreen(
                             focusHeld = state.shutterKeyHeld,
                             onFocusIdle = viewModel::unlockFocus,
                             subjectOverlay = subjectOverlay,
+                            smileScore = smileScore?.score,
+                            smileThreshold = viewModel.smileThreshold,
                             meteringMode = state.effectiveMeteringMode,
                             onSurfaceTextureReady = { surfaceTexture ->
                                 previewSurfaceTexture = surfaceTexture
@@ -1678,6 +1683,9 @@ fun CameraScreen(
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
+
+                        val sceneHints by viewModel.sceneHints.collectAsState()
+                        SceneHintIcons(sceneHints, Modifier.align(Alignment.BottomEnd).padding(8.dp))
 
                         // 倒计时覆盖
                         if (state.countdownValue > 0) {
@@ -1983,6 +1991,7 @@ fun CameraScreen(
                 } else {
                     if (useLivePhoto) add(TopEdgeMark(AppIcons.LivePhotoLine))
                     if (state.timerSeconds > 0) add(TopEdgeMark(AppIcons.StopwatchLine, "${state.timerSeconds}s"))
+                    smileSizeLetter(viewModel.smileThreshold)?.let { add(TopEdgeMark(AppIcons.MoodSmileLine, it)) }
                     // The front camera has no LED: only its screen flash shows, whatever else the flash mode says.
                     if (state.usesScreenFlash || (state.flashMode != 0 && state.videoCapabilities.supportsTorch)) {
                         add(TopEdgeMark(if (state.flashMode == 2) AppIcons.BulbLine else AppIcons.BoltLine))
@@ -2286,6 +2295,8 @@ fun CameraScreen(
             onFlashToggle = { viewModel.toggleFlash() },
             timerSeconds = state.timerSeconds,
             onTimerToggle = { viewModel.toggleTimer() },
+            smileThreshold = viewModel.smileThreshold,
+            onSmileToggle = { viewModel.toggleSmile() },
             useLivePhoto = useLivePhoto,
             onLivePhotoToggle = { viewModel.setUseLivePhoto(!state.useLivePhoto) },
             aspectRatio = state.aspectRatio,
@@ -2689,7 +2700,8 @@ private fun Controls(
                         isPortraitMode = line.shownMode == CameraShootingMode.PORTRAIT,
                         isCapturing = state.isCapturing,
                         isCaptureBusy = captureBusy,
-                        isCountdownActive = state.countdownValue > 0,
+                        // Waiting for smiles: a press stops it, as during the self-timer.
+                        isCountdownActive = state.countdownValue > 0 || viewModel.smileWaiting,
                         photoCaptureProgress = state.photoCaptureProgress,
                         isBurstCapturing = state.burstCapturing,
                         isVideoRecording = state.videoRecordingState.isRecording,

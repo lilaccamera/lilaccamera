@@ -69,6 +69,8 @@ fun CameraPreviewGL(
     focusHeld: Boolean = false,
     onFocusIdle: () -> Unit = {},
     subjectOverlay: SubjectOverlay = SubjectOverlay(),
+    smileScore: Int? = null,
+    smileThreshold: Int = 0,
     meteringCircleMode: MeteringMode = MeteringMode.SYSTEM_DEFAULT,
     meteringMode: MeteringMode = MeteringMode.SYSTEM_DEFAULT,
     onSurfaceTextureReady: (SurfaceTexture) -> Unit,
@@ -343,7 +345,7 @@ fun CameraPreviewGL(
                 )
             }
 
-            SubjectFrames(subjectOverlay, Modifier.fillMaxSize())
+            SubjectFrames(subjectOverlay, Modifier.fillMaxSize(), smileScore, smileThreshold)
 
             // 对焦指示器
             FocusIndicator(

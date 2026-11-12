@@ -1609,6 +1609,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var burstSettings: CaptureSettingsSnapshot? = null
     private var livePhotoIndicatorJob: Job? = null
     private var countdownJob: Job? = null
+    /** Smile shutter: 0 off, else the smile score (40 small, 55 average, 70 big smile) that takes a shot. */
+    var smileThreshold by mutableStateOf(0)
+        private set
+    /** A press armed the smile shutter: it shoots on smiles until the next press. */
+    var smileWaiting by mutableStateOf(false)
+        private set
     private var burstPhotoId: String? = null
     var burstImageCount by mutableStateOf(0)
         private set
@@ -3292,7 +3298,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
-        if (timerSeconds > 0) {
+        if (smileThreshold > 0) {
+            countdownJob = viewModelScope.launch { shootOnSmiles() }
+        } else if (timerSeconds > 0) {
             // 延时拍摄：开始倒计时
             countdownJob = viewModelScope.launch {
                 try {
@@ -3309,6 +3317,36 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         } else {
             submitPhotoCapture()
+        }
+    }
+
+    /**
+     * Smile shutter: a shot each time the main face's smile score reaches [smileThreshold], at most one a second and
+     * each from a preview frame newer than the last shot, until a press cancels it, the tile is turned off or the mode
+     * leaves photos. A smile held keeps shooting once a second.
+     */
+    private suspend fun shootOnSmiles() {
+        smileWaiting = true
+        try {
+            var lastShotMs = 0L
+            var staleUpTo = -1L
+            cameraController.smileScore
+                .takeWhile { smileThreshold > 0 && state.value.captureMode == CaptureMode.PHOTO }
+                .filterNotNull()
+                .collect { smile ->
+                    val now = SystemClock.elapsedRealtime()
+                    if (state.value.isCapturing) {
+                        // Scores seen while a shot is taken are old by the time it ends.
+                        staleUpTo = smile.frame
+                    } else if (smile.score >= smileThreshold && smile.frame > staleUpTo && now - lastShotMs >= 1_000L) {
+                        lastShotMs = now
+                        staleUpTo = smile.frame
+                        PLog.i(TAG, "smile shot: score=${smile.score} threshold=$smileThreshold frame=${smile.frame}")
+                        submitPhotoCapture()
+                    }
+                }
+        } finally {
+            smileWaiting = false
         }
     }
 
@@ -5181,7 +5219,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             else -> 0
         }
         cameraController.setTimerSeconds(nextTimer)
+        // The self-timer and the smile shutter are never on together.
+        if (nextTimer > 0 && smileThreshold > 0) {
+            smileThreshold = 0
+            countdownJob?.takeIf { smileWaiting }?.cancel()
+        }
     }
+
+    /** Steps the smile shutter: off, small, average, big smile, off. Turning it on turns the self-timer off. */
+    fun toggleSmile() {
+        smileThreshold = when (smileThreshold) {
+            0 -> 40
+            40 -> 55
+            55 -> 70
+            else -> 0
+        }
+        if (smileThreshold == 0) countdownJob?.takeIf { smileWaiting }?.cancel() else cameraController.setTimerSeconds(0)
+    }
+
+    val smileScore get() = cameraController.smileScore
+    val sceneHints get() = cameraController.sceneHints
 
     /**
      * 切换网格线显示

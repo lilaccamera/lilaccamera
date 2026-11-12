@@ -1411,6 +1411,7 @@ class Camera2Controller(private val context: Context) {
             processStillFlashPrecapture(request, result)
             processMultiFrameTorchWarmupState(request, result)
             if (session === captureSession) handleSubjectResult(result)
+            if (session === captureSession) handleHintResult(result)
 
             // 监听对焦状态
             val afState = result.get(CaptureResult.CONTROL_AF_STATE)
@@ -2377,6 +2378,7 @@ class Camera2Controller(private val context: Context) {
         faceDetectMode = CaptureRequest.STATISTICS_FACE_DETECT_MODE_OFF
         sonyFeatures = SonySubjectFeatures()
         resetSubjectState()
+        resetHintState(SonyHintFeatures())
         availableColorCorrectionModes = intArrayOf()
         awbColorTemperatureRange = null
         lastWhiteBalanceResult = null
@@ -3001,6 +3003,11 @@ class Camera2Controller(private val context: Context) {
                 )
                 resetSubjectState()
                 Log.i(SonySubjectKeys.LOG_TAG, "camera=$capabilityCameraId $sonyFeatures")
+                resetHintState(SonyHintFeatures.of(
+                    openCharacteristics,
+                    faceDetection = faceDetectMode != CaptureRequest.STATISTICS_FACE_DETECT_MODE_OFF,
+                ))
+                Log.i(SonyHintKeys.LOG_TAG, "camera=$capabilityCameraId $hintFeatures")
                 availableColorCorrectionModes = loadAvailableColorCorrectionModes(openCharacteristics)
                 awbColorTemperatureRange = loadAwbColorTemperatureRange(openCharacteristics)
                 lastWhiteBalanceResult = null
@@ -4499,6 +4506,7 @@ class Camera2Controller(private val context: Context) {
             builder.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE, faceDetectMode)
         }
         applySonySubjectKeys(builder)
+        applySonyHintKeys(builder)
 
         if (disableZslForHdrCapture) {
             setZslDisabledIfSupported(builder)
@@ -7521,6 +7529,79 @@ class Camera2Controller(private val context: Context) {
                 updatePreview()
             }
             clearPointFocusState()
+        }
+    }
+
+    // ==================== Sony smile scores and scene hints ====================
+
+    private var hintFeatures = SonyHintFeatures()
+    private val _smileScore = MutableStateFlow<SmileScore?>(null)
+    /** The main face's smile score on the latest preview frame, or null with no face or no smile scores. */
+    val smileScore: StateFlow<SmileScore?> = _smileScore.asStateFlow()
+    private val _sceneHints = MutableStateFlow<List<SceneHint>>(emptyList())
+    /** What the camera reports about the scene (one scene, then one condition), for icons only. */
+    val sceneHints: StateFlow<List<SceneHint>> = _sceneHints.asStateFlow()
+    private var pendingHints: List<SceneHint> = emptyList()
+    private var pendingHintsSinceMs = 0L
+    private var lastHintLogMs = 0L
+
+    private fun resetHintState(features: SonyHintFeatures) {
+        hintFeatures = features
+        pendingHints = emptyList()
+        _smileScore.value = null
+        _sceneHints.value = emptyList()
+    }
+
+    private fun applySonyHintKeys(builder: CaptureRequest.Builder) {
+        try {
+            if (hintFeatures.smile) builder.set(SonyHintKeys.SMILE_MODE, SonyHintKeys.ON)
+            if (hintFeatures.scene) builder.set(SonyHintKeys.SCENE_MODE, SonyHintKeys.ON)
+            if (hintFeatures.condition) builder.set(SonyHintKeys.CONDITION_MODE, SonyHintKeys.ON)
+        } catch (e: Exception) {
+            Log.w(SonyHintKeys.LOG_TAG, "Sony hint keys rejected", e)
+        }
+    }
+
+    /** Runs after [handleSubjectResult], so the main face is this frame's. Camera thread. */
+    private fun handleHintResult(result: CaptureResult) {
+        if (hintFeatures == SonyHintFeatures()) return
+        val now = SystemClock.elapsedRealtime()
+        val faces = result.get(CaptureResult.STATISTICS_FACES).orEmpty().take(MAX_SUBJECT_FACES)
+        val scores = if (hintFeatures.smile) SonySubjectKeys.read(result, SonyHintKeys.SMILE_SCORES) else null
+        // Scores come in the driver's face order; the main face is the driver face nearest its kept box.
+        val main = keptFaces.firstOrNull { it.id == mainFaceId && it.fromDriver && now - it.seenMs <= FACE_SHOW_MS }?.sensor
+        val mainIndex = main?.let { m ->
+            faces.indices.minByOrNull { i ->
+                val b = faces[i].bounds
+                hypot((b.centerX() - (m.left + m.right) / 2).toFloat(), (b.centerY() - (m.top + m.bottom) / 2).toFloat())
+            }
+        }
+        _smileScore.value = mainIndex?.let { scores?.getOrNull(it) }?.let { SmileScore(it, result.frameNumber) }
+
+        val scene = if (hintFeatures.scene) SonySubjectKeys.read(result, SonyHintKeys.SCENE)?.toInt()?.and(0xFF) else null
+        val condition = if (hintFeatures.condition) SonySubjectKeys.read(result, SonyHintKeys.CONDITION)?.toInt()?.and(0xFF) else null
+        // Macro is the app's own, as in Sony's camera: the lens focused at 14.5 cm or closer.
+        val lens = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
+        val macro = _state.value.supportsPointAutoFocus && lens != null && lens >= SonyHintKeys.MACRO_DIOPTERS
+        val hints = listOfNotNull(
+            if (macro) SceneHint.MACRO else scene?.let(SceneHint::ofScene),
+            condition?.let(SceneHint::ofCondition),
+        )
+        // A hint shows once reported for a moment, so a result flickering between two scenes does not blink the icons.
+        if (hints != pendingHints) {
+            pendingHints = hints
+            pendingHintsSinceMs = now
+        } else if (now - pendingHintsSinceMs >= SonyHintKeys.HINT_SETTLE_MS) {
+            _sceneHints.value = hints
+        }
+
+        if (now - lastHintLogMs >= SUBJECT_LOG_MS) {
+            lastHintLogMs = now
+            Log.d(
+                SonyHintKeys.LOG_TAG,
+                "faceSmileScores=${scores?.contentToString()} faces=${faces.size} mainIndex=$mainIndex " +
+                    "scene=$scene condition=$condition lens=$lens shown=${_sceneHints.value}",
+            )
         }
     }
 

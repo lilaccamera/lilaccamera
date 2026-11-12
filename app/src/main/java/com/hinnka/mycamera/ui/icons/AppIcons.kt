@@ -602,6 +602,20 @@ object AppIcons {
         )
     }
 
+    // Scene and condition hints from the camera (Tabler line icons; the tripod is drawn to match).
+    val HazeLine: ImageVector by lazy { lineIcon("AppIcons.HazeLine", "M3 12h1M12 3v1M20 12h1M5.6 5.6l.7 .7M18.4 5.6l-.7 .7M8 12a4 4 0 1 1 8 0M3 16h18M3 20h18") }
+    val MoonLine: ImageVector by lazy { lineIcon("AppIcons.MoonLine", "M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z") }
+    val CandleLine: ImageVector by lazy { lineIcon("AppIcons.CandleLine", "M9 21h6v-9a1 1 0 0 0 -1 -1h-4a1 1 0 0 0 -1 1v9zM12 3l1.465 1.638a2 2 0 1 1 -3.015 .099l1.55 -1.737z") }
+    val MountainLine: ImageVector by lazy { lineIcon("AppIcons.MountainLine", "M3 20h18l-6.921 -14.612a2.3 2.3 0 0 0 -4.158 0l-6.921 14.612zM7.5 11l2 2.5l2.5 -2.5l2 3l2.5 -2") }
+    val UserLine: ImageVector by lazy { lineIcon("AppIcons.UserLine", "M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2") }
+    val FileTextLine: ImageVector by lazy { lineIcon("AppIcons.FileTextLine", "M14 3v4a1 1 0 0 0 1 1h4M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2zM9 9l1 0M9 13l6 0M9 17l6 0") }
+    val KitchenLine: ImageVector by lazy { lineIcon("AppIcons.KitchenLine", "M19 3v12h-5c-.023 -3.681 .184 -7.406 5 -12zm0 12v6h-1v-3m-10 -14v17m-3 -17v3a3 3 0 1 0 6 0v-3") }
+    val LampLine: ImageVector by lazy { lineIcon("AppIcons.LampLine", "M9 20h6M12 20v-8M5 12h14l-4 -8h-6z") }
+    val MacroLine: ImageVector by lazy { lineIcon("AppIcons.MacroLine", "M6 15a6 6 0 1 0 12 0M18 15a6 6 0 0 0 -6 6M12 21a6 6 0 0 0 -6 -6M12 21v-10M12 11a5 5 0 0 1 -5 -5v-3l3 2l2 -2l2 2l3 -2v3a5 5 0 0 1 -5 5z") }
+    val TripodLine: ImageVector by lazy { lineIcon("AppIcons.TripodLine", "M8 4a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1v3a1 1 0 0 1 -1 1h-6a1 1 0 0 1 -1 -1zM12 8v4M12 12l-5 9M12 12l5 9M12 12v9") }
+    val WalkLine: ImageVector by lazy { lineIcon("AppIcons.WalkLine", "M12 4a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M7 21l3 -4M16 21l-2 -4l-3 -3l1 -6M6 12l2 -3l4 -1l3 3l3 1") }
+    val RunLine: ImageVector by lazy { lineIcon("AppIcons.RunLine", "M12 4a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M4 17l5 1l.75 -1.5M15 21l0 -4l-4 -3l1 -6M7 12l0 -3l5 -1l3 3l3 1") }
+
     private fun lineIcon(name: String, pathData: String): ImageVector = ImageVector.Builder(
         name = name,
         defaultWidth = 24f.dp,

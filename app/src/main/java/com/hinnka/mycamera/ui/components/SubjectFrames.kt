@@ -17,7 +17,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import com.hinnka.mycamera.ui.icons.AppIcons
 import androidx.compose.ui.unit.dp
 import com.hinnka.mycamera.camera.SubjectOverlay
 import com.hinnka.mycamera.camera.ViewRect
@@ -25,9 +30,10 @@ import com.hinnka.mycamera.camera.ViewRect
 /**
  * The camera's face frames and the tracked object's mark, as on a Sony Alpha: light squares, the main face brighter
  * and green once focus is on it, other faces faint. Faces hide while an object is tracked; they stay tappable.
+ * With the smile shutter on ([smileThreshold] over 0) the main face's right edge is its smile gauge.
  */
 @Composable
-fun SubjectFrames(overlay: SubjectOverlay, modifier: Modifier = Modifier) {
+fun SubjectFrames(overlay: SubjectOverlay, modifier: Modifier = Modifier, smileScore: Int? = null, smileThreshold: Int = 0) {
     // When tracking ends (lost, or the mark tapped again) the mark fades out where it was.
     val lastTracking = remember { arrayOfNulls<SubjectOverlay>(1) }
     if (overlay.tracking) lastTracking[0] = overlay
@@ -35,16 +41,27 @@ fun SubjectFrames(overlay: SubjectOverlay, modifier: Modifier = Modifier) {
     if (overlay.tracking) return
     for (face in overlay.faces) {
         key(face.id) {
-            FaceFrame(face.box, main = face.id == overlay.mainFace, focused = overlay.focused, modifier = modifier)
+            val main = face.id == overlay.mainFace
+            FaceFrame(
+                face.box,
+                main = main,
+                focused = overlay.focused,
+                smile = if (main && smileThreshold > 0) (smileScore ?: 0) / 100f else null,
+                smileMark = smileThreshold / 100f,
+                modifier = modifier,
+            )
         }
     }
 }
 
 @Composable
-private fun FaceFrame(face: ViewRect, main: Boolean, focused: Boolean, modifier: Modifier) {
+private fun FaceFrame(face: ViewRect, main: Boolean, focused: Boolean, smile: Float?, smileMark: Float, modifier: Modifier) {
     val appear = remember { Animatable(0f) }
     LaunchedEffect(Unit) { appear.animateTo(1f, tween(300)) }
     val rect = animatedRect(face)
+    // Eased: the driver's score jumps a few points from frame to frame.
+    val smileLevel by animateFloatAsState(smile ?: 0f, spring(dampingRatio = 1f, stiffness = Spring.StiffnessVeryLow), label = "smileLevel")
+    val smileIcon = rememberVectorPainter(AppIcons.MoodSmileLine)
     Canvas(modifier.fillMaxSize()) {
         val scale = 0.5f + 0.5f * appear.value
         val width = rect.width * size.width * scale
@@ -53,7 +70,34 @@ private fun FaceFrame(face: ViewRect, main: Boolean, focused: Boolean, modifier:
         val alpha = appear.value * (if (main) 0.55f else 0.22f)
         val line = if (main) TapFrameLine else 1.dp
         val color = if (main && focused) FocusGreen else Color.White
-        drawRect(color.copy(alpha = alpha), topLeft, Size(width, height), style = Stroke(line.toPx()))
+        if (smile == null) {
+            drawRect(color.copy(alpha = alpha), topLeft, Size(width, height), style = Stroke(line.toPx()))
+            return@Canvas
+        }
+        // The right edge is the smile gauge: it fills from the bottom with the score up to a smile icon sitting at the
+        // level that takes a shot; fill and icon turn full white once it is reached. Neither line runs through the icon.
+        val frameColor = color.copy(alpha = alpha)
+        val stroke = line.toPx()
+        val x = topLeft.x + width
+        val bottom = topLeft.y + height
+        fun edge(from: Offset, to: Offset) = drawLine(frameColor, from, to, stroke, StrokeCap.Square)
+        edge(topLeft, Offset(x, topLeft.y))
+        edge(topLeft, Offset(topLeft.x, bottom))
+        edge(Offset(topLeft.x, bottom), Offset(x, bottom))
+        val iconHalf = 7.dp.toPx()
+        val markY = bottom - height * smileMark
+        edge(Offset(x, topLeft.y), Offset(x, markY - iconHalf))
+        edge(Offset(x, markY + iconHalf), Offset(x, bottom))
+        val reached = smile >= smileMark
+        val fillColor = Color.White.copy(alpha = appear.value * (if (reached) 1f else 0.8f))
+        val fillTop = bottom - height * smileLevel
+        val fillWidth = 3.dp.toPx()
+        if (fillTop < bottom) drawLine(fillColor, Offset(x, bottom), Offset(x, maxOf(fillTop, markY + iconHalf)), fillWidth)
+        if (fillTop < markY - iconHalf) drawLine(fillColor, Offset(x, markY - iconHalf), Offset(x, fillTop), fillWidth)
+        val iconColor = if (reached) Color.White.copy(alpha = appear.value) else frameColor
+        translate(x - iconHalf, markY - iconHalf) {
+            with(smileIcon) { draw(Size(2 * iconHalf, 2 * iconHalf), colorFilter = ColorFilter.tint(iconColor)) }
+        }
     }
 }
 
