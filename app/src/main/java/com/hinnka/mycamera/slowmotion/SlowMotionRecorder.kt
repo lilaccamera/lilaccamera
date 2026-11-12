@@ -122,6 +122,37 @@ class SlowMotionRecorder(
         listener.onBurstDone(arrived)
     }
 
+    /**
+     * Debug experiment: fires another burst with a re-arm step first. [variant] holds the letters of the steps to
+     * run before the trigger: "b" hands the encoder to the service again, "c" repeats the mode change.
+     * Every step's result and time is logged; nothing limits the count.
+     */
+    fun triggerVariant(variant: String) = post {
+        if (state != State.RECORDING) return@post
+        val bridge = client.bridge ?: return@post fail("The slow-motion service stopped")
+        fun timed(name: String, call: () -> Int): Int {
+            val began = SystemClock.elapsedRealtime()
+            val r = call()
+            PLog.i(TAG, "Variant step $name: result=$r, ${SystemClock.elapsedRealtime() - began} ms")
+            return r
+        }
+        if ('c' in variant && timed("mode change") { bridge.enterSuperSlow(spec.width, spec.height, SlowMotionSpec.FPS, spec.frames) } != 0) return@post
+        if ('b' in variant && timed("prepare again") { bridge.reprepare() } != 0) return@post
+        val before = bridge.frameCount()
+        val began = SystemClock.elapsedRealtimeNanos()
+        triggerFrames += before
+        state = State.TRIGGERED
+        timed("trigger") { bridge.trigger() }
+        var last = before
+        while (SystemClock.elapsedRealtimeNanos() - began < BURST_TIMEOUT_MS * 1_000_000L) {
+            Thread.sleep(100)
+            val count = bridge.frameCount()
+            if (count != last) { PLog.d(TAG, "Variant frames: ${count - before} after ${(SystemClock.elapsedRealtimeNanos() - began) / 1_000_000} ms"); last = count }
+        }
+        state = State.RECORDING
+        PLog.i(TAG, "Variant burst $variant: ${last - before} frames in ${BURST_TIMEOUT_MS} ms")
+    }
+
     /** Ends the recording, lays the sound onto the video and saves it. */
     fun stop() = post {
         if (state != State.RECORDING && state != State.TRIGGERED) return@post

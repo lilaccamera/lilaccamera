@@ -9294,6 +9294,8 @@ class Camera2Controller(private val context: Context) {
                         ))
                     }
                     "trigger" -> triggerSlowMotion()
+                    // re-arm experiments: --es variant b|c|bc
+                    "trigger2" -> slowMotion?.triggerVariant(intent.getStringExtra("variant").orEmpty())
                     "stop" -> cameraHandler?.post { stopVideoRecording() }
                 }
             }

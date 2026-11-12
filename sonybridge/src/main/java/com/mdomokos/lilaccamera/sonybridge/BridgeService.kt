@@ -32,6 +32,7 @@ class BridgeService : Service() {
     private var videoW = 0
     private var videoH = 0
     private var fps = 960
+    private var encoderSurface: Surface? = null
     @Volatile private var frames = 0
     private val times = ArrayList<Long>() // pairs: file time stamp in microseconds, arrival in elapsed-realtime nanoseconds
 
@@ -72,7 +73,7 @@ class BridgeService : Service() {
         }
         val enc = MediaCodec.createEncoderByType("video/avc").also { codec = it }
         enc.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        val surface = enc.createInputSurface()
+        val surface = enc.createInputSurface().also { encoderSurface = it }
         enc.start()
         val mux = MediaMuxer(file.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).also { muxer = it }
         drain = Thread {
@@ -127,6 +128,8 @@ class BridgeService : Service() {
         }
 
         override fun prepare(file: ParcelFileDescriptor) = call("prepare") { camera.prepare(startEncoder(file)) }
+
+        override fun reprepare() = call("reprepare") { camera.prepare(encoderSurface ?: error("no encoder")) }
 
         override fun startVideo() = call("startVideo") { camera.startVideo() }
 
