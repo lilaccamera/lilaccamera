@@ -18,7 +18,7 @@ for i in $(seq 40); do adb logcat -d -s LilacSonyBridge | grep -q "startVideo ->
 sleep 2.5; b trigger
 for i in $(seq 100); do adb logcat -d | grep -q "Burst 1:" && break; sleep 0.2; done
 sleep "$GAP"
-[ "$VAR" = none ] && b trigger2 "" || b trigger2 "$VAR"
+[ "$VAR" = none ] && b trigger2 a || b trigger2 "$VAR"
 sleep 11; b stop; sleep 12
-adb logcat -d | grep -E "LilacSonyBridge|PLog_SlowMotion|libcacao_client: start|CACAO" | grep -vE "TRANSMITTING|serialize|getSerialize|session established|Mode	" | cut -c7-175
+adb logcat -d | grep -E "LilacSonyBridge|PLog_SlowMotion|libcacao_client: start|CACAO" | grep -vE "TRANSMITTING|serialize|getSerialize|session established|Mode	|Variant frames|native callback type=1$" | cut -c7-175
 echo "cacaoserver after: $(adb shell pidof cacaoserver)"
