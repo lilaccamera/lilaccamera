@@ -3837,6 +3837,7 @@ object GalleryManager {
                 )
                 val profileStartMs = System.currentTimeMillis()
                 val dngProfilePreparation = RawProcessor.prepareRawDngProfile(
+                    mergedFrameCount = finalStackResult.mergedFrameCount,
                     rawBuffer = null,
                     gpuLinearRgbSource = defaultDenoisedGpuSource,
                     fastMomentsRawStats = finalStackResult.fastMomentsRawStats,

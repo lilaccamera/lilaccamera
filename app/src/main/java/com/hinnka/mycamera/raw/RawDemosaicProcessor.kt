@@ -3397,6 +3397,7 @@ class RawDemosaicProcessor {
                     else -> null
                 }
                 val skipHdrNetViewfinderMatch = hdrNetViewfinderSkipReason != null
+                PLog.d(TAG, "HDRNET_MATCH viewfinderSkip=$hdrNetViewfinderSkipReason mergedFrames=${actualMetadata.mergedFrameCount}")
                 if (skipHdrNetViewfinderMatch) {
                     PLog.i(
                         TAG,
