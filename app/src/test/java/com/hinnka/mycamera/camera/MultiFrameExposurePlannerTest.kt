@@ -79,4 +79,29 @@ class MultiFrameExposurePlannerTest {
         assertTrue(plan.shutterUpperLimited)
         assertTrue(plan.upperLimitsProduceLowerExposureThanBase)
     }
+
+    private fun histogram(clippedShare: Float): IntArray = IntArray(256).also {
+        val clipped = (1024 * clippedShare).toInt()
+        it[255] = clipped
+        it[100] = 1024 - clipped
+    }
+
+    @Test
+    fun highlightUnderexposureFollowsClippingAndFrameCount() {
+        fun plan(share: Float, frames: Int, iso: Int = 1600, shutter: Long = 50_000_000L) =
+            MultiFrameExposurePlanner.planHighlightUnderexposure(histogram(share), frames, iso, shutter, 50, 100_000L)
+
+        assertEquals(null, plan(0.001f, 13))                       // nothing clipped: unchanged
+        assertEquals(-1.0, plan(0.01f, 13)!!.plannedDeltaEv, 0.01)  // a little clipped: 1 EV
+        val strong = plan(0.30f, 13)!!                             // monitor and window scene
+        assertEquals(-3.0, strong.plannedDeltaEv, 0.01)
+        assertEquals(200, strong.sensitivityIso)                   // ISO first, shutter kept
+        assertEquals(50_000_000L, strong.exposureTimeNs)
+        assertEquals(-1.58, plan(0.30f, 3)!!.plannedDeltaEv, 0.01) // 3 frames: at most log2(3)
+        val floor = plan(0.30f, 13, iso = 100)!!                   // ISO floor: shutter shortens
+        assertEquals(50, floor.sensitivityIso)
+        assertEquals(12_500_000L, floor.exposureTimeNs)
+        assertEquals(null, plan(0.30f, 1))                         // single frames are left alone
+    }
 }
+

@@ -19,6 +19,13 @@ internal data class MultiFrameLongExposurePlan(
     val upperLimitsProduceLowerExposureThanBase: Boolean,
 )
 
+internal data class HighlightUnderexposurePlan(
+    val sensitivityIso: Int,
+    val exposureTimeNs: Long,
+    val clippedFraction: Float,
+    val plannedDeltaEv: Double,
+)
+
 internal object MultiFrameExposurePlanner {
     private val LN_2 = ln(2.0)
 
@@ -78,4 +85,43 @@ internal object MultiFrameExposurePlanner {
                 plannedExposureProduct < baseExposureProduct,
         )
     }
+
+    /**
+     * Darker same-exposure burst when the viewfinder shows clipped highlights, as HDR+ does: the merge
+     * removes the extra noise and the tone mapping lifts the shadows. Darkening by k EV costs 2^k light,
+     * merging N frames gains N, so k is capped at log2(N) to keep shadows no noisier than one normal frame.
+     * ISO goes down first; the shutter (auto exposure's flicker-safe choice) only shortens at the ISO floor.
+     * Returns null when nothing changes.
+     */
+    fun planHighlightUnderexposure(
+        viewfinderHistogram: IntArray?,
+        frameCount: Int,
+        baseIso: Int,
+        baseExposureTimeNs: Long,
+        isoLower: Int,
+        exposureTimeLowerNs: Long,
+    ): HighlightUnderexposurePlan? {
+        val histogram = viewfinderHistogram?.takeIf { it.size == 256 } ?: return null
+        if (frameCount < 2 || baseIso <= 0 || baseExposureTimeNs <= 0L) return null
+        val total = histogram.sum()
+        if (total <= 0) return null
+        val clipped = (CLIPPED_LUMA..255).sumOf { histogram[it] }.toFloat() / total
+        val wantedEv = CLIP_STEPS.lastOrNull { clipped >= it.first }?.second ?: return null
+        val ev = min(wantedEv, ln(frameCount.toDouble()) / LN_2)
+        val target = baseIso.toDouble() * baseExposureTimeNs.toDouble() / 2.0.pow(ev)
+        val iso = (target / baseExposureTimeNs).roundToInt().coerceIn(min(isoLower, baseIso), baseIso)
+        val exposureTimeNs = (target / iso).roundToLong()
+            .coerceIn(min(exposureTimeLowerNs, baseExposureTimeNs), baseExposureTimeNs)
+        if (iso == baseIso && exposureTimeNs == baseExposureTimeNs) return null
+        return HighlightUnderexposurePlan(
+            sensitivityIso = iso,
+            exposureTimeNs = exposureTimeNs,
+            clippedFraction = clipped,
+            plannedDeltaEv = ln(iso.toDouble() * exposureTimeNs / (baseIso.toDouble() * baseExposureTimeNs)) / LN_2,
+        )
+    }
+
+    private const val CLIPPED_LUMA = 250
+    // Share of the viewfinder at white -> EV to darken; HDR+ caps its own underexposure near 3 EV.
+    private val CLIP_STEPS = listOf(0.005f to 1.0, 0.02f to 2.0, 0.05f to 3.0)
 }
