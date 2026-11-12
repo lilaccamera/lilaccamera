@@ -54,7 +54,8 @@ fun FocusIndicator(
     modifier: Modifier = Modifier
 ) {
     var visible by remember { mutableStateOf(position != null) }
-    val isSeparated = source == FocusPointSource.MANUAL && meteringPosition != null
+    // A metering point with no focus point (Spot metering on a tracked tap) is not a split: the old frame fades.
+    val isSeparated = source == FocusPointSource.MANUAL && position != null && meteringPosition != null
     val currentFocusPosition by rememberUpdatedState(position)
     val currentIsSeparated by rememberUpdatedState(isSeparated)
     val currentMeteringPosition by rememberUpdatedState(meteringPosition ?: position)
