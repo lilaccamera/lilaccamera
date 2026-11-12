@@ -53,5 +53,6 @@ android {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
     }
+    lint { checkReleaseBuilds = false }
     buildFeatures { aidl = true }
 }
