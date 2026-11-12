@@ -1334,6 +1334,7 @@ internal fun QuickSlider(
     onDoubleTap: (() -> Unit)? = null,
     valueWidth: Dp = 40.dp
 ) {
+    val trackWidth = 150.dp
     val currentOnFraction by rememberUpdatedState(onFraction)
     val currentOnDoubleTap by rememberUpdatedState(onDoubleTap)
     Row(
@@ -1353,7 +1354,7 @@ internal fun QuickSlider(
         Box(
             modifier = Modifier
                 .padding(end = 8.dp)
-                .width(150.dp)
+                .width(trackWidth)
                 .fillMaxHeight()
                 .pointerInput(Unit) {
                     fun select(x: Float) = currentOnFraction((x / size.width).coerceIn(0f, 1f))
@@ -1395,7 +1396,7 @@ internal fun QuickSlider(
             Box(
                 Modifier
                     .align(Alignment.CenterStart)
-                    .offset(x = 120.dp * fraction - 8.dp)
+                    .offset(x = trackWidth * fraction - 8.dp)
                     .size(16.dp)
                     .background(Color.Black, CircleShape)
                     .border(1.5.dp, ModeAmber, CircleShape)
