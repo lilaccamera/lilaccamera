@@ -76,6 +76,8 @@
     <string name="settings_custom_aspect_ratio_height">Height</string>
     <string name="video_torch_chip">Torch</string>
     <string name="slow_motion_chip">Slow-mo</string>
+    <string name="slow_motion_trigger">Slow-mo burst</string>
+    <string name="slow_motion_720_only">960 fps is only possible at 720p</string>
     <string name="slow_motion_dark_pill">Too dark for slow-mo</string>
     <string name="video_aspect_chip">Aspect</string>
     <string name="video_log_chip">Log</string>

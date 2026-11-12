@@ -327,6 +327,7 @@ fun CameraScreen(
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
     var captureButtonBounds by remember { mutableStateOf<Rect?>(null) }
     val noteLine = remember { NoteLineState() }
+    LaunchedEffect(state.slowMotion.resolutionNotice) { if (state.slowMotion.resolutionNotice > 0) noteLine.say(R.string.slow_motion_720_only) }
     // The shutter shows a cross while it waits for smiles; the note says why.
     LaunchedEffect(viewModel.smileWaiting) { if (viewModel.smileWaiting) noteLine.say(R.string.smile_waiting) }
     // Multiple exposure shots counted from the shutter press, so the actions, the count and the shutter ring answer
@@ -2180,31 +2181,6 @@ fun CameraScreen(
                     modifier = guidePillPlacement
                 )
             }
-            // The on-screen trigger for the slow-motion burst, above the shutter; the camera key does the same.
-            if (state.slowMotion.active) {
-                captureButtonBounds?.let { shutter ->
-                    val density = LocalDensity.current
-                    val size = 56.dp
-                    Box(
-                        modifier = Modifier
-                            .offset {
-                                androidx.compose.ui.unit.IntOffset(
-                                    (shutter.center.x - (cameraScreenBounds?.left ?: 0f) - size.toPx() / 2).roundToInt(),
-                                    (shutter.top - cameraScreenTop - size.toPx() - 14.dp.toPx()).roundToInt()
-                                )
-                            }
-                            .size(size)
-                            .graphicsLayer { alpha = if (state.slowMotion.canTrigger) 1f else 0.4f }
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.55f))
-                            .border(2.dp, ModeAmber, CircleShape)
-                            .clickable(enabled = state.slowMotion.canTrigger) { viewModel.triggerSlowMotion() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("960", color = ModeAmber, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.autoRotate())
-                    }
-                }
-            }
             // Photo mode offers the camera basics the same way, on every launch until opened once.
             if (
                 photoMode && !offerNight && !basicsGuideSeen && guidePillBottom != null &&
@@ -2894,7 +2870,21 @@ private fun Controls(
                     }
                 }
 
-                if (recording) {
+                if (recording && state.slowMotion.active) {
+                    // A slow-motion recording has no pause and no snapshot: the burst trigger takes the right-hand place.
+                    val sm = state.slowMotion
+                    FramedFooterButton(
+                        onClick = { viewModel.triggerSlowMotion() },
+                        icon = AppIcons.BoltLine,
+                        contentDescription = stringResource(R.string.slow_motion_trigger),
+                        enabled = sm.canTrigger,
+                        tint = ModeAmber,
+                        badge = if (sm.maxBursts > 1) "${sm.bursts}/${sm.maxBursts}" else null,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
+                    )
+                } else if (recording) {
                     FramedFooterButton(
                         onClick = {
                             if (state.videoRecordingState.isPaused) {
@@ -3095,11 +3085,14 @@ private fun FramedFooterButton(
     onClick: () -> Unit,
     icon: ImageVector,
     contentDescription: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    tint: Color = CameraControlsLayoutDefaults.LineColor.onFooter(),
+    badge: String? = null
 ) {
     val shape = RoundedCornerShape(ThumbnailCorner)
     PhysicalButton(
-        onClick = onClick,
+        onClick = { if (enabled) onClick() },
         modifier = modifier
             .size(CameraControlsLayoutDefaults.SideButtonSize)
             .autoRotate()
@@ -3107,7 +3100,14 @@ private fun FramedFooterButton(
         shape = shape,
         backgroundColor = Color.Transparent
     ) {
-        Icon(icon, contentDescription = contentDescription, tint = CameraControlsLayoutDefaults.LineColor.onFooter(), modifier = Modifier.size(24.dp))
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = contentDescription, tint = tint.copy(alpha = if (enabled) 1f else 0.35f), modifier = Modifier.size(24.dp))
+            // A counter in the corner, for buttons that can be used several times in a recording.
+            if (badge != null) Text(
+                badge, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.align(Alignment.BottomEnd).offset(x = 14.dp, y = 14.dp)
+            )
+        }
     }
 }
 

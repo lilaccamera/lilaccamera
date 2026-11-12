@@ -10,6 +10,11 @@ data class SlowMotionUiState(
     val active: Boolean = false,
     /** A burst may be fired now. */
     val canTrigger: Boolean = false,
+    /** Bursts taken in the running recording, and how many one recording can hold. */
+    val bursts: Int = 0,
+    val maxBursts: Int = SlowMotionSpec.MAX_BURSTS,
+    /** Counts the times the switch was turned off because the resolution was changed; the screen says why. */
+    val resolutionNotice: Int = 0,
     /** The scene is too dark for the 1/960 s exposure cap. */
     val dark: Boolean = false,
 )

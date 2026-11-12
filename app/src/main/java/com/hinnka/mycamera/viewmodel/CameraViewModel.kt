@@ -4105,6 +4105,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setVideoResolution(resolution: VideoResolutionPreset) {
+        // 960 fps slow motion exists at 720p only: another resolution turns it off (the screen says so).
+        if (state.value.slowMotion.enabled && resolution != VideoResolutionPreset.HD_720P) {
+            cameraController.setSlowMotionEnabled(false, becauseOfResolution = true)
+        }
         cameraController.setVideoResolution(resolution)
         val resolvedConfig = state.value.videoConfig
         reopenCamera()
@@ -4358,7 +4362,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun triggerSlowMotion() = cameraController.triggerSlowMotion()
 
-    fun setSlowMotionEnabled(enabled: Boolean) = cameraController.setSlowMotionEnabled(enabled)
+    /** Slow motion is 720p: switching it on switches the resolution to 720p first. */
+    fun setSlowMotionEnabled(enabled: Boolean) {
+        if (enabled && state.value.videoConfig.resolution != VideoResolutionPreset.HD_720P) {
+            if (VideoResolutionPreset.HD_720P !in state.value.videoCapabilities.availableResolutions) return
+            setVideoResolution(VideoResolutionPreset.HD_720P)
+        }
+        cameraController.setSlowMotionEnabled(enabled)
+    }
 
     fun toggleFlash() {
         // The screen has no torch: on the front camera Flash is just off or on.

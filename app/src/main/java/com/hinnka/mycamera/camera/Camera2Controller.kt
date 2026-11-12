@@ -9062,7 +9062,10 @@ class Camera2Controller(private val context: Context) {
 
                 override fun onBurstDone(arrived: Boolean) {
                     PLog.i(TAG, "Slow-motion burst done, arrived=$arrived")
-                    cameraHandler?.post { slowMotionBursts++; setSlowMotionCanTrigger(slowMotionBursts < SlowMotionSpec.MAX_BURSTS) }
+                    cameraHandler?.post {
+                        slowMotionBursts++
+                        _state.update { s -> s.copy(slowMotion = s.slowMotion.copy(bursts = slowMotionBursts, canTrigger = slowMotionBursts < SlowMotionSpec.MAX_BURSTS)) }
+                    }
                 }
 
                 override fun onFinished(uri: Uri?) {
@@ -9084,6 +9087,7 @@ class Camera2Controller(private val context: Context) {
         slowMotion = recorder
         slowMotionSpec = spec
         slowMotionBursts = 0
+        _state.update { s -> s.copy(slowMotion = s.slowMotion.copy(bursts = 0)) }
         slowMotionTexture = texture
         // Sony's service changes mode only while no camera device is open (with one open, even without a session,
         // the mode change does not return until it is closed): close the camera, change the mode, reopen the camera
@@ -9129,9 +9133,12 @@ class Camera2Controller(private val context: Context) {
     }
 
     /** The switch next to resolution and fps; it only takes effect for the next recording. */
-    fun setSlowMotionEnabled(enabled: Boolean) {
+    fun setSlowMotionEnabled(enabled: Boolean, becauseOfResolution: Boolean = false) {
         if (_state.value.videoRecordingState.isRecording || _state.value.videoRecordingState.isProcessing) return
-        _state.update { s -> s.copy(slowMotion = s.slowMotion.copy(enabled = enabled && s.slowMotion.available)) }
+        _state.update { s -> s.copy(slowMotion = s.slowMotion.copy(
+            enabled = enabled && s.slowMotion.available,
+            resolutionNotice = s.slowMotion.resolutionNotice + if (becauseOfResolution) 1 else 0
+        )) }
     }
 
     /** Asks the companion once whether 960 fps exists here (off the main thread); the switch appears when it does. */
