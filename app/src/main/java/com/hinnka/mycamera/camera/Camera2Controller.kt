@@ -360,6 +360,9 @@ class Camera2Controller(private val context: Context) {
     var frontStillJpegActive = false
         private set
     private var frontStillJpegStallNs = 0L
+    // Measured burst frame spacing by still format and size: the first frame of the next burst has no measurement
+    // yet, and exposure times underestimate a camera that waits between frames.
+    private val measuredFrameSpacingNs = mutableMapOf<Triple<Int, Int, Int>, Long>()
     private val ambientLightReader = AmbientLightReader(context)
 
     // 降噪等级 (0=Off, 1=Fast, 2=High Quality, 3=ZSL, 4=Minimal)
@@ -973,7 +976,8 @@ class Camera2Controller(private val context: Context) {
         val captureSurface = shot.reader.surface
         // Sum the actual request plan so HDR frames with different exposures contribute
         // their own duration. Keep one timeline for the entire photo, including frame gaps.
-        val estimatedDurationNs = requests.sumOf { request ->
+        val spacingKey = Triple(shot.reader.imageFormat, shot.reader.width, shot.reader.height)
+        val exposureDurationNs = requests.sumOf { request ->
             val manualExposure = request.get(CaptureRequest.CONTROL_AE_MODE) ==
                 CaptureRequest.CONTROL_AE_MODE_OFF
             val exposureNs = if (manualExposure) {
@@ -990,6 +994,7 @@ class Camera2Controller(private val context: Context) {
             val jpegStallNs = if (frontStillJpegActive) frontStillJpegStallNs else 0L
             maxOf(exposureNs, frameDurationNs ?: 0L, jpegStallNs, 1L)
         }
+        val estimatedDurationNs = maxOf(exposureDurationNs, (measuredFrameSpacingNs[spacingKey] ?: 0L) * requests.size)
         var progressStarted = false
         var firstStartTimestamp = 0L
         var startedFrames = 0
@@ -1008,27 +1013,37 @@ class Camera2Controller(private val context: Context) {
                 shot.timestampByFrameNumber[frameNumber] = timestamp
                 pendingCaptureStartedTimestamps[frameNumber] = timestamp
                 registerPhotoTimestamp(shot, timestamp)
+                startedFrames++
+                if (startedFrames == 1) firstStartTimestamp = timestamp
+                // The ring shows how long to hold still. It never passes the frames started so far, and from the
+                // second frame on it runs from where it is to the end at the measured spacing: the camera may report
+                // no exposure (lilac front) or wait between frames for a JPEG (lilac RAW), so the first estimate can
+                // be far off, and jumping or holding the ring to correct it looks like a stall.
+                // Sensor timestamps may use a different clock from elapsedRealtime, so they only give the spacing.
+                val nowNs = SystemClock.elapsedRealtimeNanos()
+                val maxFraction = startedFrames.toFloat() / requests.size
                 if (!progressStarted && activePhotoCapture === shot && !shot.continuousBurst && !shot.failed) {
                     progressStarted = true
                     val progress = PhotoCaptureProgress(
                         captureId = shot.id,
-                        // Sensor timestamps may use a different clock from elapsedRealtime.
-                        startedElapsedNs = SystemClock.elapsedRealtimeNanos(),
+                        startedElapsedNs = nowNs,
                         estimatedDurationNs = estimatedDurationNs,
+                        maxFraction = maxFraction,
                     )
                     _state.update { it.copy(photoCaptureProgress = progress) }
-                }
-                // The ring shows how long to hold still, so once frames arrive it follows their real spacing:
-                // the camera may report no exposure (lilac front) or wait between frames for a JPEG.
-                startedFrames++
-                if (startedFrames == 1) firstStartTimestamp = timestamp
-                if (startedFrames >= 2 && progressStarted && activePhotoCapture === shot) {
-                    val measuredNs = (timestamp - firstStartTimestamp) / (startedFrames - 1) * requests.size
+                } else if (startedFrames >= 2 && progressStarted && activePhotoCapture === shot) {
+                    val spacingNs = (timestamp - firstStartTimestamp) / (startedFrames - 1)
+                    measuredFrameSpacingNs[spacingKey] = spacingNs
                     _state.update { s ->
                         val current = s.photoCaptureProgress
-                        if (current?.captureId != shot.id ||
-                            abs(measuredNs - current.estimatedDurationNs) < current.estimatedDurationNs / 20
-                        ) s else s.copy(photoCaptureProgress = current.copy(estimatedDurationNs = measuredNs))
+                        if (current?.captureId != shot.id) s else s.copy(
+                            photoCaptureProgress = current.copy(
+                                startedElapsedNs = nowNs,
+                                startFraction = current.fractionAt(nowNs),
+                                estimatedDurationNs = spacingNs * (requests.size - startedFrames + 1),
+                                maxFraction = maxFraction,
+                            )
+                        )
                     }
                 }
             }
