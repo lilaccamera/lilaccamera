@@ -117,89 +117,330 @@ internal fun rawGroupItems(
     val film = fotufilmItems(viewModel, level, commit)
     if (level.filmSection != null) return RawLevel(film.items, film.filmSections)
 
-    if (sensor) {
-        val blackMode by viewModel.editRawBlackLevelMode.collectAsState()
-        val blackCustom by viewModel.editRawCustomBlackLevel.collectAsState()
-        val whiteMode by viewModel.editRawWhiteLevelMode.collectAsState()
-        val whiteCustom by viewModel.editRawCustomWhiteLevel.collectAsState()
-        val cfa by viewModel.editRawCfaCorrectionMode.collectAsState()
-        val openBlack = viewModel.editOpenValue("rawBlackLevel") as? Pair<*, *>
-        val openWhite = viewModel.editOpenValue("rawWhiteLevel") as? Pair<*, *>
-        val customText = stringResource(R.string.settings_black_level_custom)
-
-        // A custom level is typed in Settings › RAW; here it shows as a chip once it is the photo's.
-        val blackOptions = listOf(
-            RawCfaCorrection.MODE_DEFAULT to stringResource(R.string.settings_black_level_default),
-            "0" to "0", "16" to "16", "64" to "64", "256" to "256", "512" to "512",
-        ) + if (blackMode == "Custom" || openBlack?.first == "Custom") {
-            listOf("Custom" to "$customText ${trimmed(if (blackMode == "Custom") blackCustom else openBlack?.second as? Float ?: 0f)}")
-        } else emptyList()
-        val whiteOptions = listOf(
-            RawWhiteLevelCorrection.MODE_DEFAULT to stringResource(R.string.settings_white_level_default),
-            RawWhiteLevelCorrection.MODE_RAW10 to stringResource(R.string.settings_white_level_raw10),
-            RawWhiteLevelCorrection.MODE_RAW12 to stringResource(R.string.settings_white_level_raw12),
-            RawWhiteLevelCorrection.MODE_RAW14 to stringResource(R.string.settings_white_level_raw14),
-            RawWhiteLevelCorrection.MODE_RAW_SENSOR to stringResource(R.string.settings_white_level_raw_sensor),
-        ) + if (whiteMode == RawWhiteLevelCorrection.MODE_CUSTOM || openWhite?.first == RawWhiteLevelCorrection.MODE_CUSTOM) {
-            val v = if (whiteMode == RawWhiteLevelCorrection.MODE_CUSTOM) whiteCustom else openWhite?.second as? Float ?: 0f
-            listOf(RawWhiteLevelCorrection.MODE_CUSTOM to "${stringResource(R.string.settings_white_level_custom)} ${trimmed(v)}")
-        } else emptyList()
-        val cfaOptions = listOf(
-            RawCfaCorrection.MODE_DEFAULT to R.string.settings_cfa_correction_default,
-            RawCfaCorrection.MODE_2X2_RGGB to R.string.settings_cfa_correction_2x2_rggb,
-            RawCfaCorrection.MODE_2X2_GRBG to R.string.settings_cfa_correction_2x2_grbg,
-            RawCfaCorrection.MODE_2X2_GBRG to R.string.settings_cfa_correction_2x2_gbrg,
-            RawCfaCorrection.MODE_2X2_BGGR to R.string.settings_cfa_correction_2x2_bggr,
-            RawCfaCorrection.MODE_4X4_RGGB to R.string.settings_cfa_correction_4x4_rggb,
-            RawCfaCorrection.MODE_4X4_GRBG to R.string.settings_cfa_correction_4x4_grbg,
-            RawCfaCorrection.MODE_4X4_GBRG to R.string.settings_cfa_correction_4x4_gbrg,
-            RawCfaCorrection.MODE_4X4_BGGR to R.string.settings_cfa_correction_4x4_bggr,
-            RawCfaCorrection.MODE_8X8_RGGB to R.string.settings_cfa_correction_8x8_rggb,
-            RawCfaCorrection.MODE_8X8_GRBG to R.string.settings_cfa_correction_8x8_grbg,
-            RawCfaCorrection.MODE_8X8_GBRG to R.string.settings_cfa_correction_8x8_gbrg,
-            RawCfaCorrection.MODE_8X8_BGGR to R.string.settings_cfa_correction_8x8_bggr,
-        ).map { (mode, label) -> mode to stringResource(label) }
-
-        fun chips(options: List<Pair<String, String>>, current: String, pick: (String) -> Unit) =
-            options.map { (mode, label) -> EditorChoice(label, null, mode == current) { pick(mode) } }
-
-        return RawLevel(listOf(
-            RawItem(
-                "blackLevel", stringResource(R.string.editor_black_level),
-                blackOptions.firstOrNull { it.first == blackMode }?.second ?: blackMode, AppIcons.MoonStars,
-                "rawBlackLevel" in changedKeys, stringResource(R.string.settings_raw_black_level_correction_description),
-                reset = { (openBlack?.first as? String)?.let { viewModel.saveRawBlackLevelMode(photo, it, done) } },
-                choices = chips(blackOptions, blackMode) { viewModel.saveRawBlackLevelMode(photo, it, done) },
-            ),
-            RawItem(
-                "whiteLevel", stringResource(R.string.editor_white_level),
-                whiteOptions.firstOrNull { it.first == whiteMode }?.second ?: whiteMode, AppIcons.SunHighLine,
-                "rawWhiteLevel" in changedKeys, stringResource(R.string.settings_raw_white_level_correction_description),
-                reset = { (openWhite?.first as? String)?.let { viewModel.saveRawWhiteLevelMode(photo, it, done) } },
-                choices = chips(whiteOptions, whiteMode) { viewModel.saveRawWhiteLevelMode(photo, it, done) },
-            ),
-            RawItem(
-                "cfa", stringResource(R.string.editor_cfa),
-                cfaOptions.firstOrNull { it.first == cfa }?.second ?: cfa, AppIcons.GridView,
-                "rawCfa" in changedKeys, stringResource(R.string.settings_raw_cfa_correction_description),
-                reset = { (viewModel.editOpenValue("rawCfa") as? String)?.let { viewModel.saveRawCfaCorrectionMode(photo, it, done) } },
-                choices = chips(cfaOptions, cfa) { viewModel.saveRawCfaCorrectionMode(photo, it, done) },
-            ),
-        ), film.filmSections)
-    }
+    if (sensor) return RawLevel(rawSensorItems(viewModel, photo, changedKeys, done), film.filmSections)
 
     val engine by viewModel.editRawRenderingEngine.collectAsState()
     val tone by viewModel.editRawToneMappingParameters.collectAsState()
-    val dcpId by viewModel.editRawDcpId.collectAsState()
-    val hncsCurve by viewModel.editRawHncsFilmCurveMode.collectAsState()
     val lensShading by viewModel.editRawLensShadingCorrectionEnabled.collectAsState()
     val baseLook by viewModel.editRawBaselineLutId.collectAsState()
+    val openTone = viewModel.editOpenValue("rawToneMapping") as? RawToneMappingParameters ?: tone
+
+    val items = mutableListOf<RawItem>()
+    val engineNames = RawRenderingEngine.entries.associateWith { rawRenderingEngineName(it) }
+    val openEngine = viewModel.editOpenValue("rawEngine") as? RawRenderingEngine
+    items += RawItem(
+        "engine", stringResource(R.string.editor_engine), engineNames.getValue(engine), AppIcons.Tune,
+        "rawEngine" in changedKeys, rawColorEngineDescription(engine),
+        reset = { openEngine?.let { viewModel.saveRawColorEngine(photo, it, done) } },
+        choices = RawRenderingEngine.entries.map { e ->
+            EditorChoice(engineNames.getValue(e), null, e == engine) { viewModel.saveRawColorEngine(photo, e, done) }
+        },
+    )
+
+    val onOff = listOf(false to offText, true to onText)
+
+    items += rawEngineItems(
+        viewModel, photo, engine, tone, openTone, changedKeys, embeddedProfiles, activeEmbeddedProfileId, film.items,
+        commit, done, importDcp, deleteDcp,
+    )
+
+    items += RawItem(
+        "lensShading", stringResource(R.string.editor_lens_shading), if (lensShading) onText else offText,
+        AppIcons.CircleHalfLine, "rawLensShading" in changedKeys,
+        stringResource(R.string.settings_raw_lens_shading_correction_description),
+        reset = {
+            (viewModel.editOpenValue("rawLensShading") as? Boolean)?.let { viewModel.saveRawLensShadingCorrectionEnabled(photo, it, done) }
+        },
+        choices = onOff.map { (on, label) ->
+            EditorChoice(label, null, on == lensShading) { viewModel.saveRawLensShadingCorrectionEnabled(photo, on, done) }
+        },
+    )
+
+    // Photon HDR can be switched on an imported RAW only; Re-render rebuilds its tone map on any RAW.
+    fun setHdr(on: Boolean) {
+        viewModel.selectRawAdaptiveExposureModeForEdit(if (on) RawAdaptiveExposureMode.PHOTON_HDR else RawAdaptiveExposureMode.OFF)
+        commit()
+    }
+    items += RawItem(
+        "dynamicRange", stringResource(R.string.editor_dynamic_range), if (tone.usePhotonHdr) onText else offText,
+        AppIcons.ContrastLine, tone.usePhotonHdr != openTone.usePhotonHdr,
+        stringResource(R.string.editor_explain_dynamic_range),
+        reset = { if (tone.usePhotonHdr != openTone.usePhotonHdr) setHdr(openTone.usePhotonHdr) },
+        choices = if (imported) onOff.map { (on, label) -> EditorChoice(label, null, on == tone.usePhotonHdr) { setHdr(on) } } else emptyList(),
+        actions = listOf(EditorChoice(stringResource(R.string.editor_rerender), AppIcons.RestartAlt, false) { reRender() }),
+    )
+
+    val openBase = viewModel.editOpenValue("rawBaseLook") as? String
+    items += RawItem(
+        "baseLook", stringResource(R.string.editor_base_look),
+        availableLuts.firstOrNull { it.id == baseLook }?.getName() ?: noneText, AppIcons.FiltersLine,
+        "rawBaseLook" in changedKeys, stringResource(R.string.editor_explain_base_look),
+        reset = { viewModel.saveRawBaselineLutSelection(photo, openBase, done) },
+        choices = listOf(EditorChoice(noneText, null, baseLook == null) { viewModel.saveRawBaselineLutSelection(photo, null, done) }) +
+            availableLuts.map { lut ->
+                EditorChoice(lut.getName(), null, lut.id == baseLook) { viewModel.saveRawBaselineLutSelection(photo, lut.id, done) }
+            },
+    )
+    return RawLevel(items, film.filmSections)
+}
+
+/**
+ * Fotufilm's controls, from its catalogue for the photo's film: the film itself on the RAW level, the rest in the
+ * group of their catalogue section (the film's format and the camera preflash in Lab). Each change is saved and
+ * re-rendered once; a ruler's value changes the document only on release.
+ */
+@Composable
+private fun fotufilmItems(viewModel: GalleryViewModel, level: EditorGroup, commit: () -> Unit): RawLevel {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val engine by viewModel.editRawRenderingEngine.collectAsState()
+    val document by viewModel.editRawFotufilmDocument.collectAsState()
+    val doc = document?.takeIf { engine == RawRenderingEngine.Fotufilm } ?: return RawLevel(emptyList(), emptyMap())
+    val catalogue by produceState<FotufilmCatalogue?>(null, doc) {
+        value = withContext(Dispatchers.Default) { runCatching { FotufilmRuntime.catalogue(context, doc) }.getOrNull() } ?: value
+    }
+    val current = catalogue ?: return RawLevel(emptyList(), emptyMap())
+    var drag by remember { mutableStateOf<Pair<String, Float>?>(null) }
+    val open = viewModel.editOpenValue("rawFotufilm") as? FotufilmDocument
+    val onText = stringResource(R.string.editor_on)
+    val offText = stringResource(R.string.editor_off)
+
+    fun setDoc(next: FotufilmDocument) {
+        viewModel.editRawFotufilmDocument.value = next
+        commit()
+    }
+    fun changeStock(id: String) {
+        scope.launch {
+            withContext(Dispatchers.Default) { documentForStock(context, doc, id) }?.let(::setDoc)
+        }
+    }
+    fun sectionOf(c: FotufilmCatalogue.Control): String? = when {
+        c.field == FotufilmDocument.STOCK_FIELD -> null
+        c.section == "filmStock" || c.field in SHOWN_LIGHT_FIELDS -> "filmLab"
+        else -> c.section
+    }
+
+    val visible = current.controls.filter { c ->
+        c.available && c.kind !is FotufilmCatalogue.Kind.Other &&
+            (c.section in SHOWN_SECTIONS || c.field in SHOWN_LIGHT_FIELDS) &&
+            (c.foldsUnder == null || current.control(c.foldsUnder)?.moved == true)
+    }
+    fun changed(c: FotufilmCatalogue.Control): Boolean =
+        if (c.field == FotufilmDocument.STOCK_FIELD) doc.stockId != open?.stockId
+        else doc.values[c.field] != open?.values?.get(c.field)
+
+    val sections = visible.mapNotNull { c -> sectionOf(c)?.let { it to changed(c) } }
+        .groupBy({ it.first }, { it.second })
+        .mapValues { (_, flags) -> flags.any { it } }
+    val wanted = level.filmSection
+    val items = visible.filter { sectionOf(it) == wanted }.map { c ->
+        val name = FotufilmStrings.title(c.field)
+        val explanation = FotufilmStrings.description(c.field) ?: name
+        val openValue = open?.values?.get(c.field)
+        val reset: () -> Unit = {
+            if (c.field == FotufilmDocument.STOCK_FIELD) {
+                open?.stockId?.let(::changeStock)
+            } else {
+                setDoc(if (openValue == null) doc.without(c.field) else doc.with(c.field, openValue))
+            }
+        }
+        when (val kind = c.kind) {
+            is FotufilmCatalogue.Kind.Slider -> {
+                val scale = kind.scale
+                val stored = ((c.value as? FotufilmDocument.Value.Number)?.value ?: scale.neutral).toFloat()
+                val start = ((openValue as? FotufilmDocument.Value.Number)?.value ?: scale.neutral).toFloat()
+                val value = drag?.takeIf { it.first == c.field }?.second ?: stored
+                // The track's own detents, else about fifty steps across it; the resting and stored values stay on it.
+                val steps = (if (scale.stops.isNotEmpty()) scale.stops.map { it.toFloat() }
+                else (0..50).map { (scale.min + (scale.max - scale.min) * it / 50.0).toFloat() })
+                    .plus(listOf(scale.neutral.toFloat(), stored, start)).distinct().sorted()
+                fun text(v: Float) = FotufilmStrings.formatValue(context, scale, v)
+                RawItem(
+                    "film:${c.field}", name, text(value), AppIcons.AdjustmentsLine, changed(c), explanation, reset,
+                    ruler = RawRuler(
+                        steps = steps, value = value, start = start, label = ::text,
+                        onChange = { drag = c.field to it },
+                        onRelease = {
+                            drag?.let { (_, v) -> setDoc(doc.withNumber(c, v.toDouble())) }
+                            drag = null
+                        },
+                    ),
+                )
+            }
+            is FotufilmCatalogue.Kind.Chips -> {
+                val stored = (c.value as? FotufilmDocument.Value.Number)?.value ?: kind.scale.neutral
+                val selected = kind.chips.minByOrNull { abs(it.value - stored) }
+                RawItem(
+                    "film:${c.field}", name, selected?.let { FotufilmStrings.chip(c.field, it) }.orEmpty(),
+                    AppIcons.AdjustmentsLine, changed(c), explanation, reset,
+                    choices = kind.chips.map { chip ->
+                        EditorChoice(FotufilmStrings.chip(c.field, chip), null, chip == selected) {
+                            setDoc(doc.withValue(c, if (chip.value == kind.scale.neutral) null else FotufilmDocument.Value.Number(chip.value)))
+                        }
+                    },
+                )
+            }
+            is FotufilmCatalogue.Kind.Toggle -> {
+                val on = (c.value as? FotufilmDocument.Value.Flag)?.value ?: kind.restingOn
+                RawItem(
+                    "film:${c.field}", name, if (on) onText else offText, AppIcons.AdjustmentsLine, changed(c), explanation, reset,
+                    choices = listOf(false to offText, true to onText).map { (v, label) ->
+                        EditorChoice(label, null, v == on) {
+                            setDoc(doc.withValue(c, if (v == kind.restingOn) null else FotufilmDocument.Value.Flag(v)))
+                        }
+                    },
+                )
+            }
+            is FotufilmCatalogue.Kind.Menu -> {
+                val selected = (c.value as? FotufilmDocument.Value.Choice)?.id ?: kind.defaultChoice
+                val stock = c.field == FotufilmDocument.STOCK_FIELD
+                RawItem(
+                    "film:${c.field}", name,
+                    kind.choices.firstOrNull { it.id == selected }?.let { FotufilmStrings.choice(c.field, kind.menu, it) }.orEmpty(),
+                    if (stock) AppIcons.Film else AppIcons.AdjustmentsLine, changed(c), explanation, reset,
+                    choices = kind.choices.map { choice ->
+                        EditorChoice(FotufilmStrings.choice(c.field, kind.menu, choice), null, choice.id == selected) {
+                            when {
+                                choice.id == selected -> Unit
+                                stock -> changeStock(choice.id)
+                                else -> setDoc(doc.withValue(c, if (choice.id == kind.defaultChoice) null else FotufilmDocument.Value.Choice(choice.id)))
+                            }
+                        }
+                    },
+                )
+            }
+            FotufilmCatalogue.Kind.Other -> null
+        }
+    }.filterNotNull()
+    return RawLevel(items, sections)
+}
+
+private fun lumixStyleLabel(style: LumixPhotoStyle): Int = when (style) {
+    LumixPhotoStyle.Standard -> R.string.settings_raw_lumix_style_standard
+    LumixPhotoStyle.Vivid -> R.string.settings_raw_lumix_style_vivid
+    LumixPhotoStyle.Natural -> R.string.settings_raw_lumix_style_natural
+    LumixPhotoStyle.Landscape -> R.string.settings_raw_lumix_style_landscape
+    LumixPhotoStyle.Portrait -> R.string.settings_raw_lumix_style_portrait
+    LumixPhotoStyle.Monochrome -> R.string.settings_raw_lumix_style_monochrome
+    LumixPhotoStyle.LMonochrome -> R.string.settings_raw_lumix_style_l_monochrome
+    LumixPhotoStyle.LMonochromeD -> R.string.settings_raw_lumix_style_l_monochrome_d
+    LumixPhotoStyle.LMonochromeS -> R.string.settings_raw_lumix_style_l_monochrome_s
+    LumixPhotoStyle.LeicaMonochrome -> R.string.settings_raw_lumix_style_leica_monochrome
+    LumixPhotoStyle.LClassicNeo -> R.string.settings_raw_lumix_style_l_classicneo
+    LumixPhotoStyle.Flat -> R.string.settings_raw_lumix_style_flat
+    LumixPhotoStyle.CinelikeD2 -> R.string.settings_raw_lumix_style_cinelike_d2
+    LumixPhotoStyle.CinelikeV2 -> R.string.settings_raw_lumix_style_cinelike_v2
+    LumixPhotoStyle.Like709 -> R.string.settings_raw_lumix_style_709like
+    LumixPhotoStyle.VLog -> R.string.settings_raw_lumix_style_vlog
+}
+
+private fun canonStyleLabel(style: CanonPictureStyle): Int = when (style) {
+    CanonPictureStyle.Standard -> R.string.settings_raw_canon_style_standard
+    CanonPictureStyle.Portrait -> R.string.settings_raw_canon_style_portrait
+    CanonPictureStyle.Landscape -> R.string.settings_raw_canon_style_landscape
+    CanonPictureStyle.Neutral -> R.string.settings_raw_canon_style_neutral
+    CanonPictureStyle.Faithful -> R.string.settings_raw_canon_style_faithful
+    CanonPictureStyle.Monochrome -> R.string.settings_raw_canon_style_monochrome
+}
+
+/** Light › RAW › Sensor: the black and white levels and the colour filter layout. */
+@Composable
+private fun rawSensorItems(viewModel: GalleryViewModel, photo: MediaData, changedKeys: Set<String>, done: (Boolean) -> Unit): List<RawItem> {
+    val blackMode by viewModel.editRawBlackLevelMode.collectAsState()
+    val blackCustom by viewModel.editRawCustomBlackLevel.collectAsState()
+    val whiteMode by viewModel.editRawWhiteLevelMode.collectAsState()
+    val whiteCustom by viewModel.editRawCustomWhiteLevel.collectAsState()
+    val cfa by viewModel.editRawCfaCorrectionMode.collectAsState()
+    val openBlack = viewModel.editOpenValue("rawBlackLevel") as? Pair<*, *>
+    val openWhite = viewModel.editOpenValue("rawWhiteLevel") as? Pair<*, *>
+    val customText = stringResource(R.string.settings_black_level_custom)
+
+    // A custom level is typed in Settings › RAW; here it shows as a chip once it is the photo's.
+    val blackOptions = listOf(
+        RawCfaCorrection.MODE_DEFAULT to stringResource(R.string.settings_black_level_default),
+        "0" to "0", "16" to "16", "64" to "64", "256" to "256", "512" to "512",
+    ) + if (blackMode == "Custom" || openBlack?.first == "Custom") {
+        listOf("Custom" to "$customText ${trimmed(if (blackMode == "Custom") blackCustom else openBlack?.second as? Float ?: 0f)}")
+    } else emptyList()
+    val whiteOptions = listOf(
+        RawWhiteLevelCorrection.MODE_DEFAULT to stringResource(R.string.settings_white_level_default),
+        RawWhiteLevelCorrection.MODE_RAW10 to stringResource(R.string.settings_white_level_raw10),
+        RawWhiteLevelCorrection.MODE_RAW12 to stringResource(R.string.settings_white_level_raw12),
+        RawWhiteLevelCorrection.MODE_RAW14 to stringResource(R.string.settings_white_level_raw14),
+        RawWhiteLevelCorrection.MODE_RAW_SENSOR to stringResource(R.string.settings_white_level_raw_sensor),
+    ) + if (whiteMode == RawWhiteLevelCorrection.MODE_CUSTOM || openWhite?.first == RawWhiteLevelCorrection.MODE_CUSTOM) {
+        val v = if (whiteMode == RawWhiteLevelCorrection.MODE_CUSTOM) whiteCustom else openWhite?.second as? Float ?: 0f
+        listOf(RawWhiteLevelCorrection.MODE_CUSTOM to "${stringResource(R.string.settings_white_level_custom)} ${trimmed(v)}")
+    } else emptyList()
+    val cfaOptions = listOf(
+        RawCfaCorrection.MODE_DEFAULT to R.string.settings_cfa_correction_default,
+        RawCfaCorrection.MODE_2X2_RGGB to R.string.settings_cfa_correction_2x2_rggb,
+        RawCfaCorrection.MODE_2X2_GRBG to R.string.settings_cfa_correction_2x2_grbg,
+        RawCfaCorrection.MODE_2X2_GBRG to R.string.settings_cfa_correction_2x2_gbrg,
+        RawCfaCorrection.MODE_2X2_BGGR to R.string.settings_cfa_correction_2x2_bggr,
+        RawCfaCorrection.MODE_4X4_RGGB to R.string.settings_cfa_correction_4x4_rggb,
+        RawCfaCorrection.MODE_4X4_GRBG to R.string.settings_cfa_correction_4x4_grbg,
+        RawCfaCorrection.MODE_4X4_GBRG to R.string.settings_cfa_correction_4x4_gbrg,
+        RawCfaCorrection.MODE_4X4_BGGR to R.string.settings_cfa_correction_4x4_bggr,
+        RawCfaCorrection.MODE_8X8_RGGB to R.string.settings_cfa_correction_8x8_rggb,
+        RawCfaCorrection.MODE_8X8_GRBG to R.string.settings_cfa_correction_8x8_grbg,
+        RawCfaCorrection.MODE_8X8_GBRG to R.string.settings_cfa_correction_8x8_gbrg,
+        RawCfaCorrection.MODE_8X8_BGGR to R.string.settings_cfa_correction_8x8_bggr,
+    ).map { (mode, label) -> mode to stringResource(label) }
+
+    fun chips(options: List<Pair<String, String>>, current: String, pick: (String) -> Unit) =
+        options.map { (mode, label) -> EditorChoice(label, null, mode == current) { pick(mode) } }
+
+    return listOf(
+        RawItem(
+            "blackLevel", stringResource(R.string.editor_black_level),
+            blackOptions.firstOrNull { it.first == blackMode }?.second ?: blackMode, AppIcons.MoonStars,
+            "rawBlackLevel" in changedKeys, stringResource(R.string.settings_raw_black_level_correction_description),
+            reset = { (openBlack?.first as? String)?.let { viewModel.saveRawBlackLevelMode(photo, it, done) } },
+            choices = chips(blackOptions, blackMode) { viewModel.saveRawBlackLevelMode(photo, it, done) },
+        ),
+        RawItem(
+            "whiteLevel", stringResource(R.string.editor_white_level),
+            whiteOptions.firstOrNull { it.first == whiteMode }?.second ?: whiteMode, AppIcons.SunHighLine,
+            "rawWhiteLevel" in changedKeys, stringResource(R.string.settings_raw_white_level_correction_description),
+            reset = { (openWhite?.first as? String)?.let { viewModel.saveRawWhiteLevelMode(photo, it, done) } },
+            choices = chips(whiteOptions, whiteMode) { viewModel.saveRawWhiteLevelMode(photo, it, done) },
+        ),
+        RawItem(
+            "cfa", stringResource(R.string.editor_cfa),
+            cfaOptions.firstOrNull { it.first == cfa }?.second ?: cfa, AppIcons.GridView,
+            "rawCfa" in changedKeys, stringResource(R.string.settings_raw_cfa_correction_description),
+            reset = { (viewModel.editOpenValue("rawCfa") as? String)?.let { viewModel.saveRawCfaCorrectionMode(photo, it, done) } },
+            choices = chips(cfaOptions, cfa) { viewModel.saveRawCfaCorrectionMode(photo, it, done) },
+        ),
+    )
+}
+
+/** Light › RAW: the values of the chosen engine (its profile, curve, style, matrix, tone rulers or film). */
+@Composable
+private fun rawEngineItems(
+    viewModel: GalleryViewModel,
+    photo: MediaData,
+    engine: RawRenderingEngine,
+    tone: RawToneMappingParameters,
+    openTone: RawToneMappingParameters,
+    changedKeys: Set<String>,
+    embeddedProfiles: List<RawEmbeddedDngProfileOption>,
+    activeEmbeddedProfileId: String?,
+    filmItems: List<RawItem>,
+    commit: () -> Unit,
+    done: (Boolean) -> Unit,
+    importDcp: () -> Unit,
+    deleteDcp: (DcpInfo) -> Unit,
+): List<RawItem> {
+    val noneText = stringResource(R.string.none)
+    val dcpId by viewModel.editRawDcpId.collectAsState()
+    val hncsCurve by viewModel.editRawHncsFilmCurveMode.collectAsState()
     val spectralFilm by viewModel.editRawSpectralFilmStock.collectAsState()
     val print by viewModel.editRawSpectralFilmPrint.collectAsState()
     val cDensity by viewModel.editRawSpectralFilmCDensityGain.collectAsState()
     val mDensity by viewModel.editRawSpectralFilmMDensityGain.collectAsState()
     val yDensity by viewModel.editRawSpectralFilmYDensityGain.collectAsState()
-    val openTone = viewModel.editOpenValue("rawToneMapping") as? RawToneMappingParameters ?: tone
 
     fun saveTone(t: RawToneMappingParameters) = viewModel.saveRawToneMappingParameters(photo, t, done)
 
@@ -238,25 +479,11 @@ internal fun rawGroupItems(
         ),
     )
 
-    val items = mutableListOf<RawItem>()
-    val engineNames = RawRenderingEngine.entries.associateWith { rawRenderingEngineName(it) }
-    val openEngine = viewModel.editOpenValue("rawEngine") as? RawRenderingEngine
-    items += RawItem(
-        "engine", stringResource(R.string.editor_engine), engineNames.getValue(engine), AppIcons.Tune,
-        "rawEngine" in changedKeys, rawColorEngineDescription(engine),
-        reset = { openEngine?.let { viewModel.saveRawColorEngine(photo, it, done) } },
-        choices = RawRenderingEngine.entries.map { e ->
-            EditorChoice(engineNames.getValue(e), null, e == engine) { viewModel.saveRawColorEngine(photo, e, done) }
-        },
-    )
-
     val deviceText = stringResource(R.string.settings_raw_canon_color_matrix_device)
-    val matrixText = stringResource(R.string.editor_matrix)
-    val styleText = stringResource(R.string.editor_style)
-    val colorCorrectionText = stringResource(R.string.settings_raw_camera_color_matching)
     val colorCorrectionExplain = stringResource(R.string.settings_raw_camera_color_matching_description)
-    val onOff = listOf(false to offText, true to onText)
+    val onOff = listOf(false to stringResource(R.string.editor_off), true to stringResource(R.string.editor_on))
 
+    val items = mutableListOf<RawItem>()
     when (engine) {
         RawRenderingEngine.AdobeCurve -> {
             val dcps = viewModel.availableDcps
@@ -459,205 +686,8 @@ internal fun rawGroupItems(
             }
         }
         // Fotufilm: the film here, its sections as groups.
-        RawRenderingEngine.Fotufilm -> items += film.items
+        RawRenderingEngine.Fotufilm -> items += filmItems
         else -> Unit  // Sigmoid has no values of its own.
     }
-
-    items += RawItem(
-        "lensShading", stringResource(R.string.editor_lens_shading), if (lensShading) onText else offText,
-        AppIcons.CircleHalfLine, "rawLensShading" in changedKeys,
-        stringResource(R.string.settings_raw_lens_shading_correction_description),
-        reset = {
-            (viewModel.editOpenValue("rawLensShading") as? Boolean)?.let { viewModel.saveRawLensShadingCorrectionEnabled(photo, it, done) }
-        },
-        choices = onOff.map { (on, label) ->
-            EditorChoice(label, null, on == lensShading) { viewModel.saveRawLensShadingCorrectionEnabled(photo, on, done) }
-        },
-    )
-
-    // Photon HDR can be switched on an imported RAW only; Re-render rebuilds its tone map on any RAW.
-    fun setHdr(on: Boolean) {
-        viewModel.selectRawAdaptiveExposureModeForEdit(if (on) RawAdaptiveExposureMode.PHOTON_HDR else RawAdaptiveExposureMode.OFF)
-        commit()
-    }
-    items += RawItem(
-        "dynamicRange", stringResource(R.string.editor_dynamic_range), if (tone.usePhotonHdr) onText else offText,
-        AppIcons.ContrastLine, tone.usePhotonHdr != openTone.usePhotonHdr,
-        stringResource(R.string.editor_explain_dynamic_range),
-        reset = { if (tone.usePhotonHdr != openTone.usePhotonHdr) setHdr(openTone.usePhotonHdr) },
-        choices = if (imported) onOff.map { (on, label) -> EditorChoice(label, null, on == tone.usePhotonHdr) { setHdr(on) } } else emptyList(),
-        actions = listOf(EditorChoice(stringResource(R.string.editor_rerender), AppIcons.RestartAlt, false) { reRender() }),
-    )
-
-    val openBase = viewModel.editOpenValue("rawBaseLook") as? String
-    items += RawItem(
-        "baseLook", stringResource(R.string.editor_base_look),
-        availableLuts.firstOrNull { it.id == baseLook }?.getName() ?: noneText, AppIcons.FiltersLine,
-        "rawBaseLook" in changedKeys, stringResource(R.string.editor_explain_base_look),
-        reset = { viewModel.saveRawBaselineLutSelection(photo, openBase, done) },
-        choices = listOf(EditorChoice(noneText, null, baseLook == null) { viewModel.saveRawBaselineLutSelection(photo, null, done) }) +
-            availableLuts.map { lut ->
-                EditorChoice(lut.getName(), null, lut.id == baseLook) { viewModel.saveRawBaselineLutSelection(photo, lut.id, done) }
-            },
-    )
-    return RawLevel(items, film.filmSections)
-}
-
-/**
- * Fotufilm's controls, from its catalogue for the photo's film: the film itself on the RAW level, the rest in the
- * group of their catalogue section (the film's format and the camera preflash in Lab). Each change is saved and
- * re-rendered once; a ruler's value changes the document only on release.
- */
-@Composable
-private fun fotufilmItems(viewModel: GalleryViewModel, level: EditorGroup, commit: () -> Unit): RawLevel {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val engine by viewModel.editRawRenderingEngine.collectAsState()
-    val document by viewModel.editRawFotufilmDocument.collectAsState()
-    val doc = document?.takeIf { engine == RawRenderingEngine.Fotufilm } ?: return RawLevel(emptyList(), emptyMap())
-    val catalogue by produceState<FotufilmCatalogue?>(null, doc) {
-        value = withContext(Dispatchers.Default) { runCatching { FotufilmRuntime.catalogue(context, doc) }.getOrNull() } ?: value
-    }
-    val current = catalogue ?: return RawLevel(emptyList(), emptyMap())
-    var drag by remember { mutableStateOf<Pair<String, Float>?>(null) }
-    val open = viewModel.editOpenValue("rawFotufilm") as? FotufilmDocument
-    val onText = stringResource(R.string.editor_on)
-    val offText = stringResource(R.string.editor_off)
-
-    fun setDoc(next: FotufilmDocument) {
-        viewModel.editRawFotufilmDocument.value = next
-        commit()
-    }
-    fun changeStock(id: String) {
-        scope.launch {
-            withContext(Dispatchers.Default) { documentForStock(context, doc, id) }?.let(::setDoc)
-        }
-    }
-    fun sectionOf(c: FotufilmCatalogue.Control): String? = when {
-        c.field == FotufilmDocument.STOCK_FIELD -> null
-        c.section == "filmStock" || c.field in SHOWN_LIGHT_FIELDS -> "filmLab"
-        else -> c.section
-    }
-
-    val visible = current.controls.filter { c ->
-        c.available && c.kind !is FotufilmCatalogue.Kind.Other &&
-            (c.section in SHOWN_SECTIONS || c.field in SHOWN_LIGHT_FIELDS) &&
-            (c.foldsUnder == null || current.control(c.foldsUnder)?.moved == true)
-    }
-    fun changed(c: FotufilmCatalogue.Control): Boolean =
-        if (c.field == FotufilmDocument.STOCK_FIELD) doc.stockId != open?.stockId
-        else doc.values[c.field] != open?.values?.get(c.field)
-
-    val sections = visible.mapNotNull { c -> sectionOf(c)?.let { it to changed(c) } }
-        .groupBy({ it.first }, { it.second })
-        .mapValues { (_, flags) -> flags.any { it } }
-    val wanted = level.filmSection
-    val items = visible.filter { sectionOf(it) == wanted }.map { c ->
-        val name = FotufilmStrings.title(c.field)
-        val explanation = FotufilmStrings.description(c.field) ?: name
-        val openValue = open?.values?.get(c.field)
-        val reset: () -> Unit = {
-            if (c.field == FotufilmDocument.STOCK_FIELD) {
-                open?.stockId?.let(::changeStock)
-            } else {
-                setDoc(if (openValue == null) doc.without(c.field) else doc.with(c.field, openValue))
-            }
-        }
-        when (val kind = c.kind) {
-            is FotufilmCatalogue.Kind.Slider -> {
-                val scale = kind.scale
-                val stored = ((c.value as? FotufilmDocument.Value.Number)?.value ?: scale.neutral).toFloat()
-                val start = ((openValue as? FotufilmDocument.Value.Number)?.value ?: scale.neutral).toFloat()
-                val value = drag?.takeIf { it.first == c.field }?.second ?: stored
-                // The track's own detents, else about fifty steps across it; the resting and stored values stay on it.
-                val steps = (if (scale.stops.isNotEmpty()) scale.stops.map { it.toFloat() }
-                else (0..50).map { (scale.min + (scale.max - scale.min) * it / 50.0).toFloat() })
-                    .plus(listOf(scale.neutral.toFloat(), stored, start)).distinct().sorted()
-                fun text(v: Float) = FotufilmStrings.formatValue(context, scale, v)
-                RawItem(
-                    "film:${c.field}", name, text(value), AppIcons.AdjustmentsLine, changed(c), explanation, reset,
-                    ruler = RawRuler(
-                        steps = steps, value = value, start = start, label = ::text,
-                        onChange = { drag = c.field to it },
-                        onRelease = {
-                            drag?.let { (_, v) -> setDoc(doc.withNumber(c, v.toDouble())) }
-                            drag = null
-                        },
-                    ),
-                )
-            }
-            is FotufilmCatalogue.Kind.Chips -> {
-                val stored = (c.value as? FotufilmDocument.Value.Number)?.value ?: kind.scale.neutral
-                val selected = kind.chips.minByOrNull { abs(it.value - stored) }
-                RawItem(
-                    "film:${c.field}", name, selected?.let { FotufilmStrings.chip(c.field, it) }.orEmpty(),
-                    AppIcons.AdjustmentsLine, changed(c), explanation, reset,
-                    choices = kind.chips.map { chip ->
-                        EditorChoice(FotufilmStrings.chip(c.field, chip), null, chip == selected) {
-                            setDoc(doc.withValue(c, if (chip.value == kind.scale.neutral) null else FotufilmDocument.Value.Number(chip.value)))
-                        }
-                    },
-                )
-            }
-            is FotufilmCatalogue.Kind.Toggle -> {
-                val on = (c.value as? FotufilmDocument.Value.Flag)?.value ?: kind.restingOn
-                RawItem(
-                    "film:${c.field}", name, if (on) onText else offText, AppIcons.AdjustmentsLine, changed(c), explanation, reset,
-                    choices = listOf(false to offText, true to onText).map { (v, label) ->
-                        EditorChoice(label, null, v == on) {
-                            setDoc(doc.withValue(c, if (v == kind.restingOn) null else FotufilmDocument.Value.Flag(v)))
-                        }
-                    },
-                )
-            }
-            is FotufilmCatalogue.Kind.Menu -> {
-                val selected = (c.value as? FotufilmDocument.Value.Choice)?.id ?: kind.defaultChoice
-                val stock = c.field == FotufilmDocument.STOCK_FIELD
-                RawItem(
-                    "film:${c.field}", name,
-                    kind.choices.firstOrNull { it.id == selected }?.let { FotufilmStrings.choice(c.field, kind.menu, it) }.orEmpty(),
-                    if (stock) AppIcons.Film else AppIcons.AdjustmentsLine, changed(c), explanation, reset,
-                    choices = kind.choices.map { choice ->
-                        EditorChoice(FotufilmStrings.choice(c.field, kind.menu, choice), null, choice.id == selected) {
-                            when {
-                                choice.id == selected -> Unit
-                                stock -> changeStock(choice.id)
-                                else -> setDoc(doc.withValue(c, if (choice.id == kind.defaultChoice) null else FotufilmDocument.Value.Choice(choice.id)))
-                            }
-                        }
-                    },
-                )
-            }
-            FotufilmCatalogue.Kind.Other -> null
-        }
-    }.filterNotNull()
-    return RawLevel(items, sections)
-}
-
-private fun lumixStyleLabel(style: LumixPhotoStyle): Int = when (style) {
-    LumixPhotoStyle.Standard -> R.string.settings_raw_lumix_style_standard
-    LumixPhotoStyle.Vivid -> R.string.settings_raw_lumix_style_vivid
-    LumixPhotoStyle.Natural -> R.string.settings_raw_lumix_style_natural
-    LumixPhotoStyle.Landscape -> R.string.settings_raw_lumix_style_landscape
-    LumixPhotoStyle.Portrait -> R.string.settings_raw_lumix_style_portrait
-    LumixPhotoStyle.Monochrome -> R.string.settings_raw_lumix_style_monochrome
-    LumixPhotoStyle.LMonochrome -> R.string.settings_raw_lumix_style_l_monochrome
-    LumixPhotoStyle.LMonochromeD -> R.string.settings_raw_lumix_style_l_monochrome_d
-    LumixPhotoStyle.LMonochromeS -> R.string.settings_raw_lumix_style_l_monochrome_s
-    LumixPhotoStyle.LeicaMonochrome -> R.string.settings_raw_lumix_style_leica_monochrome
-    LumixPhotoStyle.LClassicNeo -> R.string.settings_raw_lumix_style_l_classicneo
-    LumixPhotoStyle.Flat -> R.string.settings_raw_lumix_style_flat
-    LumixPhotoStyle.CinelikeD2 -> R.string.settings_raw_lumix_style_cinelike_d2
-    LumixPhotoStyle.CinelikeV2 -> R.string.settings_raw_lumix_style_cinelike_v2
-    LumixPhotoStyle.Like709 -> R.string.settings_raw_lumix_style_709like
-    LumixPhotoStyle.VLog -> R.string.settings_raw_lumix_style_vlog
-}
-
-private fun canonStyleLabel(style: CanonPictureStyle): Int = when (style) {
-    CanonPictureStyle.Standard -> R.string.settings_raw_canon_style_standard
-    CanonPictureStyle.Portrait -> R.string.settings_raw_canon_style_portrait
-    CanonPictureStyle.Landscape -> R.string.settings_raw_canon_style_landscape
-    CanonPictureStyle.Neutral -> R.string.settings_raw_canon_style_neutral
-    CanonPictureStyle.Faithful -> R.string.settings_raw_canon_style_faithful
-    CanonPictureStyle.Monochrome -> R.string.settings_raw_canon_style_monochrome
+    return items
 }

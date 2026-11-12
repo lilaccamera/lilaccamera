@@ -10,7 +10,6 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.os.SystemClock
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
@@ -96,17 +95,14 @@ import com.hinnka.mycamera.raw.DngEmbeddedProfile
 import com.hinnka.mycamera.raw.RawAdaptiveExposureMode
 import com.hinnka.mycamera.processor.DenoiseStrength
 import com.hinnka.mycamera.processor.BokehStyle
-import com.hinnka.mycamera.ui.camera.LutEditBottomSheet
-import com.hinnka.mycamera.ui.camera.LutEditorTarget
 import com.hinnka.mycamera.ui.components.*
 import com.hinnka.mycamera.ui.components.RawEditPanel
-import com.hinnka.mycamera.ui.components.RawBaselineColorCorrectionBottomSheet
 import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
@@ -136,6 +132,9 @@ import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.ui.camera.autoRotate
 import com.hinnka.mycamera.frame.FrameInfo
+import com.hinnka.mycamera.lut.LutInfo
+import com.hinnka.mycamera.model.CameraPreset
+import com.hinnka.mycamera.raw.RawRenderingEngine
 import com.hinnka.mycamera.ui.settings.presetDisplayName
 import com.hinnka.mycamera.ui.camera.ChoiceScroller
 import com.hinnka.mycamera.ui.camera.NoteLineState
@@ -239,7 +238,6 @@ fun GalleryEditScreen(
     val depthModelState by remember(context.applicationContext) {
         DepthModelManager.observe(context)
     }.collectAsState()
-    val isDepthModelInstalled = DepthModelManager.isInstalled(context)
     var showDepthModelDownloadDialog by remember { mutableStateOf(false) }
     // Depth was chosen while its model is missing: applied once the model is installed.
     var pendingDepth by remember { mutableStateOf(false) }
@@ -284,15 +282,11 @@ fun GalleryEditScreen(
     var isSaving by remember { mutableStateOf(false) }
     var isLoadingPreview by remember { mutableStateOf(false) }
     val defaultPresetName = stringResource(R.string.preset_new_preset_default)
-    var showBaselineLutEditSheet by remember { mutableStateOf(false) }
-    var baselineLutEditId by remember { mutableStateOf<String?>(null) }
-    var showRawBaselineLutSelectorSheet by remember { mutableStateOf(false) }
 
     // 预览 Bitmap 状态
     var previewBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var cropPreviewBitmap by remember(editSourcePhoto?.id) { mutableStateOf<Bitmap?>(null) }
     var thumbnailBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var imageHistogram by remember { mutableStateOf<ImageHistogram?>(null) }
 
     // 边框编辑状态
     val editFrameId by viewModel.editFrameId.collectAsState()
@@ -350,62 +344,7 @@ fun GalleryEditScreen(
 
     val isRaw = editSourcePhoto?.let { viewModel.isRaw(it.id) } ?: false
     val refreshKey = editSourcePhoto?.id?.let { viewModel.photoRefreshKeys[it] } ?: 0L
-    val dngProfileStamp = remember(editSourcePhoto?.id, refreshKey, isRaw) {
-        editSourcePhoto
-            ?.takeIf { isRaw }
-            ?.let { GalleryManager.getDngFile(context, it.id) }
-            ?.takeIf { it.exists() }
-            ?.let { it.lastModified() xor it.length() }
-            ?: 0L
-    }
-    val embeddedProfileFallbackName = stringResource(
-        R.string.settings_raw_profile_tone_map_embedded
-    )
-    var embeddedDngProfileUiState by remember(editSourcePhoto?.id, dngProfileStamp) {
-        mutableStateOf(EmbeddedDngProfileUiState())
-    }
-
-    LaunchedEffect(
-        editSourcePhoto?.id,
-        dngProfileStamp,
-        isRaw,
-        embeddedProfileFallbackName,
-    ) {
-        val photo = editSourcePhoto
-        embeddedDngProfileUiState = if (photo != null && isRaw) {
-            withContext(Dispatchers.IO) {
-                val dngFile = GalleryManager.getDngFile(context, photo.id)
-                val profiles = DngEmbeddedProfile.readAllFrom(dngFile)
-                val visibleProfiles = profiles.filterNot { it.isPhotonHdr }
-                PLog.d(
-                    "GalleryEditScreen",
-                    "DNG embedded profiles: " + profiles.joinToString { profile ->
-                        "${profile.id}:${profile.profileName}" +
-                            "(pgtm=${profile.hasProfileGainTableMap},photon=${profile.isPhotonHdr})"
-                    }
-                )
-                EmbeddedDngProfileUiState(
-                    options = visibleProfiles.map { profile ->
-                        RawEmbeddedDngProfileOption(
-                            id = profile.id,
-                            name = profile.profileName
-                                .trim()
-                                .takeUnless {
-                                    it.isEmpty() || it.equals("Embedded", ignoreCase = true)
-                                }
-                                ?: embeddedProfileFallbackName,
-                            hasProfileGainTableMap = profile.hasProfileGainTableMap,
-                        )
-                    },
-                    defaultProfileId = visibleProfiles
-                        .firstOrNull { it.id == DngEmbeddedProfile.PRIMARY_PROFILE_ID }
-                        ?.id,
-                )
-            }
-        } else {
-            EmbeddedDngProfileUiState()
-        }
-    }
+    val embeddedDngProfileUiState = embeddedDngProfiles(editSourcePhoto, isRaw, refreshKey)
     val activeEmbeddedDngProfileId = editRawEmbeddedDngProfileId
         ?.takeIf { selectedId ->
             embeddedDngProfileUiState.options.any { it.id == selectedId }
@@ -415,7 +354,8 @@ fun GalleryEditScreen(
     // The editor's small, unsaved UI state in one object: the screen's main lambda may take at most 255 values.
     val ui = remember(editSourcePhoto?.id) { EditorUiState() }
     // HD preview: the editor previews at full size (slower, exactly what Save gives) instead of small copies.
-    val hdPreview by preferenceValue { it.editorHdPreview }
+    val hdPreviewState = preferenceValue { it.editorHdPreview }
+    val hdPreview by hdPreviewState
     var showOrigin by remember { mutableStateOf(false) }
 
     // 编辑标签页状态
@@ -464,13 +404,10 @@ fun GalleryEditScreen(
     var calibrationPick by rememberSaveable { mutableIntStateOf(0) }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     val scope = rememberCoroutineScope()
-    val isBaselineLutEditSheetVisible = showBaselineLutEditSheet && baselineLutEditId != null
 
     var previewRenderRequestId by remember { mutableLongStateOf(0L) }
-    // RAW: the edit state developed at half size, the photo's base while editing; Save develops it in full.
     // The edit chain's small copy (AI denoise, blur, JPEG noise reduction), the base on screen while editing.
     val editChainBase by viewModel.editChainBase.collectAsState()
-    val shouldCalculateImageHistogram = isBaselineLutEditSheetVisible
 
     // shortcut: a rough stand-in, exact only in the midtones (brightening clips early, darkening can't bring back
     // what the develop clipped); it ends by itself when a develop of the current tone values lands.
@@ -488,7 +425,7 @@ fun GalleryEditScreen(
         val levelsChanged = editRawWhitePointCorrection != was("rawWhitePoint") ||
             editRawBlackPointCorrection != was("rawBlackPoint")
         if (exposure == 0f && highlights == 0f && shadows == 0f && !levelsChanged) return null
-        val base = editPhotoRecipeParams ?: editLutRecipeParams ?: ColorRecipeParams()
+        val base = editPhotoRecipeParams ?: editLutRecipeParams
         return base.copy(
             exposure = base.exposure + exposure,
             highlights = base.highlights + highlights,
@@ -563,6 +500,9 @@ fun GalleryEditScreen(
             rawToneStandIn = rawToneStandIn(),
         )
     }
+    // Effects and the screen hold this one reference rather than every value the function reads: that keeps
+    // their compiled methods small enough for ART to compile.
+    val previewSignature: (Boolean) -> PreviewRenderSignature? = ::currentPreviewSignature
 
     // RAW: this session's renders, small, by the edit state they show. Going back to one (an engine tried before)
     // shows it at once while the RAW develops again behind it, so looks can be compared without waiting.
@@ -578,7 +518,7 @@ fun GalleryEditScreen(
         val requestId = ++previewRenderRequestId
         val isCropPreview = section == EditorSection.Crop
         // The state this picture shows: a mode switch waits for a picture of the current state.
-        val renderedFor = currentPreviewSignature()
+        val renderedFor = previewSignature(false)
         val bitmap = withContext(Dispatchers.IO) {
             viewModel.getPreviewBitmap(
                 photo,
@@ -624,7 +564,7 @@ fun GalleryEditScreen(
         if (photo.isVideo) return@LaunchedEffect
         snapshotFlow {
             // RAW: only the tone stand-in follows the finger; everything else waits for the full pass.
-            currentPreviewSignature(true)?.takeIf { !isRaw || it.rawToneStandIn != null }
+            previewSignature(true)?.takeIf { !isRaw || it.rawToneStandIn != null }
         }
             .filter { it != null }
             .conflate()
@@ -644,7 +584,7 @@ fun GalleryEditScreen(
         // stays on until the preview shows them, not only while they were being made.
         isLoadingPreview = true
         snapshotFlow {
-            currentPreviewSignature()
+            previewSignature(false)
         }
             .filter { it != null }
             .conflate()
@@ -660,29 +600,6 @@ fun GalleryEditScreen(
         val photo = editSourcePhoto ?: return@LaunchedEffect
         thumbnailBitmap = withContext(Dispatchers.IO) {
             viewModel.loadThumbnail(photo)
-        }
-    }
-
-    LaunchedEffect(shouldCalculateImageHistogram, previewBitmap) {
-        val bitmap = previewBitmap
-        if (!shouldCalculateImageHistogram || bitmap == null || bitmap.isRecycled) {
-            imageHistogram = null
-            return@LaunchedEffect
-        }
-
-        imageHistogram = try {
-            withContext(Dispatchers.Default) {
-                ImageHistogram.fromBitmap(bitmap)
-            }
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            PLog.e(
-                "GalleryEditScreen",
-                "Failed to calculate histogram from the current preview",
-                error,
-            )
-            null
         }
     }
 
@@ -793,26 +710,7 @@ fun GalleryEditScreen(
         if (isBokehProcessing || blurPending) awaitingBlur = true else if (!isLoadingPreview) awaitingBlur = false
     }
 
-    // Portrait's cheap preview: the photo as edited but without the blur, small, loaded once per edit state
-    // (one ordinary preview render, never while dragging), then blurred on the CPU from the subject cut-out.
     val portraitOpen = section == EditorSection.Portrait && !currentPhoto.isVideo
-    var sharpBase by remember(currentEditSourcePhoto.id) { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(
-        portraitOpen, currentEditSourcePhoto.id, editPhotoRecipeParams, editLutId,
-        editCropRect, editRotationDegrees, editStraightenDegrees, editMirrorHorizontal,
-    ) {
-        if (!portraitOpen) return@LaunchedEffect
-        viewModel.prepareBlurMaps(currentEditSourcePhoto)
-        sharpBase = withContext(Dispatchers.IO) {
-            viewModel.getPreviewBitmap(
-                currentEditSourcePhoto,
-                useGlobalEdit = true,
-                ignoreFrame = true,
-                ignoreBokeh = true,
-                maxEdge = 720,
-            )
-        }
-    }
     // The ruler's place between two stops while it is dragged, so the preview's blur grows with the finger.
     var apertureScroll by remember { mutableStateOf<Float?>(null) }
     val previewStrength = apertureScroll?.let { position ->
@@ -822,45 +720,26 @@ fun GalleryEditScreen(
         BlurPreview.strength(ApertureStops[lower]) * (1 - t) + BlurPreview.strength(ApertureStops[upper]) * t
     } ?: BlurPreview.strength(apertureDrag ?: editComputationalAperture ?: 0f)
 
-    // The preview at each of BlurPreview.LEVELS, made on the CPU whenever the photo, the focus or the mode
-    // changes; the strength in use comes first so the preview shows at once, the rest follow for scrolling.
-    var blurLayers by remember { mutableStateOf<List<ImageBitmap?>>(emptyList()) }
     val previewDepthOfField = dofDrag?.roundToInt() ?: editDepthOfField
-    LaunchedEffect(portraitOpen, sharpBase, blurMaps, ringDrag, editFocusX, editFocusY, portraitQuick, previewDepthOfField) {
-        val base = sharpBase
-        val maps = blurMaps?.takeIf { it.photoId == currentEditSourcePhoto.id }
-        if (!portraitOpen || base == null || maps == null) {
-            blurLayers = emptyList()
-            return@LaunchedEffect
-        }
-        delay(60)  // a burst of drags only computes the last one
-        val bounds = contentBounds
-        val focus = ringDrag?.takeIf { bounds != null && bounds.width > 0f }?.let { p ->
-            viewModel.displayPointToSource(
-                ((p.x - bounds!!.left) / bounds.width).coerceIn(0f, 1f),
-                ((p.y - bounds.top) / bounds.height).coerceIn(0f, 1f),
-            )
-        } ?: ((editFocusX ?: 0.5f) to (editFocusY ?: 0.5f))
-        val prepared = withContext(Dispatchers.Default) {
-            BlurPreview.prepare(
-                base = base,
-                toSource = viewModel::displayPointToSource,
-                mask = maps.mask,
-                depth = maps.depth,
-                focusX = focus.first,
-                focusY = focus.second,
-                quick = portraitQuick,
-                widthScale = PortraitBlurMetadata.focalWidthScale(previewDepthOfField),
-            )
-        }
-        val layers = MutableList<ImageBitmap?>(BlurPreview.LEVELS.size) { null }
-        for (level in BlurPreview.LEVELS.indices.sortedBy { abs(BlurPreview.LEVELS[it] - previewStrength) }) {
-            layers[level] = withContext(Dispatchers.Default) {
-                BlurPreview.layer(prepared, BlurPreview.LEVELS[level]).asImageBitmap()
-            }
-            blurLayers = layers.toList()
-        }
-    }
+    val blurLayers by portraitBlurLayers(
+        viewModel = viewModel,
+        photo = currentEditSourcePhoto,
+        portraitOpen = portraitOpen,
+        editPhotoRecipeParams = editPhotoRecipeParams,
+        editLutId = editLutId,
+        editCropRect = editCropRect,
+        editRotationDegrees = editRotationDegrees,
+        editStraightenDegrees = editStraightenDegrees,
+        editMirrorHorizontal = editMirrorHorizontal,
+        blurMaps = blurMaps,
+        ringDrag = ringDrag,
+        editFocusX = editFocusX,
+        editFocusY = editFocusY,
+        portraitQuick = portraitQuick,
+        previewDepthOfField = previewDepthOfField,
+        previewStrength = previewStrength,
+        contentBounds = { contentBounds },
+    )
 
     // Portrait's focus ring: where the focus point is on the photo, and on screen inside the zoomable view.
     val focusOnPhoto = remember(
@@ -923,7 +802,6 @@ fun GalleryEditScreen(
         ?: currentPhoto.width.takeIf { it > 0 }
     val previewSourceHeight = previewBitmap?.height?.takeIf { it > 0 }
         ?: currentPhoto.height.takeIf { it > 0 }
-    var pendingRawPreviewRefresh by remember(currentEditSourcePhoto.id) { mutableStateOf(false) }
     // Save is developing the RAW in full before the edit saves.
     // How long the last develop with each engine took in this session, for the status line's estimate.
     // The RAW develop's stages as they pass, timed per kind (preview or full) and engine for the next estimate.
@@ -940,8 +818,6 @@ fun GalleryEditScreen(
         ui.stageStartedAt = now
     }
 
-    var pendingPhotonPgtmRegeneration by remember(currentEditSourcePhoto.id) { mutableStateOf(false) }
-    var pendingRawRefreshToast by remember(currentEditSourcePhoto.id) { mutableStateOf(false) }
     val isRefreshingRawPreview = viewModel.refreshingPhotos.contains(currentEditSourcePhoto.id)
 
     // One heavy GPU job at a time: while a blur, a RAW develop, AI denoise or noise reduction runs, a press that
@@ -960,90 +836,8 @@ fun GalleryEditScreen(
         if (!blockedByGpu(allowBlur = true)) placeFocus(position)
     }
 
-    fun refreshRawPreview(
-        showResultToast: Boolean = false,
-        forceRegeneratePhotonPgtm: Boolean = false,
-    ) {
-        // shortcut: assumes the files develop from the state saved just before; a change saved while this
-        // starts could be cached under the wrong state. Only a few small earlier looks are kept, so the cost is low.
-        val requested = viewModel.editRawState()
-        val engineAtStart = viewModel.editRawRenderingEngine.value.name
-        val startedAt = SystemClock.uptimeMillis()
-        viewModel.refreshRawPreview(
-            photo = currentEditSourcePhoto,
-            forceRegeneratePhotonPgtm = forceRegeneratePhotonPgtm,
-        ) { success ->
-            if (success) {
-                ui.developedRaw = requested
-                ui.rawDevelopMs["full:$engineAtStart"] = SystemClock.uptimeMillis() - startedAt
-                ui.rawPreviewBase = null
-            }
-            if (showResultToast) {
-                Toast.makeText(
-                    context,
-                    if (success) R.string.refresh_success else R.string.refresh_failed,
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
-    }
-
-    // The quick preview develop: one at a time; changes made meanwhile develop once more when it ends.
-    fun developRawPreview() {
-        if (ui.previewDeveloping) {
-            ui.previewAgain = true
-            return
-        }
-        ui.previewDeveloping = true
-        val photo = currentEditSourcePhoto
-        scope.launch {
-            // A develop holds the GPU for seconds: it waits until the user pauses, then takes the settings as
-            // they are by then.
-            viewModel.awaitEditorPause()
-            ui.previewAgain = false
-            val state = viewModel.editRawState()
-            val meta = viewModel.editRawPreviewMetadata(photo)
-            val engineAtStart = viewModel.editRawRenderingEngine.value.name
-            val startedAt = SystemClock.uptimeMillis()
-            val bitmap = GalleryManager.developRawPreview(context, photo.id, meta, halfSize = !hdPreview)
-            if (bitmap != null) {
-                ui.rawPreviewBase = bitmap
-                ui.developedRaw = state
-                ui.rawDevelopMs[engineAtStart] = SystemClock.uptimeMillis() - startedAt
-            }
-            ui.previewDeveloping = false
-            if (ui.previewAgain) {
-                ui.previewAgain = false
-                developRawPreview()
-            }
-        }
-    }
-
-    fun requestRawPreviewRefresh(
-        showResultToast: Boolean = false,
-        forceRegeneratePhotonPgtm: Boolean = false,
-    ) {
-        if (!isRaw) return
-        // While editing, a RAW change develops the quick preview; Re-render writes the edits and develops in full.
-        if (viewModel.deferEditWrites && !forceRegeneratePhotonPgtm) {
-            developRawPreview()
-            return
-        }
-        if (viewModel.rawEditsPending) {
-            viewModel.writeRawEdits(currentEditSourcePhoto) { requestRawPreviewRefresh(showResultToast, forceRegeneratePhotonPgtm) }
-            return
-        }
-        if (viewModel.refreshingPhotos.contains(currentEditSourcePhoto.id)) {
-            pendingPhotonPgtmRegeneration = pendingPhotonPgtmRegeneration || forceRegeneratePhotonPgtm
-            pendingRawRefreshToast = pendingRawRefreshToast || showResultToast
-            pendingRawPreviewRefresh = true
-            return
-        }
-        refreshRawPreview(
-            showResultToast = showResultToast,
-            forceRegeneratePhotonPgtm = forceRegeneratePhotonPgtm,
-        )
-    }
+    val rawRefresh = rawPreviewRefresh(viewModel, ui, currentEditSourcePhoto, isRaw, hdPreviewState, scope)
+    fun requestRawPreviewRefresh(forceRegeneratePhotonPgtm: Boolean = false) = rawRefresh(forceRegeneratePhotonPgtm)
 
     // Undo and Redo show where the change was: the section (and group) of a changed setting, unless one is in view.
     fun showStepPlace(keys: Set<String>) {
@@ -1086,6 +880,9 @@ fun GalleryEditScreen(
         }
         showStepPlace(keys)
     }
+    // The handlers below hold this one reference rather than every value the function reads, as with
+    // previewSignature.
+    val historyStep: (Boolean) -> Unit = ::stepHistory
 
     val rawDcpLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
@@ -1109,25 +906,7 @@ fun GalleryEditScreen(
         }
     }
 
-    LaunchedEffect(isRefreshingRawPreview, pendingRawPreviewRefresh, currentEditSourcePhoto.id) {
-        if (!isRefreshingRawPreview && pendingRawPreviewRefresh) {
-            val forceRegeneratePhotonPgtm = pendingPhotonPgtmRegeneration
-            val showResultToast = pendingRawRefreshToast
-            pendingRawPreviewRefresh = false
-            pendingPhotonPgtmRegeneration = false
-            pendingRawRefreshToast = false
-            refreshRawPreview(
-                showResultToast = showResultToast,
-                forceRegeneratePhotonPgtm = forceRegeneratePhotonPgtm,
-            )
-        }
-    }
-
-    val rawBusy = isRefreshingRawPreview || pendingRawPreviewRefresh || ui.previewDeveloping || ui.previewAgain
-    // Switching HD develops the waiting RAW changes again at the other size.
-    LaunchedEffect(hdPreview) {
-        if (isRaw && viewModel.rawEditsPending) developRawPreview()
-    }
+    val rawBusy = isRefreshingRawPreview || ui.pendingRawRefresh || ui.previewDeveloping || ui.previewAgain
     // A RAW state seen before shows its earlier look at once; the develop behind it replaces it when done.
     LaunchedEffect(editState, ui.developedRaw, rawBusy) {
         if (!isRaw) return@LaunchedEffect
@@ -1135,7 +914,7 @@ fun GalleryEditScreen(
         ui.rawLookShown = look != null && !rawDeveloped()
         if (ui.rawLookShown) {
             previewBitmap = look
-            ui.previewFor = currentPreviewSignature()
+            ui.previewFor = previewSignature(false)
         }
     }
     // Once the photo shows its current state, a small copy is kept (the last six).
@@ -1163,140 +942,8 @@ fun GalleryEditScreen(
                 .onSizeChanged { viewportSize = it }
                 .animateContentSize()
         ) {
-            // Draggable Floating Reference Photo
-            val referencePhotoUrl = userPreferences.referencePhotoUrl
-            var isMinimized by remember { mutableStateOf(false) }
-            var isLarge by remember { mutableStateOf(false) }
-            
-            referencePhotoUrl?.let { url ->
-                val density = androidx.compose.ui.platform.LocalDensity.current
-                val initialOffsetX = remember(density) { with(density) { 20.dp.toPx() } }
-                val initialOffsetY = remember(density) { with(density) { 80.dp.toPx() } }
-                
-                var offsetX by remember { mutableStateOf(initialOffsetX) }
-                var offsetY by remember { mutableStateOf(initialOffsetY) }
-
-                Box(
-                    modifier = Modifier
-                        .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
-                        .pointerInput(Unit) {
-                            detectDragGestures { change, dragAmount ->
-                                change.consume()
-                                offsetX += dragAmount.x
-                                offsetY += dragAmount.y
-                            }
-                        }
-                        .zIndex(10f)
-                ) {
-                    if (isMinimized) {
-                        Card(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clickable { isMinimized = false },
-                            shape = CircleShape,
-                            colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.8f)),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                            border = BorderStroke(1.5.dp, Color.White)
-                        ) {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = AppIcons.PushPin,
-                                    contentDescription = "Show Reference",
-                                    tint = AccentColor,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    } else {
-                        val cardSize = if (isLarge) 240.dp else 120.dp
-                        Card(
-                            modifier = Modifier
-                                .width(cardSize),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                            border = BorderStroke(2.dp, Color.White)
-                        ) {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Box(modifier = Modifier.fillMaxWidth()) {
-                                    coil.compose.AsyncImage(
-                                        model = ImageRequest.Builder(LocalContext.current)
-                                            .data(url)
-                                            .placeholder(R.mipmap.ic_launcher)
-                                            .build(),
-                                        contentDescription = "Reference Photo",
-                                        modifier = Modifier
-                                            .fillMaxWidth(),
-                                        contentScale = ContentScale.FillWidth
-                                    )
-                                    
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(4.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(24.dp)
-                                                .clip(CircleShape)
-                                                .background(Color.Black.copy(alpha = 0.6f))
-                                                .clickable { isMinimized = true },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = AppIcons.PushPin,
-                                                contentDescription = "Minimize",
-                                                tint = Color.White,
-                                                modifier = Modifier.size(12.dp)
-                                            )
-                                        }
-                                        Box(
-                                            modifier = Modifier
-                                                .size(24.dp)
-                                                .clip(CircleShape)
-                                                .background(Color.Black.copy(alpha = 0.6f))
-                                                .clickable {
-                                                    scope.launch {
-                                                        userPreferencesRepository.update { this.referencePhotoUrl = null }
-                                                    }
-                                                },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Close,
-                                                contentDescription = "Close",
-                                                tint = Color.White,
-                                                modifier = Modifier.size(12.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                                
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(Color.White)
-                                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                                        .clickable { isLarge = !isLarge },
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = if (isLarge) stringResource(R.string.zoom_out) else stringResource(R.string.zoom_in),
-                                        color = Color.Black,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+            ReferencePhoto(userPreferences.referencePhotoUrl) {
+                scope.launch { userPreferencesRepository.update { this.referencePhotoUrl = null } }
             }
 
             // The photo, placed by its shape: above the tool block while editing, the whole screen in full view.
@@ -1310,7 +957,7 @@ fun GalleryEditScreen(
             }
             // Switching to or from Crop shows the new view once its picture shows the current edit; until then
             // the previous view stays, so an old picture never flashes up.
-            val currentSignature = currentPreviewSignature()
+            val currentSignature = previewSignature(false)
             val viewReady = if (cropView) {
                 cropPreviewBitmap != null && ui.cropFor == currentSignature
             } else {
@@ -1604,108 +1251,6 @@ fun GalleryEditScreen(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                val previewMediaModifier = Modifier.fillMaxSize()
-
-                // 显示预览
-                if (currentPhoto.isVideo) {
-                    if (videoSourceProfile != null) {
-                        VideoEditPlayer(
-                            photo = currentPhoto,
-                            lutConfig = if (showOrigin) null else editLutConfig,
-                            recipeParams = if (showOrigin) null else (editPhotoRecipeParams ?: editLutRecipeParams),
-                            sourceLogProfile = videoSourceProfile,
-                            modifier = previewMediaModifier
-                        )
-                    } else {
-                        CircularProgressIndicator(color = Color.White)
-                    }
-                } else if (showCrop && cropPreviewBitmap != null) {
-                    val geometryBaseWidth = currentEditSourcePhoto.metadata?.width?.takeIf { it > 0 }
-                        ?: currentEditSourcePhoto.width.coerceAtLeast(1)
-                    val geometryBaseHeight = currentEditSourcePhoto.metadata?.height?.takeIf { it > 0 }
-                        ?: currentEditSourcePhoto.height.coerceAtLeast(1)
-                    val (straightenSourceWidth, straightenSourceHeight) =
-                        PostEditGeometry.rotatedDimensions(
-                            geometryBaseWidth,
-                            geometryBaseHeight,
-                            editRotationDegrees
-                        )
-                    val (straightenedWidth, straightenedHeight) =
-                        PostEditGeometry.straightenedDimensions(
-                            straightenSourceWidth,
-                            straightenSourceHeight,
-                            editStraightenDegrees
-                        )
-                    val cropAspectRatio = when (editCropAspectOption) {
-                        CropAspectOption.Free -> null
-                        CropAspectOption.Original ->
-                            straightenSourceWidth.toFloat() / straightenSourceHeight
-                        else -> editCropAspectOption.getAspectRatioValue(
-                            straightenSourceWidth,
-                            straightenSourceHeight
-                        )
-                    }
-                    // Keep the no-black-corner constraint stable while the user drags a free crop
-                    // handle. Recomputing it from editCropRect on every pointer move changes the
-                    // pointerInput key and cancels the active gesture after each small movement.
-                    val effectiveCropAspectRatio = remember(
-                        currentEditSourcePhoto.id,
-                        editRotationDegrees,
-                        editStraightenDegrees,
-                        editCropAspectOption,
-                        straightenSourceWidth,
-                        straightenSourceHeight
-                    ) {
-                        cropAspectRatio
-                            ?: editCropRect?.takeIf { it.width() > 0f && it.height() > 0f }?.let {
-                                it.width() * straightenedWidth /
-                                    (it.height() * straightenedHeight)
-                            }
-                            ?: straightenSourceWidth.toFloat() / straightenSourceHeight
-                    }
-                    val cropBounds = PostEditGeometry.straightenSafeCropRectForAspect(
-                        width = straightenSourceWidth,
-                        height = straightenSourceHeight,
-                        straightenDegrees = editStraightenDegrees,
-                        pixelAspect = effectiveCropAspectRatio
-                    )
-                    // A held value shows the photo without that one change (the frame hides, it no longer fits).
-                    val heldTurn = ui.heldCrop == "rotation"
-                    val heldFlip = ui.heldCrop == "mirror"
-                    CropOverlay(
-                        bitmap = cropPreviewBitmap,
-                        cropRect = editCropRect ?: cropBounds,
-                        cropAspectRatio = cropAspectRatio,
-                        straightenDegrees = when {
-                            ui.heldCrop == "straighten" -> 0f
-                            heldFlip -> -editStraightenDegrees  // flipping also mirrored the angle
-                            else -> editStraightenDegrees
-                        },
-                        geometrySourceWidth = straightenSourceWidth,
-                        geometrySourceHeight = straightenSourceHeight,
-                        onCropRectChanged = { rect -> viewModel.setCropRect(rect) },
-                        aspectOption = editCropAspectOption,
-                        contentPadding = 24.dp,
-                        rotationDegrees = if (heldTurn) 0 else editRotationDegrees,
-                        mirrorHorizontal = editMirrorHorizontal && !heldFlip,
-                        showFrame = ui.heldCrop == null,
-                        modifier = previewMediaModifier
-                    )
-                } else {
-                    ZoomableEditImage(
-                        previewBitmap = previewBitmap,
-                        resetKey = fullView,
-                        contentDescription = stringResource(R.string.edit),
-                        onZoomChange = {
-                            isZoomed = it
-                        },
-                        onContentBounds = { contentBounds = it },
-                        modifier = previewMediaModifier
-                    )
-                }
-
-                LutSwipeIndicator(state = lutSwipeState)
-
                 // The blur on screen against the blur asked for: the picture's base is the chain's small copy (made
                 // with the chain's blur settings) or the photo's files (the settings it opened with). While they
                 // differ the cheap blur shows, from the frame a setting changes, so the old blur never flashes up.
@@ -1716,61 +1261,44 @@ fun GalleryEditScreen(
                     shownSignature.editChainBase === editChainBase -> viewModel.editChainBlurKey
                     else -> Unit
                 }
-                val blurStale = portraitOpen && shownBlur != viewModel.currentBlurKey()
-                // Portrait: the cheap preview while the blur renders or a control is dragged, cross-fading between
-                // the two prepared strengths around the one wanted, so it feels like more steps than there are.
-                val previewBounds = contentBounds
-                val layers = blurLayers
-                val cheapWanted = portraitOpen && !fullView && (previewStrength > 0f || apertureScroll != null) &&
-                    (awaitingBlur || blurStale || apertureDrag != null || apertureScroll != null || ringDrag != null || dofDrag != null)
-                // On at once; off only after the new blur has cross-faded in underneath (the picture's own fade
-                // takes about 200 ms), then fading out over it, so no moment shows the photo without a blur.
-                val cheapAlpha by animateFloatAsState(
-                    targetValue = if (cheapWanted) 1f else 0f,
-                    animationSpec = if (cheapWanted) snap() else tween(durationMillis = 300, delayMillis = 300),
-                    label = "cheapBlur",
+                EditorPhotoContent(
+                    viewModel = viewModel,
+                    ui = ui,
+                    currentPhoto = currentPhoto,
+                    currentEditSourcePhoto = currentEditSourcePhoto,
+                    videoSourceProfile = videoSourceProfile,
+                    editLutConfig = editLutConfig,
+                    recipe = editPhotoRecipeParams ?: editLutRecipeParams,
+                    showOrigin = showOrigin,
+                    fullView = fullView,
+                    showCrop = showCrop,
+                    cropPreviewBitmap = cropPreviewBitmap,
+                    previewBitmap = previewBitmap,
+                    editCropRect = editCropRect,
+                    editCropAspectOption = editCropAspectOption,
+                    editRotationDegrees = editRotationDegrees,
+                    editStraightenDegrees = editStraightenDegrees,
+                    editMirrorHorizontal = editMirrorHorizontal,
+                    lutSwipeState = lutSwipeState,
+                    blurStale = portraitOpen && shownBlur != viewModel.currentBlurKey(),
+                    portraitOpen = portraitOpen,
+                    portraitQuick = portraitQuick,
+                    previewStrength = previewStrength,
+                    blurLayers = blurLayers,
+                    awaitingBlur = awaitingBlur,
+                    apertureDrag = apertureDrag,
+                    apertureScroll = apertureScroll,
+                    dofDrag = dofDrag,
+                    editComputationalAperture = editComputationalAperture,
+                    contentBounds = contentBounds,
+                    ringDrag = ringDrag,
+                    focusCenter = ringCenter(focusOnPhoto),
+                    curveOpen = curveOpen,
+                    curveFree = curveFree,
+                    curveChannel = curveChannel,
+                    onZoomChange = { isZoomed = it },
+                    onContentBounds = { contentBounds = it },
                 )
-                if (layers.isNotEmpty() && previewBounds != null && portraitOpen && !fullView && cheapAlpha > 0f) {
-                    val levels = BlurPreview.LEVELS
-                    val upper = levels.indexOfFirst { it >= previewStrength }.let { if (it < 0) levels.lastIndex else it }
-                    val lower = (upper - 1).coerceAtLeast(0)
-                    val t = if (upper == lower) 1f else ((previewStrength - levels[lower]) / (levels[upper] - levels[lower])).coerceIn(0f, 1f)
-                    val under = layers[lower] ?: layers[upper]
-                    val over = layers[upper] ?: layers[lower]
-                    val dstOffset = IntOffset(previewBounds.left.roundToInt(), previewBounds.top.roundToInt())
-                    val dstSize = IntSize(previewBounds.width.roundToInt(), previewBounds.height.roundToInt())
-                    androidx.compose.foundation.Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = cheapAlpha }) {
-                        under?.let { drawImage(it, dstOffset = dstOffset, dstSize = dstSize) }
-                        if (over != null && over !== under) drawImage(over, dstOffset = dstOffset, dstSize = dstSize, alpha = t)
-                    }
-                }
-
-                // Portrait: the focus ring, on the photo the whole time the section is open (not in Quick,
-                // which keeps the cut-out subject sharp wherever the focus is).
-                if (portraitOpen && !fullView && !portraitQuick) {
-                    val center = ringDrag ?: ringCenter(focusOnPhoto)
-                    if (center != null) {
-                        PortraitFocusRing(
-                            center = center,
-                            off = (apertureDrag ?: editComputationalAperture ?: 0f) <= 0f
-                        )
-                    }
-                }
-
-                if (curveOpen && !fullView && !currentPhoto.isVideo) {
-                    val recipe = editPhotoRecipeParams ?: editLutRecipeParams
-                    val points = ui.curveDrag ?: curvePoints(recipe, curveChannel)
-                    CurveOverlay(
-                        contentBounds = contentBounds,
-                        free = curveFree,
-                        points = points,
-                        channel = curveChannel,
-                        // The other channels that bend the tones, faint behind the one being edited.
-                        others = CurveChannel.entries.filter { it != curveChannel }
-                            .mapNotNull { c -> recipe.getCurvePoints(c)?.let { c to it } },
-                        selected = ui.curveSelected?.takeIf { it < points.size },
-                    )
-                }
             }
 
             if (!fullView) {
@@ -1991,35 +1519,7 @@ fun GalleryEditScreen(
                             (it.filmSection == null || rawLevel?.filmSections?.containsKey(it.filmSection) == true)
                     }
                 }
-                val groupTiles = groups.map { g ->
-                    EditorValue(
-                        key = "group:${g.name}",
-                        name = stringResource(g.label),
-                        value = "",
-                        icon = g.icon,
-                        changed = g.filmSection?.let { rawLevel?.filmSections?.get(it) } ?: g.keys.any { it in changedKeys },
-                        wide = true,
-                        group = true,
-                    )
-                }
-                val offText = stringResource(R.string.editor_off)
-                val autoText = stringResource(R.string.editor_auto)
-                val shallowText = stringResource(R.string.editor_shallow)
-                val deepText = stringResource(R.string.editor_deep)
-                val shallowValue = stringResource(R.string.editor_shallow_value)
-                val deepValue = stringResource(R.string.editor_deep_value)
-                // Lower keeps less in focus, higher more; words say which way, as signs alone did not.
-                fun depthOfFieldText(v: Float): String {
-                    val n = v.roundToInt()
-                    return when {
-                        n < 0 -> shallowValue.format(-n)
-                        n > 0 -> deepValue.format(n)
-                        else -> autoText
-                    }
-                }
-                val subjectText = stringResource(R.string.editor_subject)
-                val onText = stringResource(R.string.editor_on)
-
+                val groupTiles = groupTiles(groups, rawLevel?.filmSections, changedKeys)
                 // Crop: the photo's size once turned (Original's shape), and the frame's shape on it.
                 val cropBaseW = currentEditSourcePhoto.metadata?.width?.takeIf { it > 0 } ?: currentEditSourcePhoto.width.coerceAtLeast(1)
                 val cropBaseH = currentEditSourcePhoto.metadata?.height?.takeIf { it > 0 } ?: currentEditSourcePhoto.height.coerceAtLeast(1)
@@ -2033,25 +1533,6 @@ fun GalleryEditScreen(
                     AspectRatio.RATIO_1_1, AspectRatio.RATIO_4_3, AspectRatio.RATIO_3_2, AspectRatio.RATIO_16_9,
                     AspectRatio.RATIO_21_9, AspectRatio.XPAN,
                 ) + customCameraRatios.filterNot { it in AspectRatio.entries }
-                fun sameShape(option: CropAspectOption, r: AspectRatio): Boolean {
-                    if (!option.hasFixedRatio || option.heightRatio == 0f) return false
-                    val a = option.widthRatio / option.heightRatio
-                    val wide = r.widthRatio.toFloat() / r.heightRatio
-                    return abs(a - wide) / wide < 0.01f || abs(a - 1f / wide) * wide < 0.01f
-                }
-                val freeText = stringResource(R.string.crop_free)
-                val originalText = stringResource(R.string.crop_original)
-                fun ratioText(option: CropAspectOption): String = when {
-                    option.isFree -> freeText
-                    option.isOriginal -> originalText
-                    else -> ratioChoices.firstOrNull { sameShape(option, it) }?.let { r ->
-                        when {
-                            r == AspectRatio.XPAN -> "XPAN"
-                            option.widthRatio >= option.heightRatio -> "${r.widthRatio}:${r.heightRatio}"
-                            else -> "${r.heightRatio}:${r.widthRatio}"
-                        }
-                    } ?: String.format(Locale.ROOT, "%.2f:1", option.widthRatio / option.heightRatio)
-                }
                 fun chooseRatio(r: AspectRatio) {
                     val landscape = turnedW >= turnedH
                     viewModel.setCropAspectOption(
@@ -2074,7 +1555,6 @@ fun GalleryEditScreen(
                         viewModel.setCropAspectOption(openOption)
                     }
                 }
-                fun straightenText(v: Float) = String.format(Locale.ROOT, "%.1f", v).removeSuffix(".0") + "°"
 
                 // Curve: each channel against its curve when the editor opened.
                 val openCurves = viewModel.editOpenValue("recipe.curves")
@@ -2118,102 +1598,44 @@ fun GalleryEditScreen(
                     rawItems.isNotEmpty() -> rawItems.map {
                         EditorValue(it.key, it.name, it.value, it.icon, it.changed, wide = it.ruler == null)
                     } + groupTiles
-                    groupValues.isNotEmpty() -> groupValues.map { v ->
-                        EditorValue(v.key, stringResource(v.label), v.text(v.get(effectiveRecipe)), v.icon, groupChanged(v))
-                    }
-                    group == EditorGroup.Curve -> listOf(
-                        EditorValue(
-                            "curvePoint", stringResource(R.string.editor_curve_point),
-                            curvePoint?.let { (x, y) -> "${(x * 255).roundToInt()} → ${(y * 255).roundToInt()}" } ?: "—",
-                            AppIcons.CircleDotLine, curveChanged(curveChannel)
-                        ),
-                        // Acts on a tap, as Rotate does; never the selected control.
-                        EditorValue(
-                            "curveDelete", stringResource(R.string.editor_curve_delete), if (curvePoint != null) "✕" else "—",
-                            AppIcons.CloseLine, dimmed = curvePoint == null || curveNow.size <= 2
-                        ),
+                    groupValues.isNotEmpty() -> groupValueTiles(groupValues, effectiveRecipe, ::groupChanged)
+                    group == EditorGroup.Curve -> curveValues(
+                        point = curvePoint,
+                        changed = curveChanged(curveChannel),
+                        deletable = curvePoint != null && curveNow.size > 2,
                     )
                     group != null -> emptyList()
-                    section == EditorSection.Crop -> listOf(
-                        EditorValue(
-                            "cropRatio", stringResource(R.string.editor_ratio), ratioText(editCropAspectOption),
-                            AppIcons.CropLine,
-                            // A frame moved by turning or straightening alone is those values' change, not the ratio's.
-                            "cropRatio" in changedKeys || "crop" in changedKeys &&
-                                listOf("rotation", "straighten", "mirror").none { it in changedKeys },
-                            glyph = EditorGlyph.CropRatio, fraction = (frameShape - 1f) / (frameShape + 1f)
-                        ),
-                        EditorValue(
-                            "straighten", stringResource(R.string.crop_straighten), straightenText(editStraightenDegrees),
-                            AppIcons.CropLine, "straighten" in changedKeys,
-                            glyph = EditorGlyph.Straighten, fraction = editStraightenDegrees / 45f
-                        ),
-                        // Rotate and Flip act on every tap; they are never the selected control.
-                        EditorValue(
-                            "rotation", stringResource(R.string.rotate), "$editRotationDegrees°",
-                            AppIcons.RotateClockwiseLine, "rotation" in changedKeys,
-                            glyph = EditorGlyph.Rotate, fraction = editRotationDegrees / 360f
-                        ),
-                        EditorValue(
-                            "mirror", stringResource(R.string.editor_flip), if (editMirrorHorizontal) onText else offText,
-                            AppIcons.CropLine, "mirror" in changedKeys,
-                            glyph = EditorGlyph.Flip, fraction = if (editMirrorHorizontal) 1f else 0f
-                        ),
+                    section == EditorSection.Crop -> cropValues(
+                        option = editCropAspectOption,
+                        ratioChoices = ratioChoices,
+                        frameShape = frameShape,
+                        straighten = editStraightenDegrees,
+                        rotation = editRotationDegrees,
+                        mirror = editMirrorHorizontal,
+                        changedKeys = changedKeys,
                     )
-                    section == EditorSection.Look -> listOf(
-                        EditorValue(
-                            "look", stringResource(R.string.editor_look),
-                            availableLuts.find { it.id == editLutId }?.getName() ?: stringResource(R.string.none),
-                            AppIcons.FiltersLine, "look" in changedKeys, wide = true
-                        ),
-                        EditorValue(
-                            "intensity", stringResource(R.string.editor_intensity), "${(intensity * 100).roundToInt()}%",
-                            AppIcons.AdjustmentsLine, "lutIntensity" in changedKeys
-                        ),
-                    ) + if (currentPhoto.isVideo) emptyList() else listOf(
-                        EditorValue(
-                            "frame", stringResource(R.string.frame),
-                            availableFrames.find { it.id == editFrameId }?.name ?: stringResource(R.string.none),
-                            AppIcons.FrameLine, "frame" in changedKeys, wide = true
-                        ),
-                        EditorValue(
-                            "preset", stringResource(R.string.editor_preset),
-                            allPresets.find { it.id == viewModel.appliedPresetId }
-                                ?.let { presetDisplayName(it) + if (viewModel.appliedPresetChanged()) "*" else "" }
-                                ?: "—",
-                            AppIcons.BookmarkLine, wide = true
-                        ),
-                    ) + if (currentPhoto.isMotionPhoto) listOf(
-                        EditorValue(
-                            "livePhoto", stringResource(R.string.settings_use_live_photo),
-                            if (applyEffectsToVideo) onText else offText,
-                            AppIcons.MovieLine, "applyEffectsToVideo" in changedKeys
-                        )
-                    ) else emptyList()
-                    else -> settings.map { s ->
-                        val v = settingValue(s)
-                        EditorValue(
-                            key = s.key,
-                            name = stringResource(s.label),
-                            value = when {
-                                s.kind == SettingKind.Aperture -> if (v > 0f) "f/${formatAperture(v)}" else offText
-                                s.kind == SettingKind.DepthOfField -> depthOfFieldText(v)
-                                s == EditorSetting.Focus && quick -> subjectText
-                                s == EditorSetting.Depth && blurOff -> offText
-                                s.kind == SettingKind.Choice -> choiceOptions(s).firstOrNull { it.selected }?.label.orEmpty()
-                                s.kind != SettingKind.AiDenoise -> s.format(v)
-                                isAiDenoising -> "${(aiDenoiseProgress * 100).roundToInt()}%"
-                                editAiDenoiseEnabled -> onText
-                                else -> offText
-                            },
-                            icon = s.icon,
-                            changed = s.key in changedKeys,
-                            glyph = s.glyph,
-                            fraction = s.fraction(v),
-                            dimmed = s.section == EditorSection.Portrait && s != EditorSetting.Aperture &&
-                                s != EditorSetting.Depth && blurOff,
-                        )
-                    } + groupTiles
+                    section == EditorSection.Look -> lookValues(
+                        lookName = availableLuts.find { it.id == editLutId }?.getName(),
+                        intensity = intensity,
+                        isVideo = currentPhoto.isVideo,
+                        isMotionPhoto = currentPhoto.isMotionPhoto,
+                        frameName = availableFrames.find { it.id == editFrameId }?.name,
+                        preset = allPresets.find { it.id == viewModel.appliedPresetId }
+                            ?.let { presetDisplayName(it) + if (viewModel.appliedPresetChanged()) "*" else "" },
+                        applyEffectsToVideo = applyEffectsToVideo,
+                        changedKeys = changedKeys,
+                    )
+                    else -> settingValues(
+                        settings = settings,
+                        valueOf = ::settingValue,
+                        choiceLabel = { s -> choiceOptions(s).firstOrNull { it.selected }?.label.orEmpty() },
+                        quick = quick,
+                        blurOff = blurOff,
+                        aiDenoiseEnabled = editAiDenoiseEnabled,
+                        isAiDenoising = isAiDenoising,
+                        aiDenoiseProgress = aiDenoiseProgress,
+                        changedKeys = changedKeys,
+                    ) + groupTiles
                 }
                 val selectable = values.filterNot { it.group || it.key in setOf("rotation", "mirror", "curveDelete") }
                 val selectedKey = selectable.firstOrNull { it.key == selections[levelKey] }?.key ?: selectable.firstOrNull()?.key
@@ -2243,8 +1665,8 @@ fun GalleryEditScreen(
                     fullView = false,
                     saving = isSaving,
                     onCancel = ::requestLeave,
-                    onUndo = { stepHistory(true) },
-                    onRedo = { stepHistory(false) },
+                    onUndo = { historyStep(true) },
+                    onRedo = { historyStep(false) },
                     onFullView = { fullView = true },
                     onCompare = { showOrigin = it },
                     onSave = {
@@ -2304,489 +1726,137 @@ fun GalleryEditScreen(
                     modifier = Modifier.align(Alignment.TopCenter)
                 )
 
-                // What the blur is doing, under the edge icons, while it works.
-                val blurStatus = when (blurProgress?.stage) {
-                    BokehStage.Subject -> stringResource(R.string.editor_blur_subject)
-                    BokehStage.Depth -> stringResource(R.string.editor_blur_depth)
-                    BokehStage.Render -> stringResource(R.string.editor_blur_render)
-                    null -> if (awaitingBlur && isLoadingPreview) stringResource(R.string.editor_blur_loading) else null
-                }?.let { text ->
-                    val seconds = blurProgress?.expectedMs?.let { ((it + 500) / 1000).toInt() }
-                        ?: if (blurProgress?.stage == BokehStage.Depth) 15 else null
-                    if (seconds != null && seconds >= 1) stringResource(R.string.editor_about_seconds, text, seconds) else text
-                }
-                // What the RAW develop is doing, the same way: which of its six stages, and how long is left, from
-                // the stage times of the last develop of the same kind with the same engine.
-                val engineName = rawRenderingEngineName(editRawColorEngine)
-                val stage = developStage.takeIf { isRaw && (rawBusy || ui.savingRaw) }
-                val rawStatus = when {
-                    stage != null -> {
-                        val full = ui.savingRaw || isRefreshingRawPreview
-                        val kind = stringResource(
-                            when {
-                                ui.savingRaw -> R.string.editor_raw_kind_saving
-                                full || hdPreview -> R.string.editor_raw_kind_full
-                                ui.rawLookShown -> R.string.editor_raw_kind_earlier
-                                else -> R.string.editor_raw_kind_preview
-                            }
-                        )
-                        val label = when (stage) {
-                            RawDevelopStage.Reading -> stringResource(R.string.editor_raw_stage_reading)
-                            RawDevelopStage.Demosaic -> stringResource(R.string.editor_raw_stage_demosaic)
-                            RawDevelopStage.ToneMap -> stringResource(R.string.editor_raw_stage_tone)
-                            RawDevelopStage.NoiseReduction -> stringResource(R.string.editor_raw_stage_noise)
-                            RawDevelopStage.Look -> stringResource(R.string.editor_raw_stage_look, engineName)
-                            RawDevelopStage.Finishing -> stringResource(R.string.editor_raw_stage_finishing)
-                        }
-                        // The step and what it does; the wheel in the top row shows it is working. (A bar from the last
-                        // develop's times jumped: a kept RAW skips the first, slowest step.)
-                        stringResource(R.string.editor_raw_status, kind, stage.ordinal + 1, RawDevelopStage.entries.size, label)
-                    }
-                    isRaw && ui.savingRaw -> stringResource(R.string.editor_raw_saving)
-                    isAiDenoising -> stringResource(
-                        if (isSaving) R.string.editor_saving_ai else R.string.editor_ai_preview,
-                        (aiDenoiseProgress * 100).roundToInt(),
-                    )
-                    isPhotonDenoising -> stringResource(if (isSaving) R.string.editor_saving_noise else R.string.editor_noise_preview)
-                    waitingForPause -> stringResource(R.string.editor_waiting_pause)
-                    isRaw && rawBusy && ui.rawLookShown -> stringResource(R.string.editor_raw_earlier, engineName)
-                    isRaw && rawBusy -> stringResource(R.string.editor_raw_developing, engineName)
-                    else -> null
-                }
-                (blurStatus ?: rawStatus)?.let { status ->
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = EDITOR_EDGE_DP.dp, start = 16.dp, end = 16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(text = status, color = LilacText, fontSize = 12.sp, style = LilacTextStyle)
-                    }
-                }
+                EditorStatus(
+                    ui = ui,
+                    isRaw = isRaw,
+                    isSaving = isSaving,
+                    blurProgress = blurProgress,
+                    awaitingBlur = awaitingBlur,
+                    isLoadingPreview = isLoadingPreview,
+                    editRawColorEngine = editRawColorEngine,
+                    developStage = developStage,
+                    rawBusy = rawBusy,
+                    isRefreshingRawPreview = isRefreshingRawPreview,
+                    hdPreview = hdPreview,
+                    isAiDenoising = isAiDenoising,
+                    aiDenoiseProgress = aiDenoiseProgress,
+                    isPhotonDenoising = isPhotonDenoising,
+                    waitingForPause = waitingForPause,
+                )
 
-                // The explanation of the selected setting, on a second tap on it.
-                val explained = settings.firstOrNull { it.key == explainKey }
-                if (explained != null) {
-                    // A look's own exposure, highlights or shadows stay applied on a RAW photo, hidden; say so.
-                    val lookPart = when (explained) {
-                        EditorSetting.RawExposure -> EditorSetting.Exposure
-                        EditorSetting.RawHighlights -> EditorSetting.Highlights
-                        EditorSetting.RawShadows -> EditorSetting.Shadows
-                        else -> null
-                    }?.let { part ->
-                        val v = part.param!!.getValue(effectiveRecipe)
-                        if (v != part.param.defaultValue) {
-                            " " + stringResource(R.string.editor_look_also_sets, stringResource(part.label), part.format(v))
-                        } else {
-                            ""
-                        }
-                    }.orEmpty()
-                    EditorExplanationCard(
-                        name = stringResource(explained.label),
-                        text = stringResource(explained.explanation) + lookPart,
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
-                    )
-                } else if (rawItems.any { it.key == explainKey }) {
-                    val item = rawItems.first { it.key == explainKey }
-                    EditorExplanationCard(
-                        name = item.name,
-                        text = item.explanation,
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
-                    )
-                } else if (groupValues.any { it.key == explainKey }) {
-                    val v = groupValues.first { it.key == explainKey }
-                    val pickName = when (group) {
-                        EditorGroup.Mixer -> stringResource(MixerColors[mixerPick].second)
-                        EditorGroup.Grading -> stringResource(GradingRanges[gradingPick])
-                        else -> stringResource(CalibrationChannels[calibrationPick].third)
-                    }
-                    EditorExplanationCard(
-                        name = "$pickName ${stringResource(v.label)}",
-                        text = stringResource(v.explanation),
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
-                    )
-                } else if (explainKey?.startsWith("group:") == true) {
-                    val g = EditorGroup.valueOf(explainKey!!.removePrefix("group:"))
-                    EditorExplanationCard(
-                        name = stringResource(g.label),
-                        text = stringResource(GroupIntros.getValue(g)),
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
-                    )
-                } else if (explainKey == "curvePoint") {
-                    EditorExplanationCard(
-                        name = stringResource(R.string.editor_group_curve),
-                        text = stringResource(R.string.editor_explain_curve),
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
-                    )
-                } else if (explainKey != null && section == EditorSection.Crop) {
-                    EditorExplanationCard(
-                        name = stringResource(if (explainKey == "straighten") R.string.crop_straighten else R.string.editor_ratio),
-                        text = stringResource(
-                            if (explainKey == "straighten") R.string.editor_explain_straighten else R.string.editor_explain_crop_ratio
-                        ),
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
-                    )
-                } else if (explainKey != null && section == EditorSection.Look) {
-                    val lookName = availableLuts.find { it.id == editLutId }?.getName() ?: stringResource(R.string.none)
-                    EditorExplanationCard(
-                        name = when (explainKey) {
-                            "look" -> lookName
-                            "frame" -> stringResource(R.string.frame)
-                            "preset" -> stringResource(R.string.editor_preset)
-                            "livePhoto" -> stringResource(R.string.settings_use_live_photo)
-                            else -> stringResource(R.string.editor_intensity)
-                        },
-                        text = stringResource(
-                            when (explainKey) {
-                                "look" -> R.string.editor_explain_look
-                                "frame" -> R.string.editor_explain_frame
-                                "preset" -> R.string.editor_explain_preset
-                                "livePhoto" -> R.string.editor_explain_live_photo
-                                else -> R.string.editor_explain_intensity
-                            }
-                        ),
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
-                    )
-                }
+                EditorExplanation(
+                    explainKey = explainKey,
+                    section = section,
+                    group = group,
+                    settings = settings,
+                    rawItems = rawItems,
+                    groupValues = groupValues,
+                    mixerPick = mixerPick,
+                    gradingPick = gradingPick,
+                    calibrationPick = calibrationPick,
+                    lookName = availableLuts.find { it.id == editLutId }?.getName(),
+                    recipe = effectiveRecipe,
+                )
 
-                // The one active control, on the photo's bottom edge.
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = EDITOR_BLOCK_DP.dp)
-                        .fillMaxWidth()
-                        .height(EDITOR_CONTROL_DP.dp)
-                ) {
+                EditorControlLayer {
                     when {
                         group == EditorGroup.Curve -> EditorControlHint(stringResource(R.string.editor_curve_hint))
-                        selectedRawItem != null -> {
-                            val item = selectedRawItem
-                            val r = item.ruler
-                            if (r != null) {
-                                LilacRuler(
-                                    values = r.steps,
-                                    value = r.value,
-                                    start = r.start,
-                                    label = r.label,
-                                    onChange = r.onChange,
-                                    onRelease = r.onRelease ?: ::commitRaw,
-                                    onReset = item.reset,
-                                    labelEvery = r.labelEvery,
-                                    onTouch = { fingerOnRuler = it },
-                                )
-                            } else {
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    ChoiceScroller(item.choices.indexOfFirst { it.selected }.coerceAtLeast(0), maxWidth = 360.dp) {
-                                        item.choices.forEach { c ->
-                                            EditorChip(text = c.label, selected = c.selected, onClick = c.onClick, onLongClick = c.onLongClick)
-                                        }
-                                        item.actions.forEach { a ->
-                                            EditorChip(text = a.label, selected = false, icon = a.icon, action = true, onClick = a.onClick)
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        selectedRawItem != null -> RawItemControl(
+                            item = selectedRawItem,
+                            onRelease = ::commitRaw,
+                            onTouch = { fingerOnRuler = it },
+                        )
                         selectedGroupValue != null -> {
                             val v = selectedGroupValue
-                            val start = groupOpen(v)
-                            LilacRuler(
-                                values = if (start in v.steps) v.steps else (v.steps + start).sorted(),
+                            GroupValueControl(
+                                v = v,
                                 value = v.get(effectiveRecipe),
-                                start = start,
-                                label = v::tick,
-                                onChange = { setGroupValue(v, it) },
-                                onRelease = {},
-                                onReset = { setGroupValue(v, start) },
-                                // Hue: every 30°.
-                                labelEvery = if (v.hue) 6 else null,
+                                start = groupOpen(v),
+                                onSet = { setGroupValue(v, it) },
                                 onTouch = { fingerOnRuler = it },
-                                tickColor = if (v.hue) ::hueColor else null,
                             )
                         }
                         group != null -> EditorControlHint(
                             stringResource(R.string.editor_section_not_built, stringResource(group.label))
                         )
-                        selectedSetting?.kind == SettingKind.AiDenoise -> Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            listOf(false to offText, true to onText).forEach { (enabled, text) ->
-                                LilacChip(
-                                    text = text,
-                                    selected = editAiDenoiseEnabled == enabled,
-                                    onClick = { setAiDenoise(enabled) },
-                                    height = 36.dp,
-                                    fill = Color(0xB8141413),
-                                    fontSize = 13.sp,
-                                    horizontalPadding = 13.dp,
-                                )
-                            }
-                        }
-                        // With the blur Off its options have nothing to act on: say so, and offer to turn it on.
-                        (selectedSetting?.kind == SettingKind.Choice && selectedSetting != EditorSetting.Depth ||
-                            selectedSetting == EditorSetting.DepthOfField) && blurOff -> PortraitNote(
-                            text = stringResource(R.string.editor_blur_off),
-                            action = stringResource(R.string.editor_turn_on),
-                            onAction = ::turnBlurOn
+                        selectedSetting != null -> SettingControl(
+                            setting = selectedSetting,
+                            value = settingValue(selectedSetting),
+                            start = openValue(selectedSetting),
+                            aiDenoiseEnabled = editAiDenoiseEnabled,
+                            blurOff = blurOff,
+                            quick = quick,
+                            choices = choiceOptions(selectedSetting),
+                            onAiDenoise = ::setAiDenoise,
+                            onTurnBlurOn = ::turnBlurOn,
+                            onChooseDepth = ::chooseDepth,
+                            onChange = { setSetting(selectedSetting, it) },
+                            onRelease = { releaseSetting(selectedSetting) },
+                            onApertureScroll = { apertureScroll = it },
+                            onTouch = { fingerOnRuler = it },
                         )
-                        selectedSetting == EditorSetting.Focus && quick -> PortraitNote(
-                            text = stringResource(R.string.editor_quick_keeps_subject),
-                            action = stringResource(R.string.editor_use_depth),
-                            onAction = ::chooseDepth
+                        selectedKey == "cropRatio" || selectedKey == "straighten" -> CropControl(
+                            viewModel = viewModel,
+                            noteLine = noteLine,
+                            selectedKey = selectedKey,
+                            option = editCropAspectOption,
+                            ratioChoices = ratioChoices,
+                            landscape = turnedW >= turnedH,
+                            straighten = editStraightenDegrees,
+                            openStraighten = openStraighten,
+                            onRatio = ::chooseRatio,
+                            onTouch = { fingerOnRuler = it },
                         )
-                        selectedSetting?.kind == SettingKind.Choice -> Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer { alpha = if (blurOff && selectedSetting != EditorSetting.Depth) 0.5f else 1f },
-                            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            choiceOptions(selectedSetting).forEach { option ->
-                                LilacChip(
-                                    text = option.label,
-                                    selected = option.selected,
-                                    onClick = option.onClick,
-                                    height = 36.dp,
-                                    fill = Color(0xB8141413),
-                                    fontSize = 13.sp,
-                                    horizontalPadding = 13.dp,
-                                    icon = option.icon,
-                                )
-                            }
-                        }
-                        selectedSetting != null -> {
-                            val aperture = selectedSetting.kind == SettingKind.Aperture
-                            val start = openValue(selectedSetting)
-                            val steps = selectedSetting.steps.let { if (aperture || start in it) it else (it + start).sorted() }
-                            LilacRuler(
-                                values = steps,
-                                value = settingValue(selectedSetting),
-                                start = start,
-                                label = {
-                                    when {
-                                        aperture && it == 0f -> offText
-                                        selectedSetting.kind == SettingKind.DepthOfField -> when (it) {
-                                            0f -> autoText
-                                            -10f -> shallowText
-                                            10f -> deepText
-                                            else -> "${abs(it.roundToInt())}"
-                                        }
-                                        else -> selectedSetting.tickLabel(it)
-                                    }
-                                },
-                                stops = aperture,
-                                onScroll = { if (aperture) apertureScroll = it },
-                                onChange = { setSetting(selectedSetting, it) },
-                                onRelease = { releaseSetting(selectedSetting) },
-                                onReset = {
-                                    setSetting(selectedSetting, start)
-                                    releaseSetting(selectedSetting)
-                                },
-                                labelEvery = selectedSetting.labelEvery,
-                                onTouch = { fingerOnRuler = it }
-                            )
-                        }
-                        selectedKey == "cropRatio" -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            val selectedIndex = when {
-                                editCropAspectOption.isOriginal -> 1
-                                editCropAspectOption.isFree -> 2
-                                else -> 3 + ratioChoices.indexOfFirst { sameShape(editCropAspectOption, it) }.coerceAtLeast(0)
-                            }
-                            ChoiceScroller(selectedIndex, maxWidth = 360.dp) {
-                                // Turn swaps a fixed shape between portrait and landscape.
-                                val turnable = editCropAspectOption.hasFixedRatio &&
-                                    editCropAspectOption.widthRatio != editCropAspectOption.heightRatio
-                                EditorChip(
-                                    text = stringResource(R.string.editor_turn), selected = false,
-                                    icon = AppIcons.RotateClockwiseLine, action = true, dim = !turnable,
-                                    onClick = {
-                                        val o = editCropAspectOption
-                                        if (turnable) viewModel.setCropAspectOption(CropAspectOption.Custom(o.heightRatio, o.widthRatio))
-                                        else noteLine.say(R.string.editor_turn_needs_shape)
-                                    }
-                                )
-                                EditorChip(
-                                    text = originalText, selected = editCropAspectOption.isOriginal,
-                                    onClick = { viewModel.setCropAspectOption(CropAspectOption.Original) }
-                                )
-                                EditorChip(
-                                    text = freeText, selected = editCropAspectOption.isFree,
-                                    onClick = { viewModel.setCropAspectOption(CropAspectOption.Free) }
-                                )
-                                ratioChoices.forEach { r ->
-                                    EditorChip(
-                                        text = if (r == AspectRatio.XPAN) "XPAN"
-                                        else if (turnedW >= turnedH) "${r.widthRatio}:${r.heightRatio}"
-                                        else "${r.heightRatio}:${r.widthRatio}",
-                                        selected = sameShape(editCropAspectOption, r),
-                                        onClick = { chooseRatio(r) }
-                                    )
-                                }
-                            }
-                        }
-                        selectedKey == "straighten" -> {
-                            val steps = (-90..90).map { it / 2f }.let { if (openStraighten in it) it else (it + openStraighten).sorted() }
-                            LilacRuler(
-                                values = steps,
-                                value = editStraightenDegrees,
-                                start = openStraighten,
-                                label = { "${it.roundToInt()}" },
-                                // Only the canvas redraws while it moves: no render.
-                                onChange = { viewModel.setStraightenDegrees(it) },
-                                onRelease = {},
-                                onReset = { viewModel.setStraightenDegrees(openStraighten) },
-                                labelEvery = 10,
-                                onTouch = { fingerOnRuler = it }
-                            )
-                        }
                         section != EditorSection.Look -> EditorControlHint(
                             stringResource(R.string.editor_section_not_built, stringResource(section.label))
                         )
-                        selectedKey == "look" -> LookStrip(
-                            luts = availableLuts,
-                            currentLutId = editLutId ?: "none",
+                        else -> LookControl(
+                            viewModel = viewModel,
+                            lutSwipeState = lutSwipeState,
+                            selectedKey = selectedKey,
+                            availableLuts = availableLuts,
+                            editLutId = editLutId,
                             // A Log video shows no thumbnails: they would show the flat Log picture.
                             thumbnail = stripThumbnail.takeUnless { videoSourceProfile?.isEnabled == true },
                             categoryOrder = categoryOrder,
-                            onSelect = { id ->
-                                viewModel.setEditLut(id)
-                                availableLuts.find { it.id == id }?.let { lutSwipeState.announce(it.getName()) }
+                            availableFrames = availableFrames,
+                            editFrameId = editFrameId,
+                            allPresets = allPresets,
+                            hasCopiedEditSettings = hasCopiedEditSettings,
+                            hasLook = hasLook,
+                            applyEffectsToVideo = applyEffectsToVideo,
+                            intensity = intensity,
+                            openIntensity = openIntensity,
+                            onFilterManagementClick = onFilterManagementClick,
+                            onOpenFrameEditor = onOpenFrameEditor,
+                            onCopyEdits = {
+                                viewModel.copyCurrentEditSettings(editFrameCustomProperties)
+                                noteLine.say(R.string.copy_settings_success)
                             },
-                            onSelectedClick = {
-                                availableLuts.find { it.id == editLutId }?.let { lutSwipeState.announce(it.getName()) }
+                            onPasteEdits = {
+                                if (!hasCopiedEditSettings) {
+                                    noteLine.say(R.string.editor_paste_nothing)
+                                } else {
+                                    viewModel.pasteCopiedEditSettingsToCurrentEdit()?.let {
+                                        editFrameCustomProperties = it
+                                        noteLine.say(R.string.paste_settings_success)
+                                    }
+                                }
                             },
-                            onLongPress = { onFilterManagementClick(it) },
-                            onManage = { onFilterManagementClick(null) },
-                            compact = true,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        selectedKey == "frame" -> {
-                            val frames = listOf<FrameInfo?>(null) + availableFrames
-                            val selected = availableFrames.find { it.id == editFrameId }
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                ChoiceScroller(frames.indexOfFirst { it?.id == editFrameId }.coerceAtLeast(0), maxWidth = 360.dp) {
-                                    frames.forEach { frame ->
-                                        EditorChip(
-                                            text = frame?.name ?: stringResource(R.string.none),
-                                            selected = frame?.id == editFrameId,
-                                            onClick = {
-                                                // A second tap on an editable frame opens it in the frame editor.
-                                                if (frame?.id == editFrameId) frame?.takeIf { it.isEditable }?.let { onOpenFrameEditor(it.id) }
-                                                else viewModel.setEditFrame(frame?.id)
-                                            }
-                                        )
-                                    }
-                                    if (selected?.isEditable == true) {
-                                        EditorChip(
-                                            text = stringResource(R.string.editor_edit_frame), selected = false,
-                                            icon = AppIcons.FrameLine, action = true,
-                                            onClick = { onOpenFrameEditor(selected.id) }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        selectedKey == "preset" -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            ChoiceScroller(allPresets.indexOfFirst { it.id == viewModel.appliedPresetId }.coerceAtLeast(0), maxWidth = 360.dp) {
-                                allPresets.forEach { preset ->
-                                    val name = presetDisplayName(preset)
-                                    EditorChip(
-                                        text = name,
-                                        selected = preset.id == viewModel.appliedPresetId,
-                                        onClick = {
-                                            viewModel.applyPresetToEdit(preset)
-                                            lutSwipeState.announce(name)
-                                        }
-                                    )
-                                }
-                                EditorChip(
-                                    text = stringResource(R.string.editor_copy_edits), selected = false,
-                                    icon = AppIcons.ContentCopy, action = true,
-                                    onClick = {
-                                        viewModel.copyCurrentEditSettings(editFrameCustomProperties)
-                                        noteLine.say(R.string.copy_settings_success)
-                                    }
+                            onSaveAsPreset = {
+                                cameraViewModel.draftPreset = viewModel.createPresetFromCurrentEdit(
+                                    cameraViewModel.prepareCurrentSettingsPresetDraft(defaultPresetName)
                                 )
-                                EditorChip(
-                                    text = stringResource(R.string.editor_paste_edits), selected = false,
-                                    icon = AppIcons.ContentCopy, action = true,
-                                    dim = !hasCopiedEditSettings,
-                                    onClick = {
-                                        if (!hasCopiedEditSettings) {
-                                            noteLine.say(R.string.editor_paste_nothing)
-                                        } else {
-                                            viewModel.pasteCopiedEditSettingsToCurrentEdit()?.let {
-                                                editFrameCustomProperties = it
-                                                noteLine.say(R.string.paste_settings_success)
-                                            }
-                                        }
-                                    }
-                                )
-                                EditorChip(
-                                    text = stringResource(R.string.save_as_preset), selected = false,
-                                    icon = AppIcons.Bookmark, action = true,
-                                    onClick = {
-                                        cameraViewModel.draftPreset = viewModel.createPresetFromCurrentEdit(
-                                            cameraViewModel.prepareCurrentSettingsPresetDraft(defaultPresetName)
-                                        )
-                                        onCreatePresetClick()
-                                    }
-                                )
-                                if (hasLook) {
-                                    EditorChip(
-                                        text = stringResource(R.string.editor_save_into_look), selected = false,
-                                        icon = AppIcons.FiltersLine, action = true,
-                                        onClick = { showSaveIntoLook = true }
-                                    )
-                                }
-                            }
-                        }
-                        selectedKey == "livePhoto" -> Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            listOf(false to offText, true to onText).forEach { (apply, text) ->
-                                EditorChip(text = text, selected = applyEffectsToVideo == apply, onClick = { viewModel.setApplyEffectsToVideo(apply) })
-                            }
-                        }
-                        selectedKey == "intensity" && !hasLook ->
-                            EditorControlHint(stringResource(R.string.editor_intensity_no_look))
-                        selectedKey == "intensity" -> LilacRuler(
-                            values = IntensitySteps,
-                            value = intensity,
-                            start = openIntensity,
-                            label = { (it * 100).roundToInt().toString() },
-                            onChange = {
+                                onCreatePresetClick()
+                            },
+                            onSaveIntoLook = { showSaveIntoLook = true },
+                            onIntensity = {
                                 viewModel.setPhotoRecipeParams(
                                     RecipeParam.LUT_INTENSITY.setValue(editPhotoRecipeParams ?: editLutRecipeParams, it)
                                 )
                             },
-                            onRelease = {},
-                            onReset = {
-                                viewModel.setPhotoRecipeParams(
-                                    RecipeParam.LUT_INTENSITY.setValue(editPhotoRecipeParams ?: editLutRecipeParams, openIntensity)
-                                )
-                            },
-                            onTouch = { fingerOnRuler = it }
+                            onTouch = { fingerOnRuler = it },
                         )
-                        else -> EditorControlHint(stringResource(R.string.editor_not_built))
                     }
                     // A control that would start a second GPU job is held while one runs: a touch says why.
                     val busyNote = gpuBusyNote(allowBlur = section == EditorSection.Portrait)
@@ -2810,242 +1880,225 @@ fun GalleryEditScreen(
 
                 // The tool block: the settings of the current level above the path row. It lightens one step for
                 // each group you are inside, so the depth shows without reading.
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .height(EDITOR_BLOCK_DP.dp)
-                        .background(
-                            when (groupStack.size) {
-                                0 -> Color.Black
-                                1 -> Color(0xFF222220)
-                                else -> Color(0xFF2E2E2C)
-                            }
-                        )
-                ) {
-                    Spacer(Modifier.height(2.dp))
-                    if (values.isEmpty()) {
-                        Box(Modifier.fillMaxWidth().height(84.dp))
-                    } else {
-                        EditorValueRow(
-                            values = values,
-                            selectedKey = selectedKey,
-                            onClick = { item ->
-                                val now = SystemClock.uptimeMillis()
-                                val doubleTap = item.key == ui.lastTapKey && now - ui.lastTapAt < DOUBLE_TAP_MS
-                                ui.lastTapKey = item.key
-                                ui.lastTapAt = if (doubleTap) 0L else now
-                                ui.pendingCard?.cancel()
-                                when {
-                                    item.group -> {
-                                        // The colour groups say what they work on as they open: they look alike.
-                                        explainKey = item.key.takeIf {
-                                            it.removePrefix("group:") in GroupIntros.keys.map { g -> g.name }
-                                        }
-                                        groupPath = (groupStack.map { it.name } + item.key.removePrefix("group:")).joinToString("/")
-                                    }
-                                    item.key == "rotation" -> {
-                                        explainKey = null
-                                        viewModel.rotateEditClockwise()
-                                    }
-                                    item.key == "mirror" -> {
-                                        explainKey = null
-                                        viewModel.toggleEditHorizontalMirror()
-                                    }
-                                    item.key == "curveDelete" -> {
-                                        explainKey = null
-                                        deleteCurvePoint()
-                                    }
-                                    // A double tap returns the setting to where it was when the editor opened.
-                                    doubleTap && (rawItems.any { it.key == item.key } ||
-                                        settings.firstOrNull { it.key == item.key }?.startsGpuWork(isRaw) == true) &&
-                                        blockedByGpu(allowBlur = section == EditorSection.Portrait) -> explainKey = null
-                                    doubleTap -> {
-                                        explainKey = null
-                                        settings.firstOrNull { it.key == item.key }?.let { s ->
-                                            if (s.kind == SettingKind.Choice) {
-                                                resetChoice(s)
-                                            } else if (s.kind == SettingKind.AiDenoise) {
-                                                setAiDenoise(openValue(s) == 1f || viewModel.editOpenValue(s.key) == true)
-                                            } else {
-                                                setSetting(s, openValue(s))
-                                                releaseSetting(s)
-                                            }
-                                        }
-                                        if (item.key == "cropRatio") restoreCropRatio()
-                                        if (item.key == "straighten") viewModel.setStraightenDegrees(openStraighten)
-                                        groupValues.firstOrNull { it.key == item.key }?.let { setGroupValue(it, groupOpen(it)) }
-                                        rawItems.firstOrNull { it.key == item.key }?.reset?.invoke()
-                                        // The selected point only: back onto the channel's curve as it was when the
-                                        // editor opened, at the same input.
-                                        if (item.key == "curvePoint") {
-                                            val i = ui.curveSelected?.takeIf { it < curveNow.size }
-                                            if (i == null) {
-                                                noteLine.say(R.string.editor_curve_select_point)
-                                            } else {
-                                                val x = curveNow[i].first
-                                                val lut = CurveUtils.evaluateCurve(openCurve(openCurves, curveChannel)?.toFloatArray())
-                                                val y = lut[(x * (CurveUtils.LUT_SIZE - 1)).roundToInt()]
-                                                setCurve(curveChannel, curveNow.toMutableList().also { it[i] = x to y })
-                                            }
-                                        }
-                                        if (item.key == "intensity") {
-                                            viewModel.setPhotoRecipeParams(
-                                                RecipeParam.LUT_INTENSITY.setValue(editPhotoRecipeParams ?: editLutRecipeParams, openIntensity)
-                                            )
-                                        }
-                                    }
-                                    // A second, single tap on the selected setting opens or closes its explanation,
-                                    // once it can't be the first half of a double tap any more.
-                                    item.key == selectedKey -> ui.pendingCard = scope.launch {
-                                        delay(DOUBLE_TAP_MS)
-                                        explainKey = if (explainKey == item.key) null else item.key
-                                    }
-                                    else -> {
-                                        explainKey = null
-                                        selections = HashMap(selections).apply { put(levelKey, item.key) }
-                                    }
+                EditorToolBlock(
+                    depth = groupStack.size,
+                    values = values,
+                    selectedKey = selectedKey,
+                    onClick = { item ->
+                        val now = SystemClock.uptimeMillis()
+                        val doubleTap = item.key == ui.lastTapKey && now - ui.lastTapAt < DOUBLE_TAP_MS
+                        ui.lastTapKey = item.key
+                        ui.lastTapAt = if (doubleTap) 0L else now
+                        ui.pendingCard?.cancel()
+                        when {
+                            item.group -> {
+                                // The colour groups say what they work on as they open: they look alike.
+                                explainKey = item.key.takeIf {
+                                    it.removePrefix("group:") in GroupIntros.keys.map { g -> g.name }
                                 }
-                            },
-                            // A long press shows the photo without this one setting's change while it lasts.
-                            onHold = { item, holding ->
-                                val s = settings.firstOrNull { it.key == item.key }
-                                val live = item.key == "intensity" || s?.kind == SettingKind.Recipe
-                                when {
-                                    item.group || item.key == "curveDelete" -> Unit
-                                    section == EditorSection.Crop -> ui.heldCrop = item.key.takeIf { holding }
-                                    groupValues.any { it.key == item.key } && holding -> {
-                                        val v = groupValues.first { it.key == item.key }
-                                        val recipe = editPhotoRecipeParams ?: editLutRecipeParams
-                                        ui.heldRecipe = recipe
-                                        viewModel.setPhotoRecipeParams(v.set(recipe, groupOpen(v)))
-                                    }
-                                    groupValues.any { it.key == item.key } -> ui.heldRecipe?.let {
-                                        ui.heldRecipe = null
-                                        viewModel.setPhotoRecipeParams(it)
-                                    }
-                                    item.key == "curvePoint" && holding -> {
-                                        val recipe = editPhotoRecipeParams ?: editLutRecipeParams
-                                        ui.heldRecipe = recipe
-                                        viewModel.setPhotoRecipeParams(recipe.withCurve(curveChannel, openCurve(openCurves, curveChannel)))
-                                    }
-                                    item.key == "curvePoint" -> ui.heldRecipe?.let {
-                                        ui.heldRecipe = null
-                                        viewModel.setPhotoRecipeParams(it)
-                                    }
-                                    !live && holding -> noteLine.say(R.string.editor_compare_one_unavailable)
-                                    !live -> Unit
-                                    holding -> {
-                                        val recipe = editPhotoRecipeParams ?: editLutRecipeParams
-                                        ui.heldRecipe = recipe
-                                        viewModel.setPhotoRecipeParams(
-                                            if (s != null) s.param!!.setValue(recipe, openValue(s))
-                                            else RecipeParam.LUT_INTENSITY.setValue(recipe, openIntensity)
-                                        )
-                                    }
-                                    else -> ui.heldRecipe?.let {
-                                        ui.heldRecipe = null
-                                        viewModel.setPhotoRecipeParams(it)
-                                    }
-                                }
+                                groupPath = (groupStack.map { it.name } + item.key.removePrefix("group:")).joinToString("/")
                             }
-                        )
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    if (group == null) {
-                        EditorSectionRow(
-                            sections = sections,
-                            selected = section,
-                            changed = ::sectionChanged,
-                            onSelect = {
+                            item.key == "rotation" -> {
                                 explainKey = null
-                                groupPath = ""
-                                section = it
+                                viewModel.rotateEditClockwise()
                             }
-                        )
-                    } else {
-                        val curve = group == EditorGroup.Curve
-                        EditorGroupRow(
-                            title = stringResource(group.label),
-                            parentTitle = groupStack.getOrNull(groupStack.size - 2)?.let { stringResource(it.label) },
-                            onBack = { groupPath = groupStack.dropLast(1).joinToString("/") { it.name } },
-                            // Reset: Curve's four curves, or RAW's values, back to where they were when the editor
-                            // opened.
-                            onReset = when (group) {
-                                EditorGroup.Curve -> {
-                                    {
-                                        if (CurveChannel.entries.none(::curveChanged)) {
-                                            noteLine.say(R.string.editor_curve_nothing_to_reset)
-                                        } else {
-                                            viewModel.setPhotoRecipeParams(
-                                                CurveChannel.entries.fold(effectiveRecipe) { r, c -> r.withCurve(c, openCurve(openCurves, c)) }
-                                            )
-                                            ui.curveSelected = null
-                                        }
+                            item.key == "mirror" -> {
+                                explainKey = null
+                                viewModel.toggleEditHorizontalMirror()
+                            }
+                            item.key == "curveDelete" -> {
+                                explainKey = null
+                                deleteCurvePoint()
+                            }
+                            // A double tap returns the setting to where it was when the editor opened.
+                            doubleTap && (rawItems.any { it.key == item.key } ||
+                                settings.firstOrNull { it.key == item.key }?.startsGpuWork(isRaw) == true) &&
+                                blockedByGpu(allowBlur = section == EditorSection.Portrait) -> explainKey = null
+                            doubleTap -> {
+                                explainKey = null
+                                settings.firstOrNull { it.key == item.key }?.let { s ->
+                                    if (s.kind == SettingKind.Choice) {
+                                        resetChoice(s)
+                                    } else if (s.kind == SettingKind.AiDenoise) {
+                                        setAiDenoise(openValue(s) == 1f || viewModel.editOpenValue(s.key) == true)
+                                    } else {
+                                        setSetting(s, openValue(s))
+                                        releaseSetting(s)
                                     }
                                 }
-                                EditorGroup.Raw -> {
-                                    {
-                                        if (blockedByGpu()) {
-                                            Unit
-                                        } else if (EditorGroup.Raw.keys.none { it in changedKeys }) {
-                                            noteLine.say(R.string.editor_raw_nothing_to_reset)
-                                        } else {
-                                            viewModel.restoreRawGroupToOpen()
-                                            commitRaw()
-                                        }
+                                if (item.key == "cropRatio") restoreCropRatio()
+                                if (item.key == "straighten") viewModel.setStraightenDegrees(openStraighten)
+                                groupValues.firstOrNull { it.key == item.key }?.let { setGroupValue(it, groupOpen(it)) }
+                                rawItems.firstOrNull { it.key == item.key }?.reset?.invoke()
+                                // The selected point only: back onto the channel's curve as it was when the
+                                // editor opened, at the same input.
+                                if (item.key == "curvePoint") {
+                                    val i = ui.curveSelected?.takeIf { it < curveNow.size }
+                                    if (i == null) {
+                                        noteLine.say(R.string.editor_curve_select_point)
+                                    } else {
+                                        val x = curveNow[i].first
+                                        val lut = CurveUtils.evaluateCurve(openCurve(openCurves, curveChannel)?.toFloatArray())
+                                        val y = lut[(x * (CurveUtils.LUT_SIZE - 1)).roundToInt()]
+                                        setCurve(curveChannel, curveNow.toMutableList().also { it[i] = x to y })
                                     }
                                 }
-                                else -> null
-                            },
-                            picker = when (group) {
-                                EditorGroup.Mixer -> {
-                                    {
-                                        MixerColors.indices.forEach { i ->
-                                            ColorDotChip(mixerColor(i), i == mixerPick, groupValuesOf(group, i).any(::groupChanged)) {
-                                                mixerPick = i
-                                            }
-                                        }
-                                    }
+                                if (item.key == "intensity") {
+                                    viewModel.setPhotoRecipeParams(
+                                        RecipeParam.LUT_INTENSITY.setValue(editPhotoRecipeParams ?: editLutRecipeParams, openIntensity)
+                                    )
                                 }
-                                EditorGroup.Grading -> {
-                                    {
-                                        GradingRanges.forEachIndexed { i, label ->
-                                            GroupPickChip(
-                                                stringResource(label), if (i == gradingPick) LilacText else LilacDim, i == gradingPick,
-                                                groupValuesOf(group, i).any(::groupChanged), { gradingPick = i }, width = 60
-                                            )
-                                        }
-                                    }
+                            }
+                            // A second, single tap on the selected setting opens or closes its explanation,
+                            // once it can't be the first half of a double tap any more.
+                            item.key == selectedKey -> ui.pendingCard = scope.launch {
+                                delay(DOUBLE_TAP_MS)
+                                explainKey = if (explainKey == item.key) null else item.key
+                            }
+                            else -> {
+                                explainKey = null
+                                selections = HashMap(selections).apply { put(levelKey, item.key) }
+                            }
+                        }
+                    },
+                    // A long press shows the photo without this one setting's change while it lasts.
+                    onHold = { item, holding ->
+                        val s = settings.firstOrNull { it.key == item.key }
+                        val live = item.key == "intensity" || s?.kind == SettingKind.Recipe
+                        when {
+                            item.group || item.key == "curveDelete" -> Unit
+                            section == EditorSection.Crop -> ui.heldCrop = item.key.takeIf { holding }
+                            groupValues.any { it.key == item.key } && holding -> {
+                                val v = groupValues.first { it.key == item.key }
+                                val recipe = editPhotoRecipeParams ?: editLutRecipeParams
+                                ui.heldRecipe = recipe
+                                viewModel.setPhotoRecipeParams(v.set(recipe, groupOpen(v)))
+                            }
+                            groupValues.any { it.key == item.key } -> ui.heldRecipe?.let {
+                                ui.heldRecipe = null
+                                viewModel.setPhotoRecipeParams(it)
+                            }
+                            item.key == "curvePoint" && holding -> {
+                                val recipe = editPhotoRecipeParams ?: editLutRecipeParams
+                                ui.heldRecipe = recipe
+                                viewModel.setPhotoRecipeParams(recipe.withCurve(curveChannel, openCurve(openCurves, curveChannel)))
+                            }
+                            item.key == "curvePoint" -> ui.heldRecipe?.let {
+                                ui.heldRecipe = null
+                                viewModel.setPhotoRecipeParams(it)
+                            }
+                            !live && holding -> noteLine.say(R.string.editor_compare_one_unavailable)
+                            !live -> Unit
+                            holding -> {
+                                val recipe = editPhotoRecipeParams ?: editLutRecipeParams
+                                ui.heldRecipe = recipe
+                                viewModel.setPhotoRecipeParams(
+                                    if (s != null) s.param!!.setValue(recipe, openValue(s))
+                                    else RecipeParam.LUT_INTENSITY.setValue(recipe, openIntensity)
+                                )
+                            }
+                            else -> ui.heldRecipe?.let {
+                                ui.heldRecipe = null
+                                viewModel.setPhotoRecipeParams(it)
+                            }
+                        }
+                    },
+                    pathRow = {
+                        if (group == null) {
+                            EditorSectionRow(
+                                sections = sections,
+                                selected = section,
+                                changed = ::sectionChanged,
+                                onSelect = {
+                                    explainKey = null
+                                    groupPath = ""
+                                    section = it
                                 }
-                                EditorGroup.Calibration -> {
-                                    {
-                                        CalibrationChannels.forEachIndexed { i, (_, short, _) ->
-                                            GroupPickChip(
-                                                short, calibrationColor(i).copy(alpha = if (i == calibrationPick) 1f else 0.6f),
-                                                i == calibrationPick, groupValuesOf(group, i).any(::groupChanged), { calibrationPick = i }
-                                            )
-                                        }
-                                    }
-                                }
-                                EditorGroup.Curve -> {
-                                    {
-                                        listOf(
-                                            CurveChannel.MASTER to stringResource(R.string.editor_curve_all),
-                                            CurveChannel.RED to "R", CurveChannel.GREEN to "G", CurveChannel.BLUE to "B",
-                                        ).forEach { (c, label) ->
-                                            CurveChannelChip(label, c, c == curveChannel, curveChanged(c)) {
-                                                curveChannel = c
+                            )
+                        } else {
+                            val curve = group == EditorGroup.Curve
+                            EditorGroupRow(
+                                title = stringResource(group.label),
+                                parentTitle = groupStack.getOrNull(groupStack.size - 2)?.let { stringResource(it.label) },
+                                onBack = { groupPath = groupStack.dropLast(1).joinToString("/") { it.name } },
+                                // Reset: Curve's four curves, or RAW's values, back to where they were when the editor
+                                // opened.
+                                onReset = when (group) {
+                                    EditorGroup.Curve -> {
+                                        {
+                                            if (CurveChannel.entries.none(::curveChanged)) {
+                                                noteLine.say(R.string.editor_curve_nothing_to_reset)
+                                            } else {
+                                                viewModel.setPhotoRecipeParams(
+                                                    CurveChannel.entries.fold(effectiveRecipe) { r, c -> r.withCurve(c, openCurve(openCurves, c)) }
+                                                )
                                                 ui.curveSelected = null
                                             }
                                         }
                                     }
+                                    EditorGroup.Raw -> {
+                                        {
+                                            if (blockedByGpu()) {
+                                                Unit
+                                            } else if (EditorGroup.Raw.keys.none { it in changedKeys }) {
+                                                noteLine.say(R.string.editor_raw_nothing_to_reset)
+                                            } else {
+                                                viewModel.restoreRawGroupToOpen()
+                                                commitRaw()
+                                            }
+                                        }
+                                    }
+                                    else -> null
+                                },
+                                picker = when (group) {
+                                    EditorGroup.Mixer -> {
+                                        {
+                                            MixerColors.indices.forEach { i ->
+                                                ColorDotChip(mixerColor(i), i == mixerPick, groupValuesOf(group, i).any(::groupChanged)) {
+                                                    mixerPick = i
+                                                }
+                                            }
+                                        }
+                                    }
+                                    EditorGroup.Grading -> {
+                                        {
+                                            GradingRanges.forEachIndexed { i, label ->
+                                                GroupPickChip(
+                                                    stringResource(label), if (i == gradingPick) LilacText else LilacDim, i == gradingPick,
+                                                    groupValuesOf(group, i).any(::groupChanged), { gradingPick = i }, width = 60
+                                                )
+                                            }
+                                        }
+                                    }
+                                    EditorGroup.Calibration -> {
+                                        {
+                                            CalibrationChannels.forEachIndexed { i, (_, short, _) ->
+                                                GroupPickChip(
+                                                    short, calibrationColor(i).copy(alpha = if (i == calibrationPick) 1f else 0.6f),
+                                                    i == calibrationPick, groupValuesOf(group, i).any(::groupChanged), { calibrationPick = i }
+                                                )
+                                            }
+                                        }
+                                    }
+                                    EditorGroup.Curve -> {
+                                        {
+                                            listOf(
+                                                CurveChannel.MASTER to stringResource(R.string.editor_curve_all),
+                                                CurveChannel.RED to "R", CurveChannel.GREEN to "G", CurveChannel.BLUE to "B",
+                                            ).forEach { (c, label) ->
+                                                CurveChannelChip(label, c, c == curveChannel, curveChanged(c)) {
+                                                    curveChannel = c
+                                                    ui.curveSelected = null
+                                                }
+                                            }
+                                        }
+                                    }
+                                    else -> null
                                 }
-                                else -> null
-                            }
-                        )
-                    }
-                }
+                            )
+                        }
+                    },
+                )
             }
 
             NoteLine(
@@ -3055,85 +2108,1200 @@ fun GalleryEditScreen(
                     .padding(bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
             )
 
-            ui.deleteDcpAsk?.let { dcp ->
-                EditorDiscardDialog(
-                    title = stringResource(R.string.editor_delete_dcp_title),
-                    message = stringResource(R.string.editor_delete_dcp_message, dcp.getName()),
-                    keepText = stringResource(R.string.cancel),
-                    actionText = stringResource(R.string.delete),
-                    onKeep = { ui.deleteDcpAsk = null },
-                    onDiscard = {
-                        ui.deleteDcpAsk = null
-                        val wasChosen = editRawDcpId == dcp.id
-                        viewModel.deleteRawDcp(currentEditSourcePhoto, dcp.id) { success ->
-                            noteLine.say(if (success) R.string.raw_dcp_delete_success else R.string.raw_dcp_delete_failed)
-                            if (success && wasChosen) requestRawPreviewRefresh()
-                        }
-                    }
-                )
-            }
-
-            if (showSaveIntoLook) {
-                val lookName = availableLuts.find { it.id == editLutId }?.getName().orEmpty()
-                EditorDiscardDialog(
-                    title = stringResource(R.string.editor_save_into_look_title, lookName),
-                    message = stringResource(R.string.editor_save_into_look_message),
-                    keepText = stringResource(R.string.cancel),
-                    actionText = stringResource(R.string.editor_save_into_look),
-                    onKeep = { showSaveIntoLook = false },
-                    onDiscard = {
-                        showSaveIntoLook = false
-                        scope.launch { if (viewModel.saveRecipeIntoLook()) noteLine.say(R.string.editor_saved_into_look) }
-                    }
-                )
-            }
-
-            if (showDiscardDialog) {
-                EditorDiscardDialog(
-                    message = stringResource(R.string.editor_discard_message),
-                    onKeep = { showDiscardDialog = false },
-                    onDiscard = {
-                        showDiscardDialog = false
-                        leaveEditor()
-                    }
-                )
-            }
+            EditorDialogs(
+                ui = ui,
+                viewModel = viewModel,
+                noteLine = noteLine,
+                scope = scope,
+                photo = currentEditSourcePhoto,
+                editRawDcpId = editRawDcpId,
+                saveIntoLookName = if (showSaveIntoLook) availableLuts.find { it.id == editLutId }?.getName().orEmpty() else null,
+                discard = showDiscardDialog,
+                onCloseSaveIntoLook = { showSaveIntoLook = false },
+                onCloseDiscard = { showDiscardDialog = false },
+                onLeave = ::leaveEditor,
+                onRawRefresh = { requestRawPreviewRefresh() },
+            )
         }
     }
 
-    if (isBaselineLutEditSheetVisible) {
-        LutEditBottomSheet(
-            lutId = baselineLutEditId!!,
-            editorTarget = LutEditorTarget.BASELINE_RAW,
-            imageHistogram = imageHistogram,
-            onDismiss = {
-                showBaselineLutEditSheet = false
-                showRawBaselineLutSelectorSheet = true
+    EditorModelDialogs(
+        viewModel = viewModel,
+        payment = showPaymentDialog,
+        aiDenoiseModel = aiDenoiseModelState.takeIf { pendingAiDenoise },
+        depthModel = depthModelState.takeIf { showDepthModelDownloadDialog },
+        onImportDepthModel = { depthModelImportLauncher.launch(arrayOf("*/*")) },
+        onDismissAiDenoise = { pendingAiDenoise = false },
+        onDismissDepth = {
+            showDepthModelDownloadDialog = false
+            pendingDepth = false
+        },
+    )
+}
+
+/**
+ * What the photo box shows: the video, Crop's frame tool or the zoomable photo, and on top the look swipe, Portrait's
+ * cheap blur and focus ring, and the curve.
+ */
+@Composable
+private fun BoxScope.EditorPhotoContent(
+    viewModel: GalleryViewModel,
+    ui: EditorUiState,
+    currentPhoto: MediaData,
+    currentEditSourcePhoto: MediaData,
+    videoSourceProfile: VideoLogProfile?,
+    editLutConfig: LutConfig?,
+    recipe: ColorRecipeParams,
+    showOrigin: Boolean,
+    fullView: Boolean,
+    showCrop: Boolean,
+    cropPreviewBitmap: Bitmap?,
+    previewBitmap: Bitmap?,
+    editCropRect: RectF?,
+    editCropAspectOption: CropAspectOption,
+    editRotationDegrees: Int,
+    editStraightenDegrees: Float,
+    editMirrorHorizontal: Boolean,
+    lutSwipeState: LutSwipeState,
+    blurStale: Boolean,
+    portraitOpen: Boolean,
+    portraitQuick: Boolean,
+    previewStrength: Float,
+    blurLayers: List<ImageBitmap?>,
+    awaitingBlur: Boolean,
+    apertureDrag: Float?,
+    apertureScroll: Float?,
+    dofDrag: Float?,
+    editComputationalAperture: Float?,
+    contentBounds: Rect?,
+    ringDrag: Offset?,
+    focusCenter: Offset?,
+    curveOpen: Boolean,
+    curveFree: Rect,
+    curveChannel: CurveChannel,
+    onZoomChange: (Boolean) -> Unit,
+    onContentBounds: (Rect) -> Unit,
+) {
+    val previewMediaModifier = Modifier.fillMaxSize()
+
+    // 显示预览
+    if (currentPhoto.isVideo) {
+        if (videoSourceProfile != null) {
+            VideoEditPlayer(
+                photo = currentPhoto,
+                lutConfig = if (showOrigin) null else editLutConfig,
+                recipeParams = if (showOrigin) null else recipe,
+                sourceLogProfile = videoSourceProfile,
+                modifier = previewMediaModifier
+            )
+        } else {
+            CircularProgressIndicator(color = Color.White)
+        }
+    } else if (showCrop && cropPreviewBitmap != null) {
+        val geometryBaseWidth = currentEditSourcePhoto.metadata?.width?.takeIf { it > 0 }
+            ?: currentEditSourcePhoto.width.coerceAtLeast(1)
+        val geometryBaseHeight = currentEditSourcePhoto.metadata?.height?.takeIf { it > 0 }
+            ?: currentEditSourcePhoto.height.coerceAtLeast(1)
+        val (straightenSourceWidth, straightenSourceHeight) =
+            PostEditGeometry.rotatedDimensions(
+                geometryBaseWidth,
+                geometryBaseHeight,
+                editRotationDegrees
+            )
+        val (straightenedWidth, straightenedHeight) =
+            PostEditGeometry.straightenedDimensions(
+                straightenSourceWidth,
+                straightenSourceHeight,
+                editStraightenDegrees
+            )
+        val cropAspectRatio = when (editCropAspectOption) {
+            CropAspectOption.Free -> null
+            CropAspectOption.Original ->
+                straightenSourceWidth.toFloat() / straightenSourceHeight
+            else -> editCropAspectOption.getAspectRatioValue(
+                straightenSourceWidth,
+                straightenSourceHeight
+            )
+        }
+        // Keep the no-black-corner constraint stable while the user drags a free crop
+        // handle. Recomputing it from editCropRect on every pointer move changes the
+        // pointerInput key and cancels the active gesture after each small movement.
+        val effectiveCropAspectRatio = remember(
+            currentEditSourcePhoto.id,
+            editRotationDegrees,
+            editStraightenDegrees,
+            editCropAspectOption,
+            straightenSourceWidth,
+            straightenSourceHeight
+        ) {
+            cropAspectRatio
+                ?: editCropRect?.takeIf { it.width() > 0f && it.height() > 0f }?.let {
+                    it.width() * straightenedWidth /
+                        (it.height() * straightenedHeight)
+                }
+                ?: straightenSourceWidth.toFloat() / straightenSourceHeight
+        }
+        val cropBounds = PostEditGeometry.straightenSafeCropRectForAspect(
+            width = straightenSourceWidth,
+            height = straightenSourceHeight,
+            straightenDegrees = editStraightenDegrees,
+            pixelAspect = effectiveCropAspectRatio
+        )
+        // A held value shows the photo without that one change (the frame hides, it no longer fits).
+        val heldTurn = ui.heldCrop == "rotation"
+        val heldFlip = ui.heldCrop == "mirror"
+        CropOverlay(
+            bitmap = cropPreviewBitmap,
+            cropRect = editCropRect ?: cropBounds,
+            cropAspectRatio = cropAspectRatio,
+            straightenDegrees = when {
+                ui.heldCrop == "straighten" -> 0f
+                heldFlip -> -editStraightenDegrees  // flipping also mirrored the angle
+                else -> editStraightenDegrees
+            },
+            geometrySourceWidth = straightenSourceWidth,
+            geometrySourceHeight = straightenSourceHeight,
+            onCropRectChanged = { rect -> viewModel.setCropRect(rect) },
+            aspectOption = editCropAspectOption,
+            contentPadding = 24.dp,
+            rotationDegrees = if (heldTurn) 0 else editRotationDegrees,
+            mirrorHorizontal = editMirrorHorizontal && !heldFlip,
+            showFrame = ui.heldCrop == null,
+            modifier = previewMediaModifier
+        )
+    } else {
+        ZoomableEditImage(
+            previewBitmap = previewBitmap,
+            resetKey = fullView,
+            contentDescription = stringResource(R.string.edit),
+            onZoomChange = onZoomChange,
+            onContentBounds = onContentBounds,
+            modifier = previewMediaModifier
+        )
+    }
+
+    LutSwipeIndicator(state = lutSwipeState)
+
+    // Portrait: the cheap preview while the blur renders or a control is dragged, cross-fading between
+    // the two prepared strengths around the one wanted, so it feels like more steps than there are.
+    val previewBounds = contentBounds
+    val layers = blurLayers
+    val cheapWanted = portraitOpen && !fullView && (previewStrength > 0f || apertureScroll != null) &&
+        (awaitingBlur || blurStale || apertureDrag != null || apertureScroll != null || ringDrag != null || dofDrag != null)
+    // On at once; off only after the new blur has cross-faded in underneath (the picture's own fade
+    // takes about 200 ms), then fading out over it, so no moment shows the photo without a blur.
+    val cheapAlpha by animateFloatAsState(
+        targetValue = if (cheapWanted) 1f else 0f,
+        animationSpec = if (cheapWanted) snap() else tween(durationMillis = 300, delayMillis = 300),
+        label = "cheapBlur",
+    )
+    if (layers.isNotEmpty() && previewBounds != null && portraitOpen && !fullView && cheapAlpha > 0f) {
+        val levels = BlurPreview.LEVELS
+        val upper = levels.indexOfFirst { it >= previewStrength }.let { if (it < 0) levels.lastIndex else it }
+        val lower = (upper - 1).coerceAtLeast(0)
+        val t = if (upper == lower) 1f else ((previewStrength - levels[lower]) / (levels[upper] - levels[lower])).coerceIn(0f, 1f)
+        val under = layers[lower] ?: layers[upper]
+        val over = layers[upper] ?: layers[lower]
+        val dstOffset = IntOffset(previewBounds.left.roundToInt(), previewBounds.top.roundToInt())
+        val dstSize = IntSize(previewBounds.width.roundToInt(), previewBounds.height.roundToInt())
+        androidx.compose.foundation.Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = cheapAlpha }) {
+            under?.let { drawImage(it, dstOffset = dstOffset, dstSize = dstSize) }
+            if (over != null && over !== under) drawImage(over, dstOffset = dstOffset, dstSize = dstSize, alpha = t)
+        }
+    }
+
+    // Portrait: the focus ring, on the photo the whole time the section is open (not in Quick,
+    // which keeps the cut-out subject sharp wherever the focus is).
+    if (portraitOpen && !fullView && !portraitQuick) {
+        val center = ringDrag ?: focusCenter
+        if (center != null) {
+            PortraitFocusRing(
+                center = center,
+                off = (apertureDrag ?: editComputationalAperture ?: 0f) <= 0f
+            )
+        }
+    }
+
+    if (curveOpen && !fullView && !currentPhoto.isVideo) {
+        val points = ui.curveDrag ?: curvePoints(recipe, curveChannel)
+        CurveOverlay(
+            contentBounds = contentBounds,
+            free = curveFree,
+            points = points,
+            channel = curveChannel,
+            // The other channels that bend the tones, faint behind the one being edited.
+            others = CurveChannel.entries.filter { it != curveChannel }
+                .mapNotNull { c -> recipe.getCurvePoints(c)?.let { c to it } },
+            selected = ui.curveSelected?.takeIf { it < points.size },
+        )
+    }
+}
+
+/** What the blur, the RAW develop, AI denoise or noise reduction is doing, under the edge icons, while it works. */
+@Composable
+private fun BoxScope.EditorStatus(
+    ui: EditorUiState,
+    isRaw: Boolean,
+    isSaving: Boolean,
+    blurProgress: GalleryViewModel.BlurProgress?,
+    awaitingBlur: Boolean,
+    isLoadingPreview: Boolean,
+    editRawColorEngine: RawRenderingEngine,
+    developStage: RawDevelopStage?,
+    rawBusy: Boolean,
+    isRefreshingRawPreview: Boolean,
+    hdPreview: Boolean,
+    isAiDenoising: Boolean,
+    aiDenoiseProgress: Float,
+    isPhotonDenoising: Boolean,
+    waitingForPause: Boolean,
+) {
+    // What the blur is doing.
+    val blurStatus = when (blurProgress?.stage) {
+        BokehStage.Subject -> stringResource(R.string.editor_blur_subject)
+        BokehStage.Depth -> stringResource(R.string.editor_blur_depth)
+        BokehStage.Render -> stringResource(R.string.editor_blur_render)
+        null -> if (awaitingBlur && isLoadingPreview) stringResource(R.string.editor_blur_loading) else null
+    }?.let { text ->
+        val seconds = blurProgress?.expectedMs?.let { ((it + 500) / 1000).toInt() }
+            ?: if (blurProgress?.stage == BokehStage.Depth) 15 else null
+        if (seconds != null && seconds >= 1) stringResource(R.string.editor_about_seconds, text, seconds) else text
+    }
+    // What the RAW develop is doing, the same way: which of its six stages, and how long is left, from
+    // the stage times of the last develop of the same kind with the same engine.
+    val engineName = rawRenderingEngineName(editRawColorEngine)
+    val stage = developStage.takeIf { isRaw && (rawBusy || ui.savingRaw) }
+    val rawStatus = when {
+        stage != null -> {
+            val full = ui.savingRaw || isRefreshingRawPreview
+            val kind = stringResource(
+                when {
+                    ui.savingRaw -> R.string.editor_raw_kind_saving
+                    full || hdPreview -> R.string.editor_raw_kind_full
+                    ui.rawLookShown -> R.string.editor_raw_kind_earlier
+                    else -> R.string.editor_raw_kind_preview
+                }
+            )
+            val label = when (stage) {
+                RawDevelopStage.Reading -> stringResource(R.string.editor_raw_stage_reading)
+                RawDevelopStage.Demosaic -> stringResource(R.string.editor_raw_stage_demosaic)
+                RawDevelopStage.ToneMap -> stringResource(R.string.editor_raw_stage_tone)
+                RawDevelopStage.NoiseReduction -> stringResource(R.string.editor_raw_stage_noise)
+                RawDevelopStage.Look -> stringResource(R.string.editor_raw_stage_look, engineName)
+                RawDevelopStage.Finishing -> stringResource(R.string.editor_raw_stage_finishing)
+            }
+            // The step and what it does; the wheel in the top row shows it is working. (A bar from the last
+            // develop's times jumped: a kept RAW skips the first, slowest step.)
+            stringResource(R.string.editor_raw_status, kind, stage.ordinal + 1, RawDevelopStage.entries.size, label)
+        }
+        isRaw && ui.savingRaw -> stringResource(R.string.editor_raw_saving)
+        isAiDenoising -> stringResource(
+            if (isSaving) R.string.editor_saving_ai else R.string.editor_ai_preview,
+            (aiDenoiseProgress * 100).roundToInt(),
+        )
+        isPhotonDenoising -> stringResource(if (isSaving) R.string.editor_saving_noise else R.string.editor_noise_preview)
+        waitingForPause -> stringResource(R.string.editor_waiting_pause)
+        isRaw && rawBusy && ui.rawLookShown -> stringResource(R.string.editor_raw_earlier, engineName)
+        isRaw && rawBusy -> stringResource(R.string.editor_raw_developing, engineName)
+        else -> null
+    }
+    (blurStatus ?: rawStatus)?.let { status ->
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = EDITOR_EDGE_DP.dp, start = 16.dp, end = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(text = status, color = LilacText, fontSize = 12.sp, style = LilacTextStyle)
+        }
+    }
+}
+
+/** The explanation of the selected setting, on a second tap on it. */
+@Composable
+private fun BoxScope.EditorExplanation(
+    explainKey: String?,
+    section: EditorSection,
+    group: EditorGroup?,
+    settings: List<EditorSetting>,
+    rawItems: List<RawItem>,
+    groupValues: List<GroupValue>,
+    mixerPick: Int,
+    gradingPick: Int,
+    calibrationPick: Int,
+    lookName: String?,
+    recipe: ColorRecipeParams,
+) {
+    val explained = settings.firstOrNull { it.key == explainKey }
+    val rawItem = rawItems.firstOrNull { it.key == explainKey }
+    val groupValue = groupValues.firstOrNull { it.key == explainKey }
+    val (name, text) = when {
+        explained != null -> {
+            // A look's own exposure, highlights or shadows stay applied on a RAW photo, hidden; say so.
+            val lookPart = when (explained) {
+                EditorSetting.RawExposure -> EditorSetting.Exposure
+                EditorSetting.RawHighlights -> EditorSetting.Highlights
+                EditorSetting.RawShadows -> EditorSetting.Shadows
+                else -> null
+            }?.let { part ->
+                val v = part.param!!.getValue(recipe)
+                if (v != part.param.defaultValue) {
+                    " " + stringResource(R.string.editor_look_also_sets, stringResource(part.label), part.format(v))
+                } else {
+                    ""
+                }
+            }.orEmpty()
+            stringResource(explained.label) to stringResource(explained.explanation) + lookPart
+        }
+        rawItem != null -> rawItem.name to rawItem.explanation
+        groupValue != null -> {
+            val pickName = when (group) {
+                EditorGroup.Mixer -> stringResource(MixerColors[mixerPick].second)
+                EditorGroup.Grading -> stringResource(GradingRanges[gradingPick])
+                else -> stringResource(CalibrationChannels[calibrationPick].third)
+            }
+            "$pickName ${stringResource(groupValue.label)}" to stringResource(groupValue.explanation)
+        }
+        explainKey?.startsWith("group:") == true -> {
+            val g = EditorGroup.valueOf(explainKey.removePrefix("group:"))
+            stringResource(g.label) to stringResource(GroupIntros.getValue(g))
+        }
+        explainKey == "curvePoint" ->
+            stringResource(R.string.editor_group_curve) to stringResource(R.string.editor_explain_curve)
+        explainKey != null && section == EditorSection.Crop -> if (explainKey == "straighten") {
+            stringResource(R.string.crop_straighten) to stringResource(R.string.editor_explain_straighten)
+        } else {
+            stringResource(R.string.editor_ratio) to stringResource(R.string.editor_explain_crop_ratio)
+        }
+        explainKey != null && section == EditorSection.Look -> when (explainKey) {
+            "look" -> (lookName ?: stringResource(R.string.none)) to stringResource(R.string.editor_explain_look)
+            "frame" -> stringResource(R.string.frame) to stringResource(R.string.editor_explain_frame)
+            "preset" -> stringResource(R.string.editor_preset) to stringResource(R.string.editor_explain_preset)
+            "livePhoto" -> stringResource(R.string.settings_use_live_photo) to stringResource(R.string.editor_explain_live_photo)
+            else -> stringResource(R.string.editor_intensity) to stringResource(R.string.editor_explain_intensity)
+        }
+        else -> return
+    }
+    EditorExplanationCard(
+        name = name,
+        text = text,
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(start = 8.dp, end = 8.dp, bottom = (EDITOR_BLOCK_DP + EDITOR_CONTROL_DP + 8f).dp)
+    )
+}
+
+/** The one active control, on the photo's bottom edge. */
+@Composable
+private fun BoxScope.EditorControlLayer(content: @Composable BoxScope.() -> Unit) {
+    Box(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(bottom = EDITOR_BLOCK_DP.dp)
+            .fillMaxWidth()
+            .height(EDITOR_CONTROL_DP.dp),
+        content = content,
+    )
+}
+
+/** Light › RAW and its groups: the selected value's ruler, or its chips and grey actions. */
+@Composable
+private fun RawItemControl(item: RawItem, onRelease: () -> Unit, onTouch: (Boolean) -> Unit) {
+    val r = item.ruler
+    if (r != null) {
+        LilacRuler(
+            values = r.steps,
+            value = r.value,
+            start = r.start,
+            label = r.label,
+            onChange = r.onChange,
+            onRelease = r.onRelease ?: onRelease,
+            onReset = item.reset,
+            labelEvery = r.labelEvery,
+            onTouch = onTouch,
+        )
+    } else {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            ChoiceScroller(item.choices.indexOfFirst { it.selected }.coerceAtLeast(0), maxWidth = 360.dp) {
+                item.choices.forEach { c ->
+                    EditorChip(text = c.label, selected = c.selected, onClick = c.onClick, onLongClick = c.onLongClick)
+                }
+                item.actions.forEach { a ->
+                    EditorChip(text = a.label, selected = false, icon = a.icon, action = true, onClick = a.onClick)
+                }
+            }
+        }
+    }
+}
+
+/** Mixer, Grading and Calibration: the ruler of the picked colour's, range's or primary's selected value. */
+@Composable
+private fun GroupValueControl(v: GroupValue, value: Float, start: Float, onSet: (Float) -> Unit, onTouch: (Boolean) -> Unit) {
+    LilacRuler(
+        values = if (start in v.steps) v.steps else (v.steps + start).sorted(),
+        value = value,
+        start = start,
+        label = v::tick,
+        onChange = onSet,
+        onRelease = {},
+        onReset = { onSet(start) },
+        // Hue: every 30°.
+        labelEvery = if (v.hue) 6 else null,
+        onTouch = onTouch,
+        tickColor = if (v.hue) ::hueColor else null,
+    )
+}
+
+/** A section's own setting: AI denoise's switch, Portrait's choices and notes, or the setting's ruler. */
+@Composable
+private fun SettingControl(
+    setting: EditorSetting,
+    value: Float,
+    start: Float,
+    aiDenoiseEnabled: Boolean,
+    blurOff: Boolean,
+    quick: Boolean,
+    choices: List<EditorChoice>,
+    onAiDenoise: (Boolean) -> Unit,
+    onTurnBlurOn: () -> Unit,
+    onChooseDepth: () -> Unit,
+    onChange: (Float) -> Unit,
+    onRelease: () -> Unit,
+    onApertureScroll: (Float?) -> Unit,
+    onTouch: (Boolean) -> Unit,
+) {
+    val offText = stringResource(R.string.editor_off)
+    when {
+        setting.kind == SettingKind.AiDenoise -> Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            listOf(false to offText, true to stringResource(R.string.editor_on)).forEach { (enabled, text) ->
+                LilacChip(
+                    text = text,
+                    selected = aiDenoiseEnabled == enabled,
+                    onClick = { onAiDenoise(enabled) },
+                    height = 36.dp,
+                    fill = Color(0xB8141413),
+                    fontSize = 13.sp,
+                    horizontalPadding = 13.dp,
+                )
+            }
+        }
+        // With the blur Off its options have nothing to act on: say so, and offer to turn it on.
+        (setting.kind == SettingKind.Choice && setting != EditorSetting.Depth ||
+            setting == EditorSetting.DepthOfField) && blurOff -> PortraitNote(
+            text = stringResource(R.string.editor_blur_off),
+            action = stringResource(R.string.editor_turn_on),
+            onAction = onTurnBlurOn
+        )
+        setting == EditorSetting.Focus && quick -> PortraitNote(
+            text = stringResource(R.string.editor_quick_keeps_subject),
+            action = stringResource(R.string.editor_use_depth),
+            onAction = onChooseDepth
+        )
+        setting.kind == SettingKind.Choice -> Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { alpha = if (blurOff && setting != EditorSetting.Depth) 0.5f else 1f },
+            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            choices.forEach { option ->
+                LilacChip(
+                    text = option.label,
+                    selected = option.selected,
+                    onClick = option.onClick,
+                    height = 36.dp,
+                    fill = Color(0xB8141413),
+                    fontSize = 13.sp,
+                    horizontalPadding = 13.dp,
+                    icon = option.icon,
+                )
+            }
+        }
+        else -> {
+            val aperture = setting.kind == SettingKind.Aperture
+            val steps = setting.steps.let { if (aperture || start in it) it else (it + start).sorted() }
+            val autoText = stringResource(R.string.editor_auto)
+            val shallowText = stringResource(R.string.editor_shallow)
+            val deepText = stringResource(R.string.editor_deep)
+            LilacRuler(
+                values = steps,
+                value = value,
+                start = start,
+                label = {
+                    when {
+                        aperture && it == 0f -> offText
+                        setting.kind == SettingKind.DepthOfField -> when (it) {
+                            0f -> autoText
+                            -10f -> shallowText
+                            10f -> deepText
+                            else -> "${abs(it.roundToInt())}"
+                        }
+                        else -> setting.tickLabel(it)
+                    }
+                },
+                stops = aperture,
+                onScroll = { if (aperture) onApertureScroll(it) },
+                onChange = onChange,
+                onRelease = onRelease,
+                onReset = {
+                    onChange(start)
+                    onRelease()
+                },
+                labelEvery = setting.labelEvery,
+                onTouch = onTouch
+            )
+        }
+    }
+}
+
+/** Crop's ratio chips and straightening ruler. */
+@Composable
+private fun CropControl(
+    viewModel: GalleryViewModel,
+    noteLine: NoteLineState,
+    selectedKey: String?,
+    option: CropAspectOption,
+    ratioChoices: List<AspectRatio>,
+    landscape: Boolean,
+    straighten: Float,
+    openStraighten: Float,
+    onRatio: (AspectRatio) -> Unit,
+    onTouch: (Boolean) -> Unit,
+) {
+    if (selectedKey == "cropRatio") Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val selectedIndex = when {
+            option.isOriginal -> 1
+            option.isFree -> 2
+            else -> 3 + ratioChoices.indexOfFirst { sameShape(option, it) }.coerceAtLeast(0)
+        }
+        ChoiceScroller(selectedIndex, maxWidth = 360.dp) {
+            // Turn swaps a fixed shape between portrait and landscape.
+            val turnable = option.hasFixedRatio && option.widthRatio != option.heightRatio
+            EditorChip(
+                text = stringResource(R.string.editor_turn), selected = false,
+                icon = AppIcons.RotateClockwiseLine, action = true, dim = !turnable,
+                onClick = {
+                    if (turnable) viewModel.setCropAspectOption(CropAspectOption.Custom(option.heightRatio, option.widthRatio))
+                    else noteLine.say(R.string.editor_turn_needs_shape)
+                }
+            )
+            EditorChip(
+                text = stringResource(R.string.crop_original), selected = option.isOriginal,
+                onClick = { viewModel.setCropAspectOption(CropAspectOption.Original) }
+            )
+            EditorChip(
+                text = stringResource(R.string.crop_free), selected = option.isFree,
+                onClick = { viewModel.setCropAspectOption(CropAspectOption.Free) }
+            )
+            ratioChoices.forEach { r ->
+                EditorChip(
+                    text = if (r == AspectRatio.XPAN) "XPAN"
+                    else if (landscape) "${r.widthRatio}:${r.heightRatio}"
+                    else "${r.heightRatio}:${r.widthRatio}",
+                    selected = sameShape(option, r),
+                    onClick = { onRatio(r) }
+                )
+            }
+        }
+    } else {
+        val steps = (-90..90).map { it / 2f }.let { if (openStraighten in it) it else (it + openStraighten).sorted() }
+        LilacRuler(
+            values = steps,
+            value = straighten,
+            start = openStraighten,
+            label = { "${it.roundToInt()}" },
+            // Only the canvas redraws while it moves: no render.
+            onChange = { viewModel.setStraightenDegrees(it) },
+            onRelease = {},
+            onReset = { viewModel.setStraightenDegrees(openStraighten) },
+            labelEvery = 10,
+            onTouch = onTouch
+        )
+    }
+}
+
+/** Look's controls: the look strip, the frames, the presets with copy and paste, Live photo, and Intensity. */
+@Composable
+private fun LookControl(
+    viewModel: GalleryViewModel,
+    lutSwipeState: LutSwipeState,
+    selectedKey: String?,
+    availableLuts: List<LutInfo>,
+    editLutId: String?,
+    thumbnail: Bitmap?,
+    categoryOrder: List<String>,
+    availableFrames: List<FrameInfo>,
+    editFrameId: String?,
+    allPresets: List<CameraPreset>,
+    hasCopiedEditSettings: Boolean,
+    hasLook: Boolean,
+    applyEffectsToVideo: Boolean,
+    intensity: Float,
+    openIntensity: Float,
+    onFilterManagementClick: (String?) -> Unit,
+    onOpenFrameEditor: (String) -> Unit,
+    onCopyEdits: () -> Unit,
+    onPasteEdits: () -> Unit,
+    onSaveAsPreset: () -> Unit,
+    onSaveIntoLook: () -> Unit,
+    onIntensity: (Float) -> Unit,
+    onTouch: (Boolean) -> Unit,
+) {
+    when {
+        selectedKey == "look" -> LookStrip(
+            luts = availableLuts,
+            currentLutId = editLutId ?: "none",
+            thumbnail = thumbnail,
+            categoryOrder = categoryOrder,
+            onSelect = { id ->
+                viewModel.setEditLut(id)
+                availableLuts.find { it.id == id }?.let { lutSwipeState.announce(it.getName()) }
+            },
+            onSelectedClick = {
+                availableLuts.find { it.id == editLutId }?.let { lutSwipeState.announce(it.getName()) }
+            },
+            onLongPress = { onFilterManagementClick(it) },
+            onManage = { onFilterManagementClick(null) },
+            compact = true,
+            modifier = Modifier.fillMaxSize()
+        )
+        selectedKey == "frame" -> {
+            val frames = listOf<FrameInfo?>(null) + availableFrames
+            val selected = availableFrames.find { it.id == editFrameId }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                ChoiceScroller(frames.indexOfFirst { it?.id == editFrameId }.coerceAtLeast(0), maxWidth = 360.dp) {
+                    frames.forEach { frame ->
+                        EditorChip(
+                            text = frame?.name ?: stringResource(R.string.none),
+                            selected = frame?.id == editFrameId,
+                            onClick = {
+                                // A second tap on an editable frame opens it in the frame editor.
+                                if (frame?.id == editFrameId) frame?.takeIf { it.isEditable }?.let { onOpenFrameEditor(it.id) }
+                                else viewModel.setEditFrame(frame?.id)
+                            }
+                        )
+                    }
+                    if (selected?.isEditable == true) {
+                        EditorChip(
+                            text = stringResource(R.string.editor_edit_frame), selected = false,
+                            icon = AppIcons.FrameLine, action = true,
+                            onClick = { onOpenFrameEditor(selected.id) }
+                        )
+                    }
+                }
+            }
+        }
+        selectedKey == "preset" -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            ChoiceScroller(allPresets.indexOfFirst { it.id == viewModel.appliedPresetId }.coerceAtLeast(0), maxWidth = 360.dp) {
+                allPresets.forEach { preset ->
+                    val name = presetDisplayName(preset)
+                    EditorChip(
+                        text = name,
+                        selected = preset.id == viewModel.appliedPresetId,
+                        onClick = {
+                            viewModel.applyPresetToEdit(preset)
+                            lutSwipeState.announce(name)
+                        }
+                    )
+                }
+                EditorChip(
+                    text = stringResource(R.string.editor_copy_edits), selected = false,
+                    icon = AppIcons.ContentCopy, action = true,
+                    onClick = onCopyEdits
+                )
+                EditorChip(
+                    text = stringResource(R.string.editor_paste_edits), selected = false,
+                    icon = AppIcons.ContentCopy, action = true,
+                    dim = !hasCopiedEditSettings,
+                    onClick = onPasteEdits
+                )
+                EditorChip(
+                    text = stringResource(R.string.save_as_preset), selected = false,
+                    icon = AppIcons.Bookmark, action = true,
+                    onClick = onSaveAsPreset
+                )
+                if (hasLook) {
+                    EditorChip(
+                        text = stringResource(R.string.editor_save_into_look), selected = false,
+                        icon = AppIcons.FiltersLine, action = true,
+                        onClick = onSaveIntoLook
+                    )
+                }
+            }
+        }
+        selectedKey == "livePhoto" -> Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            listOf(false to stringResource(R.string.editor_off), true to stringResource(R.string.editor_on)).forEach { (apply, text) ->
+                EditorChip(text = text, selected = applyEffectsToVideo == apply, onClick = { viewModel.setApplyEffectsToVideo(apply) })
+            }
+        }
+        selectedKey == "intensity" && !hasLook ->
+            EditorControlHint(stringResource(R.string.editor_intensity_no_look))
+        selectedKey == "intensity" -> LilacRuler(
+            values = IntensitySteps,
+            value = intensity,
+            start = openIntensity,
+            label = { (it * 100).roundToInt().toString() },
+            onChange = onIntensity,
+            onRelease = {},
+            onReset = { onIntensity(openIntensity) },
+            onTouch = onTouch
+        )
+        else -> EditorControlHint(stringResource(R.string.editor_not_built))
+    }
+}
+
+/** True when [option] is ratio [r], either way round. */
+private fun sameShape(option: CropAspectOption, r: AspectRatio): Boolean {
+    if (!option.hasFixedRatio || option.heightRatio == 0f) return false
+    val a = option.widthRatio / option.heightRatio
+    val wide = r.widthRatio.toFloat() / r.heightRatio
+    return abs(a - wide) / wide < 0.01f || abs(a - 1f / wide) * wide < 0.01f
+}
+
+/** Crop's values: the frame's ratio and straightening, then Rotate and Flip, which act on every tap. */
+@Composable
+private fun cropValues(
+    option: CropAspectOption,
+    ratioChoices: List<AspectRatio>,
+    frameShape: Float,
+    straighten: Float,
+    rotation: Int,
+    mirror: Boolean,
+    changedKeys: Set<String>,
+): List<EditorValue> {
+    val ratioText = when {
+        option.isFree -> stringResource(R.string.crop_free)
+        option.isOriginal -> stringResource(R.string.crop_original)
+        else -> ratioChoices.firstOrNull { sameShape(option, it) }?.let { r ->
+            when {
+                r == AspectRatio.XPAN -> "XPAN"
+                option.widthRatio >= option.heightRatio -> "${r.widthRatio}:${r.heightRatio}"
+                else -> "${r.heightRatio}:${r.widthRatio}"
+            }
+        } ?: String.format(Locale.ROOT, "%.2f:1", option.widthRatio / option.heightRatio)
+    }
+    return listOf(
+        EditorValue(
+            "cropRatio", stringResource(R.string.editor_ratio), ratioText,
+            AppIcons.CropLine,
+            // A frame moved by turning or straightening alone is those values' change, not the ratio's.
+            "cropRatio" in changedKeys || "crop" in changedKeys &&
+                listOf("rotation", "straighten", "mirror").none { it in changedKeys },
+            glyph = EditorGlyph.CropRatio, fraction = (frameShape - 1f) / (frameShape + 1f)
+        ),
+        EditorValue(
+            "straighten", stringResource(R.string.crop_straighten),
+            String.format(Locale.ROOT, "%.1f", straighten).removeSuffix(".0") + "°",
+            AppIcons.CropLine, "straighten" in changedKeys,
+            glyph = EditorGlyph.Straighten, fraction = straighten / 45f
+        ),
+        // Rotate and Flip act on every tap; they are never the selected control.
+        EditorValue(
+            "rotation", stringResource(R.string.rotate), "$rotation°",
+            AppIcons.RotateClockwiseLine, "rotation" in changedKeys,
+            glyph = EditorGlyph.Rotate, fraction = rotation / 360f
+        ),
+        EditorValue(
+            "mirror", stringResource(R.string.editor_flip),
+            stringResource(if (mirror) R.string.editor_on else R.string.editor_off),
+            AppIcons.CropLine, "mirror" in changedKeys,
+            glyph = EditorGlyph.Flip, fraction = if (mirror) 1f else 0f
+        ),
+    )
+}
+
+/** Look's values: the look and its intensity, then (photos only) the frame and preset, and Live photo. */
+@Composable
+private fun lookValues(
+    lookName: String?,
+    intensity: Float,
+    isVideo: Boolean,
+    isMotionPhoto: Boolean,
+    frameName: String?,
+    preset: String?,
+    applyEffectsToVideo: Boolean,
+    changedKeys: Set<String>,
+): List<EditorValue> = listOf(
+    EditorValue(
+        "look", stringResource(R.string.editor_look),
+        lookName ?: stringResource(R.string.none),
+        AppIcons.FiltersLine, "look" in changedKeys, wide = true
+    ),
+    EditorValue(
+        "intensity", stringResource(R.string.editor_intensity), "${(intensity * 100).roundToInt()}%",
+        AppIcons.AdjustmentsLine, "lutIntensity" in changedKeys
+    ),
+) + if (isVideo) emptyList() else listOf(
+    EditorValue(
+        "frame", stringResource(R.string.frame),
+        frameName ?: stringResource(R.string.none),
+        AppIcons.FrameLine, "frame" in changedKeys, wide = true
+    ),
+    EditorValue(
+        "preset", stringResource(R.string.editor_preset),
+        preset ?: "—",
+        AppIcons.BookmarkLine, wide = true
+    ),
+) + if (isMotionPhoto) listOf(
+    EditorValue(
+        "livePhoto", stringResource(R.string.settings_use_live_photo),
+        stringResource(if (applyEffectsToVideo) R.string.editor_on else R.string.editor_off),
+        AppIcons.MovieLine, "applyEffectsToVideo" in changedKeys
+    )
+) else emptyList()
+
+/** A section's own settings as value tiles. */
+@Composable
+private fun settingValues(
+    settings: List<EditorSetting>,
+    valueOf: (EditorSetting) -> Float,
+    choiceLabel: (EditorSetting) -> String,
+    quick: Boolean,
+    blurOff: Boolean,
+    aiDenoiseEnabled: Boolean,
+    isAiDenoising: Boolean,
+    aiDenoiseProgress: Float,
+    changedKeys: Set<String>,
+): List<EditorValue> {
+    val offText = stringResource(R.string.editor_off)
+    val onText = stringResource(R.string.editor_on)
+    val autoText = stringResource(R.string.editor_auto)
+    val shallowValue = stringResource(R.string.editor_shallow_value)
+    val deepValue = stringResource(R.string.editor_deep_value)
+    val subjectText = stringResource(R.string.editor_subject)
+    // Lower keeps less in focus, higher more; words say which way, as signs alone did not.
+    fun depthOfFieldText(v: Float): String {
+        val n = v.roundToInt()
+        return when {
+            n < 0 -> shallowValue.format(-n)
+            n > 0 -> deepValue.format(n)
+            else -> autoText
+        }
+    }
+    return settings.map { s ->
+        val v = valueOf(s)
+        EditorValue(
+            key = s.key,
+            name = stringResource(s.label),
+            value = when {
+                s.kind == SettingKind.Aperture -> if (v > 0f) "f/${formatAperture(v)}" else offText
+                s.kind == SettingKind.DepthOfField -> depthOfFieldText(v)
+                s == EditorSetting.Focus && quick -> subjectText
+                s == EditorSetting.Depth && blurOff -> offText
+                s.kind == SettingKind.Choice -> choiceLabel(s)
+                s.kind != SettingKind.AiDenoise -> s.format(v)
+                isAiDenoising -> "${(aiDenoiseProgress * 100).roundToInt()}%"
+                aiDenoiseEnabled -> onText
+                else -> offText
+            },
+            icon = s.icon,
+            changed = s.key in changedKeys,
+            glyph = s.glyph,
+            fraction = s.fraction(v),
+            dimmed = s.section == EditorSection.Portrait && s != EditorSetting.Aperture &&
+                s != EditorSetting.Depth && blurOff,
+        )
+    }
+}
+
+/**
+ * The tool block: the settings of the current level above the path row. It lightens one step for each group you are
+ * inside ([depth]), so the depth shows without reading.
+ */
+@Composable
+private fun BoxScope.EditorToolBlock(
+    depth: Int,
+    values: List<EditorValue>,
+    selectedKey: String?,
+    onClick: (EditorValue) -> Unit,
+    onHold: (EditorValue, Boolean) -> Unit,
+    pathRow: @Composable () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .height(EDITOR_BLOCK_DP.dp)
+            .background(
+                when (depth) {
+                    0 -> Color.Black
+                    1 -> Color(0xFF222220)
+                    else -> Color(0xFF2E2E2C)
+                }
+            )
+    ) {
+        Spacer(Modifier.height(2.dp))
+        if (values.isEmpty()) {
+            Box(Modifier.fillMaxWidth().height(84.dp))
+        } else {
+            EditorValueRow(values = values, selectedKey = selectedKey, onClick = onClick, onHold = onHold)
+        }
+        Spacer(Modifier.height(4.dp))
+        pathRow()
+    }
+}
+
+/** The groups of the current level, as tiles that open them. */
+@Composable
+private fun groupTiles(groups: List<EditorGroup>, filmSections: Map<String, Boolean>?, changedKeys: Set<String>): List<EditorValue> =
+    groups.map { g ->
+        EditorValue(
+            key = "group:${g.name}",
+            name = stringResource(g.label),
+            value = "",
+            icon = g.icon,
+            changed = g.filmSection?.let { filmSections?.get(it) } ?: g.keys.any { it in changedKeys },
+            wide = true,
+            group = true,
+        )
+    }
+
+/** Mixer, Grading and Calibration: the picked colour's, range's or primary's values. */
+@Composable
+private fun groupValueTiles(values: List<GroupValue>, recipe: ColorRecipeParams, changed: (GroupValue) -> Boolean): List<EditorValue> =
+    values.map { v ->
+        EditorValue(v.key, stringResource(v.label), v.text(v.get(recipe)), v.icon, changed(v))
+    }
+
+/** Curve's values: the selected point, and Delete, which acts on a tap, as Rotate does; never the selected control. */
+@Composable
+private fun curveValues(point: Pair<Float, Float>?, changed: Boolean, deletable: Boolean): List<EditorValue> = listOf(
+    EditorValue(
+        "curvePoint", stringResource(R.string.editor_curve_point),
+        point?.let { (x, y) -> "${(x * 255).roundToInt()} → ${(y * 255).roundToInt()}" } ?: "—",
+        AppIcons.CircleDotLine, changed
+    ),
+    EditorValue(
+        "curveDelete", stringResource(R.string.editor_curve_delete), if (point != null) "✕" else "—",
+        AppIcons.CloseLine, dimmed = !deletable
+    ),
+)
+
+/** The editor's questions: delete an imported DCP, save the edit into its look, and discard the changes. */
+@Composable
+private fun EditorDialogs(
+    ui: EditorUiState,
+    viewModel: GalleryViewModel,
+    noteLine: NoteLineState,
+    scope: CoroutineScope,
+    photo: MediaData,
+    editRawDcpId: String?,
+    saveIntoLookName: String?,
+    discard: Boolean,
+    onCloseSaveIntoLook: () -> Unit,
+    onCloseDiscard: () -> Unit,
+    onLeave: () -> Unit,
+    onRawRefresh: () -> Unit,
+) {
+    ui.deleteDcpAsk?.let { dcp ->
+        EditorDiscardDialog(
+            title = stringResource(R.string.editor_delete_dcp_title),
+            message = stringResource(R.string.editor_delete_dcp_message, dcp.getName()),
+            keepText = stringResource(R.string.cancel),
+            actionText = stringResource(R.string.delete),
+            onKeep = { ui.deleteDcpAsk = null },
+            onDiscard = {
+                ui.deleteDcpAsk = null
+                val wasChosen = editRawDcpId == dcp.id
+                viewModel.deleteRawDcp(photo, dcp.id) { success ->
+                    noteLine.say(if (success) R.string.raw_dcp_delete_success else R.string.raw_dcp_delete_failed)
+                    if (success && wasChosen) onRawRefresh()
+                }
             }
         )
     }
 
-    if (showRawBaselineLutSelectorSheet) {
-        RawBaselineColorCorrectionBottomSheet(
-            selectedLutId = editRawBaselineLutId,
-            availableLuts = availableLuts,
-            thumbnail = thumbnailBitmap,
-            containerColor = Color(0x151A1A1A),
-            onSelectLut = { lutId ->
-                viewModel.saveRawBaselineLutSelection(currentEditSourcePhoto, lutId)
-            },
-            onEditRecipe = { lutId ->
-                baselineLutEditId = lutId
-                showRawBaselineLutSelectorSheet = false
-                showBaselineLutEditSheet = true
-            },
-            onDismiss = {
-                showRawBaselineLutSelectorSheet = false
+    if (saveIntoLookName != null) {
+        EditorDiscardDialog(
+            title = stringResource(R.string.editor_save_into_look_title, saveIntoLookName),
+            message = stringResource(R.string.editor_save_into_look_message),
+            keepText = stringResource(R.string.cancel),
+            actionText = stringResource(R.string.editor_save_into_look),
+            onKeep = onCloseSaveIntoLook,
+            onDiscard = {
+                onCloseSaveIntoLook()
+                scope.launch { if (viewModel.saveRecipeIntoLook()) noteLine.say(R.string.editor_saved_into_look) }
             }
         )
     }
 
-    if (showPaymentDialog) {
+    if (discard) {
+        EditorDiscardDialog(
+            message = stringResource(R.string.editor_discard_message),
+            onKeep = onCloseDiscard,
+            onDiscard = {
+                onCloseDiscard()
+                onLeave()
+            }
+        )
+    }
+}
+
+/** Portrait's cheap blur: the preview's layers, one per BlurPreview.LEVELS strength, as state read where drawn. */
+@Composable
+private fun portraitBlurLayers(
+    viewModel: GalleryViewModel,
+    photo: MediaData,
+    portraitOpen: Boolean,
+    editPhotoRecipeParams: ColorRecipeParams?,
+    editLutId: String?,
+    editCropRect: RectF?,
+    editRotationDegrees: Int,
+    editStraightenDegrees: Float,
+    editMirrorHorizontal: Boolean,
+    blurMaps: GalleryViewModel.BlurMaps?,
+    ringDrag: Offset?,
+    editFocusX: Float?,
+    editFocusY: Float?,
+    portraitQuick: Boolean,
+    previewDepthOfField: Int?,
+    previewStrength: Float,
+    contentBounds: () -> Rect?,
+): State<List<ImageBitmap?>> {
+    // Portrait's cheap preview: the photo as edited but without the blur, small, loaded once per edit state
+    // (one ordinary preview render, never while dragging), then blurred on the CPU from the subject cut-out.
+    var sharpBase by remember(photo.id) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(
+        portraitOpen, photo.id, editPhotoRecipeParams, editLutId,
+        editCropRect, editRotationDegrees, editStraightenDegrees, editMirrorHorizontal,
+    ) {
+        if (!portraitOpen) return@LaunchedEffect
+        viewModel.prepareBlurMaps(photo)
+        sharpBase = withContext(Dispatchers.IO) {
+            viewModel.getPreviewBitmap(
+                photo,
+                useGlobalEdit = true,
+                ignoreFrame = true,
+                ignoreBokeh = true,
+                maxEdge = 720,
+            )
+        }
+    }
+
+    // The preview at each of BlurPreview.LEVELS, made on the CPU whenever the photo, the focus or the mode
+    // changes; the strength in use comes first so the preview shows at once, the rest follow for scrolling.
+    val blurLayers = remember { mutableStateOf<List<ImageBitmap?>>(emptyList()) }
+    LaunchedEffect(portraitOpen, sharpBase, blurMaps, ringDrag, editFocusX, editFocusY, portraitQuick, previewDepthOfField) {
+        val base = sharpBase
+        val maps = blurMaps?.takeIf { it.photoId == photo.id }
+        if (!portraitOpen || base == null || maps == null) {
+            blurLayers.value = emptyList()
+            return@LaunchedEffect
+        }
+        delay(60)  // a burst of drags only computes the last one
+        val bounds = contentBounds()
+        val focus = ringDrag?.takeIf { bounds != null && bounds.width > 0f }?.let { p ->
+            viewModel.displayPointToSource(
+                ((p.x - bounds!!.left) / bounds.width).coerceIn(0f, 1f),
+                ((p.y - bounds.top) / bounds.height).coerceIn(0f, 1f),
+            )
+        } ?: ((editFocusX ?: 0.5f) to (editFocusY ?: 0.5f))
+        val prepared = withContext(Dispatchers.Default) {
+            BlurPreview.prepare(
+                base = base,
+                toSource = viewModel::displayPointToSource,
+                mask = maps.mask,
+                depth = maps.depth,
+                focusX = focus.first,
+                focusY = focus.second,
+                quick = portraitQuick,
+                widthScale = PortraitBlurMetadata.focalWidthScale(previewDepthOfField),
+            )
+        }
+        val layers = MutableList<ImageBitmap?>(BlurPreview.LEVELS.size) { null }
+        for (level in BlurPreview.LEVELS.indices.sortedBy { abs(BlurPreview.LEVELS[it] - previewStrength) }) {
+            layers[level] = withContext(Dispatchers.Default) {
+                BlurPreview.layer(prepared, BlurPreview.LEVELS[level]).asImageBitmap()
+            }
+            blurLayers.value = layers.toList()
+        }
+    }
+    return blurLayers
+}
+
+/** RAW: the profiles embedded in the photo's DNG, read again whenever the file changes. */
+@Composable
+private fun embeddedDngProfiles(photo: MediaData?, isRaw: Boolean, refreshKey: Long): EmbeddedDngProfileUiState {
+    val context = LocalContext.current
+    val dngProfileStamp = remember(photo?.id, refreshKey, isRaw) {
+        photo
+            ?.takeIf { isRaw }
+            ?.let { GalleryManager.getDngFile(context, it.id) }
+            ?.takeIf { it.exists() }
+            ?.let { it.lastModified() xor it.length() }
+            ?: 0L
+    }
+    val embeddedProfileFallbackName = stringResource(
+        R.string.settings_raw_profile_tone_map_embedded
+    )
+    var embeddedDngProfileUiState by remember(photo?.id, dngProfileStamp) {
+        mutableStateOf(EmbeddedDngProfileUiState())
+    }
+
+    LaunchedEffect(
+        photo?.id,
+        dngProfileStamp,
+        isRaw,
+        embeddedProfileFallbackName,
+    ) {
+        embeddedDngProfileUiState = if (photo != null && isRaw) {
+            withContext(Dispatchers.IO) {
+                val dngFile = GalleryManager.getDngFile(context, photo.id)
+                val profiles = DngEmbeddedProfile.readAllFrom(dngFile)
+                val visibleProfiles = profiles.filterNot { it.isPhotonHdr }
+                PLog.d(
+                    "GalleryEditScreen",
+                    "DNG embedded profiles: " + profiles.joinToString { profile ->
+                        "${profile.id}:${profile.profileName}" +
+                            "(pgtm=${profile.hasProfileGainTableMap},photon=${profile.isPhotonHdr})"
+                    }
+                )
+                EmbeddedDngProfileUiState(
+                    options = visibleProfiles.map { profile ->
+                        RawEmbeddedDngProfileOption(
+                            id = profile.id,
+                            name = profile.profileName
+                                .trim()
+                                .takeUnless {
+                                    it.isEmpty() || it.equals("Embedded", ignoreCase = true)
+                                }
+                                ?: embeddedProfileFallbackName,
+                            hasProfileGainTableMap = profile.hasProfileGainTableMap,
+                        )
+                    },
+                    defaultProfileId = visibleProfiles
+                        .firstOrNull { it.id == DngEmbeddedProfile.PRIMARY_PROFILE_ID }
+                        ?.id,
+                )
+            }
+        } else {
+            EmbeddedDngProfileUiState()
+        }
+    }
+    return embeddedDngProfileUiState
+}
+
+/** The purchase dialog, and the downloads of the AI denoise and depth models the first time each is chosen. */
+@Composable
+private fun EditorModelDialogs(
+    viewModel: GalleryViewModel,
+    payment: Boolean,
+    aiDenoiseModel: AiDenoiseModelState?,
+    depthModel: DepthModelDownloadState?,
+    onImportDepthModel: () -> Unit,
+    onDismissAiDenoise: () -> Unit,
+    onDismissDepth: () -> Unit,
+) {
+    val context = LocalContext.current
+    if (payment) {
         val activity = context.findActivity()
         PaymentDialog(
             onDismiss = { viewModel.showPaymentDialog = false },
@@ -3146,28 +3314,122 @@ fun GalleryEditScreen(
         )
     }
 
-    if (pendingAiDenoise) {
+    if (aiDenoiseModel != null) {
         AiDenoiseModelDownloadDialog(
-            state = aiDenoiseModelState,
+            state = aiDenoiseModel,
             onDownload = { AiDenoiseModelManager.download(context) },
             onDismiss = {
-                pendingAiDenoise = false
+                onDismissAiDenoise()
                 viewModel.setAiDenoiseEnabled(false)
             }
         )
     }
 
-    if (showDepthModelDownloadDialog) {
+    if (depthModel != null) {
         DepthModelDownloadDialog(
-            state = depthModelState,
+            state = depthModel,
             onDownload = { DepthModelManager.download(context) },
-            onImport = { depthModelImportLauncher.launch(arrayOf("*/*")) },
-            onDismiss = {
-                showDepthModelDownloadDialog = false
-                pendingDepth = false
-            }
+            onImport = onImportDepthModel,
+            onDismiss = onDismissDepth
         )
     }
+}
+
+/**
+ * RAW: develops the photo again after a RAW change. While editing that is the quick preview develop, one at a time
+ * (changes made meanwhile develop once more when it ends); Re-render writes the edits and develops in full. Returns
+ * the request, which takes whether Photon HDR's tone map is to be rebuilt.
+ */
+@Composable
+private fun rawPreviewRefresh(
+    viewModel: GalleryViewModel,
+    ui: EditorUiState,
+    photo: MediaData,
+    isRaw: Boolean,
+    hdPreview: State<Boolean>,
+    scope: CoroutineScope,
+): (Boolean) -> Unit {
+    val context = LocalContext.current
+
+    fun refreshRawPreview(forceRegeneratePhotonPgtm: Boolean) {
+        // shortcut: assumes the files develop from the state saved just before; a change saved while this
+        // starts could be cached under the wrong state. Only a few small earlier looks are kept, so the cost is low.
+        val requested = viewModel.editRawState()
+        val engineAtStart = viewModel.editRawRenderingEngine.value.name
+        val startedAt = SystemClock.uptimeMillis()
+        viewModel.refreshRawPreview(
+            photo = photo,
+            forceRegeneratePhotonPgtm = forceRegeneratePhotonPgtm,
+        ) { success ->
+            if (success) {
+                ui.developedRaw = requested
+                ui.rawDevelopMs["full:$engineAtStart"] = SystemClock.uptimeMillis() - startedAt
+                ui.rawPreviewBase = null
+            }
+        }
+    }
+
+    fun developRawPreview() {
+        if (ui.previewDeveloping) {
+            ui.previewAgain = true
+            return
+        }
+        ui.previewDeveloping = true
+        scope.launch {
+            // A develop holds the GPU for seconds: it waits until the user pauses, then takes the settings as
+            // they are by then.
+            viewModel.awaitEditorPause()
+            ui.previewAgain = false
+            val state = viewModel.editRawState()
+            val meta = viewModel.editRawPreviewMetadata(photo)
+            val engineAtStart = viewModel.editRawRenderingEngine.value.name
+            val startedAt = SystemClock.uptimeMillis()
+            val bitmap = GalleryManager.developRawPreview(context, photo.id, meta, halfSize = !hdPreview.value)
+            if (bitmap != null) {
+                ui.rawPreviewBase = bitmap
+                ui.developedRaw = state
+                ui.rawDevelopMs[engineAtStart] = SystemClock.uptimeMillis() - startedAt
+            }
+            ui.previewDeveloping = false
+            if (ui.previewAgain) {
+                ui.previewAgain = false
+                developRawPreview()
+            }
+        }
+    }
+
+    fun requestRawPreviewRefresh(forceRegeneratePhotonPgtm: Boolean) {
+        if (!isRaw) return
+        if (viewModel.deferEditWrites && !forceRegeneratePhotonPgtm) {
+            developRawPreview()
+            return
+        }
+        if (viewModel.rawEditsPending) {
+            viewModel.writeRawEdits(photo) { requestRawPreviewRefresh(forceRegeneratePhotonPgtm) }
+            return
+        }
+        if (viewModel.refreshingPhotos.contains(photo.id)) {
+            ui.pendingPgtmRegeneration = ui.pendingPgtmRegeneration || forceRegeneratePhotonPgtm
+            ui.pendingRawRefresh = true
+            return
+        }
+        refreshRawPreview(forceRegeneratePhotonPgtm)
+    }
+
+    val isRefreshingRawPreview = viewModel.refreshingPhotos.contains(photo.id)
+    LaunchedEffect(isRefreshingRawPreview, ui.pendingRawRefresh, photo.id) {
+        if (!isRefreshingRawPreview && ui.pendingRawRefresh) {
+            val forceRegeneratePhotonPgtm = ui.pendingPgtmRegeneration
+            ui.pendingRawRefresh = false
+            ui.pendingPgtmRegeneration = false
+            refreshRawPreview(forceRegeneratePhotonPgtm)
+        }
+    }
+    // Switching HD develops the waiting RAW changes again at the other size.
+    LaunchedEffect(hdPreview.value) {
+        if (isRaw && viewModel.rawEditsPending) developRawPreview()
+    }
+    return ::requestRawPreviewRefresh
 }
 
 private fun Context.findActivity(): Activity? {
@@ -3177,6 +3439,140 @@ private fun Context.findActivity(): Activity? {
         context = context.baseContext
     }
     return null
+}
+
+/** The reference photo set from a film's page: a small card that can be dragged, enlarged or pinned away. */
+@Composable
+private fun ReferencePhoto(referencePhotoUrl: String?, onClose: () -> Unit) {
+    var isMinimized by remember { mutableStateOf(false) }
+    var isLarge by remember { mutableStateOf(false) }
+
+    referencePhotoUrl?.let { url ->
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val initialOffsetX = remember(density) { with(density) { 20.dp.toPx() } }
+        val initialOffsetY = remember(density) { with(density) { 80.dp.toPx() } }
+
+        var offsetX by remember { mutableStateOf(initialOffsetX) }
+        var offsetY by remember { mutableStateOf(initialOffsetY) }
+
+        Box(
+            modifier = Modifier
+                .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+                .pointerInput(Unit) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        offsetX += dragAmount.x
+                        offsetY += dragAmount.y
+                    }
+                }
+                .zIndex(10f)
+        ) {
+            if (isMinimized) {
+                Card(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clickable { isMinimized = false },
+                    shape = CircleShape,
+                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.8f)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                    border = BorderStroke(1.5.dp, Color.White)
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = AppIcons.PushPin,
+                            contentDescription = "Show Reference",
+                            tint = AccentColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            } else {
+                val cardSize = if (isLarge) 240.dp else 120.dp
+                Card(
+                    modifier = Modifier
+                        .width(cardSize),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                    border = BorderStroke(2.dp, Color.White)
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            coil.compose.AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(url)
+                                    .placeholder(R.mipmap.ic_launcher)
+                                    .build(),
+                                contentDescription = "Reference Photo",
+                                modifier = Modifier
+                                    .fillMaxWidth(),
+                                contentScale = ContentScale.FillWidth
+                            )
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.6f))
+                                        .clickable { isMinimized = true },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = AppIcons.PushPin,
+                                        contentDescription = "Minimize",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.6f))
+                                        .clickable { onClose() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Close",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color.White)
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                .clickable { isLarge = !isLarge },
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (isLarge) stringResource(R.string.zoom_out) else stringResource(R.string.zoom_in),
+                                color = Color.Black,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /**
