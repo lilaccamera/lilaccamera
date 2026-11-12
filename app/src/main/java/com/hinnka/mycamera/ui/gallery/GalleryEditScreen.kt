@@ -452,7 +452,9 @@ fun GalleryEditScreen(
             editLutId = editLutId,
             editPhotoRecipeParams = editPhotoRecipeParams,
             editLutRecipeParams = editLutRecipeParams,
-            editLutConfig = editLutConfig,
+            // Read here, not from the screen's local copy: the render effects keep this function from their first
+            // composition, so a look loaded later never matched the screen's state and Crop never showed.
+            editLutConfig = viewModel.editLutConfig,
             editFrameId = editFrameId,
             editFrameCustomProperties = editFrameCustomProperties.toMap(),
             editSharpening = if (rawDevelopIsBaked) 0f else editSharpening,
