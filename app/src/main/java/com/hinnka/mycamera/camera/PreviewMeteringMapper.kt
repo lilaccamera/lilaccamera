@@ -43,7 +43,18 @@ internal data class PreviewMeteringMapping(
     val centerX: Int,
     val centerY: Int,
     val visibleRegion: CameraCoordinateRect,
+    val sensorOrientationDegrees: Int = 0,
+    val isFrontFacing: Boolean = false,
 )
+
+/** A box in the viewfinder, normalized to its width and height (origin top left). */
+data class ViewRect(val left: Float, val top: Float, val right: Float, val bottom: Float) {
+    val centerX: Float get() = (left + right) / 2f
+    val centerY: Float get() = (top + bottom) / 2f
+    val width: Float get() = right - left
+    val height: Float get() = bottom - top
+    fun contains(x: Float, y: Float): Boolean = x in left..right && y in top..bottom
+}
 
 /**
  * 把最终显示画面的归一化坐标映射到 Camera2 AF/AE region 坐标。
@@ -73,7 +84,8 @@ internal object PreviewMeteringMapper {
             sensorOrientationDegrees = sensorOrientationDegrees,
         )
 
-        val uiX = normalizedX.coerceIn(0f, 1f)
+        // A front preview is shown mirrored: undo the mirror on the view's own x axis before rotating.
+        val uiX = normalizedX.coerceIn(0f, 1f).let { if (isFrontFacing) 1f - it else it }
         val uiY = normalizedY.coerceIn(0f, 1f)
         val (rotatedX, rotatedY) = when (Math.floorMod(sensorOrientationDegrees, 360)) {
             0 -> uiX to uiY
@@ -82,7 +94,7 @@ internal object PreviewMeteringMapper {
             270 -> (1f - uiY) to uiX
             else -> uiX to uiY
         }
-        val sensorX = if (isFrontFacing) 1f - rotatedX else rotatedX
+        val sensorX = rotatedX
         val sensorY = rotatedY
 
         return PreviewMeteringMapping(
@@ -97,7 +109,33 @@ internal object PreviewMeteringMapper {
                 length = visibleRegion.height,
             ),
             visibleRegion = visibleRegion,
+            sensorOrientationDegrees = sensorOrientationDegrees,
+            isFrontFacing = isFrontFacing,
         )
+    }
+
+    /** The inverse of [mapPoint] for a box in camera coordinates (faces, a tracked object), clipped to the view. */
+    fun mapRectToView(rect: CameraCoordinateRect, mapping: PreviewMeteringMapping): ViewRect? {
+        val visible = mapping.visibleRegion
+        if (visible.isEmpty) return null
+        fun toView(x: Int, y: Int): Pair<Float, Float> {
+            val rotatedX = (x - visible.left).toFloat() / (visible.width - 1).coerceAtLeast(1)
+            val rotatedY = (y - visible.top).toFloat() / (visible.height - 1).coerceAtLeast(1)
+            val (viewX, viewY) = when (Math.floorMod(mapping.sensorOrientationDegrees, 360)) {
+                90 -> (1f - rotatedY) to rotatedX
+                180 -> (1f - rotatedX) to (1f - rotatedY)
+                270 -> rotatedY to (1f - rotatedX)
+                else -> rotatedX to rotatedY
+            }
+            return (if (mapping.isFrontFacing) 1f - viewX else viewX) to viewY
+        }
+        val a = toView(rect.left, rect.top)
+        val b = toView(rect.right, rect.bottom)
+        val left = minOf(a.first, b.first).coerceIn(0f, 1f)
+        val right = maxOf(a.first, b.first).coerceIn(0f, 1f)
+        val top = minOf(a.second, b.second).coerceIn(0f, 1f)
+        val bottom = maxOf(a.second, b.second).coerceIn(0f, 1f)
+        return ViewRect(left, top, right, bottom).takeIf { right > left && bottom > top }
     }
 
     fun buildCenteredRegion(

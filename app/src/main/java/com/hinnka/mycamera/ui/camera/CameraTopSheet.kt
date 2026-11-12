@@ -142,6 +142,8 @@ internal fun CameraTopSheet(
     onFlashToggle: () -> Unit,
     timerSeconds: Int,
     onTimerToggle: () -> Unit,
+    smileThreshold: Int,
+    onSmileToggle: () -> Unit,
     useLivePhoto: Boolean,
     onLivePhotoToggle: () -> Unit,
     aspectRatio: AspectRatio,
@@ -304,6 +306,8 @@ internal fun CameraTopSheet(
                 onLivePhotoToggle = onLivePhotoToggle,
                 timerSeconds = timerSeconds,
                 onTimerToggle = onTimerToggle,
+                smileThreshold = smileThreshold,
+                onSmileToggle = onSmileToggle,
                 aspectRatio = shownAspect,
                 onAspectClick = {
                     val ratios = AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios)
@@ -818,6 +822,8 @@ private fun RowScope.PhotoEverydayItems(
     onLivePhotoToggle: () -> Unit,
     timerSeconds: Int,
     onTimerToggle: () -> Unit,
+    smileThreshold: Int,
+    onSmileToggle: () -> Unit,
     aspectRatio: AspectRatio,
     onAspectClick: () -> Unit,
     flashMode: Int,
@@ -839,6 +845,12 @@ private fun RowScope.PhotoEverydayItems(
         onClick = onTimerToggle,
         modifier = itemModifier
     ) { color -> Icon(AppIcons.StopwatchLine, contentDescription = null, tint = color, modifier = Modifier.size(24.dp)) }
+    EverydayItem(
+        label = "${stringResource(R.string.smile)} ${smileSizeLetter(smileThreshold) ?: off}",
+        active = smileThreshold > 0,
+        onClick = onSmileToggle,
+        modifier = itemModifier
+    ) { color -> Icon(AppIcons.MoodSmileLine, contentDescription = null, tint = color, modifier = Modifier.size(24.dp)) }
     EverydayItem(
         label = aspectRatio.getDisplayName(),
         active = false,
@@ -1556,3 +1568,11 @@ fun QuickSettingButton(
     }
 }
 
+
+/** The smile shutter's size of smile as one letter: S small, M average, L big; null when off. */
+internal fun smileSizeLetter(threshold: Int): String? = when {
+    threshold <= 0 -> null
+    threshold < 55 -> "S"
+    threshold < 70 -> "M"
+    else -> "L"
+}

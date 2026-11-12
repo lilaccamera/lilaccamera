@@ -19,6 +19,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.util.Range
 import android.util.Rational
 import android.util.Size
@@ -76,6 +77,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.math.hypot
 import kotlin.math.ln
 import kotlin.math.pow
@@ -127,6 +130,43 @@ class Camera2Controller(private val context: Context) {
         private const val FOCUS_LOCK_SETTLE_FRAMES = 5        // 对焦锁定后等待镜头稳定的帧数
         private const val SCENE_CHANGE_CONFIRM_FRAMES = 3     // 连续 N 帧检测到变化才确认
         private const val EYE_TARGET_RECENT_MS = 1_500L
+        private const val MAX_SUBJECT_FACES = 5
+        private const val SUBJECT_LOG_MS = 200L
+        // The driver drops faces for a few frames at a time; a frame stays this long before it goes.
+        private const val FACE_SHOW_MS = 400L
+        private const val MAIN_FACE_HOLD_MS = 1_000L
+        private const val FACE_MATCH_MIN_DISTANCE = 0.08f
+        // Another face this much larger for this long becomes the main face, unless the user chose the main face.
+        private const val RIVAL_AREA_RATIO = 1.5f
+        private const val RIVAL_HOLD_MS = 2_000L
+        // A half-press with no face in sight waits this long for the app's detector before locking on the centre.
+        private const val HALF_PRESS_FACE_WAIT_MS = 400L
+        private const val FACE_RESELECT_AFTER_MS = 500L
+        private const val FACE_RESELECT_EVERY_MS = 1_000L
+        // Face metering stays on this long after the last face, so a blink of the detector does not flip exposure.
+        private const val FACE_AE_HOLD_MS = 1_000L
+        private const val TRACK_FAINT_MS = 500L
+        private const val TRACK_STOP_MS = 3_000L
+        private const val TRACK_BOX_FOLLOW = 0.6f
+        private const val TRACK_GROWTH_LIMIT = 4f
+        private const val TRACK_FACE_TAKEOVER_MS = 200L
+        private const val TAP_CHECK_WAIT_MS = 150L
+        private const val FACE_FRAME_SCALE = 1.2f
+        private const val FACE_FRAME_CHIN_SHIFT = 0.05f
+        // Subject AF: the region follows the subject without restarting the driver's AF on every frame.
+        private const val SUBJECT_AF_MIN_INTERVAL_MS = 150L
+        private const val SUBJECT_AF_MOVE_FRACTION = 0.03f
+        private const val SUBJECT_AF_RESIZE_FRACTION = 0.10f
+        // A one-shot AF scan when the subject came nearer or went away, or continuous AF has not settled on it.
+        private const val AF_KICK_RESIZE_FRACTION = 0.25f
+        private const val AF_KICK_UNFOCUSED_MS = 1_500L
+        private const val AF_KICK_EVERY_MS = 1_500L
+        private const val AF_KICK_TIMEOUT_MS = 2_000L
+        // A late answer can still turn the new track into a face; after this it is ignored.
+        private const val TAP_CHECK_GIVE_UP_MS = 1_000L
+        private const val TAP_FACE_MARGIN = 0.15f
+        // Half the tap mark (42 dp), the area that clears a selection when tapped again.
+        private const val TAP_MARK_HALF_DP = 21f
         private const val AF_REGION_WIDTH_FRACTION = 0.10f
         private const val AF_REGION_HEIGHT_FRACTION = 0.10f
         private const val SPOT_AE_REGION_FRACTION = 0.06f
@@ -382,6 +422,16 @@ class Camera2Controller(private val context: Context) {
 
     private val _state = MutableStateFlow(CameraState())
     val state: StateFlow<CameraState> = _state.asStateFlow()
+
+    // Kept out of CameraState, which every frame copies whole.
+    private val _subjectOverlay = MutableStateFlow(SubjectOverlay())
+    val subjectOverlay: StateFlow<SubjectOverlay> = _subjectOverlay.asStateFlow()
+    /** The driver's faces and the main one, every frame while Portrait is on; called on the camera thread. */
+    @Volatile
+    var onPortraitFaces: ((List<ViewRect>, Int) -> Unit)? = null
+    // Why the app's own face detector should look at the viewfinder now ("tap", "track", "face"), or null for no work.
+    private val _faceCheckReason = MutableStateFlow<String?>(null)
+    val faceCheckReason: StateFlow<String?> = _faceCheckReason.asStateFlow()
 
     @Volatile
     var retainCaptureSettingsEnabled: Boolean = false
@@ -1425,6 +1475,8 @@ class Camera2Controller(private val context: Context) {
             // 处理拍照状态机
             processStillFlashPrecapture(request, result)
             processMultiFrameTorchWarmupState(request, result)
+            if (session === captureSession) handleSubjectResult(result)
+            if (session === captureSession) handleHintResult(result)
 
             // 监听对焦状态
             val afState = result.get(CaptureResult.CONTROL_AF_STATE)
@@ -2389,6 +2441,9 @@ class Camera2Controller(private val context: Context) {
         availableFaceDetectModes = intArrayOf()
         maxFaceCount = 0
         faceDetectMode = CaptureRequest.STATISTICS_FACE_DETECT_MODE_OFF
+        sonyFeatures = SonySubjectFeatures()
+        resetSubjectState()
+        resetHintState(SonyHintFeatures())
         availableColorCorrectionModes = intArrayOf()
         awbColorTemperatureRange = null
         lastWhiteBalanceResult = null
@@ -3008,6 +3063,17 @@ class Camera2Controller(private val context: Context) {
                 maxFaceCount =
                     openCharacteristics.get(CameraCharacteristics.STATISTICS_INFO_MAX_FACE_COUNT) ?: 0
                 faceDetectMode = resolveFaceDetectMode(availableFaceDetectModes, maxFaceCount)
+                sonyFeatures = SonySubjectFeatures.of(
+                    openCharacteristics,
+                    faceDetection = faceDetectMode != CaptureRequest.STATISTICS_FACE_DETECT_MODE_OFF,
+                )
+                resetSubjectState()
+                Log.i(SonySubjectKeys.LOG_TAG, "camera=$capabilityCameraId $sonyFeatures")
+                resetHintState(SonyHintFeatures.of(
+                    openCharacteristics,
+                    faceDetection = faceDetectMode != CaptureRequest.STATISTICS_FACE_DETECT_MODE_OFF,
+                ))
+                Log.i(SonyHintKeys.LOG_TAG, "camera=$capabilityCameraId $hintFeatures")
                 availableColorCorrectionModes = loadAvailableColorCorrectionModes(openCharacteristics)
                 awbColorTemperatureRange = loadAwbColorTemperatureRange(openCharacteristics)
                 lastWhiteBalanceResult = null
@@ -4509,6 +4575,8 @@ class Camera2Controller(private val context: Context) {
         if (faceDetectMode != CaptureRequest.STATISTICS_FACE_DETECT_MODE_OFF) {
             builder.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE, faceDetectMode)
         }
+        applySonySubjectKeys(builder)
+        applySonyHintKeys(builder)
 
         if (disableZslForHdrCapture) {
             setZslDisabledIfSupported(builder)
@@ -7177,8 +7245,23 @@ class Camera2Controller(private val context: Context) {
     /**
      * 点击对焦
      */
-    fun focusOnPoint(x: Float, y: Float, viewWidth: Int, viewHeight: Int) {
+    fun focusOnPoint(x: Float, y: Float, viewWidth: Int, viewHeight: Int, allowSubject: Boolean = true) {
         if (viewWidth <= 0 || viewHeight <= 0) return
+        // A tap on the current selection's mark clears it, back to automatic.
+        val markHalf = TAP_MARK_HALF_DP * context.resources.displayMetrics.density
+        fun onMark(point: Pair<Float, Float>?) =
+            point != null && abs(point.first * viewWidth - x) <= markHalf && abs(point.second * viewHeight - y) <= markHalf
+        val overlay = _subjectOverlay.value
+        if (overlay.tracking && onMark(overlay.trackBox?.let { it.centerX to it.centerY } ?: overlay.trackStart)) {
+            cameraHandler?.post { clearSelection("object") }
+            return
+        }
+        if (_state.value.focusPointSource == FocusPointSource.MANUAL && onMark(_state.value.focusPoint)) {
+            Log.i(SonySubjectKeys.LOG_TAG, "selection cleared (point)")
+            unlockFocus()
+            return
+        }
+        if (allowSubject && selectSubjectAt(x / viewWidth, y / viewHeight, viewWidth.toFloat() / viewHeight)) return
         focusOnNormalizedPoint(
             normX = x / viewWidth,
             normY = y / viewHeight,
@@ -7197,6 +7280,27 @@ class Camera2Controller(private val context: Context) {
             return
         }
         shutterKeyHold = held
+        if (held) {
+            // A half-press locks focus on the subject: the tracked object (a driver that tracks during the lock keeps
+            // following it) or the main face.
+            if (trackingSinceMs > 0L) {
+                if (sonyFeatures.trackingDuringLock) lockSubjectAf("object", subjectAfRegion)
+            } else if (_state.value.focusPoint == null) {
+                // A tap or eye point keeps its own lock.
+                keptFaces.firstOrNull { it.id == mainFaceId }?.let { lockSubjectAf("face ${it.id}", it.sensor) }
+            }
+        } else {
+            halfPressCheck?.let { cameraHandler?.removeCallbacks(it) }
+            halfPressCheck = null
+            if (subjectAfLocked) {
+                subjectAfLocked = false
+                submitOneShot(
+                    "half-press released: AF cancel",
+                    set = { it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL) },
+                    reset = { it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE) },
+                )
+            }
+        }
         val aeLockAvailable = getActiveOpenCameraCharacteristics()
             ?.get(CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE) == true
         previewRequestBuilder?.apply {
@@ -7207,6 +7311,91 @@ class Camera2Controller(private val context: Context) {
             shutterKeyHeld = held,
             exposureHeld = held && aeLockAvailable && _state.value.isAutoExposure,
         ) }
+    }
+
+    // The pending half-press search for a face: runs the centre lock if the app's detector does not answer in time.
+    private var halfPressCheck: Runnable? = null
+    private var halfPressOutcomePending = false
+
+    /** AF START on the subject's region in continuous mode; exposure is held by the half-press itself. */
+    private fun lockSubjectAf(kind: String, sensor: CameraCoordinateRect?) {
+        val state = _state.value
+        val visible = mapPreviewMeteringPoint(0.5f, 0.5f, null)?.visibleRegion
+        val region = sensor?.let { visible?.let(it::intersect) ?: it }
+        if (maxAfRegions <= 0 || !state.supportsPointAutoFocus || !state.isAutoFocus || eyeFocusOwnsAf || region == null) {
+            Log.i(SonySubjectKeys.LOG_TAG, "half-press: $kind, exposure lock only")
+            return
+        }
+        val builder = previewRequestBuilder ?: return
+        subjectAfRegion = region
+        subjectAfSentMs = SystemClock.elapsedRealtime()
+        afKickPending = false
+        applySonySubjectKeys(builder)
+        subjectAfLocked = submitOneShot(
+            "half-press: $kind, AF start on $region",
+            set = { it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START) },
+            reset = { it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE) },
+        )
+        halfPressOutcomePending = subjectAfLocked
+    }
+
+    /**
+     * A half-press with no subject: a face the camera reports now; else focus starts on the centre at once while the
+     * app's detector looks for a face for up to 400 ms. A face found moves the lock onto it; otherwise the centre
+     * lock stays and its mark appears. Call after [setShutterKeyHold].
+     */
+    fun halfPressFindFace() {
+        val handler = cameraHandler ?: return
+        if (Looper.myLooper() != handler.looper) {
+            handler.post { halfPressFindFace() }
+            return
+        }
+        if (!shutterKeyHold) return
+        keptFaces.firstOrNull { it.id == mainFaceId }?.let {
+            lockSubjectAf("face ${it.id}", it.sensor)
+            return
+        }
+        // Fixed focus (the front camera): a face would only change exposure, which the half-press already holds.
+        if (!_state.value.supportsPointAutoFocus) {
+            lockCentre()
+            return
+        }
+        val centre = mapPreviewMeteringPoint(0.5f, 0.5f, null)?.let {
+            PreviewMeteringMapper.buildCenteredRegion(it, AF_REGION_WIDTH_FRACTION, AF_REGION_HEIGHT_FRACTION)
+        }
+        if (centre == null) {
+            lockCentre()
+            return
+        }
+        lockSubjectAf("centre (searching for a face)", centre)
+        val fallback = Runnable {
+            halfPressCheck = null
+            showCentreMark()
+        }
+        halfPressCheck = fallback
+        _faceCheckReason.value = "half"
+        handler.postDelayed(fallback, HALF_PRESS_FACE_WAIT_MS)
+    }
+
+    /** No face after all: the centre lock already running shows its mark, as today's centre lock does. */
+    private fun showCentreMark() {
+        if (!shutterKeyHold) return
+        Log.i(SonySubjectKeys.LOG_TAG, "half-press: centre")
+        // isFocusing lets the usual AF result handling turn the mark green or blink it from the lock's state.
+        _state.update { s -> s.copy(
+            focusPoint = 0.5f to 0.5f,
+            meteringPoint = null,
+            focusPointSource = FocusPointSource.MANUAL,
+            isFocusLocked = true,
+            isFocusing = true,
+            focusSuccess = null,
+        ) }
+    }
+
+    private fun lockCentre() {
+        if (!shutterKeyHold) return
+        Log.i(SonySubjectKeys.LOG_TAG, "half-press: centre")
+        focusOnNormalizedPoint(0.5f, 0.5f, FocusPointSource.MANUAL, lockFocus = true)
     }
 
     /** Focuses again on the tapped point (a half-press after a miss), keeping the exposure point as it is. */
@@ -7410,6 +7599,734 @@ class Camera2Controller(private val context: Context) {
                 updatePreview()
             }
             clearPointFocusState()
+        }
+    }
+
+    // ==================== Sony smile scores and scene hints ====================
+
+    private var hintFeatures = SonyHintFeatures()
+    private val _smileScore = MutableStateFlow<SmileScore?>(null)
+    /** The main face's smile score on the latest preview frame, or null with no face or no smile scores. */
+    val smileScore: StateFlow<SmileScore?> = _smileScore.asStateFlow()
+    private val _sceneHints = MutableStateFlow<List<SceneHint>>(emptyList())
+    /** What the camera reports about the scene (one scene, then one condition), for icons only. */
+    val sceneHints: StateFlow<List<SceneHint>> = _sceneHints.asStateFlow()
+    private var pendingHints: List<SceneHint> = emptyList()
+    private var pendingHintsSinceMs = 0L
+    private var lastHintLogMs = 0L
+
+    private fun resetHintState(features: SonyHintFeatures) {
+        hintFeatures = features
+        pendingHints = emptyList()
+        _smileScore.value = null
+        _sceneHints.value = emptyList()
+    }
+
+    private fun applySonyHintKeys(builder: CaptureRequest.Builder) {
+        try {
+            if (hintFeatures.smile) builder.set(SonyHintKeys.SMILE_MODE, SonyHintKeys.ON)
+            if (hintFeatures.scene) builder.set(SonyHintKeys.SCENE_MODE, SonyHintKeys.ON)
+            if (hintFeatures.condition) builder.set(SonyHintKeys.CONDITION_MODE, SonyHintKeys.ON)
+        } catch (e: Exception) {
+            Log.w(SonyHintKeys.LOG_TAG, "Sony hint keys rejected", e)
+        }
+    }
+
+    /** Runs after [handleSubjectResult], so the main face is this frame's. Camera thread. */
+    private fun handleHintResult(result: CaptureResult) {
+        if (hintFeatures == SonyHintFeatures()) return
+        val now = SystemClock.elapsedRealtime()
+        val faces = result.get(CaptureResult.STATISTICS_FACES).orEmpty().take(MAX_SUBJECT_FACES)
+        val scores = if (hintFeatures.smile) SonySubjectKeys.read(result, SonyHintKeys.SMILE_SCORES) else null
+        // Scores come in the driver's face order; the main face is the driver face nearest its kept box.
+        val main = keptFaces.firstOrNull { it.id == mainFaceId && it.fromDriver && now - it.seenMs <= FACE_SHOW_MS }?.sensor
+        val mainIndex = main?.let { m ->
+            faces.indices.minByOrNull { i ->
+                val b = faces[i].bounds
+                hypot((b.centerX() - (m.left + m.right) / 2).toFloat(), (b.centerY() - (m.top + m.bottom) / 2).toFloat())
+            }
+        }
+        _smileScore.value = mainIndex?.let { scores?.getOrNull(it) }?.let { SmileScore(it, result.frameNumber) }
+
+        val scene = if (hintFeatures.scene) SonySubjectKeys.read(result, SonyHintKeys.SCENE)?.toInt()?.and(0xFF) else null
+        val condition = if (hintFeatures.condition) SonySubjectKeys.read(result, SonyHintKeys.CONDITION)?.toInt()?.and(0xFF) else null
+        // Macro is the app's own, as in Sony's camera: the lens focused at 14.5 cm or closer.
+        val lens = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
+        val macro = _state.value.supportsPointAutoFocus && lens != null && lens >= SonyHintKeys.MACRO_DIOPTERS
+        val hints = listOfNotNull(
+            if (macro) SceneHint.MACRO else scene?.let(SceneHint::ofScene),
+            condition?.let(SceneHint::ofCondition),
+        )
+        // A hint shows once reported for a moment, so a result flickering between two scenes does not blink the icons.
+        if (hints != pendingHints) {
+            pendingHints = hints
+            pendingHintsSinceMs = now
+        } else if (now - pendingHintsSinceMs >= SonyHintKeys.HINT_SETTLE_MS) {
+            _sceneHints.value = hints
+        }
+
+        if (now - lastHintLogMs >= SUBJECT_LOG_MS) {
+            lastHintLogMs = now
+            Log.d(
+                SonyHintKeys.LOG_TAG,
+                "faceSmileScores=${scores?.contentToString()} faces=${faces.size} mainIndex=$mainIndex " +
+                    "scene=$scene condition=$condition lens=$lens shown=${_sceneHints.value}",
+            )
+        }
+    }
+
+    // ==================== Sony driver faces and object tracking ====================
+
+    private var sonyFeatures = SonySubjectFeatures()
+    /** The camera reports face boxes itself (STATISTICS_FACES). */
+    val hasDriverFaces: Boolean get() = faceDetectMode != CaptureRequest.STATISTICS_FACE_DETECT_MODE_OFF
+    // Camera thread only. 0 = not tracking.
+    private var trackingSinceMs = 0L
+    private var trackingLostSinceMs = 0L
+    private var trackStart: Pair<Float, Float>? = null
+    private var subjectAfLocked = false
+    private var trackBox: ViewRect? = null
+    // Area of the first box the driver found; a box grown far past it has usually lost the object.
+    private var trackFirstArea = 0f
+    private var trackTooBig = false
+    private var trackFaceSinceMs = 0L
+    private var lastSubjectLogMs = 0L
+    private var facesLastSeenMs = 0L
+    // Faces matched frame to frame by their centres, so each keeps its id while the driver reorders them.
+    // fromDriver is false for a face only the app's detector has seen so far.
+    // sensor is the face in camera coordinates, unenlarged: the AF region.
+    private class KeptFace(
+        val id: Int,
+        var box: ViewRect,
+        var seenMs: Long,
+        var fromDriver: Boolean = true,
+        var sensor: CameraCoordinateRect? = null,
+    )
+    // A tap off the driver's faces: tracking starts unless the app's detector finds a face there first.
+    private class TapCheck(val x: Float, val y: Float, val startedMs: Long, val startTracking: Runnable) {
+        var trackingStarted = false
+    }
+    private var tapCheck: TapCheck? = null
+    private val keptFaces = mutableListOf<KeptFace>()
+    private var nextFaceId = 0
+    private var mainFaceId = -1
+    private var mainFaceUserChosen = false
+    private var rivalFaceId = -1
+    private var rivalSinceMs = 0L
+    private var driverMismatchSinceMs = 0L
+    private var lastFaceSelectMs = 0L
+    private var faceAeActive = false
+    // The driver's own metering mode, restored when face metering ends.
+    private var aeRegionModeBaseline: Byte? = null
+    private var afRegionModeBaseline: Byte? = null
+    /** Eye focus is on and owns the AF regions. */
+    @Volatile
+    var eyeFocusOwnsAf = false
+    private var subjectAfRegion: CameraCoordinateRect? = null
+    private var subjectAfSentMs = 0L
+    private var afFocusedMs = 0L
+    private var afKickArea = 0f
+    private var afKickMs = 0L
+    private var afKickPending = false
+
+    private fun resetSubjectState() {
+        trackingSinceMs = 0L
+        trackingLostSinceMs = 0L
+        trackStart = null
+        trackBox = null
+        subjectAfLocked = false
+        trackFaceSinceMs = 0L
+        facesLastSeenMs = 0L
+        keptFaces.clear()
+        tapCheck?.let { cameraHandler?.removeCallbacks(it.startTracking) }
+        tapCheck = null
+        halfPressCheck?.let { cameraHandler?.removeCallbacks(it) }
+        halfPressCheck = null
+        _faceCheckReason.value = null
+        mainFaceId = -1
+        mainFaceUserChosen = false
+        rivalFaceId = -1
+        driverMismatchSinceMs = 0L
+        faceAeActive = false
+        aeRegionModeBaseline = null
+        afRegionModeBaseline = null
+        subjectAfRegion = null
+        afKickPending = false
+        _subjectOverlay.value = SubjectOverlay()
+    }
+
+    private fun applySonySubjectKeys(builder: CaptureRequest.Builder) {
+        try {
+            if (sonyFeatures.objectTracking) {
+                builder.set(SonySubjectKeys.OBJECT_SELECT_TRIGGER, SonySubjectKeys.TRIGGER_IDLE)
+            }
+            if (sonyFeatures.faceAe) {
+                builder.set(
+                    SonySubjectKeys.AE_REGION_MODE,
+                    if (faceAeActive) SonySubjectKeys.AE_REGION_MODE_FACE else aeRegionModeBaseline,
+                )
+            }
+            subjectAfRegion?.let {
+                builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(MeteringRectangle(it.toAndroidRect(), MeteringRectangle.METERING_WEIGHT_MAX)))
+            }
+            if (sonyFeatures.afUserRegion) {
+                builder.set(
+                    SonySubjectKeys.AF_REGION_MODE,
+                    if (subjectAfRegion != null) SonySubjectKeys.AF_REGION_MODE_USER else afRegionModeBaseline,
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(SonySubjectKeys.LOG_TAG, "Sony subject keys rejected", e)
+        }
+    }
+
+    /** Sends [set] on one request, then resumes the repeating request after [reset], as the AF trigger does. */
+    private fun submitOneShot(
+        reason: String,
+        set: (CaptureRequest.Builder) -> Unit,
+        reset: (CaptureRequest.Builder) -> Unit,
+    ): Boolean {
+        val session = captureSession ?: return false
+        val builder = previewRequestBuilder ?: return false
+        var submitted = false
+        try {
+            set(builder)
+            session.capture(builder.build(), previewCallback, cameraHandler)
+            submitted = true
+            Log.i(SonySubjectKeys.LOG_TAG, "sent $reason")
+        } catch (e: Exception) {
+            Log.w(SonySubjectKeys.LOG_TAG, "failed to send $reason", e)
+        } finally {
+            reset(builder)
+        }
+        if (submitted) updatePreview()
+        return submitted
+    }
+
+    private fun sendSonyTrigger(
+        triggerKey: CaptureRequest.Key<Byte>,
+        trigger: Byte,
+        areaKey: CaptureRequest.Key<IntArray>?,
+        point: PreviewMeteringMapping?,
+        idle: Byte?,
+    ): Boolean = submitOneShot(
+        "${triggerKey.name}=$trigger at ${point?.let { "${it.centerX},${it.centerY}" }}",
+        set = { builder ->
+            builder.set(triggerKey, trigger)
+            if (areaKey != null && point != null) {
+                builder.set(areaKey, intArrayOf(point.centerX, point.centerY, point.centerX + 1, point.centerY + 1))
+            }
+        },
+        reset = { builder ->
+            builder.set(triggerKey, idle)
+            if (areaKey != null) builder.set(areaKey, null)
+        },
+    )
+
+    /**
+     * A tap on a face makes it the main face; elsewhere, a camera whose driver tracks objects starts tracking there.
+     * Returns false when the tap should focus as before. Called on the main thread.
+     */
+    private fun selectSubjectAt(normX: Float, normY: Float, viewAspectRatio: Float): Boolean {
+        val state = _state.value
+        if (state.isCapturing || previewRequestBuilder == null) return false
+        val face = _subjectOverlay.value.faces.firstOrNull { it.box.contains(normX, normY) }
+        val canTrack = sonyFeatures.objectTracking && state.isAutoFocus && !state.isPortraitMode
+        if (face == null && !canTrack) return false
+        cameraHandler?.post {
+            when {
+                face == null -> beginTapCheck(normX, normY, viewAspectRatio)
+                face.id == mainFaceId && mainFaceUserChosen -> clearSelection("face")
+                else -> selectFace(face, viewAspectRatio)
+            }
+        } ?: return false
+        return true
+    }
+
+    private fun beginTapCheck(normX: Float, normY: Float, viewAspectRatio: Float) {
+        tapCheck?.let { cameraHandler?.removeCallbacks(it.startTracking) }
+        lateinit var check: TapCheck
+        check = TapCheck(normX, normY, SystemClock.elapsedRealtime(), Runnable {
+            if (tapCheck !== check) return@Runnable
+            check.trackingStarted = true
+            startTracking(normX, normY, viewAspectRatio)
+        })
+        tapCheck = check
+        _faceCheckReason.value = "tap"
+        // The tap stays responsive: tracking starts if the detector has not answered by then.
+        cameraHandler?.postDelayed(check.startTracking, TAP_CHECK_WAIT_MS)
+    }
+
+    /** Faces the app's detector found in the viewfinder, asked for by [faceCheckReason]. */
+    fun onAppFaces(boxes: List<ViewRect>, durationMs: Long, reason: String) {
+        val handler = cameraHandler ?: return
+        if (Looper.myLooper() != handler.looper) {
+            handler.post { onAppFaces(boxes, durationMs, reason) }
+            return
+        }
+        Log.i(SonySubjectKeys.LOG_TAG, "blazeface reason=$reason ms=$durationMs faces=${boxes.size} ${boxes.joinToString(" ")}")
+        val now = SystemClock.elapsedRealtime()
+        // A face the driver has not found yet stays on screen while the app's detector still sees it.
+        keptFaces.firstOrNull { it.id == mainFaceId && !it.fromDriver }?.let { main ->
+            boxes.minByOrNull { hypot(it.centerX - main.box.centerX, it.centerY - main.box.centerY) }
+                ?.takeIf { hypot(it.centerX - main.box.centerX, it.centerY - main.box.centerY) < maxOf(main.box.width, main.box.height) }
+                ?.let { main.box = it; main.seenMs = now; main.sensor = viewRectToSensor(it) }
+        }
+        halfPressCheck?.let { fallback ->
+            cameraHandler?.removeCallbacks(fallback)
+            halfPressCheck = null
+            val box = boxes.maxByOrNull { it.width * it.height }
+            if (box == null) {
+                fallback.run()
+            } else {
+                val face = KeptFace(nextFaceId++, box, now, fromDriver = false, sensor = viewRectToSensor(box))
+                keptFaces.add(face)
+                mainFaceId = face.id
+                mainFaceUserChosen = false
+                sendFaceSelect(box, null)
+                lockSubjectAf("blazeface face ${face.id}", face.sensor)
+            }
+        }
+        val check = tapCheck
+        if (check != null) {
+            val face = boxes.firstOrNull { box ->
+                val marginX = box.width * TAP_FACE_MARGIN
+                val marginY = box.height * TAP_FACE_MARGIN
+                ViewRect(box.left - marginX, box.top - marginY, box.right + marginX, box.bottom + marginY).contains(check.x, check.y)
+            }
+            if (face != null) {
+                cameraHandler?.removeCallbacks(check.startTracking)
+                tapCheck = null
+                selectAppFace(face, now)
+                return
+            }
+            if (!check.trackingStarted) {
+                cameraHandler?.removeCallbacks(check.startTracking)
+                check.startTracking.run()
+            }
+            tapCheck = null
+        }
+        val box = trackBox
+        if (trackingSinceMs > 0L && box != null) {
+            boxes.firstOrNull { box.contains(it.centerX, it.centerY) }?.let { selectAppFace(it, now) }
+        }
+    }
+
+    private fun selectAppFace(box: ViewRect, now: Long) {
+        val face = KeptFace(nextFaceId++, box, now, fromDriver = false, sensor = viewRectToSensor(box))
+        keptFaces.add(face)
+        selectFace(SubjectFace(face.id, box), null)
+    }
+
+    /** Drops the user's subject: continuous AF on the whole frame and the app's own choice of main face again. */
+    private fun clearSelection(kind: String) {
+        stopTracking("cleared")
+        mainFaceUserChosen = false
+        mainFaceId = -1
+        rivalFaceId = -1
+        if (subjectAfRegion != null) {
+            subjectAfRegion = null
+            afKickPending = false
+            previewRequestBuilder?.let {
+                clearCustomAfRegions(it)
+                applySonySubjectKeys(it)
+                updatePreview()
+            }
+        }
+        Log.i(SonySubjectKeys.LOG_TAG, "selection cleared ($kind)")
+    }
+
+    private fun selectFace(face: SubjectFace, viewAspectRatio: Float?) {
+        stopTracking("face chosen")
+        if (_state.value.focusPoint != null) restoreContinuousAf()
+        mainFaceId = face.id
+        mainFaceUserChosen = true
+        rivalFaceId = -1
+        Log.i(SonySubjectKeys.LOG_TAG, "main face=${face.id} (chosen)")
+        sendFaceSelect(face.box, viewAspectRatio)
+    }
+
+    private fun sendFaceSelect(box: ViewRect, viewAspectRatio: Float?) {
+        if (!sonyFeatures.faceSelect) return
+        val point = mapPreviewMeteringPoint(box.centerX, box.centerY, viewAspectRatio) ?: return
+        lastFaceSelectMs = SystemClock.elapsedRealtime()
+        driverMismatchSinceMs = 0L
+        sendSonyTrigger(
+            SonySubjectKeys.FACE_SELECT_TRIGGER, SonySubjectKeys.TRIGGER_START,
+            SonySubjectKeys.FACE_SELECT_TRIGGER_AREA, point, idle = null,
+        )
+    }
+
+    private fun startTracking(normX: Float, normY: Float, viewAspectRatio: Float) {
+        if (isCaptureFocusFrozen || _state.value.isCapturing) return
+        // The driver focuses and meters on the tracked object itself, with continuous AF and no regions.
+        if (_state.value.focusPoint != null) restoreContinuousAf()
+        val builder = previewRequestBuilder ?: return
+        val afMode = resolveAutoFocusMode(_state.value.captureMode)
+        builder.set(CaptureRequest.CONTROL_AF_MODE, afMode)
+        builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
+        val point = mapPreviewMeteringPoint(normX, normY, viewAspectRatio) ?: return
+        if (trackingSinceMs > 0L) {
+            sendSonyTrigger(SonySubjectKeys.OBJECT_SELECT_TRIGGER, SonySubjectKeys.TRIGGER_STOP, null, null, SonySubjectKeys.TRIGGER_IDLE)
+        }
+        // An AF lock left from an earlier trigger would hold the lens still for the whole track: cancel it here.
+        val sent = submitOneShot(
+            "objectSelectTrigger=${SonySubjectKeys.TRIGGER_START} at ${point.centerX},${point.centerY} afMode=$afMode +cancel",
+            set = {
+                it.set(SonySubjectKeys.OBJECT_SELECT_TRIGGER, SonySubjectKeys.TRIGGER_START)
+                it.set(
+                    SonySubjectKeys.OBJECT_SELECT_TRIGGER_AREA,
+                    intArrayOf(point.centerX, point.centerY, point.centerX + 1, point.centerY + 1),
+                )
+                it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
+            },
+            reset = {
+                it.set(SonySubjectKeys.OBJECT_SELECT_TRIGGER, SonySubjectKeys.TRIGGER_IDLE)
+                it.set(SonySubjectKeys.OBJECT_SELECT_TRIGGER_AREA, null)
+                it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
+            },
+        )
+        if (!sent) return
+        trackingSinceMs = SystemClock.elapsedRealtime()
+        trackingLostSinceMs = 0L
+        subjectAfLocked = false
+        trackStart = normX to normY
+        trackBox = null
+        trackFirstArea = 0f
+        trackTooBig = false
+        trackFaceSinceMs = 0L
+        if (faceAeActive) setFaceAe(false)
+        _subjectOverlay.update { it.copy(tracking = true, trackStart = trackStart, trackBox = null, trackLost = false) }
+    }
+
+    /** Ends tracking, back to plain continuous AF; [reason] goes to the log. */
+    fun stopTracking(reason: String) {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { stopTracking(reason) }
+            return
+        }
+        if (trackingSinceMs == 0L) return
+        trackingSinceMs = 0L
+        trackingLostSinceMs = 0L
+        trackStart = null
+        trackBox = null
+        sendSonyTrigger(SonySubjectKeys.OBJECT_SELECT_TRIGGER, SonySubjectKeys.TRIGGER_STOP, null, null, SonySubjectKeys.TRIGGER_IDLE)
+        Log.i(SonySubjectKeys.LOG_TAG, "tracking stopped: $reason")
+        _subjectOverlay.update { it.copy(tracking = false, trackStart = null, trackBox = null, trackLost = false) }
+    }
+
+    private fun setFaceAe(active: Boolean) {
+        faceAeActive = active
+        previewRequestBuilder?.let {
+            applySonySubjectKeys(it)
+            updatePreview()
+        }
+        Log.i(SonySubjectKeys.LOG_TAG, "aeRegionMode=${if (active) SonySubjectKeys.AE_REGION_MODE_FACE else aeRegionModeBaseline}")
+    }
+
+    /**
+     * The driver's face box is a square on the middle of the face that cuts through forehead and chin. Grown and
+     * moved toward the chin (the person's down, from the phone's rotation) it holds the whole face.
+     */
+    private fun wholeFaceFrame(box: ViewRect): ViewRect {
+        val rotation = Math.toRadians(OrientationObserver.captureRotationDegrees.toDouble())
+        val centerX = box.centerX + sin(rotation).toFloat() * box.width * FACE_FRAME_CHIN_SHIFT
+        val centerY = box.centerY + cos(rotation).toFloat() * box.height * FACE_FRAME_CHIN_SHIFT
+        val halfWidth = box.width * FACE_FRAME_SCALE / 2
+        val halfHeight = box.height * FACE_FRAME_SCALE / 2
+        return ViewRect(
+            (centerX - halfWidth).coerceAtLeast(0f), (centerY - halfHeight).coerceAtLeast(0f),
+            (centerX + halfWidth).coerceAtMost(1f), (centerY + halfHeight).coerceAtMost(1f),
+        )
+    }
+
+    /** A viewfinder box in camera coordinates, through the same mapping as a tap. */
+    private fun viewRectToSensor(box: ViewRect): CameraCoordinateRect? {
+        val a = mapPreviewMeteringPoint(box.left, box.top, null) ?: return null
+        val b = mapPreviewMeteringPoint(box.right, box.bottom, null) ?: return null
+        return CameraCoordinateRect(
+            minOf(a.centerX, b.centerX), minOf(a.centerY, b.centerY), maxOf(a.centerX, b.centerX), maxOf(a.centerY, b.centerY),
+        ).takeUnless { it.isEmpty }
+    }
+
+    /**
+     * Continuous AF on the subject: the driver does not steer AF to its tracker or the chosen face by itself, so the
+     * subject becomes the AF region. Cameras without AF regions (the fixed-focus front) never get one.
+     */
+    private fun updateSubjectAf(
+        subject: CameraCoordinateRect?,
+        visible: CameraCoordinateRect,
+        afState: Int?,
+        state: CameraState,
+        now: Long,
+    ) {
+        val builder = previewRequestBuilder ?: return
+        // The half-press holds focus where it is.
+        if (shutterKeyHold) return
+        // A tap point and eye focus set their own AF regions.
+        val allowed = maxAfRegions > 0 && state.supportsPointAutoFocus && state.isAutoFocus && !eyeFocusOwnsAf &&
+            state.focusPoint == null
+        val rect = subject?.intersect(visible)?.takeIf { allowed }
+        if (rect == null) {
+            if (subjectAfRegion != null) {
+                subjectAfRegion = null
+                afKickPending = false
+                if (state.focusPoint == null) clearCustomAfRegions(builder)
+                applySonySubjectKeys(builder)
+                updatePreview()
+                Log.i(SonySubjectKeys.LOG_TAG, "subject AF off, afRegionMode=$afRegionModeBaseline")
+            }
+            return
+        }
+        val area = rect.width.toFloat() * rect.height
+        val last = subjectAfRegion
+        val changed = last == null || builder.get(CaptureRequest.CONTROL_AF_REGIONS).isNullOrEmpty() ||
+            (now - subjectAfSentMs >= SUBJECT_AF_MIN_INTERVAL_MS && (
+                abs((rect.left + rect.right) - (last.left + last.right)) / 2f > visible.width * SUBJECT_AF_MOVE_FRACTION ||
+                    abs((rect.top + rect.bottom) - (last.top + last.bottom)) / 2f > visible.height * SUBJECT_AF_MOVE_FRACTION ||
+                    abs(area / (last.width.toFloat() * last.height) - 1f) > SUBJECT_AF_RESIZE_FRACTION
+                ))
+        if (changed) {
+            if (last == null) {
+                afFocusedMs = now
+                afKickArea = 0f
+            }
+            subjectAfRegion = rect
+            subjectAfSentMs = now
+            applySonySubjectKeys(builder)
+            updatePreview()
+            Log.i(
+                SonySubjectKeys.LOG_TAG,
+                "AF region $rect afRegionMode=${if (sonyFeatures.afUserRegion) SonySubjectKeys.AF_REGION_MODE_USER else "-"}",
+            )
+        }
+
+        if (afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED || afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED) {
+            afFocusedMs = now
+            if (afKickArea == 0f) afKickArea = area
+        }
+        if (afKickPending) {
+            val locked = afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+            if (locked || now - afKickMs > AF_KICK_TIMEOUT_MS) {
+                afKickPending = false
+                afKickArea = area
+                submitOneShot(
+                    "AF cancel after kick: af=$afState after ${now - afKickMs} ms",
+                    set = { it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL) },
+                    reset = { it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE) },
+                )
+            }
+            return
+        }
+        if (now - afKickMs < AF_KICK_EVERY_MS) return
+        val reason = when {
+            afKickArea > 0f && abs(area / afKickArea - 1f) > AF_KICK_RESIZE_FRACTION -> "size ${area / afKickArea}x"
+            now - afFocusedMs > AF_KICK_UNFOCUSED_MS -> "unfocused ${now - afFocusedMs} ms"
+            else -> return
+        }
+        afKickMs = now
+        afKickPending = submitOneShot(
+            "AF kick ($reason) on $rect",
+            set = { it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START) },
+            reset = { it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE) },
+        )
+    }
+
+    /** Matches this frame's faces to the kept ones by nearest centre; a face missing a moment keeps its frame. */
+    private fun updateKeptFaces(detected: List<Pair<ViewRect, CameraCoordinateRect>>, now: Long) {
+        val unmatched = keptFaces.toMutableList()
+        for ((box, sensor) in detected) {
+            val match = unmatched.minByOrNull { hypot(it.box.centerX - box.centerX, it.box.centerY - box.centerY) }
+                ?.takeIf {
+                    hypot(it.box.centerX - box.centerX, it.box.centerY - box.centerY) <
+                        maxOf(it.box.width, it.box.height, FACE_MATCH_MIN_DISTANCE)
+                }
+            if (match != null) {
+                match.box = box
+                match.seenMs = now
+                match.fromDriver = true
+                match.sensor = sensor
+                unmatched.remove(match)
+            } else {
+                keptFaces.add(KeptFace(nextFaceId++, box, now, sensor = sensor))
+            }
+        }
+        // The main face is remembered longer than it is shown, so a short absence does not hand it to someone else.
+        keptFaces.removeAll { now - it.seenMs > if (it.id == mainFaceId) MAIN_FACE_HOLD_MS else FACE_SHOW_MS }
+    }
+
+    /**
+     * The main face is ours and sticky. One the user chose stays until it has gone or another tap; one the app chose
+     * (the largest) also gives way to a clearly larger face.
+     */
+    private fun updateMainFace(visible: List<KeptFace>, now: Long) {
+        if (keptFaces.none { it.id == mainFaceId }) {
+            mainFaceId = visible.maxByOrNull { it.box.width * it.box.height }?.id ?: -1
+            mainFaceUserChosen = false
+            rivalFaceId = -1
+            return
+        }
+        if (mainFaceUserChosen) return
+        val main = keptFaces.first { it.id == mainFaceId }
+        val rival = visible.filter { it.id != mainFaceId }.maxByOrNull { it.box.width * it.box.height }
+        if (rival == null || rival.box.width * rival.box.height <= main.box.width * main.box.height * RIVAL_AREA_RATIO) {
+            rivalFaceId = -1
+            return
+        }
+        if (rival.id != rivalFaceId) {
+            rivalFaceId = rival.id
+            rivalSinceMs = now
+        } else if (now - rivalSinceMs >= RIVAL_HOLD_MS) {
+            mainFaceId = rival.id
+            rivalFaceId = -1
+            Log.i(SonySubjectKeys.LOG_TAG, "main face=${rival.id} (larger)")
+        }
+    }
+
+    private fun handleSubjectResult(result: CaptureResult) {
+        if (faceDetectMode == CaptureRequest.STATISTICS_FACE_DETECT_MODE_OFF && !sonyFeatures.objectTracking) return
+        val state = _state.value
+        // No trigger may slip between the frames of a shot.
+        if (state.isCapturing) return
+        val now = SystemClock.elapsedRealtime()
+        if (trackingSinceMs > 0L && (state.isPortraitMode || !state.isAutoFocus)) {
+            stopTracking(if (state.isPortraitMode) "portrait" else "manual focus")
+        }
+        val mapping = mapPreviewMeteringPoint(0.5f, 0.5f, null) ?: return
+
+        val raw = result.get(CaptureResult.STATISTICS_FACES).orEmpty().take(MAX_SUBJECT_FACES)
+        val detected = raw.mapNotNull { face ->
+            val sensor = face.bounds.toCameraCoordinateRect()
+            PreviewMeteringMapper.mapRectToView(sensor, mapping)?.let { wholeFaceFrame(it) to sensor }
+        }
+        if (detected.isNotEmpty()) facesLastSeenMs = now
+        updateKeptFaces(detected, now)
+        val visible = keptFaces.filter { now - it.seenMs <= FACE_SHOW_MS }
+        updateMainFace(visible, now)
+        val main = visible.firstOrNull { it.id == mainFaceId }
+        onPortraitFaces?.takeIf { state.isPortraitMode }?.invoke(visible.map { it.box }, visible.indexOf(main))
+
+        // The driver picks its own face now and then; keep it focusing on ours.
+        val selectArea = if (sonyFeatures.faceSelect) SonySubjectKeys.read(result, SonySubjectKeys.FACE_SELECT_AREA) else null
+        if (main != null && selectArea != null && selectArea.size >= 5 && trackingSinceMs == 0L) {
+            val driverBox = PreviewMeteringMapper.mapRectToView(
+                CameraCoordinateRect(selectArea[0], selectArea[1], selectArea[2], selectArea[3]), mapping,
+            )
+            val agrees = selectArea[4] != 0 && driverBox != null && main.box.contains(driverBox.centerX, driverBox.centerY)
+            if (agrees) {
+                driverMismatchSinceMs = 0L
+            } else if (driverMismatchSinceMs == 0L) {
+                driverMismatchSinceMs = now
+            } else if (now - driverMismatchSinceMs >= FACE_RESELECT_AFTER_MS && now - lastFaceSelectMs >= FACE_RESELECT_EVERY_MS) {
+                sendFaceSelect(main.box, null)
+            }
+        }
+
+        val afState = result.get(CaptureResult.CONTROL_AF_STATE)
+        val focused = state.supportsPointAutoFocus && (afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED ||
+            afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED)
+
+        var objectArea: IntArray? = null
+        if (trackingSinceMs > 0L) {
+            objectArea = SonySubjectKeys.read(result, SonySubjectKeys.OBJECT_SELECT_AREA)
+            val box = objectArea?.takeIf { it.size >= 5 && it[4] == 0 }?.let {
+                PreviewMeteringMapper.mapRectToView(CameraCoordinateRect(it[0], it[1], it[2], it[3]), mapping)
+            }
+            if (box == null) {
+                if (trackingLostSinceMs == 0L) trackingLostSinceMs = now
+                if (now - trackingLostSinceMs >= TRACK_STOP_MS) stopTracking("lost")
+            } else {
+                // Any sighting before the stop means the driver found the object again.
+                trackingLostSinceMs = 0L
+                trackBox = trackBox?.let { old ->
+                    fun ease(from: Float, to: Float) = from + (to - from) * TRACK_BOX_FOLLOW
+                    ViewRect(ease(old.left, box.left), ease(old.top, box.top), ease(old.right, box.right), ease(old.bottom, box.bottom))
+                } ?: box
+                val area = box.width * box.height
+                if (trackFirstArea == 0f) trackFirstArea = area
+                val tooBig = area > trackFirstArea * TRACK_GROWTH_LIMIT
+                if (tooBig != trackTooBig) Log.i(SonySubjectKeys.LOG_TAG, "tracked box ${if (tooBig) "grew past" else "back within"} ${TRACK_GROWTH_LIMIT}x: $box")
+                trackTooBig = tooBig
+                // As on a Sony Alpha, a face found on the tracked object takes over.
+                val face = visible.firstOrNull { it.box.contains(box.centerX, box.centerY) || box.contains(it.box.centerX, it.box.centerY) }
+                if (face == null) {
+                    trackFaceSinceMs = 0L
+                } else if (trackFaceSinceMs == 0L) {
+                    trackFaceSinceMs = now
+                } else if (now - trackFaceSinceMs >= TRACK_FACE_TAKEOVER_MS) {
+                    selectFace(SubjectFace(face.id, face.box), null)
+                }
+            }
+        }
+
+        // The tracked object, or else the main face; a lost object keeps its last region until tracking stops.
+        val subject = if (trackingSinceMs > 0L) {
+            objectArea?.takeIf { it.size >= 5 && it[4] == 0 }?.let { CameraCoordinateRect(it[0], it[1], it[2], it[3]) }
+                ?: subjectAfRegion
+        } else {
+            keptFaces.firstOrNull { it.id == mainFaceId }?.sensor
+        }
+        if (sonyFeatures.afUserRegion && subjectAfRegion == null && afRegionModeBaseline == null) {
+            afRegionModeBaseline = SonySubjectKeys.read(result, SonySubjectKeys.AF_REGION_MODE_RESULT)
+                ?.takeIf { it != SonySubjectKeys.AF_REGION_MODE_USER }
+        }
+        updateSubjectAf(subject, mapping.visibleRegion, afState, state, now)
+
+        // Face metering only in the default metering mode, and never mid-lock: the half-press holds exposure and
+        // a tap point waits for the exposure to change.
+        if (sonyFeatures.faceAe) {
+            if (!faceAeActive && aeRegionModeBaseline == null) {
+                aeRegionModeBaseline = SonySubjectKeys.read(result, SonySubjectKeys.AE_REGION_MODE_RESULT)
+                    ?.takeIf { it != SonySubjectKeys.AE_REGION_MODE_FACE }
+            }
+            val wantFaceAe = state.effectiveMeteringMode == MeteringMode.SYSTEM_DEFAULT && state.isAutoExposure &&
+                trackingSinceMs == 0L && facesLastSeenMs > 0L && now - facesLastSeenMs <= FACE_AE_HOLD_MS
+            if (wantFaceAe != faceAeActive && !shutterKeyHold && !isFocusLockedWaitingForSceneChange) setFaceAe(wantFaceAe)
+        }
+
+        val check = tapCheck
+        if (check != null && check.trackingStarted && now - check.startedMs > TAP_CHECK_GIVE_UP_MS) tapCheck = null
+        if (halfPressOutcomePending && (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED)
+        ) {
+            halfPressOutcomePending = false
+            Log.i(SonySubjectKeys.LOG_TAG, "half-press lock: ${if (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED) "focused" else "missed"}")
+        }
+        _faceCheckReason.value = when {
+            halfPressCheck != null -> "half"
+            tapCheck != null -> "tap"
+            trackingSinceMs > 0L -> "track"
+            keptFaces.any { it.id == mainFaceId && !it.fromDriver } -> "face"
+            else -> null
+        }
+
+        val lostFor = if (trackingLostSinceMs > 0L) now - trackingLostSinceMs else 0L
+        _subjectOverlay.value = SubjectOverlay(
+            faces = visible.map { SubjectFace(it.id, it.box) },
+            mainFace = main?.id ?: -1,
+            focused = focused,
+            tracking = trackingSinceMs > 0L,
+            trackStart = trackStart,
+            trackBox = trackBox,
+            trackLost = lostFor >= TRACK_FAINT_MS,
+        )
+
+        if (now - lastSubjectLogMs >= SUBJECT_LOG_MS) {
+            lastSubjectLogMs = now
+            Log.d(
+                SonySubjectKeys.LOG_TAG,
+                "faces=${raw.size} ${raw.joinToString(" ") { it.bounds.toShortString() }} " +
+                    "kept=${visible.joinToString(",") { "${it.id}" }} main=$mainFaceId " +
+                    "faceSelect=${selectArea?.contentToString()} " +
+                    (if (trackingSinceMs > 0L) "object=${objectArea?.contentToString()} lostMs=$lostFor big=$trackTooBig " else "") +
+                    "afMode=${result.get(CaptureResult.CONTROL_AF_MODE)} af=$afState " +
+                    "lens=${result.get(CaptureResult.LENS_FOCUS_DISTANCE)} " +
+                    "aeMode=${if (sonyFeatures.faceAe) SonySubjectKeys.read(result, SonySubjectKeys.AE_REGION_MODE_RESULT) else "-"} " +
+                    "faceAe=$faceAeActive iso=${result.get(CaptureResult.SENSOR_SENSITIVITY)} " +
+                    "exp=${result.get(CaptureResult.SENSOR_EXPOSURE_TIME)}"
+            )
         }
     }
 

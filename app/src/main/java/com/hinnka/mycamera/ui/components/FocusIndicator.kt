@@ -362,10 +362,10 @@ fun FocusIndicator(
     }
 }
 
-private val TapFrameSize = 42.dp
-private val TapFrameLine = 1.25.dp
+internal val TapFrameSize = 42.dp
+internal val TapFrameLine = 1.25.dp
 private val SpotCircleRadius = 11.dp
 // 1.5 s until the frame fades, then 10 s more.
 private const val TapPointIdleMs = 11_500L
 // The bright green of a Sony camera's in-focus frame.
-private val FocusGreen = Color(0xFF3FE03F)
+internal val FocusGreen = Color(0xFF3FE03F)

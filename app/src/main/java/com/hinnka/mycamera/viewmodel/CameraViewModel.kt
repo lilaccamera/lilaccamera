@@ -1,6 +1,7 @@
 package com.hinnka.mycamera.viewmodel
 
 import com.hinnka.mycamera.mgc.PhotonLookContract
+import android.util.Log
 import android.app.Application
 import android.app.ActivityManager
 import android.content.Context
@@ -62,6 +63,8 @@ import com.hinnka.mycamera.ml.DepthModelManager
 import com.hinnka.mycamera.phantom.PhantomWidgetProvider
 import com.hinnka.mycamera.preview.EyeFocusPreviewFrame
 import com.hinnka.mycamera.preview.PortraitFace
+import com.hinnka.mycamera.camera.ViewRect
+import com.hinnka.mycamera.camera.SonySubjectKeys
 import com.hinnka.mycamera.preview.PortraitMaskSnapshot
 import com.hinnka.mycamera.preview.PreviewEyeFocusProcessor
 import com.hinnka.mycamera.processor.BokehStyle
@@ -1549,8 +1552,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var lastEyeFocusTriggerElapsedMs = 0L
     @Volatile
     private var latestPortraitMask: PortraitMaskSnapshot? = null
+    // The main face, where the saved photo's blur is centred.
     private var latestPortraitFace: PortraitFace? = null
     private var latestPortraitFaceAtMs = 0L
+    private var portraitFaceDown: Pair<Float, Float>? = null
+    // The face check the last frame was sent for, and when; a tap check takes the next frame, the others 5 a second.
+    @Volatile
+    private var faceCheckSubmittedFor: String? = null
+    private var lastFaceCheckMs = 0L
+    private var faceCheckWaitJob: Job? = null
+    // Inference takes 55-130 ms on the XZ1 Compact, so a running track checks only twice a second.
+    private fun faceCheckIntervalMs(reason: String) = if (reason == "track") 500L else 200L
+    val faceCheckReason get() = cameraController.faceCheckReason
+
+    private fun showPortraitFaces(faces: List<PortraitFace>, main: PortraitFace?) {
+        latestPortraitFace = main
+        latestPortraitFaceAtMs = SystemClock.elapsedRealtime()
+        // Also covers a viewfinder created after the aperture was last set.
+        if (faces.isNotEmpty()) glSurfaceView?.setPortraitAperture(state.value.virtualAperture)
+        glSurfaceView?.setPortraitFaces(faces)
+    }
 
     /** The Portrait guide is open; it opens from the pill in the picture or a long press on Portrait blur. */
     var showPortraitIntro by mutableStateOf(false)
@@ -1588,6 +1609,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var burstSettings: CaptureSettingsSnapshot? = null
     private var livePhotoIndicatorJob: Job? = null
     private var countdownJob: Job? = null
+    /** Smile shutter: 0 off, else the smile score (40 small, 55 average, 70 big smile) that takes a shot. */
+    var smileThreshold by mutableStateOf(0)
+        private set
+    /** A press armed the smile shutter: it shoots on smiles until the next press. */
+    var smileWaiting by mutableStateOf(false)
+        private set
     private var burstPhotoId: String? = null
     var burstImageCount by mutableStateOf(0)
         private set
@@ -1689,11 +1716,37 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             viewModelScope.launch(Dispatchers.Main.immediate) {
                 // A late detection must not light the viewfinder after leaving Portrait.
                 val shown = face.takeIf { state.value.isPortraitMode }
-                latestPortraitFace = shown
-                latestPortraitFaceAtMs = SystemClock.elapsedRealtime()
-                // Also covers a viewfinder created after the aperture was last set.
-                if (shown != null) glSurfaceView?.setPortraitAperture(state.value.virtualAperture)
-                glSurfaceView?.setPortraitFace(shown)
+                if (cameraController.hasDriverFaces) {
+                    // The camera's own face boxes place the faces; this detector only adds the eye line (which way is down).
+                    portraitFaceDown = shown?.let { it.downX to it.downY }
+                } else {
+                    showPortraitFaces(listOfNotNull(shown), shown)
+                }
+            }
+        }
+        previewEyeFocusProcessor.onFaces = { boxes, durationMs ->
+            // The detector reads the viewfinder as shown (mirrored on the front), so its boxes are already view boxes.
+            cameraController.onAppFaces(
+                boxes.map { ViewRect(it.left, it.top, it.right, it.bottom) },
+                durationMs,
+                faceCheckSubmittedFor ?: "",
+            )
+        }
+        viewModelScope.launch {
+            // A tap check must not wait out the pause between track checks.
+            cameraController.faceCheckReason.collect { reason ->
+                if ((reason == "tap" || reason == "half") && faceCheckWaitJob?.isActive == true) {
+                    faceCheckWaitJob?.cancel()
+                    completeEyeFocusInput()
+                }
+            }
+        }
+        cameraController.onPortraitFaces = { faces, main ->
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                if (!state.value.isPortraitMode) return@launch
+                val (downX, downY) = portraitFaceDown ?: (0f to 1f)
+                val portraitFaces = faces.map { PortraitFace(it.centerX, it.centerY, it.width, it.height, downX, downY) }
+                showPortraitFaces(portraitFaces, portraitFaces.getOrNull(main))
             }
         }
         previewEyeFocusProcessor.onTargetLost = {
@@ -1704,6 +1757,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         previewEyeFocusProcessor.onInitializationError = { error ->
             viewModelScope.launch(Dispatchers.Main.immediate) {
                 isEyeFocusRuntimeAvailable = false
+                cameraController.eyeFocusOwnsAf = false
                 resetEyeFocusTracking(cancelCameraFocus = true, reason = "initialization_failed")
                 userPreferencesRepository.update { eyeFocusEnabled = false }
                 PLog.e(TAG, "Human eye autofocus is unavailable", error)
@@ -1714,8 +1768,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         viewModelScope.launch {
             userPreferencesRepository.flow { it.eyeFocusEnabled }.collect { enabled ->
+                cameraController.eyeFocusOwnsAf = enabled && isEyeFocusRuntimeAvailable
                 if (enabled && isEyeFocusRuntimeAvailable) {
                     previewEyeFocusProcessor.prewarm()
+                    cameraController.stopTracking("eye focus on")
                 } else if (!enabled) {
                     previewEyeFocusProcessor.resetTracking()
                     resetEyeFocusTracking(cancelCameraFocus = true, reason = "disabled")
@@ -3252,7 +3308,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
-        if (timerSeconds > 0) {
+        if (smileThreshold > 0) {
+            countdownJob = viewModelScope.launch { shootOnSmiles() }
+        } else if (timerSeconds > 0) {
             // 延时拍摄：开始倒计时
             countdownJob = viewModelScope.launch {
                 try {
@@ -3269,6 +3327,36 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         } else {
             submitPhotoCapture()
+        }
+    }
+
+    /**
+     * Smile shutter: a shot each time the main face's smile score reaches [smileThreshold], at most one a second and
+     * each from a preview frame newer than the last shot, until a press cancels it, the tile is turned off or the mode
+     * leaves photos. A smile held keeps shooting once a second.
+     */
+    private suspend fun shootOnSmiles() {
+        smileWaiting = true
+        try {
+            var lastShotMs = 0L
+            var staleUpTo = -1L
+            cameraController.smileScore
+                .takeWhile { smileThreshold > 0 && state.value.captureMode == CaptureMode.PHOTO }
+                .filterNotNull()
+                .collect { smile ->
+                    val now = SystemClock.elapsedRealtime()
+                    if (state.value.isCapturing) {
+                        // Scores seen while a shot is taken are old by the time it ends.
+                        staleUpTo = smile.frame
+                    } else if (smile.score >= smileThreshold && smile.frame > staleUpTo && now - lastShotMs >= 1_000L) {
+                        lastShotMs = now
+                        staleUpTo = smile.frame
+                        PLog.i(TAG, "smile shot: score=${smile.score} threshold=$smileThreshold frame=${smile.frame}")
+                        submitPhotoCapture()
+                    }
+                }
+        } finally {
+            smileWaiting = false
         }
     }
 
@@ -3329,7 +3417,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (state.value.isPortraitMode == enabled) return
         cameraController.setPortraitMode(enabled)
         latestPortraitFace = null
-        glSurfaceView?.setPortraitFace(null)
+        portraitFaceDown = null
+        glSurfaceView?.setPortraitFaces(emptyList())
         if (enabled) {
             val current = state.value
             virtualApertureBeforePortrait = Pair(current.isVirtualApertureEnabled, current.virtualAperture)
@@ -4185,8 +4274,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 点击对焦
      */
     fun focusOnPoint(x: Float, y: Float, viewWidth: Int, viewHeight: Int) {
-        cameraController.focusOnPoint(x, y, viewWidth, viewHeight)
+        // Eye focus owns the AF regions while it is on, so taps focus as before.
+        val eyeFocusOn = userPreferencesRepository.current.eyeFocusEnabled && isEyeFocusRuntimeAvailable
+        cameraController.focusOnPoint(x, y, viewWidth, viewHeight, allowSubject = !eyeFocusOn)
     }
+
+    val subjectOverlay get() = cameraController.subjectOverlay
 
     fun moveMeteringPoint(x: Float, y: Float, viewAspectRatio: Float) {
         cameraController.moveMeteringPoint(x, y, viewAspectRatio)
@@ -4213,9 +4306,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (shutterKeyFocusHeld || !s.isPreviewActive || !s.isAutoFocus || s.isCapturing) return
         shutterKeyFocusHeld = true
         val point = s.focusPoint
+        val subject = cameraController.subjectOverlay.value
         when {
+            // The tracked object: the controller locks focus on it in setShutterKeyHold.
+            subject.tracking -> {
+                Log.i(SonySubjectKeys.LOG_TAG, "half-press: object")
+                shutterKeyOwnsFocusLock = false
+            }
             // A point the user tapped holds, as a camera's focus area does.
             point != null && s.focusPointSource == FocusPointSource.MANUAL -> {
+                Log.i(SonySubjectKeys.LOG_TAG, "half-press: tap point")
                 // As a camera's half-press does, try again where the last attempt missed.
                 if (s.focusSuccess == false) cameraController.refocusTapPoint()
                 shutterKeyOwnsFocusLock = false
@@ -4224,9 +4324,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.focusOnNormalizedPoint(point.first, point.second, FocusPointSource.EYE, lockFocus = true)
                 shutterKeyOwnsFocusLock = true
             }
+            // The main face: locked in setShutterKeyHold, with no centre mark.
+            subject.mainFace >= 0 -> {
+                Log.i(SonySubjectKeys.LOG_TAG, "half-press: face")
+                shutterKeyOwnsFocusLock = false
+            }
             else -> {
-                cameraController.focusOnNormalizedPoint(0.5f, 0.5f, FocusPointSource.MANUAL, lockFocus = true)
+                // A face found now, else the centre as before.
+                cameraController.setShutterKeyHold(true)
+                cameraController.halfPressFindFace()
                 shutterKeyOwnsFocusLock = true
+                return
             }
         }
         cameraController.setShutterKeyHold(true)
@@ -4857,10 +4965,31 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             !cameraState.isHyperfocalFocusEnabled &&
             !cameraState.isCapturing &&
             (cameraState.focusPoint == null || cameraState.focusPointSource == FocusPointSource.EYE)
-        if (!acceptsEyeFocus && !acceptsPortraitMask && !acceptsPortraitFace) {
+        val now = SystemClock.elapsedRealtime()
+        val faceCheck = cameraController.faceCheckReason.value?.takeIf {
+            cameraState.isPreviewActive && !cameraState.isCapturing &&
+                (it == "tap" || it == "half" || now - lastFaceCheckMs >= faceCheckIntervalMs(it))
+        }
+        if (!acceptsEyeFocus && !acceptsPortraitMask && !acceptsPortraitFace && faceCheck == null) {
             frame.bitmap.recycle()
-            completeEyeFocusInput()
+            val waiting = cameraController.faceCheckReason.value
+            if (waiting == null) {
+                completeEyeFocusInput()
+                return
+            }
+            // Only a face check wants frames: the viewfinder stops reading them back until the next one is due.
+            isEyeFocusBusy = true
+            glSurfaceView?.setEyeFocusBusy(true)
+            faceCheckWaitJob?.cancel()
+            faceCheckWaitJob = viewModelScope.launch {
+                delay(faceCheckIntervalMs(waiting) - (now - lastFaceCheckMs))
+                completeEyeFocusInput()
+            }
             return
+        }
+        if (faceCheck != null) {
+            faceCheckSubmittedFor = faceCheck
+            lastFaceCheckMs = now
         }
 
         if (
@@ -4870,6 +4999,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 createFaceMask = acceptsPortraitMask,
                 trackPortraitFace = acceptsPortraitFace,
                 uprightRotationDegrees = previewFaceUprightRotation(),
+                reportFaces = faceCheck != null,
             )
         ) {
             frame.bitmap.recycle()
@@ -5155,7 +5285,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             else -> 0
         }
         cameraController.setTimerSeconds(nextTimer)
+        // The self-timer and the smile shutter are never on together.
+        if (nextTimer > 0 && smileThreshold > 0) {
+            smileThreshold = 0
+            countdownJob?.takeIf { smileWaiting }?.cancel()
+        }
     }
+
+    /** Steps the smile shutter: off, small, average, big smile, off. Turning it on turns the self-timer off. */
+    fun toggleSmile() {
+        smileThreshold = when (smileThreshold) {
+            0 -> 40
+            40 -> 55
+            55 -> 70
+            else -> 0
+        }
+        if (smileThreshold == 0) countdownJob?.takeIf { smileWaiting }?.cancel() else cameraController.setTimerSeconds(0)
+    }
+
+    val smileScore get() = cameraController.smileScore
+    val sceneHints get() = cameraController.sceneHints
 
     /**
      * 切换网格线显示
