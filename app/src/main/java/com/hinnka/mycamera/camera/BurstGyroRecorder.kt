@@ -6,8 +6,10 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Handler
+import android.os.SystemClock
 import com.hinnka.mycamera.utils.PLog
 import java.util.ArrayDeque
+import kotlin.math.sqrt
 
 class BurstGyroRecorder(context: Context) {
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -75,6 +77,30 @@ class BurstGyroRecorder(context: Context) {
         return GyroExposureWindowIntegrator.integrate(snapshot, startTimestampNs, endTimestampNs)
     }
 
+    /**
+     * Root-mean-square rotation speed in rad/s over the last [windowNs], or null with too few samples.
+     * The window's mean rate is taken out first: on a tripod the gyro reads a steady offset of about
+     * 0.05 rad/s that is not motion, while hand tremor swings around zero.
+     * shortcut: a steady slow pan is taken out too; fine while the shot asks the user to hold still.
+     */
+    fun recentAngularSpeed(windowNs: Long): Float? {
+        val since = SystemClock.elapsedRealtimeNanos() - windowNs
+        val recent = synchronized(lock) { samples.filter { it.timestampNs >= since } }
+        if (recent.size < MIN_RECENT_SAMPLES) return null
+        val mx = recent.sumOf { it.x.toDouble() } / recent.size
+        val my = recent.sumOf { it.y.toDouble() } / recent.size
+        val mz = recent.sumOf { it.z.toDouble() } / recent.size
+        val variance = recent.sumOf {
+            (it.x - mx) * (it.x - mx) + (it.y - my) * (it.y - my) + (it.z - mz) * (it.z - mz)
+        } / recent.size
+        PLog.d(
+            TAG,
+            "Recent gyro: offset=%.4f shake=%.4f rad/s samples=%d"
+                .format(sqrt(mx * mx + my * my + mz * mz), sqrt(variance), recent.size),
+        )
+        return sqrt(variance).toFloat()
+    }
+
     fun release() {
         stop()
         synchronized(lock) { samples.clear() }
@@ -88,5 +114,6 @@ class BurstGyroRecorder(context: Context) {
         const val TAG = "BurstGyroRecorder"
         const val MAX_SAMPLES = 8_192
         const val WINDOW_GUARD_NS = 2_000_000L
+        const val MIN_RECENT_SAMPLES = 20
     }
 }

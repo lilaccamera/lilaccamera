@@ -148,8 +148,10 @@ internal object PreviewColorShader {
             ${PreviewColorShaderModules.LUT_COLOR_SPACE}
 
             ${if (variant.includeEnginePreview) RawEnginePreviewGl.SAMPLING_GLSL else ""}
+            ${if (variant.includeCastFix) PreviewCastFixGl.GLSL else ""}
             vec4 samplePreviewSource(vec2 uv) {
                 vec4 sampled = texture(uCameraTexture, uv);
+                ${if (variant.includeCastFix) "sampled.rgb = applyCastFix(sampled.rgb);" else ""}
                 ${if (variant.includeEnginePreview) "sampled.rgb = sampleEnginePreview(sampled.rgb);" else ""}
                 return sampled;
             }

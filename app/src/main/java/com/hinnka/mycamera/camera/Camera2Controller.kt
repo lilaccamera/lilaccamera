@@ -305,6 +305,11 @@ class Camera2Controller(private val context: Context) {
     private var stabilizationImageReader: StabilizationImageReader? = null
     // lilac raw19 shim: serves full-res RAW only when the same request also targets a full-size JPEG; the JPEG is discarded
     private var rawCompanionJpegReader: ImageReader? = null
+    // lilac front camera, low-light YUV stills: the same slot holds a small discarded JPEG (see frontStillJpegReader)
+    var frontStillJpegActive = false
+        private set
+    private var frontStillJpegStallNs = 0L
+    private val ambientLightReader = AmbientLightReader(context)
 
     // 降噪等级 (0=Off, 1=Fast, 2=High Quality, 3=ZSL, 4=Minimal)
     private var nrLevel = NoiseReductionLevel.DEFAULT
@@ -486,6 +491,8 @@ class Camera2Controller(private val context: Context) {
 
     private var nextPhotoCaptureId = 0L
     private var activePhotoCapture: PhotoCaptureContext? = null
+    // Exposure for the YUV burst being captured, when it is planned for low light.
+    private var nightPlan: NightCapturePlan? = null
     private var pendingContinuousBurstCapture: PhotoCaptureContext? = null
     private val photoCaptures = mutableMapOf<Long, PhotoCaptureContext>()
     private val photoCaptureByTimestamp = mutableMapOf<Long, PhotoCaptureContext>()
@@ -779,12 +786,17 @@ class Camera2Controller(private val context: Context) {
 
     private fun finishPhotoCaptureSequence(shot: PhotoCaptureContext, successful: Boolean) {
         shot.sequenceCompleted = true
+        nightPlan = null
         clearPhotoCaptureProgress(shot)
         if (!successful) failPhotoCapture(shot, "capture sequence aborted")
         if (shot.failed) settleFailedPhotoCapture(shot)
         if (activePhotoCapture === shot) {
             activePhotoCapture = null
-            burstGyroRecorder.stop()
+            if (shot.expectedFrames > 1) {
+                PLog.i(TAG, "Ambient light at the shot: ${ambientLightReader.latestLux ?: "no reading"} lux " +
+                    "(${ambientLightReader.readings} readings), front still JPEG=$frontStillJpegActive")
+            }
+            stopShotSensors()
             _state.update {
                 it.copy(isCapturing = false, hdrBracketCapturing = false, hdrBracketFrameCount = 0)
             }
@@ -913,9 +925,13 @@ class Camera2Controller(private val context: Context) {
             } else {
                 baseExposureResult?.get(CaptureResult.SENSOR_FRAME_DURATION)
             }
-            maxOf(exposureNs, frameDurationNs ?: 0L, 1L)
+            // a request that also targets a JPEG waits for the JPEG encoder between frames
+            val jpegStallNs = if (frontStillJpegActive) frontStillJpegStallNs else 0L
+            maxOf(exposureNs, frameDurationNs ?: 0L, jpegStallNs, 1L)
         }
         var progressStarted = false
+        var firstStartTimestamp = 0L
+        var startedFrames = 0
         val callback = object : CameraCaptureSession.CaptureCallback() {
             override fun onCaptureStarted(
                 session: CameraCaptureSession,
@@ -940,6 +956,19 @@ class Camera2Controller(private val context: Context) {
                         estimatedDurationNs = estimatedDurationNs,
                     )
                     _state.update { it.copy(photoCaptureProgress = progress) }
+                }
+                // The ring shows how long to hold still, so once frames arrive it follows their real spacing:
+                // the camera may report no exposure (lilac front) or wait between frames for a JPEG.
+                startedFrames++
+                if (startedFrames == 1) firstStartTimestamp = timestamp
+                if (startedFrames >= 2 && progressStarted && activePhotoCapture === shot) {
+                    val measuredNs = (timestamp - firstStartTimestamp) / (startedFrames - 1) * requests.size
+                    _state.update { s ->
+                        val current = s.photoCaptureProgress
+                        if (current?.captureId != shot.id ||
+                            abs(measuredNs - current.estimatedDurationNs) < current.estimatedDurationNs / 20
+                        ) s else s.copy(photoCaptureProgress = current.copy(estimatedDurationNs = measuredNs))
+                    }
                 }
             }
 
@@ -1040,6 +1069,42 @@ class Camera2Controller(private val context: Context) {
         val frameNumber = result.frameNumber
         val startedTimestamp = pendingCaptureStartedTimestamps.remove(frameNumber)
         return result.get(CaptureResult.SENSOR_TIMESTAMP) ?: startedTimestamp
+    }
+
+    private fun stopShotSensors() {
+        burstGyroRecorder.stop()
+        ambientLightReader.stop()
+    }
+
+    /**
+     * lilac front camera, "Accurate" colour: a small JPEG output whose images are dropped. A still request that targets a
+     * JPEG gets Sony's still processing for its YUV output too: about 1/15 s instead of 1/30 s and colours as in
+     * Sony's own JPEG, without the violet-magenta black floor of plain YUV requests. It costs about 240 ms per frame,
+     * and it holds per request only, so every burst frame carries it.
+     */
+    private fun frontStillJpegReader(captureFormat: Int, characteristics: CameraCharacteristics): ImageReader? {
+        if (!DeviceQuirks.isLilac || !_state.value.frontStillJpeg ||
+            captureFormat == ImageFormat.RAW_SENSOR || captureFormat == ImageFormat.RAW10 ||
+            characteristics.get(CameraCharacteristics.LENS_FACING) != CameraCharacteristics.LENS_FACING_FRONT
+        ) return null
+        val sizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            ?.getOutputSizes(ImageFormat.JPEG).orEmpty()
+        // any size works the same and is as slow; the smallest at least 640 wide keeps the encoder's work small
+        val size = sizes.filter { it.width >= 640 }.minByOrNull { it.width.toLong() * it.height }
+            ?: sizes.maxByOrNull { it.width.toLong() * it.height } ?: return null
+        // measured on lilac: frames about 240 ms apart against an advertised 200 ms stall
+        frontStillJpegStallNs = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            ?.getOutputStallDuration(ImageFormat.JPEG, size)?.takeIf { it > 0L } ?: 200_000_000L
+        PLog.i(TAG, "Front still JPEG on: ${size.width}x${size.height} beside the YUV stills, images dropped, " +
+            "stall ${frontStillJpegStallNs / 1_000_000} ms")
+        return ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 2).apply {
+            setOnImageAvailableListener({ reader ->
+                while (true) {
+                    val image = reader.acquireNextImage() ?: break
+                    image.close()
+                }
+            }, cameraHandler)
+        }
     }
 
     /** The id of the shot whose first companion JPEG has [timestamp], when it is to be kept. */
@@ -2741,7 +2806,8 @@ class Camera2Controller(private val context: Context) {
     private fun surfacelessOpenSettings(): List<Any?> = _state.value.let {
         listOf(
             it.currentCameraId, it.captureMode, it.aspectRatio, requestedRawCaptureEnabled,
-            it.useP010, it.useP3ColorSpace, it.photoResolutionCapMp, it.frontPhotoResolutionCapMp, it.multiFrameOutputScale,
+            it.useP010, it.useP3ColorSpace, it.photoResolutionCapMp, it.activeFrontPhotoResolutionCapMp, it.frontStillJpeg,
+            it.multiFrameOutputScale,
             it.photoPreviewStabilizationEnabled, it.useLivePhoto,
             it.vendorCaptureSettingsByLens, it.customVendorKeySettings,
         )
@@ -3119,7 +3185,7 @@ class Camera2Controller(private val context: Context) {
                             outputCharacteristicsForStreams.get(CameraCharacteristics.LENS_FACING) ==
                             CameraCharacteristics.LENS_FACING_FRONT
                         ) {
-                            _state.value.frontPhotoResolutionCapMp
+                            _state.value.activeFrontPhotoResolutionCapMp
                         } else {
                             _state.value.photoResolutionCapMp
                         },
@@ -3213,13 +3279,16 @@ class Camera2Controller(private val context: Context) {
                             reader.discardFreeBuffers()
                         }, cameraHandler)
                     }
-                } else null
+                } else frontStillJpegReader(captureFormat, outputCharacteristicsForStreams)
+                frontStillJpegActive = rawCompanionJpegReader != null &&
+                    captureFormat != ImageFormat.RAW_SENSOR && captureFormat != ImageFormat.RAW10
 
             } else {
                 safeCloseImageReader(imageReader)
                 imageReader = null
                 safeCloseImageReader(rawCompanionJpegReader)
                 rawCompanionJpegReader = null
+                frontStillJpegActive = false
                 activeHighResolutionCaptureProfile = null
                 _state.update { s -> s.copy(isP3Supported = false) }
             }
@@ -4393,7 +4462,8 @@ class Camera2Controller(private val context: Context) {
         currentState: CameraState = _state.value,
     ) {
         // every RAW still request passes through here; the raw19 shim needs the JPEG beside the RAW (see rawCompanionJpegReader)
-        if (isCapture && isRawCapture) rawCompanionJpegReader?.surface?.let { builder.addTarget(it) }
+        // and on the lilac front camera in low light every YUV still request carries the small JPEG (see frontStillJpegReader)
+        if (isCapture && (isRawCapture || frontStillJpegActive)) rawCompanionJpegReader?.surface?.let { builder.addTarget(it) }
 
         // 1. 曝光设置
         applyExposureSettings(
@@ -7606,26 +7676,50 @@ class Camera2Controller(private val context: Context) {
     fun setPhotoResolutionCapMp(megapixels: Int) {
         if (_state.value.photoResolutionCapMp == megapixels) return
         _state.update { s -> s.copy(photoResolutionCapMp = megapixels) }
-        if (!isFrontCameraOpen()) restartForPhotoResolutionCap(megapixels)
+        if (!isFrontCameraOpen()) restartPhotoSession("photo resolution cap: $megapixels MP")
     }
 
     /** Caps the front camera's Photo-mode capture size; 0 = full sensor size. */
-    fun setFrontPhotoResolutionCapMp(megapixels: Int) {
-        if (_state.value.frontPhotoResolutionCapMp == megapixels) return
-        _state.update { s -> s.copy(frontPhotoResolutionCapMp = megapixels) }
-        if (isFrontCameraOpen()) restartForPhotoResolutionCap(megapixels)
+    fun setFrontPhotoResolutionCapMp(megapixels: Int) = updateFrontSession("front photo resolution cap: $megapixels MP") {
+        it.copy(frontPhotoResolutionCapMp = megapixels)
+    }
+
+    /** Front camera "Accurate" colour (see frontStillJpegReader); the JPEG output is part of the session. */
+    fun setFrontAccurateColour(enabled: Boolean) = updateFrontSession("front accurate colour: $enabled") {
+        it.copy(frontAccurateColour = enabled)
+    }
+
+    /** Night on the mode dial: every Photo shot is a stack planned for low light (see planNightCapture). */
+    fun setNightMode(enabled: Boolean) = updateFrontSession("night mode: $enabled") {
+        it.copy(isNightMode = enabled)
+    }
+
+    /** Night's Fast choice: 1/30 s frames on the back camera; on lilac's front camera, no JPEG in the requests. */
+    fun setNightFast(fast: Boolean) = updateFrontSession("night fast: $fast") { it.copy(nightFast = fast) }
+
+    /** Night's frame count; 0 = Auto. */
+    fun setNightFrameCount(frames: Int) {
+        _state.update { s -> s.copy(nightFrameCount = if (frames > 0) MultiFrameConfig.normalizeDenoiseFrameCount(frames) else 0) }
+    }
+
+    // The front camera's still JPEG and capture size are part of the session, so a change to either reopens it.
+    private fun updateFrontSession(reason: String, change: (CameraState) -> CameraState) {
+        val session = { s: CameraState -> s.frontStillJpeg to s.activeFrontPhotoResolutionCapMp }
+        val before = session(_state.value)
+        _state.update(change)
+        if (session(_state.value) != before && isFrontCameraOpen()) restartPhotoSession(reason)
     }
 
     private fun isFrontCameraOpen(): Boolean =
         _state.value.getCurrentCameraInfo()?.lensFacing == CameraCharacteristics.LENS_FACING_FRONT
 
-    private fun restartForPhotoResolutionCap(megapixels: Int) {
-        // The capture size is fixed when the camera opens, so a running YUV camera must reopen.
+    private fun restartPhotoSession(reason: String) {
+        // The capture outputs are fixed when the camera opens, so a running YUV camera must reopen.
         val reader = imageReader ?: return
         if (isRawCaptureReader(reader) || _state.value.captureMode != CaptureMode.PHOTO || _state.value.isCapturing) return
         val surfaceTexture = previewSurfaceTexture ?: return
         if (cameraDevice == null) return
-        PLog.i(TAG, "Restarting camera for photo resolution cap: ${megapixels} MP")
+        PLog.i(TAG, "Restarting camera for $reason")
         openCamera(surfaceTexture)
     }
 
@@ -8278,16 +8372,106 @@ class Camera2Controller(private val context: Context) {
             val currentState = _state.value
             if (currentState.requiresMultiFrameCaptureSequence) {
                 burstGyroRecorder.start(cameraHandler)
+                ambientLightReader.start(cameraHandler)
             }
-            prepareCaptureLighting(device, reader, baseExposureResult)
+            nightPlan = null
+            val planNight = isNightPlanCandidate(currentState)
+            _state.update { s -> s.copy(nightShotPlan = null, nightSteadying = planNight) }
+            if (planNight) {
+                // Measure how steady the phone is before choosing the exposure.
+                val start = { startNightCapture(device, reader, baseExposureResult) }
+                cameraHandler?.postDelayed(start, NightCapturePlanner.STEADINESS_WINDOW_MS) ?: start()
+            } else {
+                prepareCaptureLighting(device, reader, baseExposureResult)
+            }
 
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to capture", e)
             PLog.e(TAG, "拍照失败", e)
             _state.update { s -> s.copy(isCapturing = false) }
-            burstGyroRecorder.stop()
+            stopShotSensors()
             resetPreviewAfterCapture()
         }
+    }
+
+    // The plan sets the exposure by hand, so a camera without manual exposure (lilac's front) shoots at once.
+    private fun isNightPlanCandidate(state: CameraState): Boolean =
+        state.isNightMode &&
+            isManualSensorSupported && availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_OFF) &&
+            state.isJpgMaxEnabled &&
+            !state.isJpgMaxHdrEnabled &&
+            state.requiresMultiFrameCaptureSequence &&
+            state.isAutoExposure &&
+            !shouldUseMultiFrameTorch(state)
+
+    private fun startNightCapture(device: CameraDevice, reader: ImageReader, baseExposureResult: CaptureResult?) {
+        try {
+            check(cameraDevice === device && imageReader === reader && captureSession != null) {
+                "camera changed while measuring steadiness"
+            }
+            nightPlan = planNightCapture(_state.value, reader, baseExposureResult)?.also { plan ->
+                activePhotoCapture?.let {
+                    it.state = it.state.copy(nightBrightenGain = plan.brightenGain, nightShotPlan = plan)
+                }
+            }
+            // The burst reads its frame count from the state, so the plan goes there before it starts.
+            _state.update { s -> s.copy(nightShotPlan = nightPlan, nightSteadying = false) }
+            prepareCaptureLighting(device, reader, baseExposureResult)
+        } catch (e: Exception) {
+            PLog.e(TAG, "Failed to start low-light capture", e)
+            nightPlan = null
+            _state.update { s -> s.copy(nightShotPlan = null, nightSteadying = false) }
+            _state.update { s -> s.copy(isCapturing = false) }
+            stopShotSensors()
+            resetPreviewAfterCapture()
+        }
+    }
+
+    private fun planNightCapture(
+        state: CameraState,
+        reader: ImageReader,
+        baseExposureResult: CaptureResult?,
+    ): NightCapturePlan? {
+        val characteristics = getActiveOpenCameraCharacteristics()
+        val aeIso = baseExposureResult?.get(CaptureResult.SENSOR_SENSITIVITY)?.takeIf { it > 0 }
+        val aeExposureNs = baseExposureResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.takeIf { it > 0L }
+        val focalMm = characteristics?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+            ?.firstOrNull()?.takeIf { it > 0f }
+        val sensorWidthMm = characteristics?.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+            ?.width?.takeIf { it > 0f }
+        val shake = burstGyroRecorder.recentAngularSpeed(NightCapturePlanner.STEADINESS_WINDOW_MS * 1_000_000L)
+        val manualExposure = isManualSensorSupported &&
+            availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_OFF)
+        if (!manualExposure || aeIso == null || aeExposureNs == null || focalMm == null ||
+            sensorWidthMm == null || shake == null
+        ) {
+            PLog.w(
+                TAG,
+                "Low-light plan unavailable: manual=$manualExposure aeIso=$aeIso aeShutter=$aeExposureNs " +
+                    "focal=$focalMm sensorWidth=$sensorWidthMm shake=$shake",
+            )
+            return null
+        }
+        // The frame spans the sensor's long side, so this is the focal length in frame pixels.
+        val focalPx = focalMm / sensorWidthMm * maxOf(reader.width, reader.height)
+        val plan = NightCapturePlanner.plan(
+            aeIso = aeIso,
+            aeExposureNs = aeExposureNs,
+            angularSpeedRadS = shake,
+            focalLengthPx = focalPx,
+            frames = state.nightFrameCount,
+            isoRange = state.getIsoRange(),
+            exposureRangeNs = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE),
+            fast = state.nightFast,
+        )
+        PLog.i(
+            TAG,
+            "Low-light plan: shake=%.4f rad/s focalPx=%.0f ae=ISO%d %.1fms -> frames=%d ISO%d %.1fms gain=%.2f".format(
+                shake, focalPx, aeIso, aeExposureNs / 1e6, plan.frames,
+                plan.iso, plan.exposureTimeNs / 1e6, plan.brightenGain,
+            ),
+        )
+        return plan
     }
 
     private fun performHdrBracketCapture(
@@ -8358,7 +8542,7 @@ class Camera2Controller(private val context: Context) {
                 hdrBracketCapturing = false,
                 hdrBracketFrameCount = 0
             ) }
-            burstGyroRecorder.stop()
+            stopShotSensors()
             onHdrBracketCaptureFailed?.invoke()
             resetPreviewAfterCapture()
         }
@@ -8554,6 +8738,12 @@ class Camera2Controller(private val context: Context) {
                     builder.set(CaptureRequest.SENSOR_SENSITIVITY, fittedIso)
                     builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, lockedExposure)
                 }
+            }
+            val plan = nightPlan
+            if (!isRawCapture && plan != null && !requestUsesManualExposure && !useMultiFrameTorch) {
+                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                builder.set(CaptureRequest.SENSOR_SENSITIVITY, plan.iso)
+                builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, plan.exposureTimeNs)
             }
 
             if (builder.get(CaptureRequest.CONTROL_AE_MODE) != CaptureRequest.CONTROL_AE_MODE_OFF) {
@@ -9041,7 +9231,7 @@ class Camera2Controller(private val context: Context) {
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to perform capture", e)
             _state.update { s -> s.copy(isCapturing = false) }
-            burstGyroRecorder.stop()
+            stopShotSensors()
             resetPreviewAfterCapture()
         }
     }
@@ -9317,7 +9507,7 @@ class Camera2Controller(private val context: Context) {
             pendingCameraOpenRequest = null
         }
         try {
-            burstGyroRecorder.stop()
+            stopShotSensors()
             pendingFrameMetadata.clear()
             cameraOpenGeneration++
             val lifecycleBeforeClose = cameraDeviceLifecycle

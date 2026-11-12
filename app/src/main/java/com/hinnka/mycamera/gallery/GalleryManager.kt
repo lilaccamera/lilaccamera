@@ -3351,6 +3351,7 @@ object GalleryManager {
         photoQuality: Int = 95,
         useSuperResolution: Boolean = false,
         superResolutionScale: Float = 1.0f,
+        brightenGain: Float = 1f,
     ) = withContext(Dispatchers.IO) {
         try {
             val photoDir = getPhotoDir(context, photoId, true)
@@ -3364,6 +3365,7 @@ object GalleryManager {
                 aspectRatio = aspectRatio,
                 outputScale = if (useSuperResolution) superResolutionScale else 1f,
                 colorSpace = ColorSpace.get(metadata.colorSpace),
+                outputGain = brightenGain,
             )
 
             if (result == null) return@withContext
@@ -4709,6 +4711,7 @@ object GalleryManager {
         rawMaxHdrFusionEnabled: Boolean = true,
         rawMaxSpatialOutputMode: MgcSpatialOutputMode = MgcSpatialOutputMode.BAYER,
         rawMaxMergeMethod: MgcMergeMethod = MgcMergeMethod.SPATIAL_BAYER,
+        brightenGain: Float = 1f,
     ) = withContext(Dispatchers.IO) {
         when (val format = images[0].format) {
             ImageFormat.YUV_420_888, ImageFormat.YCBCR_P010, ImageFormat.NV21 -> {
@@ -4725,7 +4728,8 @@ object GalleryManager {
                     chromaNoiseReductionValue,
                     photoQuality,
                     useSuperResolution,
-                    superResolutionScale
+                    superResolutionScale,
+                    brightenGain,
                 )
             }
 

@@ -360,6 +360,18 @@ object AppIcons {
                 "M17 4a2 2 0 0 0 2 2a2 2 0 0 0 -2 2a2 2 0 0 0 -2 -2a2 2 0 0 0 2 -2M19 11h2m-1 -1v2"
         ).also { _moonStars = it }
 
+    // Night's Fast choice (the bolt is the flash), and the dim-light reading on the top edge.
+    val RunLine: ImageVector by lazy {
+        lineIcon("AppIcons.RunLine", "M12 4a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M4 17l5 1l.75 -1.5M15 21v-4l-4 -3l1 -6M7 12v-3l5 -1l3 3l3 1")
+    }
+    val SunLowLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.SunLowLine",
+            "M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0M4 12h.01M12 4v.01M20 12h.01M12 20v.01M6.31 6.31l-.01 -.01" +
+                "M17.71 6.31l-.01 .01M17.7 17.7l.01 .01M6.3 17.7l.01 -.01"
+        )
+    }
+
     val User: ImageVector
         get() = _user ?: lineIcon(
             "AppIcons.User",

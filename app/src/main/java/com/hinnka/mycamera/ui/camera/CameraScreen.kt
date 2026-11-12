@@ -141,6 +141,7 @@ enum class ActivePanel {
 }
 
 internal enum class CameraShootingMode {
+    NIGHT,
     PORTRAIT,
     PROFESSIONAL,
     PHOTO,
@@ -415,6 +416,7 @@ fun CameraScreen(
             when {
                 state.captureMode == CaptureMode.VIDEO -> CameraShootingMode.VIDEO
                 state.useRaw && state.isRawSupported -> CameraShootingMode.PROFESSIONAL
+                state.isNightMode -> CameraShootingMode.NIGHT
                 state.isPortraitMode -> CameraShootingMode.PORTRAIT
                 else -> CameraShootingMode.PHOTO
             },
@@ -459,7 +461,12 @@ fun CameraScreen(
     // as a compact line of just those values, so a shot is never taken with a fixed value nobody can see.
     val anyManualValue = state.exposureCompensation != 0 || !state.isIsoAuto || !state.isShutterSpeedAuto ||
         !state.isAutoFocus || state.awbMode != CaptureRequest.CONTROL_AWB_MODE_AUTO ||
-        showsPortraitAperture(state)
+        showsPortraitAperture(state) || showsNightFrames(state)
+    // The light sensor runs while Photo or Night is open: for the low-light offer and the top-edge reading.
+    val photoOrNight = state.captureMode == CaptureMode.PHOTO && !(state.useRaw && state.isRawSupported) &&
+        !state.isPortraitMode
+    val ambientLux = rememberAmbientLux(enabled = photoOrNight)
+    val lowLightOffer = rememberLowLightOffer(ambientLux, state.currentCameraId)
     val isXpan = state.aspectRatio == AspectRatio.XPAN
     val burstCapturingCount = viewModel.burstImageCount
 
@@ -800,23 +807,27 @@ fun CameraScreen(
 
         val targetCaptureMode = when (mode) {
             CameraShootingMode.PROFESSIONAL,
+            CameraShootingMode.NIGHT,
             CameraShootingMode.PORTRAIT,
             CameraShootingMode.PHOTO -> CaptureMode.PHOTO
             CameraShootingMode.VIDEO -> CaptureMode.VIDEO
         }
         val targetUseRaw = when (mode) {
             CameraShootingMode.PROFESSIONAL -> true
+            CameraShootingMode.NIGHT,
             CameraShootingMode.PORTRAIT,
             CameraShootingMode.PHOTO -> false
             CameraShootingMode.VIDEO -> null
         }
         val targetPortrait = mode == CameraShootingMode.PORTRAIT
+        val targetNight = mode == CameraShootingMode.NIGHT
         if (
             targetCaptureMode == state.captureMode &&
             (targetUseRaw == null || targetUseRaw == state.useRaw)
         ) {
-            // Photo and Portrait share the camera setup, so only the portrait flag changes.
+            // Photo, Portrait and Night share the camera setup, so only their flags change.
             viewModel.setPortraitMode(targetPortrait)
+            viewModel.setNightMode(targetNight)
             return
         }
 
@@ -826,6 +837,7 @@ fun CameraScreen(
             }
             viewModel.setShootingMode(targetCaptureMode, targetUseRaw)
             viewModel.setPortraitMode(targetPortrait)
+            viewModel.setNightMode(targetNight)
         }
     }
 
@@ -1098,6 +1110,7 @@ fun CameraScreen(
                 CameraParameter.WHITE_BALANCE ->
                     viewModel.setAwbMode(android.hardware.camera2.CameraMetadata.CONTROL_AWB_MODE_AUTO)
                 CameraParameter.APERTURE -> viewModel.resetPortraitAperture()
+                CameraParameter.FRAMES -> viewModel.setNightFrameCount(0)
             }
         }
         // A tap toggles the value's ruler at once; a second tap on it within 320 ms puts it back to auto.
@@ -1198,6 +1211,7 @@ fun CameraScreen(
                     CameraParameter.FOCUS -> state.focusDistance
                     CameraParameter.WHITE_BALANCE -> whiteBalanceCurrentValue
                     CameraParameter.APERTURE -> state.virtualAperture
+                    CameraParameter.FRAMES -> state.nightFrames.toFloat()
                 },
                 minValue = when (selectedParameter) {
                     CameraParameter.EXPOSURE_COMPENSATION -> state.getExposureCompensationRange().lower * state.getExposureCompensationStep()
@@ -1206,6 +1220,7 @@ fun CameraScreen(
                     CameraParameter.FOCUS -> 0f
                     CameraParameter.WHITE_BALANCE -> state.awbTemperatureMin.toFloat()
                     CameraParameter.APERTURE -> PortraitApertureStops.first()
+                    CameraParameter.FRAMES -> NightFramesMin.toFloat()
                 },
                 maxValue = when (selectedParameter) {
                     CameraParameter.EXPOSURE_COMPENSATION -> state.getExposureCompensationRange().upper * state.getExposureCompensationStep()
@@ -1214,9 +1229,10 @@ fun CameraScreen(
                     CameraParameter.FOCUS -> state.minimumFocusDistance
                     CameraParameter.WHITE_BALANCE -> state.awbTemperatureMax.toFloat()
                     CameraParameter.APERTURE -> PortraitApertureStops.last()
+                    CameraParameter.FRAMES -> NightFramesMax.toFloat()
                 },
                 isAdjustable = when (selectedParameter) {
-                    CameraParameter.APERTURE -> true
+                    CameraParameter.APERTURE, CameraParameter.FRAMES -> true
                     CameraParameter.EXPOSURE_COMPENSATION -> state.isAutoExposure
                     CameraParameter.SHUTTER_SPEED, CameraParameter.ISO -> state.isManualSensorSupported
                     CameraParameter.FOCUS -> state.minimumFocusDistance > 0f
@@ -1228,10 +1244,12 @@ fun CameraScreen(
                     CameraParameter.FOCUS -> state.isAutoFocus
                     CameraParameter.WHITE_BALANCE ->
                         state.awbMode == android.hardware.camera2.CameraMetadata.CONTROL_AWB_MODE_AUTO
+                    CameraParameter.FRAMES -> state.nightFrameCount == 0
                     CameraParameter.EXPOSURE_COMPENSATION, CameraParameter.APERTURE -> false
                 },
                 showAutoButton = when (selectedParameter) {
-                    CameraParameter.SHUTTER_SPEED, CameraParameter.ISO, CameraParameter.WHITE_BALANCE, CameraParameter.FOCUS -> true
+                    CameraParameter.SHUTTER_SPEED, CameraParameter.ISO, CameraParameter.WHITE_BALANCE, CameraParameter.FOCUS,
+                    CameraParameter.FRAMES -> true
                     else -> false
                 },
                 isAutoModeToggleEnabled = when (selectedParameter) {
@@ -1256,6 +1274,7 @@ fun CameraScreen(
                         CameraParameter.FOCUS -> viewModel.setFocusDistance(value)
                         CameraParameter.WHITE_BALANCE -> viewModel.setAwbTemperature(value.toInt())
                         CameraParameter.APERTURE -> viewModel.setAperture(value)
+                        CameraParameter.FRAMES -> viewModel.setNightFrameCount(value.roundToInt())
                     }
                 },
                 onAutoModeToggle = {
@@ -1273,6 +1292,9 @@ fun CameraScreen(
                         }
 
                         CameraParameter.FOCUS -> viewModel.setAutoFocus(!state.isAutoFocus)
+                        // Leaving Auto keeps the count it shows.
+                        CameraParameter.FRAMES ->
+                            viewModel.setNightFrameCount(if (state.nightFrameCount == 0) state.nightFrames else 0)
                         else -> {}
                     }
                 },
@@ -1524,6 +1546,7 @@ fun CameraScreen(
                             onTap = { x, y, w, h ->
                                 // Quick settings, the everyday row and an open ruler close and the tap still focuses;
                                 // the manual values stay (only a swipe down hides them). Other panels only close.
+                                lowLightOffer.dismiss()
                                 everydayRowShown = false
                                 showParameterRuler = false
                                 scrubRulerShown = false
@@ -1802,6 +1825,7 @@ fun CameraScreen(
                 previewPending = !previewTransitionRevealing &&
                     (!hasPlayedInitialPreviewTransition || previewTransitionAwaitingResume),
                 onCaptureTap = {
+                    lowLightOffer.dismiss()
                     val shouldDebounceRawCapture =
                         state.useRaw && state.captureMode == CaptureMode.PHOTO
                     if (shouldDebounceRawCapture) {
@@ -1991,6 +2015,9 @@ fun CameraScreen(
                     if (viewModel.currentFrameId != null) add(TopEdgeMark(AppIcons.FrameLine))
                     // Exposure held by a half-pressed camera key, like a camera's AE lock mark.
                     if (state.exposureHeld) add(TopEdgeMark(null, "AE-L", ModeAmber))
+                    ambientLux?.takeIf { it < LuxMarkBelow }?.let { lux ->
+                        add(TopEdgeMark(AppIcons.SunLowLine, stringResource(R.string.night_lux_mark, lux.roundToInt())))
+                    }
                 }
             }
             val topEdgeHistogram = state.histogram.takeIf { isPhotoStyleMode && showHistogram }
@@ -2086,10 +2113,28 @@ fun CameraScreen(
                     modifier = guidePillPlacement
                 )
             }
-            // Photo mode offers the camera basics the same way, on every launch until opened once.
-            val photoMode = state.captureMode == CaptureMode.PHOTO && !proMode && !state.isPortraitMode
+            // In low light Photo mode offers Night in the same place; a tap rolls the dial there.
+            val photoMode = state.captureMode == CaptureMode.PHOTO && !proMode && !state.isPortraitMode &&
+                !state.isNightMode
+            val offerNight = photoMode && lowLightOffer.offered && !lowLightOffer.dismissed &&
+                modeLine.shownMode == CameraShootingMode.PHOTO && !modeLine.lift.isRunning && modeLine.lift.value == 0f
             if (
-                photoMode && !basicsGuideSeen && guidePillBottom != null &&
+                offerNight && guidePillBottom != null &&
+                activePanel == ActivePanel.NONE && !noteLine.shown && !viewModel.showBasicsGuide
+            ) {
+                ModeGuidePill(
+                    icon = AppIcons.MoonStars,
+                    text = stringResource(R.string.night_low_light_pill),
+                    onClick = {
+                        lowLightOffer.dismiss()
+                        modeLine.rollTo(CameraShootingMode.NIGHT)
+                    },
+                    modifier = guidePillPlacement
+                )
+            }
+            // Photo mode offers the camera basics the same way, on every launch until opened once.
+            if (
+                photoMode && !offerNight && !basicsGuideSeen && guidePillBottom != null &&
                 activePanel == ActivePanel.NONE && !noteLine.shown && !viewModel.showBasicsGuide
             ) {
                 ModeGuidePill(
@@ -2327,9 +2372,12 @@ fun CameraScreen(
             photoResolutionAdjustable = state.photoResolutionAdjustable,
             onPhotoResolutionCapChange = viewModel::setPhotoResolutionCapMp,
             onFrontPhotoResolutionCapChange = viewModel::setFrontPhotoResolutionCapMp,
+            frontAccurateColour = state.frontAccurateColour,
+            onFrontAccurateColourChange = viewModel::setFrontAccurateColour,
             saveCameraJpeg = saveCameraJpeg,
             onSaveCameraJpegChange = { saveCameraJpeg = it },
             isPortraitMode = state.isPortraitMode,
+            isNightMode = state.isNightMode,
             portraitQuickBlur = portraitQuickBlur,
             onPortraitQuickBlurChange = viewModel::setPortraitQuickBlur,
             portraitBokehStyle = portraitBokehStyle,
@@ -2653,6 +2701,7 @@ private fun Controls(
             val shootingMode = when {
                 state.captureMode == CaptureMode.VIDEO -> CameraShootingMode.VIDEO
                 state.useRaw && state.isRawSupported -> CameraShootingMode.PROFESSIONAL
+                state.isNightMode -> CameraShootingMode.NIGHT
                 state.isPortraitMode -> CameraShootingMode.PORTRAIT
                 else -> CameraShootingMode.PHOTO
             }
@@ -2684,6 +2733,7 @@ private fun Controls(
                         captureMode = if (line.shownMode == CameraShootingMode.VIDEO) CaptureMode.VIDEO else CaptureMode.PHOTO,
                         isProfessionalMode = line.shownMode == CameraShootingMode.PROFESSIONAL,
                         isPortraitMode = line.shownMode == CameraShootingMode.PORTRAIT,
+                        isNightMode = line.shownMode == CameraShootingMode.NIGHT,
                         isCapturing = state.isCapturing,
                         isCaptureBusy = captureBusy,
                         isCountdownActive = state.countdownValue > 0,
@@ -2859,10 +2909,28 @@ private fun Controls(
                     }
                 }
 
-                // Looks can't change during a recording.
+                // Looks can't change during a recording. In Night the button is Night's Fast / Accurate switch;
+                // its icon springs over as the dial reaches Night (looks stay on the sideways swipe).
+                val nightSwitch = line.shownMode == CameraShootingMode.NIGHT
                 if (!isXpan && !recording) {
                     PhysicalButton(
-                        onClick = onLooksClick,
+                        onClick = {
+                            if (nightSwitch) {
+                                val fast = !state.nightFast
+                                viewModel.setNightFast(fast)
+                                val front = state.getCurrentCameraInfo()?.lensType == LensType.FRONT
+                                noteLine.say(
+                                    when {
+                                        fast && front -> R.string.night_note_fast_front
+                                        fast -> R.string.night_note_fast
+                                        front -> R.string.night_note_accurate_front
+                                        else -> R.string.night_note_accurate
+                                    }
+                                )
+                            } else {
+                                onLooksClick()
+                            }
+                        },
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
                             .padding(end = CameraControlsLayoutDefaults.SideMargin)
@@ -2877,12 +2945,32 @@ private fun Controls(
                         shape = RoundedCornerShape(ThumbnailCorner),
                         backgroundColor = Color.Transparent
                     ) {
-                        Icon(
-                            imageVector = AppIcons.Film,
-                            contentDescription = stringResource(R.string.filters_panel),
-                            tint = CameraControlsLayoutDefaults.LineColor.onFooter(),
-                            modifier = Modifier.size(24.dp)
-                        )
+                        val face = when {
+                            !nightSwitch -> LooksButtonFace.LOOKS
+                            state.nightFast -> LooksButtonFace.FAST
+                            else -> LooksButtonFace.ACCURATE
+                        }
+                        AnimatedContent(
+                            targetState = face,
+                            transitionSpec = {
+                                (fadeIn(tween(160)) + scaleIn(LooksSwapSpring, initialScale = 0.6f)) togetherWith
+                                    (fadeOut(tween(160)) + scaleOut(tween(160), targetScale = 0.6f))
+                            },
+                            label = "looks button face"
+                        ) { shown ->
+                            Icon(
+                                imageVector = when (shown) {
+                                    LooksButtonFace.LOOKS -> AppIcons.Film
+                                    LooksButtonFace.ACCURATE -> AppIcons.MoonStars
+                                    LooksButtonFace.FAST -> AppIcons.RunLine
+                                },
+                                contentDescription = stringResource(
+                                    if (shown == LooksButtonFace.LOOKS) R.string.filters_panel else R.string.night_switch
+                                ),
+                                tint = if (shown == LooksButtonFace.FAST) ModeAmber else CameraControlsLayoutDefaults.LineColor.onFooter(),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -2892,6 +2980,11 @@ private fun Controls(
 
 // The zoom collar's knob centre above the shutter centre: halfway through the 48 to 74 dp band.
 private val LooksRise = 61.dp
+
+private enum class LooksButtonFace { LOOKS, ACCURATE, FAST }
+
+// A little overshoot, like the prototype's cubic-bezier(.3, 1.35, .5, 1) over 0.26 s.
+private val LooksSwapSpring = spring<Float>(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow)
 
 /** While the mode list opens, a side control slides 44 dp outward, shrinks a little and fades. */
 private fun GraphicsLayerScope.makeRoom(side: Float, direction: Float) {
@@ -3068,6 +3161,7 @@ fun CaptureButton(
     captureMode: CaptureMode,
     isProfessionalMode: Boolean,
     isPortraitMode: Boolean = false,
+    isNightMode: Boolean = false,
     isCapturing: Boolean,
     isCaptureBusy: Boolean = false,
     isCountdownActive: Boolean = false,
@@ -3305,10 +3399,10 @@ fun CaptureButton(
                 Box(Modifier.fillMaxSize().background(Color(0xFF3C3C3C).copy(alpha = busyTint)))
             }
         }
-        if (isPortraitMode && !showCancelTimer) {
-            // The mode dial's Portrait mark, in the ring's grey, tells Portrait apart from Photo.
+        if ((isPortraitMode || isNightMode) && !showCancelTimer) {
+            // The mode dial's Portrait or Night mark, in the ring's grey, tells the mode apart from Photo.
             Icon(
-                AppIcons.User,
+                if (isNightMode) AppIcons.MoonStars else AppIcons.User,
                 contentDescription = null,
                 tint = CameraControlsLayoutDefaults.LineColor.onFooter(),
                 modifier = Modifier.align(Alignment.Center).size(36.dp)
@@ -3356,14 +3450,16 @@ private const val SeeThroughFaceAlpha = 0.3f
 
 @Composable
 private fun rememberPhotoCaptureProgress(progress: PhotoCaptureProgress?): State<Float> {
-    val fraction = remember(progress) {
+    // Keyed on the shot, not the estimate: when the estimate is corrected mid-burst the ring slows down or speeds
+    // up, it never runs backwards.
+    val fraction = remember(progress?.captureId) {
         mutableFloatStateOf(progress?.fractionAt(SystemClock.elapsedRealtimeNanos()) ?: 0f)
     }
     LaunchedEffect(progress) {
         if (progress == null) return@LaunchedEffect
         while (isActive && fraction.floatValue < 1f) {
             withFrameNanos {
-                fraction.floatValue = progress.fractionAt(SystemClock.elapsedRealtimeNanos())
+                fraction.floatValue = maxOf(fraction.floatValue, progress.fractionAt(SystemClock.elapsedRealtimeNanos()))
             }
         }
     }

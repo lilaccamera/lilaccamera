@@ -188,9 +188,12 @@ internal fun CameraTopSheet(
     photoResolutionAdjustable: Boolean,
     onPhotoResolutionCapChange: (Int) -> Unit,
     onFrontPhotoResolutionCapChange: (Int) -> Unit,
+    frontAccurateColour: Boolean,
+    onFrontAccurateColourChange: (Boolean) -> Unit,
     saveCameraJpeg: Boolean,
     onSaveCameraJpegChange: (Boolean) -> Unit,
     isPortraitMode: Boolean = false,
+    isNightMode: Boolean = false,
     portraitQuickBlur: Boolean = true,
     onPortraitQuickBlurChange: (Boolean) -> Unit = {},
     portraitBokehStyle: BokehStyle = BokehStyle.NATURAL,
@@ -551,6 +554,7 @@ internal fun CameraTopSheet(
                         title = stringResource(
                             when {
                                 isPortraitMode -> R.string.capture_mode_portrait
+                                isNightMode -> R.string.capture_mode_night
                                 isProfessionalMode -> R.string.capture_mode_professional
                                 else -> R.string.capture_mode_photo
                             }
@@ -673,6 +677,8 @@ internal fun CameraTopSheet(
                             when {
                                 // Pro (RAW) is always full size: the RAW stream only exists at full sensor size.
                                 isProfessionalMode -> QuickFixed(stringResource(R.string.quick_resolution_full_raw))
+                                // Night always shoots the front camera's binned 2 MP; Photo's choice comes back after.
+                                isFrontCamera && isNightMode -> QuickFixed(resolutionLabel(2))
                                 isFrontCamera -> listOf(0, 2).forEach { cap ->
                                     QuickChoice(
                                         text = resolutionLabel(cap),
@@ -689,6 +695,27 @@ internal fun CameraTopSheet(
                                         selected = photoResolutionCapMp == cap,
                                         minWidth = 56.dp,
                                         onClick = { onPhotoResolutionCapChange(cap) }
+                                    )
+                                }
+                            }
+                        }
+                        // Only where the camera's still processing differs from its YUV frames (lilac's front camera).
+                        // Night has its own Fast / Accurate switch on the footer, with the same icons.
+                        if (isFrontCamera && !isProfessionalMode && !isNightMode && com.hinnka.mycamera.camera.DeviceQuirks.isLilac) {
+                            rows.Setting(
+                                key = "colour",
+                                label = stringResource(R.string.quick_colour),
+                                explanation = stringResource(R.string.quick_explain_colour_front)
+                            ) {
+                                listOf(false, true).forEach { accurate ->
+                                    LilacChip(
+                                        text = stringResource(
+                                            if (accurate) R.string.quick_colour_accurate else R.string.quick_colour_fast
+                                        ),
+                                        selected = frontAccurateColour == accurate,
+                                        minWidth = 56.dp,
+                                        icon = if (accurate) AppIcons.MoonStars else AppIcons.RunLine,
+                                        onClick = { onFrontAccurateColourChange(accurate) }
                                     )
                                 }
                             }

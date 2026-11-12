@@ -1854,7 +1854,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        cameraController.onPreviewStreamActive = { active -> glSurfaceView?.setCameraStreamActive(active) }
+        cameraController.onPreviewStreamActive = { active ->
+            glSurfaceView?.setCameraStreamActive(active)
+            // An "Accurate" front session's photos lose the viewfinder's cast; show the viewfinder that way too.
+            if (active) glSurfaceView?.setCastFixEnabled(cameraController.frontStillJpegActive)
+        }
 
         cameraController.onCameraError = { code, message, canRetry ->
             // 只记录错误日志，不在这里重试打开相机
@@ -2025,6 +2029,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 )
                 cameraController.setPhotoResolutionCapMp(it.photoResolutionCapMp)
                 cameraController.setFrontPhotoResolutionCapMp(it.frontPhotoResolutionCapMp)
+                cameraController.setFrontAccurateColour(it.frontAccurateColour)
+                cameraController.setNightFast(it.nightFast)
+                cameraController.setNightFrameCount(it.nightFrameCount)
                 cameraController.keepRawCompanionJpeg = it.saveCameraJpeg
                 cameraController.setVideoCodec(it.videoCodec)
                 multipleExposureState = multipleExposureState.copy(enabled = it.useMultipleExposure)
@@ -2595,6 +2602,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         )
         cameraController.setPhotoResolutionCapMp(prefs.photoResolutionCapMp)
         cameraController.setFrontPhotoResolutionCapMp(prefs.frontPhotoResolutionCapMp)
+        cameraController.setFrontAccurateColour(prefs.frontAccurateColour)
+        cameraController.setNightFast(prefs.nightFast)
+        cameraController.setNightFrameCount(prefs.nightFrameCount)
         cameraController.setUseP010(prefs.useP010)
         cameraController.setUseP3ColorSpace(prefs.useP3ColorSpace)
         cameraController.setPhotoPreviewStabilizationEnabled(prefs.photoPreviewStabilizationEnabled)
@@ -3335,6 +3345,30 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * Switches Night on or off. Night stacks every shot, so like turning on multi-frame it switches off Live photo
+     * and multiple exposure, which cannot stack.
+     */
+    fun setNightMode(enabled: Boolean) {
+        if (state.value.isNightMode == enabled) return
+        cameraController.setNightMode(enabled)
+        if (enabled && (state.value.useLivePhoto || state.value.useMultipleExposure)) {
+            if (state.value.useMultipleExposure) setUseMultipleExposure(false)
+            if (state.value.useLivePhoto) setUseLivePhoto(false)
+        }
+    }
+
+    fun setNightFast(fast: Boolean) {
+        cameraController.setNightFast(fast)
+        userPreferencesRepository.updateAsync { nightFast = fast }
+    }
+
+    /** 0 = Auto: the count is chosen with the shutter time at the press. */
+    fun setNightFrameCount(frames: Int) {
+        cameraController.setNightFrameCount(frames)
+        userPreferencesRepository.updateAsync { nightFrameCount = state.value.nightFrameCount }
+    }
+
     /** Depth blur needs the depth model; without it the choice is explained and offered for download. */
     fun setPortraitQuickBlur(quick: Boolean) {
         if (!quick && !DepthModelManager.isInstalled(getApplication())) {
@@ -3613,6 +3647,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 normalFrames
             }
             val orderedFrames = orderedNormalFrames + auxiliaryFrames
+            if (!isRawStack) {
+                // Same order as the stacker's "YUV stack weight frame N" lines, so shake and lost weight line up.
+                PLog.i(
+                    TAG,
+                    "YUV stack shake in merge order: score=" +
+                        orderedFrames.joinToString { f ->
+                            gyroShakeScore(f.frame.gyroWindow)?.let { "%.2e".format(it) } ?: "-"
+                        },
+                )
+            }
             val referencePlanLog = when {
                 isRawStack -> "deferred_mgc_gles, reference=pending, "
                 gyroReferenceIndex > 0 -> "gyro, reference=$gyroReferenceIndex, "
@@ -4043,6 +4087,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.setFrontPhotoResolutionCapMp(megapixels)
         viewModelScope.launch {
             userPreferencesRepository.update { frontPhotoResolutionCapMp = megapixels }
+        }
+    }
+
+    fun setFrontAccurateColour(enabled: Boolean) {
+        cameraController.setFrontAccurateColour(enabled)
+        viewModelScope.launch {
+            userPreferencesRepository.update { frontAccurateColour = enabled }
         }
     }
 
@@ -4664,6 +4715,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val thumbnail = rotatePreviewBitmapForCapture(bitmap, rotation)
                 settings.originalThumbnail = thumbnail
                 previewThumbnail = thumbnail
+                if (com.hinnka.mycamera.BuildConfig.DEBUG &&
+                    com.hinnka.mycamera.utils.SystemPropertiesUtil.get("debug.lilac.previewcolour.keep")?.trim() == "on"
+                ) {
+                    // Pairs the plain viewfinder frame with the still's uncorrected.jpg (debug.lilac.castfix.keep).
+                    val dir = File(getApplication<Application>().getExternalFilesDir(null), "previewcolour").apply { mkdirs() }
+                    val copy = thumbnail.copy(Bitmap.Config.ARGB_8888, false)
+                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        runCatching {
+                            File(dir, "${settings.photoId}.png").outputStream().use {
+                                copy.compress(Bitmap.CompressFormat.PNG, 100, it)
+                            }
+                        }.onFailure { PLog.w(TAG, "preview colour keep failed", it) }
+                        copy.recycle()
+                    }
+                }
             },
         )
     }
@@ -6063,14 +6129,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * exposure). Frames without gyro coverage are left out; see [steadiestGyroScoreIndex].
      */
     private fun steadiestGyroReferenceIndex(frames: List<PendingRawStackFrame>): Int {
+        // one spare candidate stands in when frame 0 has no gyro data (see steadiestGyroScoreIndex)
         val windows = frames.take(GYRO_REFERENCE_CANDIDATES + 1).map { it.frame.gyroWindow }
-        val scores = windows.map { window ->
-            if (window == null || window.sampleCount < 2 || window.coverageRatio < GYRO_REFERENCE_MIN_COVERAGE) {
-                null
-            } else {
-                window.angularEnergy * (window.endTimestampNs - window.startTimestampNs) / 1e9f
-            }
-        }
+        val scores = windows.map(::gyroShakeScore)
         PLog.i(
             TAG,
             "YUV burst gyro: coverage=${windows.joinToString { "%.2f".format(it?.coverageRatio ?: 0f) }} " +
@@ -6078,6 +6139,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         )
         return steadiestGyroScoreIndex(scores, GYRO_REFERENCE_MIN_GAIN, GYRO_REFERENCE_CANDIDATES)
     }
+
+    /** Gyro angular energy times exposure time: an upper bound on the squared angle swept while exposing. */
+    private fun gyroShakeScore(window: GyroExposureWindow?): Float? =
+        if (window == null || window.sampleCount < 2 || window.coverageRatio < GYRO_REFERENCE_MIN_COVERAGE) {
+            null
+        } else {
+            window.angularEnergy * (window.endTimestampNs - window.startTimestampNs) / 1e9f
+        }
 
     private fun rawStackFrame(
         image: SafeImage,
@@ -6367,6 +6436,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     rawMaxHdrFusionEnabled = rawMaxHdrFusionEnabled,
                     rawMaxSpatialOutputMode = rawSpatialOutputMode,
                     rawMaxMergeMethod = rawMaxMergeMethod,
+                    brightenGain = settings.state.nightBrightenGain,
                 )
             }
             PLog.d(TAG, "Image saved: $photoId, LUT: $lutIdToSave, Frame: $frameIdToSave")
