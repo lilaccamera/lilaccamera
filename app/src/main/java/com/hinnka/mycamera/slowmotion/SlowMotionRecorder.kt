@@ -56,7 +56,7 @@ class SlowMotionRecorder(
     private val handler = Handler(thread.looper)
     private val client = SonyBridgeClient(appContext) { post { fail("The slow-motion service stopped") } }
     private val dir = File(appContext.cacheDir, "slowmotion").apply { mkdirs() }
-    private val videoFile = File(dir, "video.mp4")
+    private var videoFile = File(dir, "video.mp4")
     private val audio = SlowMotionAudio(channels)
     private var state = State.NEW
     private var dateTakenMs = 0L
@@ -135,6 +135,20 @@ class SlowMotionRecorder(
             val r = call()
             PLog.i(TAG, "Variant step $name: result=$r, ${SystemClock.elapsedRealtime() - began} ms")
             return r
+        }
+        if ('r' in variant) {
+            // Experiment: end this recording in the service and start a new one in the same native session, camera running.
+            val seg1 = videoFile
+            val s1 = timed("stop segment") { bridge.stop() }
+            val times1 = runCatching { bridge.frameTimes() }.getOrNull()?.size?.div(2)
+            PLog.i(TAG, "Segment 1 ended: stop=$s1, frames=$times1, file ${seg1.length()} bytes")
+            runBlocking { VideoMediaStoreWriter.publishVideo(appContext, seg1, dateTakenMs, recordingPath, recordingTreeUri, "_seg1") }
+            videoFile = File(dir, "video2.mp4")
+            val fd = ParcelFileDescriptor.open(videoFile, ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE)
+            val p2 = try { timed("prepare segment 2") { bridge.prepare(fd) } } finally { fd.close() }
+            if (p2 != 0) return@post
+            if (timed("start video segment 2") { bridge.startVideo() } != 0) return@post
+            Thread.sleep(2500)
         }
         if ('c' in variant && timed("mode change") { bridge.enterSuperSlow(spec.width, spec.height, SlowMotionSpec.FPS, spec.frames) } != 0) return@post
         if ('b' in variant && timed("prepare again") { bridge.reprepare() } != 0) return@post
