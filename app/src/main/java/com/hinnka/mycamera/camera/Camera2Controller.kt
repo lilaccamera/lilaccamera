@@ -7216,12 +7216,13 @@ class Camera2Controller(private val context: Context) {
         focusLockedReferenceDistance = result.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: 0f
     }
 
-    private fun restoreContinuousAf() {
+    /** [spot] keeps a separate metering point there instead of clearing it with the focus point. */
+    private fun restoreContinuousAf(spot: Pair<Float, Float>? = null, spotViewAspectRatio: Float? = null) {
         if (isCaptureFocusFrozen) {
             PLog.d(TAG, "Continuous AF restore deferred while multi-frame focus is frozen")
             return
         }
-        clearPointFocusState()
+        clearPointFocusState(spot, spotViewAspectRatio)
         previewRequestBuilder?.apply {
             // 解锁触屏 AF 不能改变用户选择的手动对焦模式。
             applyFocusSettings(this, _state.value)
@@ -7242,8 +7243,8 @@ class Camera2Controller(private val context: Context) {
         restoreContinuousAf()
     }
 
-    private fun clearPointFocusState() {
-        pointMeteringViewAspectRatio = null
+    private fun clearPointFocusState(spot: Pair<Float, Float>? = null, spotViewAspectRatio: Float? = null) {
+        pointMeteringViewAspectRatio = spotViewAspectRatio
         isFocusLockedWaitingForSceneChange = false
         sceneChangeFrameCount = 0
         focusLockedReferenceIso = 0
@@ -7254,7 +7255,7 @@ class Camera2Controller(private val context: Context) {
         pointAfTriggerPending = false
         _state.update { s -> s.copy(
             focusPoint = null,
-            meteringPoint = null,
+            meteringPoint = spot,
             focusPointSource = FocusPointSource.MANUAL,
             isFocusLocked = false,
             isFocusing = false,
@@ -8056,7 +8057,16 @@ class Camera2Controller(private val context: Context) {
     private fun startTracking(normX: Float, normY: Float, viewAspectRatio: Float) {
         if (isCaptureFocusFrozen || _state.value.isCapturing) return
         // The driver focuses and meters on the tracked object itself, with continuous AF and no regions.
-        if (_state.value.focusPoint != null) restoreContinuousAf()
+        // Spot metering moves to the tap at once, so it never falls back to the centre while tracking starts.
+        val state = _state.value
+        val spot = (normX to normY).takeIf { state.meteringMode == MeteringMode.SPOT && state.supportsPointMetering }
+        if (state.focusPoint != null) {
+            restoreContinuousAf(spot, viewAspectRatio)
+        } else if (spot != null) {
+            pointMeteringViewAspectRatio = viewAspectRatio
+            _state.update { it.copy(meteringPoint = spot) }
+            applyMeteringRegions()
+        }
         val builder = previewRequestBuilder ?: return
         val afMode = resolveAutoFocusMode(_state.value.captureMode)
         builder.set(CaptureRequest.CONTROL_AF_MODE, afMode)
