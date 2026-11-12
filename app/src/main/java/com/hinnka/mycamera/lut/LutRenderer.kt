@@ -50,6 +50,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private val appContext = context.applicationContext
     companion object {
         private const val TAG = "LutRenderer"
+        // lilac: the latched camera frame counts as live until the next one is at least this late.
+        private const val MIN_LIVE_FRAME_GAP_NS = 50_000_000L
 
         // 属性位置
         private const val POSITION_COMPONENT_COUNT = 2
@@ -245,11 +247,17 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     @Volatile
     private var cameraStreamToken = 0
     private var cameraStreamCounter = 0
+    @Volatile
     private var latchedStreamToken = 0
     // Stream whose images cameraTextureId has held; 0 while the texture is still fresh.
     private var textureStreamToken = 0
-    // Frames latched from the current stream, counted up to 2.
+    // Frames latched from the current stream, counted up to 2, and when the last one was latched (System.nanoTime).
+    @Volatile
     private var streamFramesLatched = 0
+    @Volatile
+    private var lastLatchNs = 0L
+    @Volatile
+    private var latchIntervalNs = 0L
     private var stabilizationCoordinator: RealtimeStabilizationCoordinator? = null
     @Volatile
     private var stabilizationSession: RealtimeStabilizationCoordinator.Session? = null
@@ -1130,6 +1138,9 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         val oesFrameUpdated = streamToken != 0 &&
             frameAvailable.getAndSet(false) && acquireLatestCameraFrame()
         if (oesFrameUpdated) {
+            val nowNs = System.nanoTime()
+            latchIntervalNs = if (streamFramesLatched > 0) nowNs - lastLatchNs else 0L
+            lastLatchNs = nowNs
             latchedStreamToken = streamToken
             streamFramesLatched = minOf(streamFramesLatched + 1, 2)
         }
@@ -1192,15 +1203,11 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             return
         }
         if (currentCameraTextureSource == PreviewColorTextureSource.EXTERNAL_OES && DeviceQuirks.isLilac &&
-            (streamFramesLatched < 2 || !oesFrameUpdated)
+            (streamFramesLatched < 2 || (!oesFrameUpdated && !cameraFrameStillLive()))
         ) {
-            // Sony's camera HAL on lilac frees preview buffers that are still bound here, with no stream change the
-            // app can see: when a stream starts it sends one frame, then restarts the stream (0.1 to 2.4 s without
-            // frames) and frees that frame; when a RAW burst starts it pauses preview for about 1.8 s and frees the
-            // last frame. Drawing such a frame, or redrawing it for a UI change while no new frame comes, faulted
-            // the GPU after 15 of 60 Pro/Photo switches and at burst starts; four faults within 3 s make the driver
-            // drop this context. So the camera image is drawn only right after a new frame is latched, from the
-            // second frame of a stream on, and the screen keeps the last picture in between.
+            // See canRedrawCameraFrame. Reached by a stream's first frame (which must still be latched, or the camera
+            // stalls waiting for its buffer) or by a redraw that got past requestRender just as the stream paused:
+            // one older picture is shown instead of a GPU fault.
             return
         }
 
@@ -2551,6 +2558,28 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     @Synchronized
     fun setCameraStreamActive(active: Boolean) {
         cameraStreamToken = if (active) ++cameraStreamCounter else 0
+    }
+
+    /**
+     * Whether a redraw for an interface change may go ahead now (any thread). Sony's camera HAL on lilac frees the
+     * preview buffer bound to the camera texture with no stream change the app can see: when a stream starts it sends
+     * one frame, restarts the stream (0.1 to 2.4 s without frames) and frees that frame; when a RAW burst starts it
+     * pauses the preview for about 1.8 s and frees the last frame. Drawing such a frame faulted the GPU, and four
+     * faults within 3 s make the driver drop the viewfinder's context. So on lilac the current frame is redrawn only
+     * from a stream's second frame on and while the next frame is not overdue. Inside those windows no redraw happens
+     * at all, so the screen keeps the last picture (a draw that is skipped is still put on screen, showing an older
+     * buffer); the next camera frame brings any change made meanwhile. Camera frames always get their redraw.
+     */
+    fun canRedrawCameraFrame(): Boolean {
+        if (!DeviceQuirks.isLilac || currentCameraTextureSource != PreviewColorTextureSource.EXTERNAL_OES) return true
+        if (frameAvailable.get()) return true
+        return streamFramesLatched >= 2 && cameraFrameStillLive()
+    }
+
+    private fun cameraFrameStillLive(): Boolean {
+        val token = cameraStreamToken
+        if (token == 0 || latchedStreamToken != token) return false
+        return System.nanoTime() - lastLatchNs < maxOf(MIN_LIVE_FRAME_GAP_NS, latchIntervalNs * 3 / 2)
     }
 
     /** GL thread. lilac front camera with "Accurate" colour: the viewfinder gets the photos' cast fix (see [PreviewCastFixGl]). */
