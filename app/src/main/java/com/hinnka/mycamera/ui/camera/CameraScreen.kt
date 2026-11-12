@@ -289,6 +289,7 @@ fun CameraScreen(
     val jpgMultiFrameCount by preferenceValue { it.jpgMultiFrameDenoiseFrameCount }
     val multipleExposureCount by preferenceValue { it.multipleExposureCount }
     val hdrPlusFrameCount by preferenceValue { it.hdrPlusFrameCount }
+    val mlAeMaxHdrRatio by preferenceValue { it.mlAeMaxHdrRatio }
     val useMultipleExposure by preferenceValue { it.useMultipleExposure }
     val useRawMax by preferenceValue { it.useRawMax }
     val ultraHdrEnabled by preferenceValue { it.ultraHdrGainMapEnabled }
@@ -2429,6 +2430,8 @@ fun CameraScreen(
             hdrPlusMinFrames = if (state.hdrPlusBracketExposureEnabled) MultiFrameConfig.MIN_HDR_PLUS_BRACKET_FRAME_COUNT
             else MultiFrameConfig.MIN_HDR_PLUS_FRAME_COUNT,
             onHdrPlusFrameCountChange = { viewModel.setHdrPlusFrameCount(it) },
+            hdrRatioLimit = mlAeMaxHdrRatio,
+            onHdrRatioLimitChange = { viewModel.setMlAeMaxHdrRatio(it) },
             onRawDcpChange = { viewModel.setRawDcpId(it) },
             onRawDcpIdsByLensChange = { viewModel.setRawDcpIdsByLens(it) },
             onRawHncsFilmCurveModeChange = { viewModel.setRawHncsFilmCurveMode(it) },

@@ -88,6 +88,8 @@ import com.hinnka.mycamera.ui.components.LilacText
 import com.hinnka.mycamera.ui.components.LilacTextStyle
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import java.util.Locale
+import com.hinnka.mycamera.raw.RawSceneExposureMath
 
 // Quick settings sheet: a row of everyday settings floating above a translucent list in outlined groups.
 internal val SheetEasing = CubicBezierEasing(0.3f, 1.35f, 0.5f, 1f)
@@ -213,6 +215,8 @@ internal fun CameraTopSheet(
     hdrPlusFrameCount: Int,
     hdrPlusMinFrames: Int,
     onHdrPlusFrameCountChange: (Int) -> Unit,
+    hdrRatioLimit: Float,
+    onHdrRatioLimitChange: (Float) -> Unit,
     onRawDcpChange: (String?) -> Unit,
     onRawDcpIdsByLensChange: ((Map<String, String?>) -> Unit)? = null,
     onRawHncsFilmCurveModeChange: (HncsFilmCurveMode) -> Unit,
@@ -623,8 +627,7 @@ internal fun CameraTopSheet(
                                 key = "hdrp",
                                 label = stringResource(R.string.quick_hdr_plus_frames),
                                 explanation = stringResource(R.string.settings_hdr_plus_frame_count_description),
-                                settingsTarget = SettingsTarget.HDR_PLUS,
-                                last = true
+                                settingsTarget = SettingsTarget.HDR_PLUS
                             ) {
                                 FrameCountSlider(
                                     frames = hdrPlusFrameCount,
@@ -632,6 +635,15 @@ internal fun CameraTopSheet(
                                     withOff = false,
                                     onFramesChange = onHdrPlusFrameCountChange
                                 )
+                            }
+                            rows.Setting(
+                                key = "hdrr",
+                                label = stringResource(R.string.quick_hdr_ratio),
+                                explanation = stringResource(R.string.settings_ml_ae_max_hdr_ratio_description),
+                                settingsTarget = SettingsTarget.HDR_PLUS,
+                                last = true
+                            ) {
+                                HdrRatioSlider(hdrRatioLimit, onHdrRatioLimitChange)
                             }
                         } else {
                             photoStackRows()
@@ -1274,6 +1286,36 @@ private fun FrameCountSlider(
                 currentOnFramesChange(value)
             }
         }
+    )
+}
+
+/** HDR ratio limit, 1 to 20 in 0.5 steps; a double tap restores the default. Shown while dragging, as saves land late. */
+@Composable
+private fun HdrRatioSlider(limit: Float, onLimitChange: (Float) -> Unit) {
+    val min = RawSceneExposureMath.MIN_CONFIGURED_MAX_HDR_RATIO
+    val max = RawSceneExposureMath.MAX_CONFIGURED_MAX_HDR_RATIO
+    val default = RawSceneExposureMath.FAST_MOMENTS_MAX_HDR_RATIO
+    var dragged by remember { mutableStateOf<Float?>(null) }
+    LaunchedEffect(limit) { if (limit == dragged) dragged = null }
+    LaunchedEffect(dragged) {
+        if (dragged != null) {
+            delay(2000)
+            dragged = null
+        }
+    }
+    val shown = dragged ?: limit
+    QuickSlider(
+        text = String.format(Locale.getDefault(), "%.1f×", shown),
+        active = shown != default,
+        fraction = (shown - min) / (max - min),
+        onFraction = { f ->
+            val value = ((min + f * (max - min)) * 2f).roundToInt() / 2f
+            if (value != dragged) {
+                dragged = value
+                onLimitChange(value)
+            }
+        },
+        onDoubleTap = { dragged = default; onLimitChange(default) }
     )
 }
 

@@ -1,5 +1,6 @@
 package com.hinnka.mycamera.ui.gallery
 
+import com.hinnka.mycamera.raw.RawPhotonHdrMetadata
 import com.hinnka.mycamera.ui.prefs.preferenceValue
 import com.hinnka.mycamera.data.UserPreferences
 import com.hinnka.mycamera.ui.prefs.rememberPreference
@@ -1212,6 +1213,7 @@ fun GalleryDetailScreen(
             value = withContext(Dispatchers.IO) { GalleryManager.savedPhotoFiles(context, currentPhoto.id) }
         }
         var savedExpanded by remember(currentPhoto.id) { mutableStateOf(false) }
+        var hdrExpanded by remember(currentPhoto.id) { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { showInfoDialog = false },
             title = { Text(stringResource(if (currentPhoto.isVideo) R.string.video_info else R.string.photo_info)) },
@@ -1251,6 +1253,25 @@ fun GalleryDetailScreen(
                                     count,
                                 ),
                             )
+                        }
+                        frameMetadata?.customProperties?.let { props ->
+                            val used = RawPhotonHdrMetadata.read(props) ?: return@let
+                            InfoCollapsibleHeader(
+                                stringResource(R.string.photo_info_hdr, used),
+                                hdrExpanded,
+                            ) { hdrExpanded = !hdrExpanded }
+                            if (hdrExpanded) {
+                                InfoSubRow(stringResource(R.string.photo_info_hdr_used, used))
+                                RawPhotonHdrMetadata.readWanted(props)?.let {
+                                    InfoSubRow(stringResource(R.string.photo_info_hdr_wanted, it))
+                                }
+                                RawPhotonHdrMetadata.readLimit(props)?.let {
+                                    InfoSubRow(stringResource(R.string.photo_info_hdr_limit, it))
+                                }
+                                RawPhotonHdrMetadata.readInputExposureEv(props)?.let {
+                                    InfoSubRow(stringResource(R.string.photo_info_hdr_viewfinder, it))
+                                }
+                            }
                         }
                         val extras = savedFiles
                             .filter { it.name !in MAIN_PHOTO_FILES && !it.name.endsWith(".tmp") }
@@ -2402,6 +2423,26 @@ private fun savedFileLabel(context: android.content.Context, name: String): Stri
     "ai_denoise.jpg" -> context.getString(R.string.photo_info_saved_ai_denoise)
     "preview.jpg" -> context.getString(R.string.photo_info_saved_preview)
     else -> name
+}
+
+@Composable
+private fun InfoCollapsibleHeader(text: String, expanded: Boolean, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = text, color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Icon(
+            if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.7f),
+        )
+    }
+}
+
+@Composable
+private fun InfoSubRow(text: String) {
+    Text(text = text, color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(start = 12.dp, top = 2.dp, bottom = 2.dp))
 }
 
 @Composable

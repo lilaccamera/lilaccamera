@@ -2551,6 +2551,7 @@ object GalleryManager {
                     preparedProfile.finalShortGain,
                     preparedProfile.hdrNetPostExposureEv,
                     preparedProfile.hdrNetInputExposureEv,
+                    preparedProfile.rawSceneExposureSummaryText,
                 ),
             )
 
@@ -3874,6 +3875,7 @@ object GalleryManager {
                             dngProfilePreparation.finalShortGain,
                             dngProfilePreparation.hdrNetPostExposureEv,
                             dngProfilePreparation.hdrNetInputExposureEv,
+                            dngProfilePreparation.rawSceneExposureSummaryText,
                         ),
                         sharpen = finalStackResult.mgcSharpenTuningSnr,
                         denoise = finalStackResult.mgcDenoiseTuningSnr,
