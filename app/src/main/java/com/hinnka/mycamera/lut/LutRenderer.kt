@@ -192,11 +192,11 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private var clarityOutputWidth: Int = 0
     private var clarityOutputHeight: Int = 0
     private val filmGrainGl = FilmGrainGl(TAG)
-    private val portraitBlurGl = PortraitBlurGl(TAG, 2f * context.resources.displayMetrics.density)
+    private val portraitBlurGl = PortraitBlurGl(TAG)
 
-    /** The face the Portrait viewfinder blurs around; null shows the plain picture. */
-    fun setPortraitFace(face: com.hinnka.mycamera.preview.PortraitFace?) {
-        portraitBlurGl.target = face
+    /** The faces the Portrait viewfinder keeps sharp; none shows the plain picture. */
+    fun setPortraitFaces(faces: List<com.hinnka.mycamera.preview.PortraitFace>) {
+        portraitBlurGl.targets = faces
     }
 
     fun setPortraitAperture(aperture: Float) {

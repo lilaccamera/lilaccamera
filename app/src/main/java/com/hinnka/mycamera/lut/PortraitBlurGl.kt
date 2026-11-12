@@ -6,15 +6,15 @@ import com.hinnka.mycamera.processor.LensBlurParams
 import com.hinnka.mycamera.utils.PLog
 
 /**
- * The Portrait viewfinder: a rough blur outside an ellipse around the tracked face, and a thin outline
- * of the face itself. Preview only; the saved photo gets its real blur after it is stored.
+ * The Portrait viewfinder: a rough blur outside a sharp head-and-shoulders shape around each face, up to five.
+ * Preview only; the saved photo gets its real blur after it is stored.
  *
- * The sharp area is the outlined head plus a wider shape below it for the shoulders and body, so the
- * frame stays readable; the photo itself is cut out by the subject mask, not by this shape.
+ * Each sharp area is an ellipse for the head plus a wider shape below it for the shoulders and body, so the
+ * frame stays readable; the photo itself is cut out by the subject mask, not by these shapes.
  *
  * The blur is built from the frame shrunk to a quarter of its size, so it costs two small passes and
- * one full-size composite. The face eases toward each new detection, and the effect fades in and out
- * with it, so the picture never jumps between the few detections made each second.
+ * one full-size composite. Each face eases toward its new position and fades in and out on its own, and the
+ * effect fades with the faces, so the picture never jumps between detections.
  */
 // Face size (square root of the face box's share of the frame) where the blur starts and where it is full.
 // Around a smaller, distant face the blur would cover nearly the whole frame; 0.10 is about 1.7 m and
@@ -28,12 +28,9 @@ internal fun portraitBlurForFaceSize(faceSize: Float): Float {
     return t * t * (3f - 2f * t)
 }
 
-internal class PortraitBlurGl(
-    private val logTag: String,
-    private val outlineWidthPx: Float,
-) {
+internal class PortraitBlurGl(private val logTag: String) {
     @Volatile
-    var target: PortraitFace? = null
+    var targets: List<PortraitFace> = emptyList()
 
     // Follows the saved photo's blur for the chosen f-number: how much blur, and how far it spreads.
     @Volatile
@@ -47,13 +44,18 @@ internal class PortraitBlurGl(
         apertureSpread = params.radiusGain.coerceAtMost(MAX_APERTURE_SPREAD)
     }
 
-    private var centerX = 0.5f
-    private var centerY = 0.5f
-    private var faceWidth = 0.3f
-    private var faceHeight = 0.4f
-    private var downX = 0f
-    private var downY = 1f
+    // One eased face per slot; a slot is free while its presence is 0.
+    private val centerX = FloatArray(MAX_FACES)
+    private val centerY = FloatArray(MAX_FACES)
+    private val faceWidth = FloatArray(MAX_FACES)
+    private val faceHeight = FloatArray(MAX_FACES)
+    private val downX = FloatArray(MAX_FACES)
+    private val downY = FloatArray(MAX_FACES) { 1f }
+    private val presence = FloatArray(MAX_FACES)
     private var strength = 0f
+    private val headUniform = FloatArray(MAX_FACES * 4)
+    private val bodyUniform = FloatArray(MAX_FACES * 4)
+    private val downUniform = FloatArray(MAX_FACES * 2)
 
     private var blurProgram = 0
     private var blurInput = -1
@@ -71,27 +73,47 @@ internal class PortraitBlurGl(
     private var outputHeight = 0
 
     /** True while there is anything to draw; the renderer skips the whole effect otherwise. */
-    fun isActive(): Boolean = target != null || strength > FADE_OUT_FLOOR
+    fun isActive(): Boolean = targets.isNotEmpty() || strength > FADE_OUT_FLOOR
 
-    /** Eases the face and the fade one frame forward; returns false once the effect has faded out. */
+    /** Eases the faces and the fade one frame forward; returns false once the effect has faded out. */
     private fun advance(): Boolean {
-        val face = target
-        if (face != null) {
-            if (strength <= FADE_OUT_FLOOR) {
-                // Appearing: start on the face instead of sliding in from the old place.
-                centerX = face.centerX; centerY = face.centerY
-                faceWidth = face.width; faceHeight = face.height
-                downX = face.downX; downY = face.downY
-            } else {
-                centerX += (face.centerX - centerX) * FOLLOW
-                centerY += (face.centerY - centerY) * FOLLOW
-                faceWidth += (face.width - faceWidth) * FOLLOW
-                faceHeight += (face.height - faceHeight) * FOLLOW
-                downX += (face.downX - downX) * FOLLOW
-                downY += (face.downY - downY) * FOLLOW
-                val length = kotlin.math.hypot(downX, downY)
-                if (length > 1e-3f) { downX /= length; downY /= length } else { downX = 0f; downY = 1f }
+        val faces = targets.take(MAX_FACES)
+        val matched = BooleanArray(MAX_FACES)
+        for (face in faces) {
+            // The nearest visible slot is the same person; a new face takes a free slot and starts on itself.
+            var slot = -1
+            var best = Float.MAX_VALUE
+            for (k in 0 until MAX_FACES) {
+                if (matched[k] || presence[k] <= FADE_OUT_FLOOR) continue
+                val distance = kotlin.math.hypot(centerX[k] - face.centerX, centerY[k] - face.centerY)
+                if (distance < best) { best = distance; slot = k }
             }
+            if (slot < 0) {
+                slot = (0 until MAX_FACES).firstOrNull { !matched[it] && presence[it] <= FADE_OUT_FLOOR } ?: continue
+                centerX[slot] = face.centerX; centerY[slot] = face.centerY
+                faceWidth[slot] = face.width; faceHeight[slot] = face.height
+                downX[slot] = face.downX; downY[slot] = face.downY
+                // The first face comes in sharp with the blur; later ones sharpen out of it.
+                presence[slot] = if (strength > FADE_OUT_FLOOR) 0f else 1f
+            } else {
+                centerX[slot] += (face.centerX - centerX[slot]) * FOLLOW
+                centerY[slot] += (face.centerY - centerY[slot]) * FOLLOW
+                faceWidth[slot] += (face.width - faceWidth[slot]) * FOLLOW
+                faceHeight[slot] += (face.height - faceHeight[slot]) * FOLLOW
+                downX[slot] += (face.downX - downX[slot]) * FOLLOW
+                downY[slot] += (face.downY - downY[slot]) * FOLLOW
+                val length = kotlin.math.hypot(downX[slot], downY[slot])
+                if (length > 1e-3f) { downX[slot] /= length; downY[slot] /= length } else { downX[slot] = 0f; downY[slot] = 1f }
+            }
+            matched[slot] = true
+            presence[slot] += (1f - presence[slot]) * FADE
+        }
+        for (k in 0 until MAX_FACES) {
+            if (matched[k]) continue
+            presence[k] -= presence[k] * FADE
+            if (presence[k] <= FADE_OUT_FLOOR) presence[k] = 0f
+        }
+        if (faces.isNotEmpty()) {
             strength += (1f - strength) * FADE
         } else {
             strength -= strength * FADE
@@ -103,6 +125,15 @@ internal class PortraitBlurGl(
     /** Returns the texture to show, or the source when nothing is drawn or a pass failed. */
     fun render(sourceTextureId: Int, width: Int, height: Int, drawQuad: (Int) -> Unit): Int {
         if (!advance()) return sourceTextureId
+        // The closest face sets the blur, so distant faces alone leave the frame as it is.
+        var faceBlur = 0f
+        for (k in 0 until MAX_FACES) {
+            if (presence[k] > 0f) {
+                faceBlur = maxOf(faceBlur, portraitBlurForFaceSize(kotlin.math.sqrt(faceWidth[k] * faceHeight[k])))
+            }
+        }
+        val blurAmount = faceBlur * apertureAmount
+        if (blurAmount <= 0f) return sourceTextureId
         if (!ensureResources(width, height)) return sourceTextureId
         val upstreamError = GLES30.glGetError()
         if (upstreamError != GLES30.GL_NO_ERROR) {
@@ -112,13 +143,11 @@ internal class PortraitBlurGl(
 
         GLES30.glDisable(GLES30.GL_BLEND)
         GLES30.glUseProgram(blurProgram)
-        val blurAmount = portraitBlurForFaceSize(kotlin.math.sqrt(faceWidth * faceHeight)) * apertureAmount
         val spread = apertureSpread
         // Two passes, across and down into the small texture: a light blur that keeps the frame readable.
-        // Skipped for a distant face, which keeps only its outline.
         var input = sourceTextureId
         var inputWidth = width
-        val passes = if (blurAmount > 0f) arrayOf(floatArrayOf(2f, 0f), floatArrayOf(0f, 1f)) else emptyArray()
+        val passes = arrayOf(floatArrayOf(2f, 0f), floatArrayOf(0f, 1f))
         for ((index, direction) in passes.withIndex()) {
             val destination = index % 2
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, smallFramebuffer[destination])
@@ -135,8 +164,30 @@ internal class PortraitBlurGl(
             inputWidth = smallWidth
         }
 
-        // Texture space runs up, the viewfinder's face box runs down.
-        val faceY = 1f - centerY
+        for (k in 0 until MAX_FACES) {
+            if (presence[k] <= 0f) {
+                // A free slot sits far outside the frame with a unit size, so the shader never divides by zero.
+                headUniform.fill(FAR_AWAY, k * 4, k * 4 + 2); headUniform.fill(1f, k * 4 + 2, k * 4 + 4)
+                bodyUniform.fill(FAR_AWAY * width, k * 4, k * 4 + 2); bodyUniform.fill(1f, k * 4 + 2, k * 4 + 4)
+                downUniform[k * 2] = 0f; downUniform[k * 2 + 1] = -1f
+                continue
+            }
+            // Texture space runs up, the viewfinder's face box runs down.
+            val faceY = 1f - centerY[k]
+            // The sharp area starts at an oval for the head.
+            headUniform[k * 4] = centerX[k]
+            headUniform[k * 4 + 1] = faceY
+            headUniform[k * 4 + 2] = faceWidth[k] * HEAD_SCALE
+            headUniform[k * 4 + 3] = faceHeight[k] * HEAD_SCALE
+            // The body hangs below the head along the person's own down, in pixels so a tilt keeps its shape.
+            val faceSizePx = kotlin.math.sqrt(faceWidth[k] * width * faceHeight[k] * height)
+            bodyUniform[k * 4] = centerX[k] * width + downX[k] * faceSizePx * BODY_DROP_FACES
+            bodyUniform[k * 4 + 1] = faceY * height - downY[k] * faceSizePx * BODY_DROP_FACES
+            bodyUniform[k * 4 + 2] = faceSizePx * BODY_WIDTH_FACES
+            bodyUniform[k * 4 + 3] = faceSizePx * BODY_HEIGHT_FACES
+            downUniform[k * 2] = downX[k]
+            downUniform[k * 2 + 1] = -downY[k]
+        }
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, outputFramebuffer)
         GLES30.glViewport(0, 0, width, height)
         GLES30.glUseProgram(compositeProgram)
@@ -146,26 +197,14 @@ internal class PortraitBlurGl(
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, input)
         GLES30.glUniform1i(composite[U_SHARP], 0)
         GLES30.glUniform1i(composite[U_BLUR], 1)
-        // The sharp area starts at the outlined oval for the head.
-        GLES30.glUniform2f(composite[U_CENTER], centerX, faceY)
-        GLES30.glUniform2f(composite[U_RADIUS], faceWidth * OUTLINE_SCALE, faceHeight * OUTLINE_SCALE)
-        // The body hangs below the head along the person's own down, in pixels so a tilt keeps its shape.
-        val faceSizePx = kotlin.math.sqrt(faceWidth * width * faceHeight * height)
-        GLES30.glUniform2f(
-            composite[U_BODY_CENTER],
-            centerX * width + downX * faceSizePx * BODY_DROP_FACES,
-            faceY * height - downY * faceSizePx * BODY_DROP_FACES,
-        )
-        GLES30.glUniform2f(composite[U_BODY_DOWN], downX, -downY)
-        GLES30.glUniform2f(composite[U_BODY_RADIUS], faceSizePx * BODY_WIDTH_FACES, faceSizePx * BODY_HEIGHT_FACES)
-        GLES30.glUniform2f(composite[U_OUTLINE_CENTER], centerX, faceY)
-        GLES30.glUniform2f(composite[U_OUTLINE_RADIUS], faceWidth * OUTLINE_SCALE, faceHeight * OUTLINE_SCALE)
+        GLES30.glUniform4fv(composite[U_HEAD], MAX_FACES, headUniform, 0)
+        GLES30.glUniform4fv(composite[U_BODY], MAX_FACES, bodyUniform, 0)
+        GLES30.glUniform2fv(composite[U_DOWN], MAX_FACES, downUniform, 0)
+        GLES30.glUniform1fv(composite[U_PRESENCE], MAX_FACES, presence, 0)
         GLES30.glUniform2f(composite[U_SIZE_PX], width.toFloat(), height.toFloat())
         GLES30.glUniform1f(composite[U_STRENGTH], strength)
         GLES30.glUniform1f(composite[U_BLUR_AMOUNT], blurAmount)
         GLES30.glUniform1f(composite[U_FEATHER], FEATHER)
-        GLES30.glUniform1f(composite[U_OUTLINE_PX], outlineWidthPx)
-        GLES30.glUniform4f(composite[U_OUTLINE_COLOR], OUTLINE_R, OUTLINE_G, OUTLINE_B, OUTLINE_ALPHA)
         drawQuad(compositeProgram)
         val error = GLES30.glGetError()
         GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
@@ -317,6 +356,9 @@ internal class PortraitBlurGl(
     }
 
     private companion object {
+        // Also in the composite shader's loop.
+        const val MAX_FACES = 5
+        const val FAR_AWAY = -100f
         const val SMALL_DIVISOR = 4
         // How fast the face and the fade follow, per frame.
         const val FOLLOW = 0.3f
@@ -331,32 +373,22 @@ internal class PortraitBlurGl(
         const val BODY_DROP_FACES = 1.9f
         const val BODY_WIDTH_FACES = 1.5f
         const val BODY_HEIGHT_FACES = 1.5f
-        // The outline hugs the face a little outside its box.
-        const val OUTLINE_SCALE = 0.62f
-        const val OUTLINE_R = 0.937f
-        const val OUTLINE_G = 0.624f
-        const val OUTLINE_B = 0.153f
-        const val OUTLINE_ALPHA = 0.9f
+        // The head oval reaches a little outside the face box.
+        const val HEAD_SCALE = 0.62f
 
         const val U_SHARP = 0
         const val U_BLUR = 1
-        const val U_CENTER = 2
-        const val U_RADIUS = 3
-        const val U_OUTLINE_CENTER = 4
-        const val U_OUTLINE_RADIUS = 5
+        const val U_HEAD = 2
+        const val U_BODY = 3
+        const val U_DOWN = 4
+        const val U_PRESENCE = 5
         const val U_SIZE_PX = 6
         const val U_STRENGTH = 7
         const val U_FEATHER = 8
-        const val U_OUTLINE_PX = 9
-        const val U_OUTLINE_COLOR = 10
-        const val U_BODY_CENTER = 11
-        const val U_BODY_RADIUS = 12
-        const val U_BODY_DOWN = 13
-        const val U_BLUR_AMOUNT = 14
+        const val U_BLUR_AMOUNT = 9
         val COMPOSITE_UNIFORMS = arrayOf(
-            "uSharpTexture", "uBlurTexture", "uCenter", "uRadius", "uOutlineCenter", "uOutlineRadius",
-            "uSizePx", "uStrength", "uFeather", "uOutlinePx", "uOutlineColor", "uBodyCenter", "uBodyRadius",
-            "uBodyDown", "uBlurAmount",
+            "uSharpTexture", "uBlurTexture", "uHead", "uBody", "uDown", "uPresence",
+            "uSizePx", "uStrength", "uFeather", "uBlurAmount",
         )
 
         // Nine taps of a gaussian along one direction; the step is in texels of the pass's input.
@@ -382,37 +414,28 @@ internal class PortraitBlurGl(
             precision highp float;
             uniform highp sampler2D uSharpTexture;
             uniform highp sampler2D uBlurTexture;
-            uniform vec2 uCenter;
-            uniform vec2 uRadius;
-            uniform vec2 uBodyCenter; // pixels
-            uniform vec2 uBodyRadius; // pixels: across, along down
-            uniform vec2 uBodyDown; // unit, texture space
-            uniform vec2 uOutlineCenter;
-            uniform vec2 uOutlineRadius;
+            uniform vec4 uHead[5]; // centre, radii; texture space
+            uniform vec4 uBody[5]; // centre, radii across and along down; pixels
+            uniform vec2 uDown[5]; // unit, texture space
+            uniform float uPresence[5];
             uniform vec2 uSizePx;
             uniform float uStrength;
             uniform float uBlurAmount;
             uniform float uFeather;
-            uniform float uOutlinePx;
-            uniform vec4 uOutlineColor;
             in vec2 vTexCoord;
             out vec4 fragColor;
             void main() {
                 vec3 sharp = texture(uSharpTexture, vTexCoord).rgb;
                 vec3 blurred = texture(uBlurTexture, vTexCoord).rgb;
-                vec2 body = vTexCoord * uSizePx - uBodyCenter;
-                vec2 bodyAxes = vec2(dot(body, vec2(uBodyDown.y, -uBodyDown.x)), dot(body, uBodyDown)) / uBodyRadius;
-                float r = min(length((vTexCoord - uCenter) / uRadius), length(bodyAxes));
-                float outside = smoothstep(1.0, 1.0 + uFeather, r);
-                vec3 color = mix(sharp, blurred, outside * uStrength * uBlurAmount);
-                // Distance in pixels to the outline's ellipse, from the implicit function and its gradient.
-                vec2 q = (vTexCoord - uOutlineCenter) / uOutlineRadius;
-                float f = dot(q, q) - 1.0;
-                vec2 gradient = 2.0 * q / uOutlineRadius / uSizePx;
-                float distancePx = abs(f) / max(length(gradient), 1e-6);
-                float line = 1.0 - smoothstep(uOutlinePx * 0.5 - 0.5, uOutlinePx * 0.5 + 0.5, distancePx);
-                color = mix(color, uOutlineColor.rgb, line * uOutlineColor.a * uStrength);
-                fragColor = vec4(color, 1.0);
+                float keep = 0.0;
+                for (int i = 0; i < 5; i++) {
+                    vec2 body = vTexCoord * uSizePx - uBody[i].xy;
+                    vec2 down = uDown[i];
+                    vec2 bodyAxes = vec2(dot(body, vec2(down.y, -down.x)), dot(body, down)) / uBody[i].zw;
+                    float r = min(length((vTexCoord - uHead[i].xy) / uHead[i].zw), length(bodyAxes));
+                    keep = max(keep, uPresence[i] * (1.0 - smoothstep(1.0, 1.0 + uFeather, r)));
+                }
+                fragColor = vec4(mix(sharp, blurred, (1.0 - keep) * uStrength * uBlurAmount), 1.0);
             }
         """.trimIndent()
     }

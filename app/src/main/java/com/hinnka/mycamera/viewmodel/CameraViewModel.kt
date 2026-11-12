@@ -1693,7 +1693,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 latestPortraitFaceAtMs = SystemClock.elapsedRealtime()
                 // Also covers a viewfinder created after the aperture was last set.
                 if (shown != null) glSurfaceView?.setPortraitAperture(state.value.virtualAperture)
-                glSurfaceView?.setPortraitFace(shown)
+                glSurfaceView?.setPortraitFaces(listOfNotNull(shown))
             }
         }
         previewEyeFocusProcessor.onTargetLost = {
@@ -3319,7 +3319,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (state.value.isPortraitMode == enabled) return
         cameraController.setPortraitMode(enabled)
         latestPortraitFace = null
-        glSurfaceView?.setPortraitFace(null)
+        glSurfaceView?.setPortraitFaces(emptyList())
         if (enabled) {
             val current = state.value
             virtualApertureBeforePortrait = Pair(current.isVirtualApertureEnabled, current.virtualAperture)
