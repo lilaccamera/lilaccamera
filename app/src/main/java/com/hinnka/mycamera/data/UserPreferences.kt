@@ -143,7 +143,8 @@ class UserPreferences internal constructor(
     var oppoSuperStabilizationEnabled by bool("oppo_super_stabilization_enabled", false)
     var photoPreviewStabilizationEnabled by bool("photo_preview_stabilization_enabled", false)
     var photoResolutionCapMp by int("photo_resolution_cap_mp", 0)
-    var frontPhotoResolutionCapMp by int("front_photo_resolution_cap_mp", 0)
+    // The front camera starts at 2 MP: lilac's binned mode, cleaner in dim light than full size.
+    var frontPhotoResolutionCapMp by int("front_photo_resolution_cap_mp", 2)
     // Front camera Photo mode: Fast (YUV only) or Accurate (Sony's still processing via a small JPEG, slower bursts).
     var frontAccurateColour by bool("front_accurate_colour", false)
     // Night: Fast (1/30 s frames; plain YUV on the front camera) or Accurate, and its frame count (0 = Auto).
