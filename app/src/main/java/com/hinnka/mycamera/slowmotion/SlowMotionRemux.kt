@@ -1,6 +1,7 @@
 package com.hinnka.mycamera.slowmotion
 
 import android.media.MediaCodec
+import android.media.MediaCodecInfo
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
@@ -87,7 +88,22 @@ object SlowMotionRemux {
                         if (t >= span.first && t < span.second) { audioFile += (t - st.shiftUs) to s; break }
                     }
                 }
-                PLog.i(TAG, "Sound: ${audioFile.size} of ${sound.samples.size} samples kept, ${stretches.size} ordinary stretches")
+                // Players take the sound as their clock and stall (ExoPlayer waits for it, then needs a seek) where the
+                // track has a hole: fill every hole with silent frames.
+                val silent = silentFrame(sound.format!!)
+                if (silent != null) {
+                    val frameUs = 1024L * 1_000_000L / sound.format!!.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                    val filled = ArrayList<Pair<Long, SlowMotionAudio.Sample>>()
+                    for ((i, entry) in audioFile.withIndex()) {
+                        if (i > 0) {
+                            var t = audioFile[i - 1].first + frameUs
+                            while (t + frameUs / 2 < entry.first) { filled += t to SlowMotionAudio.Sample(silent, 0L, 0); t += frameUs }
+                        }
+                        filled += entry
+                    }
+                    audioFile.clear(); audioFile.addAll(filled)
+                }
+                PLog.i(TAG, "Sound: ${audioFile.size} frames written (${sound.samples.size} recorded), ${stretches.size} ordinary stretches")
             }
 
             val muxer = MediaMuxer(out.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
@@ -128,6 +144,50 @@ object SlowMotionRemux {
             return null
         } finally {
             extractor.release()
+        }
+    }
+
+    /** One AAC frame of silence in the format of [format] (encoded once from zeros), or null if the encoder refuses. */
+    private fun silentFrame(format: MediaFormat): ByteArray? {
+        val rate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+        val channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+        val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+        try {
+            encoder.configure(MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, rate, channels).apply {
+                setInteger(MediaFormat.KEY_BIT_RATE, 96_000 * channels)
+                setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            }, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            encoder.start()
+            val info = MediaCodec.BufferInfo()
+            var fed = 0
+            var outputs = 0
+            val deadline = System.nanoTime() + 3_000_000_000L
+            while (System.nanoTime() < deadline) {
+                if (fed < 12) {
+                    val i = encoder.dequeueInputBuffer(10_000)
+                    if (i >= 0) {
+                        val b = encoder.getInputBuffer(i)!!
+                        b.clear(); val n = 1024 * 2 * channels; b.put(ByteArray(n)) // zeros
+                        encoder.queueInputBuffer(i, 0, n, fed * 1024L * 1_000_000L / rate, 0)
+                        fed++
+                    }
+                }
+                val o = encoder.dequeueOutputBuffer(info, 10_000)
+                if (o >= 0) {
+                    val config = info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
+                    if (!config && info.size > 0 && ++outputs == 6) { // steady state, past the encoder's start-up frames
+                        val d = ByteArray(info.size); encoder.getOutputBuffer(o)!!.apply { position(info.offset); get(d) }
+                        return d
+                    }
+                    encoder.releaseOutputBuffer(o, false)
+                }
+            }
+            return null
+        } catch (e: Exception) {
+            PLog.w(TAG, "No silent frame: ${e.message}")
+            return null
+        } finally {
+            runCatching { encoder.stop() }; runCatching { encoder.release() }
         }
     }
 }
