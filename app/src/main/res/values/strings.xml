@@ -1778,10 +1778,6 @@
     <string name="delete_all_versions_selected">Delete all versions</string>
     <string name="camera_jpeg">Camera JPEG</string>
     <string name="quick_frames_off">Off</string>
-    <plurals name="quick_frame_count">
-        <item quantity="one">%1$d frame</item>
-        <item quantity="other">%1$d frames</item>
-    </plurals>
     <plurals name="quick_shot_count">
         <item quantity="one">%1$d shot</item>
         <item quantity="other">%1$d shots</item>

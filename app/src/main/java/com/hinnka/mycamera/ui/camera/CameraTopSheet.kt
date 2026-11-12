@@ -1250,7 +1250,8 @@ private fun FrameCountSlider(
     withOff: Boolean,
     onFramesChange: (Int) -> Unit,
     max: Int = MultiFrameConfig.MAX_FRAME_COUNT,
-    countLabel: Int = R.plurals.quick_frame_count
+    // Frame counts show the bare number: the row's name already says what is counted.
+    countLabel: Int? = null
 ) {
     val start = if (withOff) min - 1 else min
     // The value while dragging, until the saved setting reaches it: saves can land late and one drag step at a
@@ -1275,7 +1276,8 @@ private fun FrameCountSlider(
     }
     QuickSlider(
         text = if (shown == 0) stringResource(R.string.quick_frames_off)
-        else pluralStringResource(countLabel, shown, shown),
+        else countLabel?.let { pluralStringResource(it, shown, shown) } ?: shown.toString(),
+        valueWidth = if (countLabel != null) 52.dp else 40.dp,
         active = if (withOff) shown > 0 else shown > 1,
         fraction = position.value,
         onFraction = { f ->
@@ -1319,14 +1321,18 @@ private fun HdrRatioSlider(limit: Float, onLimitChange: (Float) -> Unit) {
     )
 }
 
-/** The sheet's slider: the value on the left (amber when [active]), a 120 dp track; reports 0..1 while dragging. */
+/**
+ * The sheet's slider: the value on the left (amber when [active]), a 150 dp track; reports 0..1 while dragging.
+ * The track is as long as fits beside the longest slider name (Multi-exposure) on a 360 dp wide screen.
+ */
 @Composable
 internal fun QuickSlider(
     text: String,
     active: Boolean,
     fraction: Float,
     onFraction: (Float) -> Unit,
-    onDoubleTap: (() -> Unit)? = null
+    onDoubleTap: (() -> Unit)? = null,
+    valueWidth: Dp = 40.dp
 ) {
     val currentOnFraction by rememberUpdatedState(onFraction)
     val currentOnDoubleTap by rememberUpdatedState(onDoubleTap)
@@ -1342,12 +1348,12 @@ internal fun QuickSlider(
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.End,
             maxLines = 1,
-            modifier = Modifier.width(62.dp)
+            modifier = Modifier.width(valueWidth)
         )
         Box(
             modifier = Modifier
                 .padding(end = 8.dp)
-                .width(120.dp)
+                .width(150.dp)
                 .fillMaxHeight()
                 .pointerInput(Unit) {
                     fun select(x: Float) = currentOnFraction((x / size.width).coerceIn(0f, 1f))
