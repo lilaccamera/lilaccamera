@@ -141,6 +141,44 @@ class PreviewMeteringMapperTest {
         assertEquals(200, mapping.centerY)
     }
 
+    @Test
+    fun frontCamera270MirrorsTheViewAfterRotating() {
+        // View (0.2, 0.3) un-mirrors to (0.8, 0.3), and a 270 sensor puts that at sensor (1 - 0.3, 0.8).
+        val mapping = map(
+            x = 0.2f,
+            y = 0.3f,
+            zoomMode = PreviewMeteringZoomMode.POST_ZOOM_ACTIVE_ARRAY,
+            previewAspectRatio = 3f / 4f,
+            sensorOrientation = 270,
+            isFrontFacing = true,
+        )
+
+        assertEquals(activeArray, mapping.visibleRegion)
+        assertEquals(2799, mapping.centerX)
+        assertEquals(2399, mapping.centerY)
+    }
+
+    @Test
+    fun cameraRectMapsBackToTheViewBoxItCameFrom() {
+        val crop = CameraCoordinateRect(500, 300, 3500, 2700)
+        for (orientation in listOf(0, 90, 180, 270)) {
+            for (front in listOf(false, true)) {
+                val a = map(0.2f, 0.3f, PreviewMeteringZoomMode.SCALER_CROP_REGION, crop, 3f / 4f, orientation, front)
+                val b = map(0.6f, 0.8f, PreviewMeteringZoomMode.SCALER_CROP_REGION, crop, 3f / 4f, orientation, front)
+                val rect = CameraCoordinateRect(
+                    minOf(a.centerX, b.centerX), minOf(a.centerY, b.centerY),
+                    maxOf(a.centerX, b.centerX), maxOf(a.centerY, b.centerY),
+                )
+                val view = requireNotNull(PreviewMeteringMapper.mapRectToView(rect, a))
+                val label = "orientation=$orientation front=$front"
+                assertEquals(label, 0.2f, view.left, 1e-3f)
+                assertEquals(label, 0.3f, view.top, 1e-3f)
+                assertEquals(label, 0.6f, view.right, 1e-3f)
+                assertEquals(label, 0.8f, view.bottom, 1e-3f)
+            }
+        }
+    }
+
     private fun map(
         x: Float,
         y: Float,
