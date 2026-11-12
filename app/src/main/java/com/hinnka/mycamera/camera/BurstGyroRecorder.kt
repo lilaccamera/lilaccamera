@@ -78,14 +78,16 @@ class BurstGyroRecorder(context: Context) {
     }
 
     /**
-     * Root-mean-square rotation speed in rad/s over the last [windowNs], or null with too few samples.
+     * Root-mean-square rotation speed in rad/s over [windowNs] ending [skipLatestNs] ago, or null with too
+     * few samples. Skipping the latest moment leaves out the finger landing on the shutter.
      * The window's mean rate is taken out first: on a tripod the gyro reads a steady offset of about
      * 0.05 rad/s that is not motion, while hand tremor swings around zero.
      * shortcut: a steady slow pan is taken out too; fine while the shot asks the user to hold still.
      */
-    fun recentAngularSpeed(windowNs: Long): Float? {
-        val since = SystemClock.elapsedRealtimeNanos() - windowNs
-        val recent = synchronized(lock) { samples.filter { it.timestampNs >= since } }
+    fun recentAngularSpeed(windowNs: Long, skipLatestNs: Long = 0L): Float? {
+        val until = SystemClock.elapsedRealtimeNanos() - skipLatestNs
+        val since = until - windowNs
+        val recent = synchronized(lock) { samples.filter { it.timestampNs in since..until } }
         if (recent.size < MIN_RECENT_SAMPLES) return null
         val mx = recent.sumOf { it.x.toDouble() } / recent.size
         val my = recent.sumOf { it.y.toDouble() } / recent.size

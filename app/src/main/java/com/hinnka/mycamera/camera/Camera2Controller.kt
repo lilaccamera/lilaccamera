@@ -9793,7 +9793,8 @@ class Camera2Controller(private val context: Context) {
             ?.firstOrNull()?.takeIf { it > 0f } ?: return floor
         val sensorWidthMm = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
             ?.width?.takeIf { it > 0f } ?: return floor
-        val shake = burstGyroRecorder.recentAngularSpeed(NightCapturePlanner.STEADINESS_WINDOW_MS * 1_000_000L)
+        // The gyro runs with the viewfinder here, so measure before the tap: the press itself shakes a tripod.
+        val shake = burstGyroRecorder.recentAngularSpeed(windowNs = 800_000_000L, skipLatestNs = 250_000_000L)
             ?: return floor
         val focalPx = focalMm / sensorWidthMm * maxOf(reader.width, reader.height)
         return maxOf(floor, NightCapturePlanner.steadyShutterNs(shake, focalPx))
