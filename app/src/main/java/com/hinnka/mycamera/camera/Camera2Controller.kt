@@ -149,6 +149,11 @@ class Camera2Controller(private val context: Context) {
         private const val TRACK_STOP_MS = 3_000L
         private const val TRACK_BOX_FOLLOW = 0.6f
         private const val TRACK_GROWTH_LIMIT = 4f
+        // A tap on no real object: in its first moments the driver's box wanders off or is lost. Results in the first
+        // TRACK_SETTLE_MS may still carry the previous object's box.
+        private const val TRACK_SETTLE_MS = 300L
+        private const val TRACK_CHECK_MS = 1_500L
+        private const val TRACK_DRIFT_LIMIT = 0.10f
         private const val TRACK_FACE_TAKEOVER_MS = 200L
         private const val TAP_CHECK_WAIT_MS = 150L
         private const val FACE_FRAME_SCALE = 1.2f
@@ -161,7 +166,13 @@ class Camera2Controller(private val context: Context) {
         private const val AF_KICK_RESIZE_FRACTION = 0.25f
         private const val AF_KICK_UNFOCUSED_MS = 1_500L
         private const val AF_KICK_EVERY_MS = 1_500L
-        private const val AF_KICK_TIMEOUT_MS = 2_000L
+        // At 10 fps a full search takes up to 25 frames after a 6-frame wait; 2 s cut searches short.
+        private const val AF_KICK_TIMEOUT_MS = 4_000L
+        // Too dark to find focus: after this many misses in a row the lens stops sweeping until the subject changes.
+        private const val AF_KICK_MISS_LIMIT = 2
+        // In dim light a small AF region holds too little detail for the driver's search; it grows to this share.
+        private const val DIM_AF_ISO = 1600
+        private const val DIM_AF_REGION_FRACTION = 0.20f
         // A late answer can still turn the new track into a face; after this it is ignored.
         private const val TAP_CHECK_GIVE_UP_MS = 1_000L
         private const val TAP_FACE_MARGIN = 0.15f
@@ -1475,8 +1486,11 @@ class Camera2Controller(private val context: Context) {
             // 处理拍照状态机
             processStillFlashPrecapture(request, result)
             processMultiFrameTorchWarmupState(request, result)
-            if (session === captureSession) handleSubjectResult(result)
-            if (session === captureSession) handleHintResult(result)
+            if (session === captureSession) {
+                readLaser(result)
+                handleSubjectResult(result)
+                handleHintResult(result)
+            }
 
             // 监听对焦状态
             val afState = result.get(CaptureResult.CONTROL_AF_STATE)
@@ -1507,6 +1521,11 @@ class Camera2Controller(private val context: Context) {
                         _state.update { s -> s.copy(isFocusing = false, focusSuccess = false) }
                         if (!_state.value.isFocusLocked && !isFocusLockedWaitingForSceneChange) {
                             recordFocusLockExposure(result)
+                        }
+                        if (_state.value.focusPointSource == FocusPointSource.MANUAL && parkLensIfFar("tap focus missed")) {
+                            // The parked lens is the new reference, so the scene watch does not read the move as a change.
+                            focusLockedReferenceDistance = previewRequestBuilder?.get(CaptureRequest.LENS_FOCUS_DISTANCE) ?: 0f
+                            focusLockSettleFrames = FOCUS_LOCK_SETTLE_FRAMES
                         }
                     }
                 }
@@ -7207,6 +7226,7 @@ class Camera2Controller(private val context: Context) {
             // 解锁触屏 AF 不能改变用户选择的手动对焦模式。
             applyFocusSettings(this, _state.value)
             clearCustomAfRegions(this)
+            applySonySubjectKeys(this)
             applyMeteringRegions()
             updatePreview()
         }
@@ -7292,6 +7312,7 @@ class Camera2Controller(private val context: Context) {
         } else {
             halfPressCheck?.let { cameraHandler?.removeCallbacks(it) }
             halfPressCheck = null
+            unparkLens()
             if (subjectAfLocked) {
                 subjectAfLocked = false
                 submitOneShot(
@@ -7337,6 +7358,7 @@ class Camera2Controller(private val context: Context) {
             reset = { it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE) },
         )
         halfPressOutcomePending = subjectAfLocked
+        afTriggerAwaited = subjectAfLocked
     }
 
     /**
@@ -7509,11 +7531,11 @@ class Camera2Controller(private val context: Context) {
                 focusSuccess = null
             ) }
             // AF 区域保持为可见画面的 10%，避免 SCALER_CROP_REGION 变焦后区域相对画面膨胀。
-            val afRect = PreviewMeteringMapper.buildCenteredRegion(
+            val afRect = dimLightAfRegion(PreviewMeteringMapper.buildCenteredRegion(
                 mapping = mapping,
                 widthFraction = AF_REGION_WIDTH_FRACTION,
                 heightFraction = AF_REGION_HEIGHT_FRACTION,
-            ).toAndroidRect()
+            ), mapping.visibleRegion).toAndroidRect()
             val afRegion = MeteringRectangle(afRect, MeteringRectangle.METERING_WEIGHT_MAX)
 
             if (triggerFocus) {
@@ -7531,6 +7553,8 @@ class Camera2Controller(private val context: Context) {
 
             if (maxAfRegions > 0) {
                 builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(afRegion))
+                // Sony's driver steers AF to the region only in its user AF region mode.
+                if (subjectAfRegion == null) applySonySubjectKeys(builder)
             }
             // 人眼跟踪只接管 AF，不移动用户当前的测光区域。
             if (source == FocusPointSource.MANUAL && !preserveMeteringPoint) {
@@ -7684,6 +7708,7 @@ class Camera2Controller(private val context: Context) {
     private var trackingSinceMs = 0L
     private var trackingLostSinceMs = 0L
     private var trackStart: Pair<Float, Float>? = null
+    private var trackViewAspectRatio: Float? = null
     private var subjectAfLocked = false
     private var trackBox: ViewRect? = null
     // Area of the first box the driver found; a box grown far past it has usually lost the object.
@@ -7728,6 +7753,13 @@ class Camera2Controller(private val context: Context) {
     private var afKickArea = 0f
     private var afKickMs = 0L
     private var afKickPending = false
+    // A search the app started (kick, half-press) reads no lock until its own trigger's result: results already in
+    // flight still carry the previous lock.
+    private var afTriggerAwaited = false
+    private var afKickMisses = 0
+    // The laser's last reading (-1 none) and zone, [left, right, top, bottom] in percent of the frame.
+    private var laserStrength = -1
+    private var laserZone: IntArray? = null
 
     private fun resetSubjectState() {
         trackingSinceMs = 0L
@@ -7755,6 +7787,66 @@ class Camera2Controller(private val context: Context) {
         _subjectOverlay.value = SubjectOverlay()
     }
 
+    /** Dim light: an AF region smaller than [DIM_AF_REGION_FRACTION] of the visible frame grows around its centre. */
+    private fun dimLightAfRegion(
+        rect: CameraCoordinateRect,
+        visible: CameraCoordinateRect? = mapPreviewMeteringPoint(0.5f, 0.5f, null)?.visibleRegion,
+    ): CameraCoordinateRect {
+        if (visible == null || _state.value.iso < DIM_AF_ISO) return rect
+        val w = maxOf(rect.width, (visible.width * DIM_AF_REGION_FRACTION).toInt())
+        val h = maxOf(rect.height, (visible.height * DIM_AF_REGION_FRACTION).toInt())
+        if (w == rect.width && h == rect.height) return rect
+        val left = ((rect.left + rect.right) / 2 - w / 2).coerceIn(visible.left, maxOf(visible.left, visible.right - w))
+        val top = ((rect.top + rect.bottom) / 2 - h / 2).coerceIn(visible.top, maxOf(visible.top, visible.bottom - h))
+        return CameraCoordinateRect(left, top, left + w, top + h).intersect(visible) ?: rect
+    }
+
+    private fun readLaser(result: CaptureResult) {
+        if (!sonyFeatures.laser) return
+        val area = SonySubjectKeys.read(result, SonySubjectKeys.TOF_MEASURE_AREA) ?: return
+        if (area.size < 5 || area[4] < 0 || area[1] <= area[0] || area[3] <= area[2]) return
+        laserStrength = area[4]
+        laserZone = area.copyOf(4)
+    }
+
+    private fun isLensParked(): Boolean = _state.value.isAutoFocus &&
+        previewRequestBuilder?.get(CaptureRequest.CONTROL_AF_MODE) == CaptureRequest.CONTROL_AF_MODE_OFF
+
+    /**
+     * A search that failed on a subject inside the laser's zone with no laser return was looking at something beyond
+     * about 2 m (a black surface at 30 cm still returns): park the lens at the hyperfocal distance, sharp from about
+     * half that distance to infinity, instead of where the sweep gave up. The next tap, search or scene change resumes AF.
+     */
+    private fun parkLensIfFar(reason: String): Boolean {
+        val zone = laserZone
+        if (!sonyFeatures.laser || laserStrength != 0 || zone == null || isCaptureFocusFrozen) return false
+        val builder = previewRequestBuilder ?: return false
+        val region = builder.get(CaptureRequest.CONTROL_AF_REGIONS)?.firstOrNull()?.rect ?: return false
+        val characteristics = getActiveOpenCameraCharacteristics() ?: return false
+        val array = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return false
+        val x = region.exactCenterX() * 100f / array.width()
+        val y = region.exactCenterY() * 100f / array.height()
+        if (x < zone[0] || x > zone[1] || y < zone[2] || y > zone[3]) return false
+        val diopters = characteristics.get(CameraCharacteristics.LENS_INFO_HYPERFOCAL_DISTANCE)?.takeIf { it > 0f }
+            ?: calculateHyperfocalFocusResult()?.focusDistanceDiopters
+            ?: return false
+        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+        builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, diopters)
+        updatePreview()
+        Log.i(SonySubjectKeys.LOG_TAG, "laser far: lens parked at $diopters D ($reason, region at $x,$y %)")
+        return true
+    }
+
+    /** Back to the AF mode the settings ask for, if [parkLensIfFar] parked the lens. */
+    private fun unparkLens() {
+        if (!isLensParked()) return
+        previewRequestBuilder?.let {
+            applyFocusSettings(it, _state.value)
+            updatePreview()
+        }
+        Log.i(SonySubjectKeys.LOG_TAG, "lens unparked")
+    }
+
     private fun applySonySubjectKeys(builder: CaptureRequest.Builder) {
         try {
             if (sonyFeatures.objectTracking) {
@@ -7766,13 +7858,15 @@ class Camera2Controller(private val context: Context) {
                     if (faceAeActive) SonySubjectKeys.AE_REGION_MODE_FACE else aeRegionModeBaseline,
                 )
             }
+            if (sonyFeatures.laser) builder.set(SonySubjectKeys.TOF_MEASURE_MODE, 1.toByte())
             subjectAfRegion?.let {
-                builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(MeteringRectangle(it.toAndroidRect(), MeteringRectangle.METERING_WEIGHT_MAX)))
+                val region = dimLightAfRegion(it)
+                builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(MeteringRectangle(region.toAndroidRect(), MeteringRectangle.METERING_WEIGHT_MAX)))
             }
             if (sonyFeatures.afUserRegion) {
                 builder.set(
                     SonySubjectKeys.AF_REGION_MODE,
-                    if (subjectAfRegion != null) SonySubjectKeys.AF_REGION_MODE_USER else afRegionModeBaseline,
+                    if (subjectAfRegion != null || _state.value.focusPoint != null) SonySubjectKeys.AF_REGION_MODE_USER else afRegionModeBaseline,
                 )
             }
         } catch (e: Exception) {
@@ -7924,6 +8018,7 @@ class Camera2Controller(private val context: Context) {
         mainFaceUserChosen = false
         mainFaceId = -1
         rivalFaceId = -1
+        unparkLens()
         if (subjectAfRegion != null) {
             subjectAfRegion = null
             afKickPending = false
@@ -7940,6 +8035,7 @@ class Camera2Controller(private val context: Context) {
         stopTracking("face chosen")
         if (_state.value.focusPoint != null) restoreContinuousAf()
         mainFaceId = face.id
+        afKickMisses = 0
         mainFaceUserChosen = true
         rivalFaceId = -1
         Log.i(SonySubjectKeys.LOG_TAG, "main face=${face.id} (chosen)")
@@ -7989,14 +8085,26 @@ class Camera2Controller(private val context: Context) {
         if (!sent) return
         trackingSinceMs = SystemClock.elapsedRealtime()
         trackingLostSinceMs = 0L
+        afKickMisses = 0
         subjectAfLocked = false
         trackStart = normX to normY
+        trackViewAspectRatio = viewAspectRatio
         trackBox = null
         trackFirstArea = 0f
         trackTooBig = false
         trackFaceSinceMs = 0L
         if (faceAeActive) setFaceAe(false)
         _subjectOverlay.update { it.copy(tracking = true, trackStart = trackStart, trackBox = null, trackLost = false) }
+    }
+
+    /** Tracking found no real object at the tap: focus on the tapped spot as a fixed point instead. */
+    private fun trackToTapPoint(point: Pair<Float, Float>, reason: String) {
+        if (trackStart != point) return
+        val aspect = trackViewAspectRatio
+        stopTracking("no object ($reason)")
+        subjectAfRegion = null
+        afKickPending = false
+        focusOnNormalizedPoint(point.first, point.second, FocusPointSource.MANUAL, previewViewAspectRatio = aspect)
     }
 
     /** Ends tracking, back to plain continuous AF; [reason] goes to the log. */
@@ -8072,6 +8180,7 @@ class Camera2Controller(private val context: Context) {
             if (subjectAfRegion != null) {
                 subjectAfRegion = null
                 afKickPending = false
+                unparkLens()
                 if (state.focusPoint == null) clearCustomAfRegions(builder)
                 applySonySubjectKeys(builder)
                 updatePreview()
@@ -8091,6 +8200,7 @@ class Camera2Controller(private val context: Context) {
             if (last == null) {
                 afFocusedMs = now
                 afKickArea = 0f
+                afKickMisses = 0
             }
             subjectAfRegion = rect
             subjectAfSentMs = now
@@ -8104,14 +8214,23 @@ class Camera2Controller(private val context: Context) {
 
         if (afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED || afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED) {
             afFocusedMs = now
+            afKickMisses = 0
             if (afKickArea == 0f) afKickArea = area
         }
         if (afKickPending) {
-            val locked = afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
-                afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+            val locked = !afTriggerAwaited && (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED)
             if (locked || now - afKickMs > AF_KICK_TIMEOUT_MS) {
                 afKickPending = false
                 afKickArea = area
+                afKickMisses = if (locked && afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED) 0 else afKickMisses + 1
+                if (afKickMisses == AF_KICK_MISS_LIMIT) Log.i(SonySubjectKeys.LOG_TAG, "AF kicks paused after $afKickMisses misses")
+                if (afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED && locked &&
+                    parkLensIfFar("subject search missed after ${now - afKickMs} ms")
+                ) {
+                    afFocusedMs = now
+                    return
+                }
                 submitOneShot(
                     "AF cancel after kick: af=$afState after ${now - afKickMs} ms",
                     set = { it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL) },
@@ -8121,12 +8240,18 @@ class Camera2Controller(private val context: Context) {
             return
         }
         if (now - afKickMs < AF_KICK_EVERY_MS) return
+        val parked = isLensParked()
+        if (parked) afFocusedMs = now
         val reason = when {
             afKickArea > 0f && abs(area / afKickArea - 1f) > AF_KICK_RESIZE_FRACTION -> "size ${area / afKickArea}x"
-            now - afFocusedMs > AF_KICK_UNFOCUSED_MS -> "unfocused ${now - afFocusedMs} ms"
+            parked && laserStrength > 0 -> "laser return $laserStrength"
+            afKickMisses < AF_KICK_MISS_LIMIT && now - afFocusedMs > AF_KICK_UNFOCUSED_MS -> "unfocused ${now - afFocusedMs} ms"
             else -> return
         }
+        if (reason.startsWith("size")) afKickMisses = 0
+        unparkLens()
         afKickMs = now
+        afTriggerAwaited = true
         afKickPending = submitOneShot(
             "AF kick ($reason) on $rect",
             set = { it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START) },
@@ -8225,6 +8350,11 @@ class Camera2Controller(private val context: Context) {
         }
 
         val afState = result.get(CaptureResult.CONTROL_AF_STATE)
+        if (result.request.get(CaptureRequest.CONTROL_AF_TRIGGER) == CaptureRequest.CONTROL_AF_TRIGGER_START ||
+            afState == CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN
+        ) {
+            afTriggerAwaited = false
+        }
         val focused = state.supportsPointAutoFocus && (afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED ||
             afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED)
 
@@ -8259,6 +8389,18 @@ class Camera2Controller(private val context: Context) {
                     selectFace(SubjectFace(face.id, face.box), null)
                 }
             }
+            val age = now - trackingSinceMs
+            val start = trackStart
+            if (start != null && age in TRACK_SETTLE_MS..TRACK_CHECK_MS) {
+                val reason = when {
+                    box != null && (abs(box.centerX - start.first) > TRACK_DRIFT_LIMIT ||
+                        abs(box.centerY - start.second) > TRACK_DRIFT_LIMIT) -> "drifted to ${box.centerX},${box.centerY}"
+                    trackingLostSinceMs > 0L && now - trackingLostSinceMs >= TRACK_SETTLE_MS -> "lost"
+                    else -> null
+                }
+                // After this result is handled, so its subject AF does not undo the tap's region.
+                if (reason != null) cameraHandler?.post { trackToTapPoint(start, reason) }
+            }
         }
 
         // The tracked object, or else the main face; a lost object keeps its last region until tracking stops.
@@ -8288,11 +8430,13 @@ class Camera2Controller(private val context: Context) {
 
         val check = tapCheck
         if (check != null && check.trackingStarted && now - check.startedMs > TAP_CHECK_GIVE_UP_MS) tapCheck = null
-        if (halfPressOutcomePending && (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+        if (halfPressOutcomePending && !afTriggerAwaited && (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
                 afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED)
         ) {
             halfPressOutcomePending = false
-            Log.i(SonySubjectKeys.LOG_TAG, "half-press lock: ${if (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED) "focused" else "missed"}")
+            val focusedLock = afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED
+            Log.i(SonySubjectKeys.LOG_TAG, "half-press lock: ${if (focusedLock) "focused" else "missed"} after ${now - subjectAfSentMs} ms")
+            if (!focusedLock) parkLensIfFar("half-press missed")
         }
         _faceCheckReason.value = when {
             halfPressCheck != null -> "half"
@@ -8324,7 +8468,7 @@ class Camera2Controller(private val context: Context) {
                     "afMode=${result.get(CaptureResult.CONTROL_AF_MODE)} af=$afState " +
                     "lens=${result.get(CaptureResult.LENS_FOCUS_DISTANCE)} " +
                     "aeMode=${if (sonyFeatures.faceAe) SonySubjectKeys.read(result, SonySubjectKeys.AE_REGION_MODE_RESULT) else "-"} " +
-                    "faceAe=$faceAeActive iso=${result.get(CaptureResult.SENSOR_SENSITIVITY)} " +
+                    "faceAe=$faceAeActive laser=$laserStrength iso=${result.get(CaptureResult.SENSOR_SENSITIVITY)} " +
                     "exp=${result.get(CaptureResult.SENSOR_EXPOSURE_TIME)}"
             )
         }

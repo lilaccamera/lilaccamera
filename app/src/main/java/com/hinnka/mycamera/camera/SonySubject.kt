@@ -20,6 +20,10 @@ internal object SonySubjectKeys {
     val AF_AVAILABLE_REGION_MODES = CameraCharacteristics.Key(
         "com.sonymobile.control.afAvailableRegionModes", ByteArray::class.java,
     )
+    val MAX_TOF_AREA_COUNT = CameraCharacteristics.Key("com.sonymobile.statistics.info.maxTofAreaCount", Byte::class.java)
+    val AVAILABLE_TOF_MEASURE_MODE = CameraCharacteristics.Key(
+        "com.sonymobile.statistics.info.availableTofMeasureMode", ByteArray::class.java,
+    )
 
     // Trigger: 0 idle (every repeating request), 1 start, 2 stop. Area: a 1x1 box at the point, in active-array coordinates.
     val OBJECT_SELECT_TRIGGER = CaptureRequest.Key("com.sonymobile.statistics.objectSelectTrigger", Byte::class.java)
@@ -29,12 +33,17 @@ internal object SonySubjectKeys {
     val AE_REGION_MODE = CaptureRequest.Key("com.sonymobile.control.aeRegionMode", Byte::class.java)
     // 0 centre, 1 multi, 2 face, 3 user (CONTROL_AF_REGIONS).
     val AF_REGION_MODE = CaptureRequest.Key("com.sonymobile.control.afRegionMode", Byte::class.java)
+    // 1 reports the laser (time-of-flight) reading in TOF_MEASURE_AREA; the driver uses the laser either way.
+    val TOF_MEASURE_MODE = CaptureRequest.Key("com.sonymobile.statistics.tofMeasureMode", Byte::class.java)
 
     // [left, top, right, bottom, flag]: for objects the flag means lost, for faces that a face is selected.
     val OBJECT_SELECT_AREA = CaptureResult.Key("com.sonymobile.statistics.objectSelectArea", IntArray::class.java)
     val FACE_SELECT_AREA = CaptureResult.Key("com.sonymobile.statistics.faceSelectArea", IntArray::class.java)
     val AE_REGION_MODE_RESULT = CaptureResult.Key("com.sonymobile.control.aeRegionMode", Byte::class.java)
     val AF_REGION_MODE_RESULT = CaptureResult.Key("com.sonymobile.control.afRegionMode", Byte::class.java)
+    // [left, right, top, bottom, strength]: the laser's zone in percent of the frame, then the return strength
+    // (about 200 at 30 cm whether the surface is light or black, 0 from about 2 m on, -1 on frames without a reading).
+    val TOF_MEASURE_AREA = CaptureResult.Key("com.sonymobile.statistics.tofMeasureArea", IntArray::class.java)
 
     const val TRIGGER_IDLE: Byte = 0
     const val TRIGGER_START: Byte = 1
@@ -60,6 +69,8 @@ internal data class SonySubjectFeatures(
     val faceAe: Boolean = false,
     // The driver focuses on CONTROL_AF_REGIONS only in its "user" AF region mode.
     val afUserRegion: Boolean = false,
+    // The laser reports its reading (back camera only; the key closes the front camera).
+    val laser: Boolean = false,
 ) {
     companion object {
         fun of(characteristics: CameraCharacteristics, faceDetection: Boolean): SonySubjectFeatures {
@@ -74,6 +85,9 @@ internal data class SonySubjectFeatures(
                     ?.contains(SonySubjectKeys.AE_REGION_MODE_FACE) == true,
                 afUserRegion = SonySubjectKeys.read(characteristics, SonySubjectKeys.AF_AVAILABLE_REGION_MODES)
                     ?.contains(SonySubjectKeys.AF_REGION_MODE_USER) == true,
+                laser = (SonySubjectKeys.read(characteristics, SonySubjectKeys.MAX_TOF_AREA_COUNT) ?: 0) > 0 &&
+                    SonySubjectKeys.read(characteristics, SonySubjectKeys.AVAILABLE_TOF_MEASURE_MODE)
+                        ?.contains(1.toByte()) == true,
             )
         }
     }
