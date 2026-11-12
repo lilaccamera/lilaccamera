@@ -161,7 +161,8 @@ class Camera2Controller(private val context: Context) {
         private const val AF_KICK_RESIZE_FRACTION = 0.25f
         private const val AF_KICK_UNFOCUSED_MS = 1_500L
         private const val AF_KICK_EVERY_MS = 1_500L
-        private const val AF_KICK_TIMEOUT_MS = 2_000L
+        // At 10 fps a full search takes up to 25 frames after a 6-frame wait; 2 s cut searches short.
+        private const val AF_KICK_TIMEOUT_MS = 4_000L
         // A late answer can still turn the new track into a face; after this it is ignored.
         private const val TAP_CHECK_GIVE_UP_MS = 1_000L
         private const val TAP_FACE_MARGIN = 0.15f
@@ -7259,6 +7260,7 @@ class Camera2Controller(private val context: Context) {
             reset = { it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE) },
         )
         halfPressOutcomePending = subjectAfLocked
+        afTriggerAwaited = subjectAfLocked
     }
 
     /**
@@ -7577,6 +7579,9 @@ class Camera2Controller(private val context: Context) {
     private var afKickArea = 0f
     private var afKickMs = 0L
     private var afKickPending = false
+    // A search the app started (kick, half-press) reads no lock until its own trigger's result: results already in
+    // flight still carry the previous lock.
+    private var afTriggerAwaited = false
 
     private fun resetSubjectState() {
         trackingSinceMs = 0L
@@ -7956,8 +7961,8 @@ class Camera2Controller(private val context: Context) {
             if (afKickArea == 0f) afKickArea = area
         }
         if (afKickPending) {
-            val locked = afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
-                afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+            val locked = !afTriggerAwaited && (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED)
             if (locked || now - afKickMs > AF_KICK_TIMEOUT_MS) {
                 afKickPending = false
                 afKickArea = area
@@ -7976,6 +7981,7 @@ class Camera2Controller(private val context: Context) {
             else -> return
         }
         afKickMs = now
+        afTriggerAwaited = true
         afKickPending = submitOneShot(
             "AF kick ($reason) on $rect",
             set = { it.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START) },
@@ -8074,6 +8080,11 @@ class Camera2Controller(private val context: Context) {
         }
 
         val afState = result.get(CaptureResult.CONTROL_AF_STATE)
+        if (result.request.get(CaptureRequest.CONTROL_AF_TRIGGER) == CaptureRequest.CONTROL_AF_TRIGGER_START ||
+            afState == CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN
+        ) {
+            afTriggerAwaited = false
+        }
         val focused = state.supportsPointAutoFocus && (afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED ||
             afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED)
 
@@ -8137,11 +8148,12 @@ class Camera2Controller(private val context: Context) {
 
         val check = tapCheck
         if (check != null && check.trackingStarted && now - check.startedMs > TAP_CHECK_GIVE_UP_MS) tapCheck = null
-        if (halfPressOutcomePending && (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+        if (halfPressOutcomePending && !afTriggerAwaited && (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
                 afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED)
         ) {
             halfPressOutcomePending = false
-            Log.i(SonySubjectKeys.LOG_TAG, "half-press lock: ${if (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED) "focused" else "missed"}")
+            val focusedLock = afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED
+            Log.i(SonySubjectKeys.LOG_TAG, "half-press lock: ${if (focusedLock) "focused" else "missed"} after ${now - subjectAfSentMs} ms")
         }
         _faceCheckReason.value = when {
             halfPressCheck != null -> "half"
