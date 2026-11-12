@@ -977,6 +977,19 @@ class Camera2Controller(private val context: Context) {
         // Sum the actual request plan so HDR frames with different exposures contribute
         // their own duration. Keep one timeline for the entire photo, including frame gaps.
         val spacingKey = Triple(shot.reader.imageFormat, shot.reader.width, shot.reader.height)
+        // A request that also targets a JPEG waits for the JPEG encoder between frames (the front camera's still JPEG,
+        // the full-size JPEG beside every lilac RAW frame: advertised 500 ms, measured 0.27 to 0.36 s).
+        val jpegStallNs = when {
+            frontStillJpegActive -> frontStillJpegStallNs
+            shot.reader.imageFormat == ImageFormat.RAW_SENSOR || shot.reader.imageFormat == ImageFormat.RAW10 ->
+                rawCompanionJpegReader?.let { jpeg ->
+                    runCatching {
+                        shot.characteristics?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                            ?.getOutputStallDuration(ImageFormat.JPEG, Size(jpeg.width, jpeg.height))
+                    }.getOrNull()
+                } ?: 0L
+            else -> 0L
+        }
         val exposureDurationNs = requests.sumOf { request ->
             val manualExposure = request.get(CaptureRequest.CONTROL_AE_MODE) ==
                 CaptureRequest.CONTROL_AE_MODE_OFF
@@ -990,14 +1003,18 @@ class Camera2Controller(private val context: Context) {
             } else {
                 baseExposureResult?.get(CaptureResult.SENSOR_FRAME_DURATION)
             }
-            // a request that also targets a JPEG waits for the JPEG encoder between frames
-            val jpegStallNs = if (frontStillJpegActive) frontStillJpegStallNs else 0L
             maxOf(exposureNs, frameDurationNs ?: 0L, jpegStallNs, 1L)
         }
-        val estimatedDurationNs = maxOf(exposureDurationNs, (measuredFrameSpacingNs[spacingKey] ?: 0L) * requests.size)
-        var progressStarted = false
+        // Until frames arrive, the ring runs on the spacing measured in the last burst of this kind, else on the
+        // exposure plan; the ring has no other way to find out, and it cannot hold back once started.
+        val guessedFrameNs = measuredFrameSpacingNs[spacingKey] ?: (exposureDurationNs / requests.size)
         var firstStartTimestamp = 0L
         var startedFrames = 0
+        var completedFrames = 0
+        // elapsedRealtime when each frame started, and the measured mean delay from a frame's start to its result
+        val frameStartedElapsedNs = HashMap<Long, Long>()
+        var arrivalDelayNs = -1L
+        var lastEstimatedEndNs = 0L
         val callback = object : CameraCaptureSession.CaptureCallback() {
             override fun onCaptureStarted(
                 session: CameraCaptureSession,
@@ -1015,35 +1032,25 @@ class Camera2Controller(private val context: Context) {
                 registerPhotoTimestamp(shot, timestamp)
                 startedFrames++
                 if (startedFrames == 1) firstStartTimestamp = timestamp
-                // The ring shows how long to hold still. It never passes the frames started so far, and from the
-                // second frame on it runs from where it is to the end at the measured spacing: the camera may report
-                // no exposure (lilac front) or wait between frames for a JPEG (lilac RAW), so the first estimate can
-                // be far off, and jumping or holding the ring to correct it looks like a stall.
+                // The ring shows how long to hold still: it aims to fill when the last frame's result arrives, from
+                // the guess above and, from the second frame on, the measured spacing (the camera may report no
+                // exposure, as lilac's front camera does, or wait between frames for a JPEG), plus the measured
+                // delay from a frame's start to its result.
                 // Sensor timestamps may use a different clock from elapsedRealtime, so they only give the spacing.
                 val nowNs = SystemClock.elapsedRealtimeNanos()
-                val maxFraction = startedFrames.toFloat() / requests.size
-                if (!progressStarted && activePhotoCapture === shot && !shot.continuousBurst && !shot.failed) {
-                    progressStarted = true
-                    val progress = PhotoCaptureProgress(
-                        captureId = shot.id,
-                        startedElapsedNs = nowNs,
-                        estimatedDurationNs = estimatedDurationNs,
-                        maxFraction = maxFraction,
-                    )
-                    _state.update { it.copy(photoCaptureProgress = progress) }
-                } else if (startedFrames >= 2 && progressStarted && activePhotoCapture === shot) {
-                    val spacingNs = (timestamp - firstStartTimestamp) / (startedFrames - 1)
-                    measuredFrameSpacingNs[spacingKey] = spacingNs
+                frameStartedElapsedNs[frameNumber] = nowNs
+                val frameNs = if (startedFrames >= 2) {
+                    ((timestamp - firstStartTimestamp) / (startedFrames - 1)).also { measuredFrameSpacingNs[spacingKey] = it }
+                } else {
+                    guessedFrameNs
+                }
+                if (activePhotoCapture === shot && !shot.continuousBurst && !shot.failed) {
+                    lastEstimatedEndNs = nowNs + frameNs * (requests.size - startedFrames) +
+                        (if (arrivalDelayNs >= 0) arrivalDelayNs else frameNs)
+                    val progress = PhotoCaptureProgress(captureId = shot.id, estimatedEndElapsedNs = lastEstimatedEndNs)
                     _state.update { s ->
                         val current = s.photoCaptureProgress
-                        if (current?.captureId != shot.id) s else s.copy(
-                            photoCaptureProgress = current.copy(
-                                startedElapsedNs = nowNs,
-                                startFraction = current.fractionAt(nowNs),
-                                estimatedDurationNs = spacingNs * (requests.size - startedFrames + 1),
-                                maxFraction = maxFraction,
-                            )
-                        )
+                        if (current == null || current.captureId == shot.id) s.copy(photoCaptureProgress = progress) else s
                     }
                 }
             }
@@ -1055,6 +1062,21 @@ class Camera2Controller(private val context: Context) {
             ) {
                 val timestamp = getCaptureTimestamp(result)
                 shot.startedFrameNumbers.remove(result.frameNumber)
+                val arrivedNs = SystemClock.elapsedRealtimeNanos()
+                frameStartedElapsedNs.remove(result.frameNumber)?.let { startedNs ->
+                    val delayNs = arrivedNs - startedNs
+                    arrivalDelayNs = if (arrivalDelayNs < 0) delayNs else (arrivalDelayNs * completedFrames + delayNs) / (completedFrames + 1)
+                }
+                completedFrames++
+                if (completedFrames == requests.size) {
+                    PLog.d(TAG, "Capture ring: last frame arrived ${(arrivedNs - lastEstimatedEndNs) / 1_000_000} ms " +
+                        "after the estimate")
+                    _state.update { s ->
+                        val current = s.photoCaptureProgress
+                        if (current?.captureId != shot.id) s
+                        else s.copy(photoCaptureProgress = current.copy(estimatedEndElapsedNs = arrivedNs, lastFrameArrived = true))
+                    }
+                }
                 if (timestamp == null) {
                     failPhotoCapture(shot, "capture result has no timestamp")
                     return
