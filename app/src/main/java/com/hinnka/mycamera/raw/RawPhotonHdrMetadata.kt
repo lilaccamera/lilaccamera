@@ -16,8 +16,14 @@ internal object RawPhotonHdrMetadata {
     private const val INPUT_EXPOSURE_PROPERTY = "photonHdrNetInputExposureEv"
     private const val INPUT_EXPOSURE_CONTRACT_PROPERTY = "photonHdrNetInputExposureEvContract"
     const val INPUT_EXPOSURE_CONTRACT = "hdrnet_input_viewfinder_v1"
+    private const val LIMIT_PROPERTY = "photonHdrNetRatioLimit"
+    private const val WANTED_PROPERTY = "photonHdrNetRatioWanted"
     private const val SUMMARY_INPUT_EXPOSURE = "hdrNetInputExposureEv"
     private const val SUMMARY_INPUT_EXPOSURE_CONTRACT = "hdrNetInputExposureEvContract"
+
+    /** The HDR ratio limit in force at capture, and the ratio ML AE wanted before it; for the info card. */
+    fun readLimit(properties: Map<String, String>): Float? = properties[LIMIT_PROPERTY]?.toFloatOrNull()
+    fun readWanted(properties: Map<String, String>): Float? = properties[WANTED_PROPERTY]?.toFloatOrNull()
 
     fun read(properties: Map<String, String>): Float? = properties[PROPERTY]
         ?.toFloatOrNull()
@@ -58,8 +64,11 @@ internal object RawPhotonHdrMetadata {
         finalShortGain: Float? = null,
         postExposureEv: Float? = null,
         inputExposureEv: Float? = null,
+        sceneExposureSummary: String? = null,
     ): Map<String, String> {
         val validRatio = hdrRatio?.takeIf { it.isFinite() && it >= 1f } ?: return properties
+        fun summaryValue(key: String) = sceneExposureSummary?.lineSequence()
+            ?.firstOrNull { it.startsWith("$key=") }?.substringAfter('=')?.toFloatOrNull()?.takeIf { it.isFinite() }
         val validShortGain = finalShortGain?.takeIf { it.isFinite() && it > 0f }
         val validInputExposureEv = inputExposureEv?.takeIf(::isValidExposureEv)
         if (inputExposureEv != null &&
@@ -68,7 +77,9 @@ internal object RawPhotonHdrMetadata {
         var result = properties + mapOf(
             PROPERTY to validRatio.toString(),
             CONTRACT_PROPERTY to CURRENT_CONTRACT,
-        )
+        ) - LIMIT_PROPERTY - WANTED_PROPERTY
+        summaryValue("effectiveMaxHdrRatio")?.let { result += LIMIT_PROPERTY to it.toString() }
+        summaryValue("hdrRatioBeforeLimit")?.let { result += WANTED_PROPERTY to it.toString() }
         if (validShortGain != null) {
             result += mapOf(
                 SHORT_GAIN_PROPERTY to validShortGain.toString(),

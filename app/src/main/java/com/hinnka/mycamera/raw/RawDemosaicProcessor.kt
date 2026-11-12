@@ -236,6 +236,7 @@ class RawDemosaicProcessor {
             afRegions = baseMetadata?.afRegions,
             defaultCrop = defaultCrop,
             frameCount = baseMetadata?.frameCount ?: 1,
+            mergedFrameCount = baseMetadata?.mergedFrameCount ?: 1,
             mgcDenoiseCorrelation = baseMetadata?.mgcDenoiseCorrelation,
             mgcDenoiseReadNoise = baseMetadata?.mgcDenoiseReadNoise,
             mgcDenoiseShotNoise = baseMetadata?.mgcDenoiseShotNoise,
@@ -3386,14 +3387,21 @@ class RawDemosaicProcessor {
 
             if (prepareCaptureProfile) {
                 val captureUsesHdrNet = sceneExposureRequest != null
-                // The preview cannot represent the captured brightness beyond its shutter cap.
-                // Keep ML AE's exposure when HDRNet develops a longer physical exposure.
-                val skipHdrNetViewfinderMatch = captureUsesHdrNet &&
-                    actualMetadata.shutterSpeed > CameraState.MAX_PHOTO_PREVIEW_SHUTTER_SPEED_NS
+                // The preview cannot represent the captured brightness beyond its shutter cap, nor the
+                // shadow range a merged burst recovers (as in HDR+): keep ML AE's exposure for both.
+                val hdrNetViewfinderSkipReason = when {
+                    !captureUsesHdrNet -> null
+                    actualMetadata.shutterSpeed > CameraState.MAX_PHOTO_PREVIEW_SHUTTER_SPEED_NS ->
+                        "CAPTURE_SHUTTER_EXCEEDS_PREVIEW_LIMIT"
+                    actualMetadata.mergedFrameCount > 1 -> "MERGED_BURST"
+                    else -> null
+                }
+                val skipHdrNetViewfinderMatch = hdrNetViewfinderSkipReason != null
+                PLog.d(TAG, "HDRNET_MATCH viewfinderSkip=$hdrNetViewfinderSkipReason mergedFrames=${actualMetadata.mergedFrameCount}")
                 if (skipHdrNetViewfinderMatch) {
                     PLog.i(
                         TAG,
-                        "HDRNET_MATCH stage=SKIPPED reason=CAPTURE_SHUTTER_EXCEEDS_PREVIEW_LIMIT " +
+                        "HDRNET_MATCH stage=SKIPPED reason=$hdrNetViewfinderSkipReason " +
                             "captureShutterNs=${actualMetadata.shutterSpeed} " +
                             "previewMaxShutterNs=${CameraState.MAX_PHOTO_PREVIEW_SHUTTER_SPEED_NS}",
                     )
@@ -3636,7 +3644,7 @@ class RawDemosaicProcessor {
                         appendLine()
                         if (skipHdrNetViewfinderMatch) {
                             appendLine("hdrNetExposureTarget=ML_AE")
-                            appendLine("hdrNetViewfinderMatchSkipped=CAPTURE_SHUTTER_EXCEEDS_PREVIEW_LIMIT")
+                            appendLine("hdrNetViewfinderMatchSkipped=$hdrNetViewfinderSkipReason")
                         } else {
                             appendLine("hdrNetExposureTarget=FULL_CAPTURE_VIEWFINDER_THUMBNAIL")
                             appendLine("hdrNetExposureGrid=8x6_WEIGHTED_DIRECT_LOG2_EV")

@@ -151,6 +151,7 @@ object RawProcessor {
             exposureCompensation = baseMetadata.exposureCompensation,
             exposureBias = baseMetadata.exposureBias,
             frameCount = 1,
+            mergedFrameCount = baseMetadata.mergedFrameCount,
             mgcSharpenTuningSnr = baseMetadata.mgcSharpenTuningSnr,
             mgcSharpenAttenuationScale = baseMetadata.mgcSharpenAttenuationScale,
             rotation = rotation,
@@ -677,6 +678,8 @@ object RawProcessor {
         physicalRawCrop: RawPhysicalCrop? = null,
         /** [DngNoiseProfile] of merged pixels; null for the single-frame Camera2 model. */
         noiseProfile: FloatArray? = null,
+        /** Frames merged into these pixels; the capture profile keeps ML AE brightness for bursts. */
+        mergedFrameCount: Int = 1,
     ): RawDngProfilePreparation? {
         if (!captureExposureCompensationEv.isFinite()) {
             PLog.e(
@@ -737,6 +740,7 @@ object RawProcessor {
             defaultCrop = defaultCrop,
             exposureCompensation = captureExposureCompensationEv,
             frameCount = 1,
+            mergedFrameCount = mergedFrameCount,
         )
         val statsMetadata = if (pixelsIncludeLensShadingCorrection) {
             cameraStatsMetadata.copy(

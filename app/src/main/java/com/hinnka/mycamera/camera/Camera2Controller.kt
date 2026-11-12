@@ -9842,9 +9842,27 @@ class Camera2Controller(private val context: Context) {
                                 "ISO${isoRange.lower}-${isoRange.upper}; using ISO$fittedIso",
                         )
                     }
+                    // Bracketed bursts plan their own short frame from this base, so only same-exposure bursts go darker.
+                    val darker = if (state.isHdrPlusBracketExposureEnabled) null else
+                        MultiFrameExposurePlanner.planHighlightUnderexposure(
+                            viewfinderHistogram = state.histogram,
+                            frameCount = state.activeMultiFrameCount,
+                            baseIso = fittedIso,
+                            baseExposureTimeNs = checkNotNull(lockedExposure),
+                            isoLower = isoRange.lower,
+                            exposureTimeLowerNs = state.getShutterSpeedRange().lower,
+                        )
+                    darker?.let {
+                        PLog.i(
+                            TAG,
+                            "RAW burst highlight underexposure: clipped=${"%.3f".format(it.clippedFraction)} " +
+                                "frames=${state.activeMultiFrameCount} ev=${"%.2f".format(it.plannedDeltaEv)} " +
+                                "ISO$fittedIso ${lockedExposure}ns -> ISO${it.sensitivityIso} ${it.exposureTimeNs}ns",
+                        )
+                    }
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, fittedIso)
-                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, lockedExposure)
+                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, darker?.sensitivityIso ?: fittedIso)
+                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, darker?.exposureTimeNs ?: lockedExposure)
                 }
             }
             val plan = nightPlan

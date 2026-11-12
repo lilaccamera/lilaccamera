@@ -5193,6 +5193,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun setMlAeMaxHdrRatio(ratio: Float) {
+        viewModelScope.launch {
+            userPreferencesRepository.update { mlAeMaxHdrRatio = RawSceneExposureMath.normalizeConfiguredMaxHdrRatio(ratio) }
+        }
+    }
+
     fun setHdrPlusBracketExposureEnabled(enabled: Boolean) {
         cameraController.setHdrPlusBracketExposureEnabled(enabled)
         viewModelScope.launch {

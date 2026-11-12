@@ -2551,6 +2551,7 @@ object GalleryManager {
                     preparedProfile.finalShortGain,
                     preparedProfile.hdrNetPostExposureEv,
                     preparedProfile.hdrNetInputExposureEv,
+                    preparedProfile.rawSceneExposureSummaryText,
                 ),
             )
 
@@ -3662,6 +3663,7 @@ object GalleryManager {
                     stackWhiteLevel.toFloat()
                 },
                 frameCount = finalStackResult.mergedFrameCount,
+                mergedFrameCount = finalStackResult.mergedFrameCount,
                 mgcDenoiseCorrelation = finalStackResult.mgcDenoiseCorrelation,
                 mgcDenoiseReadNoise = finalStackResult.mgcDenoiseReadNoise,
                 mgcDenoiseShotNoise = finalStackResult.mgcDenoiseShotNoise,
@@ -3836,6 +3838,7 @@ object GalleryManager {
                 )
                 val profileStartMs = System.currentTimeMillis()
                 val dngProfilePreparation = RawProcessor.prepareRawDngProfile(
+                    mergedFrameCount = finalStackResult.mergedFrameCount,
                     rawBuffer = null,
                     gpuLinearRgbSource = defaultDenoisedGpuSource,
                     fastMomentsRawStats = finalStackResult.fastMomentsRawStats,
@@ -3872,6 +3875,7 @@ object GalleryManager {
                             dngProfilePreparation.finalShortGain,
                             dngProfilePreparation.hdrNetPostExposureEv,
                             dngProfilePreparation.hdrNetInputExposureEv,
+                            dngProfilePreparation.rawSceneExposureSummaryText,
                         ),
                         sharpen = finalStackResult.mgcSharpenTuningSnr,
                         denoise = finalStackResult.mgcDenoiseTuningSnr,

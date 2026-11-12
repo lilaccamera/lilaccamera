@@ -179,6 +179,8 @@ data class RawMetadata(
     val sensorPixelArrayWidth: Int = 0,
     val sensorPixelArrayHeight: Int = 0,
     val frameCount: Int = 1,
+    /** Frames merged into this image; unlike [frameCount], never reset to 1 after the merge's denoise. */
+    val mergedFrameCount: Int = 1,
     /**
      * MGC's normalized 128-bin power-correlation spectrum after the selected MGC merge branch.
      * Null means either a single uncorrelated source or an unsupported propagated model.

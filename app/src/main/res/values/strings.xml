@@ -1750,6 +1750,11 @@
     <string name="photo_info_frames_stacked">%1$d, stacked</string>
     <string name="photo_info_frames_multiple_exposure">%1$d, multiple exposure</string>
     <string name="photo_info_saved_with">Saved with this photo</string>
+    <string name="photo_info_hdr">HDR · ratio %1$.1f×</string>
+    <string name="photo_info_hdr_used">Ratio used: %1$.1f×</string>
+    <string name="photo_info_hdr_wanted">Scene wanted: %1$.1f×</string>
+    <string name="photo_info_hdr_limit">Ratio limit: %1$.1f×</string>
+    <string name="photo_info_hdr_viewfinder">Viewfinder match: %1$+.1f EV</string>
     <string name="photo_info_saved_dng">RAW file (DNG)</string>
     <string name="photo_info_saved_viewfinder">Viewfinder frame</string>
     <string name="photo_info_saved_render_job">Render settings</string>
@@ -1773,10 +1778,6 @@
     <string name="delete_all_versions_selected">Delete all versions</string>
     <string name="camera_jpeg">Camera JPEG</string>
     <string name="quick_frames_off">Off</string>
-    <plurals name="quick_frame_count">
-        <item quantity="one">%1$d frame</item>
-        <item quantity="other">%1$d frames</item>
-    </plurals>
     <plurals name="quick_shot_count">
         <item quantity="one">%1$d shot</item>
         <item quantity="other">%1$d shots</item>
@@ -1815,6 +1816,7 @@
     <string name="quick_multi_exposure">Multi-exposure</string>
     <string name="quick_rendering">Rendering</string>
     <string name="quick_hdr_plus_frames">HDR+ frames</string>
+    <string name="quick_hdr_ratio">HDR ratio</string>
     <string name="quick_bitrate">Bitrate, Mbps</string>
     <string name="quick_codec">Codec</string>
     <string name="quick_lens">Lens</string>

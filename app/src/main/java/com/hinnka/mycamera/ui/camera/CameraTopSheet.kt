@@ -88,6 +88,8 @@ import com.hinnka.mycamera.ui.components.LilacText
 import com.hinnka.mycamera.ui.components.LilacTextStyle
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import java.util.Locale
+import com.hinnka.mycamera.raw.RawSceneExposureMath
 
 // Quick settings sheet: a row of everyday settings floating above a translucent list in outlined groups.
 internal val SheetEasing = CubicBezierEasing(0.3f, 1.35f, 0.5f, 1f)
@@ -213,6 +215,8 @@ internal fun CameraTopSheet(
     hdrPlusFrameCount: Int,
     hdrPlusMinFrames: Int,
     onHdrPlusFrameCountChange: (Int) -> Unit,
+    hdrRatioLimit: Float,
+    onHdrRatioLimitChange: (Float) -> Unit,
     onRawDcpChange: (String?) -> Unit,
     onRawDcpIdsByLensChange: ((Map<String, String?>) -> Unit)? = null,
     onRawHncsFilmCurveModeChange: (HncsFilmCurveMode) -> Unit,
@@ -623,8 +627,7 @@ internal fun CameraTopSheet(
                                 key = "hdrp",
                                 label = stringResource(R.string.quick_hdr_plus_frames),
                                 explanation = stringResource(R.string.settings_hdr_plus_frame_count_description),
-                                settingsTarget = SettingsTarget.HDR_PLUS,
-                                last = true
+                                settingsTarget = SettingsTarget.HDR_PLUS
                             ) {
                                 FrameCountSlider(
                                     frames = hdrPlusFrameCount,
@@ -632,6 +635,15 @@ internal fun CameraTopSheet(
                                     withOff = false,
                                     onFramesChange = onHdrPlusFrameCountChange
                                 )
+                            }
+                            rows.Setting(
+                                key = "hdrr",
+                                label = stringResource(R.string.quick_hdr_ratio),
+                                explanation = stringResource(R.string.settings_ml_ae_max_hdr_ratio_description),
+                                settingsTarget = SettingsTarget.HDR_PLUS,
+                                last = true
+                            ) {
+                                HdrRatioSlider(hdrRatioLimit, onHdrRatioLimitChange)
                             }
                         } else {
                             photoStackRows()
@@ -1238,7 +1250,8 @@ private fun FrameCountSlider(
     withOff: Boolean,
     onFramesChange: (Int) -> Unit,
     max: Int = MultiFrameConfig.MAX_FRAME_COUNT,
-    countLabel: Int = R.plurals.quick_frame_count
+    // Frame counts show the bare number: the row's name already says what is counted.
+    countLabel: Int? = null
 ) {
     val start = if (withOff) min - 1 else min
     // The value while dragging, until the saved setting reaches it: saves can land late and one drag step at a
@@ -1263,7 +1276,8 @@ private fun FrameCountSlider(
     }
     QuickSlider(
         text = if (shown == 0) stringResource(R.string.quick_frames_off)
-        else pluralStringResource(countLabel, shown, shown),
+        else countLabel?.let { pluralStringResource(it, shown, shown) } ?: shown.toString(),
+        valueWidth = if (countLabel != null) 52.dp else 40.dp,
         active = if (withOff) shown > 0 else shown > 1,
         fraction = position.value,
         onFraction = { f ->
@@ -1277,15 +1291,50 @@ private fun FrameCountSlider(
     )
 }
 
-/** The sheet's slider: the value on the left (amber when [active]), a 120 dp track; reports 0..1 while dragging. */
+/** HDR ratio limit, 1 to 20 in 0.5 steps; a double tap restores the default. Shown while dragging, as saves land late. */
+@Composable
+private fun HdrRatioSlider(limit: Float, onLimitChange: (Float) -> Unit) {
+    val min = RawSceneExposureMath.MIN_CONFIGURED_MAX_HDR_RATIO
+    val max = RawSceneExposureMath.MAX_CONFIGURED_MAX_HDR_RATIO
+    val default = RawSceneExposureMath.FAST_MOMENTS_MAX_HDR_RATIO
+    var dragged by remember { mutableStateOf<Float?>(null) }
+    LaunchedEffect(limit) { if (limit == dragged) dragged = null }
+    LaunchedEffect(dragged) {
+        if (dragged != null) {
+            delay(2000)
+            dragged = null
+        }
+    }
+    val shown = dragged ?: limit
+    QuickSlider(
+        text = String.format(Locale.getDefault(), "%.1f×", shown),
+        active = shown != default,
+        fraction = (shown - min) / (max - min),
+        onFraction = { f ->
+            val value = ((min + f * (max - min)) * 2f).roundToInt() / 2f
+            if (value != dragged) {
+                dragged = value
+                onLimitChange(value)
+            }
+        },
+        onDoubleTap = { dragged = default; onLimitChange(default) }
+    )
+}
+
+/**
+ * The sheet's slider: the value on the left (amber when [active]), a 150 dp track; reports 0..1 while dragging.
+ * The track is as long as fits beside the longest slider name (Multi-exposure) on a 360 dp wide screen.
+ */
 @Composable
 internal fun QuickSlider(
     text: String,
     active: Boolean,
     fraction: Float,
     onFraction: (Float) -> Unit,
-    onDoubleTap: (() -> Unit)? = null
+    onDoubleTap: (() -> Unit)? = null,
+    valueWidth: Dp = 40.dp
 ) {
+    val trackWidth = 150.dp
     val currentOnFraction by rememberUpdatedState(onFraction)
     val currentOnDoubleTap by rememberUpdatedState(onDoubleTap)
     Row(
@@ -1300,12 +1349,12 @@ internal fun QuickSlider(
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.End,
             maxLines = 1,
-            modifier = Modifier.width(62.dp)
+            modifier = Modifier.width(valueWidth)
         )
         Box(
             modifier = Modifier
                 .padding(end = 8.dp)
-                .width(120.dp)
+                .width(trackWidth)
                 .fillMaxHeight()
                 .pointerInput(Unit) {
                     fun select(x: Float) = currentOnFraction((x / size.width).coerceIn(0f, 1f))
@@ -1347,7 +1396,7 @@ internal fun QuickSlider(
             Box(
                 Modifier
                     .align(Alignment.CenterStart)
-                    .offset(x = 120.dp * fraction - 8.dp)
+                    .offset(x = trackWidth * fraction - 8.dp)
                     .size(16.dp)
                     .background(Color.Black, CircleShape)
                     .border(1.5.dp, ModeAmber, CircleShape)
