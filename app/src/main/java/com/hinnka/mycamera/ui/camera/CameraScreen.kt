@@ -1684,9 +1684,6 @@ fun CameraScreen(
                             )
                         }
 
-                        val sceneHints by viewModel.sceneHints.collectAsState()
-                        SceneHintIcons(sceneHints, Modifier.align(Alignment.BottomEnd).padding(8.dp))
-
                         // 倒计时覆盖
                         if (state.countdownValue > 0) {
                             CountdownOverlay(
@@ -2040,6 +2037,20 @@ fun CameraScreen(
                         HeatGauge(state.videoRecordingState.heatGauge, barWidth = 64.dp)
                     }
                 }
+            }
+            // The camera's scene and condition hints: the right end of the same line, whenever it could show.
+            val sceneHints by viewModel.sceneHints.collectAsState()
+            AnimatedVisibility(
+                visible = activePanel != ActivePanel.SETTINGS && activePanel != ActivePanel.FILTERS &&
+                    !everydayRowShown && !recordingLine && sceneHints.isNotEmpty(),
+                enter = fadeIn(tween(150)),
+                exit = fadeOut(tween(150)),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = viewfinderTop, end = 16.dp)
+                    .height(TopEdgeLineHeight)
+            ) {
+                SceneHintIcons(sceneHints, Modifier.wrapContentHeight(Alignment.CenterVertically))
             }
 
             // Portrait offers its guide in a pill centred just above the picture's bottom, the manual
