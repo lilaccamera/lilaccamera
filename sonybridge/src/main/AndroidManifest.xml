@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Sony's photo service (cacao) checks this permission when a client connects; nothing on the ROM declares it.
+         Signature level, so only this app (and anything signed with its key) can hold it. -->
+    <permission
+        android:name="com.sonymobile.permission.IMAGE_PROCESSOR"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="com.sonymobile.permission.IMAGE_PROCESSOR" />
+
+    <!-- No launcher activity: a bound service only. It works only as a privileged system app
+         (/system/priv-app), see tools/install.sh. -->
+    <application
+        android:allowBackup="false"
+        android:label="Lilac Sony Bridge">
+        <service
+            android:name=".BridgeService"
+            android:exported="true" />
+    </application>
+</manifest>
