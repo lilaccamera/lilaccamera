@@ -1118,6 +1118,15 @@ class Camera2Controller(private val context: Context) {
         }
         session.captureBurst(requests, callback, cameraHandler)
         shot.submitted = true
+        // A HAL that silently drops a frame never ends the sequence; fail the shot rather than wait forever.
+        // RAW bursts on the XZ1 Compact run about 0.3 s per frame beyond the exposure, so allow 1 s per frame.
+        val stallTimeoutMs = estimatedDurationNs / 1_000_000 + requests.size * 1_000L + CAPTURE_IMAGE_DELIVERY_TIMEOUT_MS
+        cameraHandler?.postDelayed({
+            if (shot.sequenceCompleted || shot.failed || shot.delivered) return@postDelayed
+            PLog.e(TAG, "Capture sequence stalled: id=${shot.id} after ${stallTimeoutMs} ms")
+            markRawHalPoisoned(shot, "capture sequence stalled")
+            failPhotoCapture(shot, "capture sequence stalled")
+        }, stallTimeoutMs)
     }
 
     private fun trackImage(image: Image?): SafeImage? {
@@ -2486,6 +2495,7 @@ class Camera2Controller(private val context: Context) {
             disposeFailedPhotoCapture(it)
         }
         activePhotoCapture = null
+        runFocusReleasesAfterCapture()
         pendingContinuousBurstCapture = null
         pendingImages.values.toList().forEach(SafeImage::close)
         pendingImages.clear()
@@ -2495,7 +2505,6 @@ class Camera2Controller(private val context: Context) {
         photoCaptureByTimestamp.clear()
         _state.update {
             it.copy(
-        runFocusReleasesAfterCapture()
                 isCapturing = false,
                 hdrBracketCapturing = false,
                 hdrBracketFrameCount = 0,
@@ -7241,20 +7250,11 @@ class Camera2Controller(private val context: Context) {
             handler.post { unlockFocus() }
             return
         }
+        if (deferWhileCapturing(::unlockFocus)) return
         PLog.d(TAG, "Unlock focus")
         restoreContinuousAf()
     }
 
-    private fun clearPointFocusState() {
-        pointMeteringViewAspectRatio = null
-        isFocusLockedWaitingForSceneChange = false
-        sceneChangeFrameCount = 0
-        focusLockedReferenceIso = 0
-        if (deferWhileCapturing(::unlockFocus)) return
-        focusLockedReferenceExposureNs = 0L
-        focusLockedReferenceDistance = 0f
-        focusLockSettleFrames = 0
-        eyeTargetLastSeenElapsedMs = 0L
     /**
      * Holds [action] until the still capture in progress has ended. An AF cancel or AF mode change sent during a
      * burst reaches the camera right after the burst's last request; the XZ1 Compact HAL then drops the RAW frame
@@ -7275,6 +7275,15 @@ class Camera2Controller(private val context: Context) {
         actions.forEach { it() }
     }
 
+    private fun clearPointFocusState() {
+        pointMeteringViewAspectRatio = null
+        isFocusLockedWaitingForSceneChange = false
+        sceneChangeFrameCount = 0
+        focusLockedReferenceIso = 0
+        focusLockedReferenceExposureNs = 0L
+        focusLockedReferenceDistance = 0f
+        focusLockSettleFrames = 0
+        eyeTargetLastSeenElapsedMs = 0L
         pointAfTriggerPending = false
         _state.update { s -> s.copy(
             focusPoint = null,
@@ -7323,6 +7332,7 @@ class Camera2Controller(private val context: Context) {
             handler.post { setShutterKeyHold(held) }
             return
         }
+        if (!held && deferWhileCapturing { setShutterKeyHold(false) }) return
         shutterKeyHold = held
         if (held) {
             // A half-press locks focus on the subject: the tracked object (a driver that tracks during the lock keeps
@@ -7332,7 +7342,6 @@ class Camera2Controller(private val context: Context) {
             } else if (_state.value.focusPoint == null) {
                 // A tap or eye point keeps its own lock.
                 keptFaces.firstOrNull { it.id == mainFaceId }?.let { lockSubjectAf("face ${it.id}", it.sensor) }
-        if (!held && deferWhileCapturing { setShutterKeyHold(false) }) return
             }
         } else {
             halfPressCheck?.let { cameraHandler?.removeCallbacks(it) }
@@ -10356,6 +10365,7 @@ class Camera2Controller(private val context: Context) {
         if (device == null || session == null || builder == null) {
             PLog.v(TAG, "resetPreviewAfterCapture: camera not ready, skipping")
             clearCaptureFocusState("preview unavailable after capture")
+            runFocusReleasesAfterCapture()
             return
         }
 
@@ -10365,7 +10375,6 @@ class Camera2Controller(private val context: Context) {
                 builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
             } else {
                 builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
-            runFocusReleasesAfterCapture()
             }
             setAePrecaptureTriggerIfSupported(
                 builder,
@@ -10391,6 +10400,7 @@ class Camera2Controller(private val context: Context) {
             PLog.e(TAG, "Failed to reset preview", e)
             clearCaptureFocusState("preview reset failure")
         }
+        runFocusReleasesAfterCapture()
     }
 
     private fun clearCaptureFocusState(reason: String) {
@@ -10400,7 +10410,6 @@ class Camera2Controller(private val context: Context) {
         stillFlashCaptureState = null
         isCaptureFocusFrozen = false
         if (hadFocusState) {
-        runFocusReleasesAfterCapture()
             PLog.i(TAG, "Capture focus state released: reason=$reason")
         }
     }
