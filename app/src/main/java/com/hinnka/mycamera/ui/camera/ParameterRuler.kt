@@ -48,8 +48,14 @@ enum class CameraParameter {
     FOCUS,
     WHITE_BALANCE,
     /** Portrait's virtual aperture: the blur strength, in the viewfinder and in the saved photo. */
-    APERTURE
+    APERTURE,
+    /** Night's frame count; Auto chooses it with the shutter time at the press. */
+    FRAMES
 }
+
+/** Night's frame counts on the ruler. */
+internal const val NightFramesMin = 4
+internal const val NightFramesMax = 20
 
 /** Third stops from f/1.0 to f/16, as on a lens's aperture ring. */
 internal val PortraitApertureStops = listOf(
@@ -306,6 +312,7 @@ private fun isMajorStep(parameter: CameraParameter, value: Float, index: Int): B
     CameraParameter.WHITE_BALANCE -> value.roundToInt() % 1000 == 0
     CameraParameter.FOCUS -> index % 5 == 0
     CameraParameter.APERTURE -> value in FullApertureStops
+    CameraParameter.FRAMES -> value.roundToInt() % 4 == 0
 }
 
 /** A round 30 dp mark at the ruler's ends: amber when on. */
@@ -346,6 +353,7 @@ private fun formatParameterValue(parameter: CameraParameter, value: Float): Stri
     CameraParameter.WHITE_BALANCE -> "${value.roundToInt()}K"
     CameraParameter.FOCUS -> formatFocusDistance(value)
     CameraParameter.APERTURE -> formatApertureValue(value)
+    CameraParameter.FRAMES -> value.roundToInt().toString()
 }
 
 /** 2 and 2.8, not 2.0. */
@@ -460,6 +468,8 @@ private fun getScaleValues(parameter: CameraParameter, minValue: Float, maxValue
         }
 
         CameraParameter.APERTURE -> PortraitApertureStops
+
+        CameraParameter.FRAMES -> (NightFramesMin..NightFramesMax).map { it.toFloat() }
 
         CameraParameter.FOCUS -> {
             val steps = 20

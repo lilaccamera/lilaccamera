@@ -146,6 +146,9 @@ class UserPreferences internal constructor(
     var frontPhotoResolutionCapMp by int("front_photo_resolution_cap_mp", 0)
     // Front camera Photo mode: Fast (YUV only) or Accurate (Sony's still processing via a small JPEG, slower bursts).
     var frontAccurateColour by bool("front_accurate_colour", false)
+    // Night: Fast (1/30 s frames; plain YUV on the front camera) or Accurate, and its frame count (0 = Auto).
+    var nightFast by bool("night_fast", false)
+    var nightFrameCount by int("night_frame_count", 0)
     // Pro: also save the full-size JPEG the camera delivers beside each RAW, in the shot's photo stack.
     var saveCameraJpeg by bool("save_camera_jpeg", false)
     var videoCodec by enum("video_codec", com.hinnka.mycamera.video.VideoCodec.H264)

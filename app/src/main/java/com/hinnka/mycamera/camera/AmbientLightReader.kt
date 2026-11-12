@@ -7,8 +7,8 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Handler
 
-/** The phone's ambient light sensor while a shot is taken: the latest reading and the darkest one, in lux. */
-class AmbientLightReader(context: Context) {
+/** The phone's ambient light sensor: the latest reading in lux, also passed to [onLux] when given. */
+class AmbientLightReader(context: Context, private val onLux: ((Float) -> Unit)? = null) {
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val sensor: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)
     private var registered = false
@@ -22,6 +22,7 @@ class AmbientLightReader(context: Context) {
         override fun onSensorChanged(event: SensorEvent) {
             latestLux = event.values.firstOrNull()
             readings++
+            latestLux?.let { onLux?.invoke(it) }
         }
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit

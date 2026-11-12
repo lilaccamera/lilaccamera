@@ -193,6 +193,7 @@ internal fun CameraTopSheet(
     saveCameraJpeg: Boolean,
     onSaveCameraJpegChange: (Boolean) -> Unit,
     isPortraitMode: Boolean = false,
+    isNightMode: Boolean = false,
     portraitQuickBlur: Boolean = true,
     onPortraitQuickBlurChange: (Boolean) -> Unit = {},
     portraitBokehStyle: BokehStyle = BokehStyle.NATURAL,
@@ -553,6 +554,7 @@ internal fun CameraTopSheet(
                         title = stringResource(
                             when {
                                 isPortraitMode -> R.string.capture_mode_portrait
+                                isNightMode -> R.string.capture_mode_night
                                 isProfessionalMode -> R.string.capture_mode_professional
                                 else -> R.string.capture_mode_photo
                             }
@@ -696,19 +698,21 @@ internal fun CameraTopSheet(
                             }
                         }
                         // Only where the camera's still processing differs from its YUV frames (lilac's front camera).
-                        if (isFrontCamera && !isProfessionalMode && com.hinnka.mycamera.camera.DeviceQuirks.isLilac) {
+                        // Night has its own Fast / Accurate switch on the footer, with the same icons.
+                        if (isFrontCamera && !isProfessionalMode && !isNightMode && com.hinnka.mycamera.camera.DeviceQuirks.isLilac) {
                             rows.Setting(
                                 key = "colour",
                                 label = stringResource(R.string.quick_colour),
                                 explanation = stringResource(R.string.quick_explain_colour_front)
                             ) {
                                 listOf(false, true).forEach { accurate ->
-                                    QuickChoice(
+                                    LilacChip(
                                         text = stringResource(
                                             if (accurate) R.string.quick_colour_accurate else R.string.quick_colour_fast
                                         ),
                                         selected = frontAccurateColour == accurate,
                                         minWidth = 56.dp,
+                                        icon = if (accurate) AppIcons.MoonStars else AppIcons.RunLine,
                                         onClick = { onFrontAccurateColourChange(accurate) }
                                     )
                                 }

@@ -32,7 +32,19 @@
     <string name="capture_mode_photo">Photo</string>
     <string name="capture_mode_video">Video</string>
     <string name="capture_mode_portrait">Portrait</string>
-    <string name="capture_mode_wip">Night: work in progress</string>
+    <string name="capture_mode_night">Night</string>
+    <string name="night_frames">Frames</string>
+    <string name="night_line">%1$d frames · hold %2$s s</string>
+    <string name="night_hold_still">Hold still</string>
+    <string name="night_line_plan">%1$d × %2$s s · hold still</string>
+    <string name="night_line_frames_capturing">%1$d frames · hold still</string>
+    <string name="night_low_light_pill">Low light · Night</string>
+    <string name="night_lux_mark">%1$d lux</string>
+    <string name="night_switch">Night: Fast or Accurate</string>
+    <string name="night_note_fast">Fast · 1/30 s frames</string>
+    <string name="night_note_fast_front">Fast · 30 fps, colours may tint</string>
+    <string name="night_note_accurate">Accurate · longer frames, hold still</string>
+    <string name="night_note_accurate_front">Accurate · true colours, slower</string>
     <string name="capture_mode_stop_recording">Stop recording to switch mode</string>
 
     <!-- Exposure Controls -->

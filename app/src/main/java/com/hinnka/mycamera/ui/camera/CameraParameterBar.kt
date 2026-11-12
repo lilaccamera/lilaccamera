@@ -39,6 +39,7 @@ import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.CameraState
 import com.hinnka.mycamera.camera.CameraUtils
+import com.hinnka.mycamera.camera.DeviceQuirks
 import com.hinnka.mycamera.video.CaptureMode
 import kotlin.math.abs
 import kotlin.math.ln
@@ -88,6 +89,8 @@ internal data class CameraParameterItem(
     @StringRes val disabledMessage: Int? = null,
     /** Set by hand rather than by the camera: the value always shows, with an amber dot. */
     val isManual: Boolean = false,
+    /** Always on the picture's bottom edge while the panel is closed, as this text (Night's plan line). */
+    val lineText: String? = null,
 )
 
 @Composable
@@ -115,7 +118,17 @@ internal fun cameraParameterItems(state: CameraState): List<CameraParameterItem>
             isManual = true
         )
     ) else emptyList()
-    return aperture + listOfNotNull(
+    // Night leads with its frame count, and its line says the plan.
+    val frames = if (showsNightFrames(state)) listOf(
+        CameraParameterItem(
+            CameraParameter.FRAMES,
+            stringResource(R.string.night_frames),
+            state.nightFrames.toString(),
+            isManual = state.nightFrameCount > 0,
+            lineText = nightPlanLine(state)
+        )
+    ) else emptyList()
+    return frames + aperture + listOfNotNull(
         CameraParameterItem(
             CameraParameter.EXPOSURE_COMPENSATION,
             stringResource(R.string.camera_parameter_exposure),
@@ -357,7 +370,7 @@ internal fun ManualValuesLine(
     onValueClick: (CameraParameter) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val items = cameraParameterItems(state).filter { it.isManual }
+    val items = cameraParameterItems(state).filter { it.isManual || it.lineText != null }
     if (items.isEmpty()) return
     val textStyle = TextStyle(shadow = ViewfinderTextShadow, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, color = Color.White)
     Row(
@@ -378,13 +391,54 @@ internal fun ManualValuesLine(
                 val text = when (item.parameter) {
                     CameraParameter.ISO -> "${item.label} ${item.value}"
                     CameraParameter.EXPOSURE_COMPENSATION -> "${item.value} ${item.label}"
-                    else -> item.value
+                    else -> item.lineText ?: item.value
                 }
                 Text(text, style = textStyle, maxLines = 1, softWrap = false)
-                ManualDot(Modifier.padding(start = 4.dp))
+                if (item.isManual) ManualDot(Modifier.padding(start = 4.dp))
             }
         }
     }
+}
+
+/** Night shows and sets its frame count with the manual values. */
+internal fun showsNightFrames(state: CameraState): Boolean =
+    state.isNightMode && state.captureMode == CaptureMode.PHOTO && !state.useRaw
+
+/**
+ * Night's one line: before the press the frame count and about how long to hold still; during the shot
+ * "Hold still" while it measures the shake, then the plan it chose.
+ */
+@Composable
+private fun nightPlanLine(state: CameraState): String {
+    val plan = state.nightShotPlan
+    return when {
+        state.isCapturing && state.nightSteadying -> stringResource(R.string.night_hold_still)
+        state.isCapturing && plan != null ->
+            stringResource(R.string.night_line_plan, plan.frames, formatShutterSpeedValue(plan.exposureTimeNs))
+        state.isCapturing -> stringResource(R.string.night_line_frames_capturing, state.activeMultiFrameCount)
+        else -> stringResource(R.string.night_line, state.nightFrames, formatHoldSeconds(nightHoldSeconds(state)))
+    }
+}
+
+/**
+ * About how long a Night shot takes: the back camera measures the shake for 0.5 s, then takes frames of about
+ * 1/15 s (Fast: 1/30 s); lilac's front camera starts at once and its frames with the JPEG come about 240 ms apart.
+ */
+internal fun nightHoldSeconds(state: CameraState): Float {
+    val planned = state.isManualSensorSupported
+    val spacing = when {
+        state.nightFast -> 1f / 30f
+        planned -> 1f / 15f
+        state.frontStillJpeg && DeviceQuirks.isLilac -> 0.24f
+        else -> 1f / 30f
+    }
+    return (if (planned) 0.5f else 0f) + state.nightFrames * spacing
+}
+
+/** Rounded up to the next half second: "1.5", "3". */
+internal fun formatHoldSeconds(seconds: Float): String {
+    val halves = kotlin.math.ceil(seconds * 2f).toInt().coerceAtLeast(1)
+    return if (halves % 2 == 0) (halves / 2).toString() else "${halves / 2}.5"
 }
 
 /** Portrait photos show and set their virtual aperture with the manual values. */

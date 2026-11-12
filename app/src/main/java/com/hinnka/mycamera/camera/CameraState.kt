@@ -313,6 +313,16 @@ data class CameraState(
     val isVirtualApertureEnabled: Boolean = false,
     /** Portrait on the mode dial: Photo with a face-aware viewfinder and a background blur after the shot. */
     val isPortraitMode: Boolean = false,
+    /** Night on the mode dial: Photo where every shot is a stack planned for low light. */
+    val isNightMode: Boolean = false,
+    /** Night's frame count; 0 = Auto, chosen with the shutter time at the press. */
+    val nightFrameCount: Int = 0,
+    /** Night's Fast choice: 1/30 s frames on the back camera, plain YUV on lilac's front camera. */
+    val nightFast: Boolean = false,
+    /** The Night shot under way: true while it measures how steady the phone is, before its plan. */
+    val nightSteadying: Boolean = false,
+    /** The plan of the Night shot under way; kept until the next press. */
+    val nightShotPlan: NightCapturePlan? = null,
     val physicalAperture: Float = 2.0f, // 物理光圈值
     val virtualAperture: Float = 2.0f,  // 虚拟光圈值 (f-number)
     // 对焦
@@ -440,8 +450,20 @@ data class CameraState(
     val isAutoExposure: Boolean
         get() = isIsoAuto && isShutterSpeedAuto
 
+    /** Night stacks every shot, whether or not Photo mode's multi-frame setting is on. */
+    private val nightStacks: Boolean
+        get() = isNightMode && captureMode == CaptureMode.PHOTO && !useRaw
+
+    /** Night's frame count before the press: the one set, or Auto's usual count. */
+    val nightFrames: Int
+        get() = if (nightFrameCount > 0) nightFrameCount else NightCapturePlanner.AUTO_FRAMES
+
+    /** lilac front camera: whether still requests carry the small JPEG (Night follows its own Fast/Accurate). */
+    val frontStillJpeg: Boolean
+        get() = if (nightStacks) !nightFast else frontAccurateColour
+
     val isMultiFrameEnabled: Boolean
-        get() = multiFrameOutputScale != null &&
+        get() = (multiFrameOutputScale != null || nightStacks) &&
             (!useRaw || (isRawSupported && isRawMultiFrameSupported && normalizedHdrPlusFrameCount > 1))
 
     // A single RAW frame uses the ordinary capture and development path.
@@ -467,7 +489,7 @@ data class CameraState(
         get() = isMultiFrameEnabled && !useRaw
 
     val isJpgMaxHdrEnabled: Boolean
-        get() = isJpgMaxEnabled && useJpgMaxHdrComposition
+        get() = isJpgMaxEnabled && useJpgMaxHdrComposition && !nightStacks  // Night's frames are planned, not bracketed
 
     val isRawMaxEnabled: Boolean
         get() = isMultiFrameEnabled && useRaw
@@ -478,6 +500,9 @@ data class CameraState(
 
     val activeMultiFrameCount: Int
         get() = when {
+            isJpgMaxEnabled && nightStacks -> MultiFrameConfig.normalizeDenoiseFrameCount(
+                nightShotPlan?.frames ?: nightFrames
+            )
             isJpgMaxEnabled -> MultiFrameConfig.normalizeDenoiseFrameCount(
                 jpgMultiFrameDenoiseFrameCount
             )

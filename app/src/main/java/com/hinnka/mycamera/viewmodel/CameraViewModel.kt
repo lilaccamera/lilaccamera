@@ -2030,6 +2030,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setPhotoResolutionCapMp(it.photoResolutionCapMp)
                 cameraController.setFrontPhotoResolutionCapMp(it.frontPhotoResolutionCapMp)
                 cameraController.setFrontAccurateColour(it.frontAccurateColour)
+                cameraController.setNightFast(it.nightFast)
+                cameraController.setNightFrameCount(it.nightFrameCount)
                 cameraController.keepRawCompanionJpeg = it.saveCameraJpeg
                 cameraController.setVideoCodec(it.videoCodec)
                 multipleExposureState = multipleExposureState.copy(enabled = it.useMultipleExposure)
@@ -2601,6 +2603,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.setPhotoResolutionCapMp(prefs.photoResolutionCapMp)
         cameraController.setFrontPhotoResolutionCapMp(prefs.frontPhotoResolutionCapMp)
         cameraController.setFrontAccurateColour(prefs.frontAccurateColour)
+        cameraController.setNightFast(prefs.nightFast)
+        cameraController.setNightFrameCount(prefs.nightFrameCount)
         cameraController.setUseP010(prefs.useP010)
         cameraController.setUseP3ColorSpace(prefs.useP3ColorSpace)
         cameraController.setPhotoPreviewStabilizationEnabled(prefs.photoPreviewStabilizationEnabled)
@@ -3339,6 +3343,30 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             virtualApertureBeforePortrait = null
             showPortraitIntro = false
         }
+    }
+
+    /**
+     * Switches Night on or off. Night stacks every shot, so like turning on multi-frame it switches off Live photo
+     * and multiple exposure, which cannot stack.
+     */
+    fun setNightMode(enabled: Boolean) {
+        if (state.value.isNightMode == enabled) return
+        cameraController.setNightMode(enabled)
+        if (enabled && (state.value.useLivePhoto || state.value.useMultipleExposure)) {
+            if (state.value.useMultipleExposure) setUseMultipleExposure(false)
+            if (state.value.useLivePhoto) setUseLivePhoto(false)
+        }
+    }
+
+    fun setNightFast(fast: Boolean) {
+        cameraController.setNightFast(fast)
+        userPreferencesRepository.updateAsync { nightFast = fast }
+    }
+
+    /** 0 = Auto: the count is chosen with the shutter time at the press. */
+    fun setNightFrameCount(frames: Int) {
+        cameraController.setNightFrameCount(frames)
+        userPreferencesRepository.updateAsync { nightFrameCount = state.value.nightFrameCount }
     }
 
     /** Depth blur needs the depth model; without it the choice is explained and offered for download. */

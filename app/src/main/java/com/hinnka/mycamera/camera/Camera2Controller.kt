@@ -1083,7 +1083,7 @@ class Camera2Controller(private val context: Context) {
      * and it holds per request only, so every burst frame carries it.
      */
     private fun frontStillJpegReader(captureFormat: Int, characteristics: CameraCharacteristics): ImageReader? {
-        if (!DeviceQuirks.isLilac || !_state.value.frontAccurateColour ||
+        if (!DeviceQuirks.isLilac || !_state.value.frontStillJpeg ||
             captureFormat == ImageFormat.RAW_SENSOR || captureFormat == ImageFormat.RAW10 ||
             characteristics.get(CameraCharacteristics.LENS_FACING) != CameraCharacteristics.LENS_FACING_FRONT
         ) return null
@@ -2806,7 +2806,7 @@ class Camera2Controller(private val context: Context) {
     private fun surfacelessOpenSettings(): List<Any?> = _state.value.let {
         listOf(
             it.currentCameraId, it.captureMode, it.aspectRatio, requestedRawCaptureEnabled,
-            it.useP010, it.useP3ColorSpace, it.photoResolutionCapMp, it.frontPhotoResolutionCapMp, it.frontAccurateColour,
+            it.useP010, it.useP3ColorSpace, it.photoResolutionCapMp, it.frontPhotoResolutionCapMp, it.frontStillJpeg,
             it.multiFrameOutputScale,
             it.photoPreviewStabilizationEnabled, it.useLivePhoto,
             it.vendorCaptureSettingsByLens, it.customVendorKeySettings,
@@ -7665,10 +7665,28 @@ class Camera2Controller(private val context: Context) {
     }
 
     /** Front camera "Accurate" colour (see frontStillJpegReader); the JPEG output is part of the session. */
-    fun setFrontAccurateColour(enabled: Boolean) {
-        if (_state.value.frontAccurateColour == enabled) return
-        _state.update { s -> s.copy(frontAccurateColour = enabled) }
-        if (isFrontCameraOpen()) restartPhotoSession("front accurate colour: $enabled")
+    fun setFrontAccurateColour(enabled: Boolean) = updateFrontStillJpeg("front accurate colour: $enabled") {
+        it.copy(frontAccurateColour = enabled)
+    }
+
+    /** Night on the mode dial: every Photo shot is a stack planned for low light (see planNightCapture). */
+    fun setNightMode(enabled: Boolean) = updateFrontStillJpeg("night mode: $enabled") {
+        it.copy(isNightMode = enabled)
+    }
+
+    /** Night's Fast choice: 1/30 s frames on the back camera; on lilac's front camera, no JPEG in the requests. */
+    fun setNightFast(fast: Boolean) = updateFrontStillJpeg("night fast: $fast") { it.copy(nightFast = fast) }
+
+    /** Night's frame count; 0 = Auto. */
+    fun setNightFrameCount(frames: Int) {
+        _state.update { s -> s.copy(nightFrameCount = if (frames > 0) MultiFrameConfig.normalizeDenoiseFrameCount(frames) else 0) }
+    }
+
+    // The front still JPEG is part of the session, so a change to it reopens a running front camera.
+    private fun updateFrontStillJpeg(reason: String, change: (CameraState) -> CameraState) {
+        val before = _state.value.frontStillJpeg
+        _state.update(change)
+        if (_state.value.frontStillJpeg != before && isFrontCameraOpen()) restartPhotoSession(reason)
     }
 
     private fun isFrontCameraOpen(): Boolean =
@@ -8336,7 +8354,9 @@ class Camera2Controller(private val context: Context) {
                 ambientLightReader.start(cameraHandler)
             }
             nightPlan = null
-            if (isNightPlanCandidate(currentState)) {
+            val planNight = isNightPlanCandidate(currentState)
+            _state.update { s -> s.copy(nightShotPlan = null, nightSteadying = planNight) }
+            if (planNight) {
                 // Measure how steady the phone is before choosing the exposure.
                 val start = { startNightCapture(device, reader, baseExposureResult) }
                 cameraHandler?.postDelayed(start, NightCapturePlanner.STEADINESS_WINDOW_MS) ?: start()
@@ -8353,8 +8373,10 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    // The plan sets the exposure by hand, so a camera without manual exposure (lilac's front) shoots at once.
     private fun isNightPlanCandidate(state: CameraState): Boolean =
-        NightCapturePlanner.enabled &&
+        state.isNightMode &&
+            isManualSensorSupported && availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_OFF) &&
             state.isJpgMaxEnabled &&
             !state.isJpgMaxHdrEnabled &&
             state.requiresMultiFrameCaptureSequence &&
@@ -8367,12 +8389,17 @@ class Camera2Controller(private val context: Context) {
                 "camera changed while measuring steadiness"
             }
             nightPlan = planNightCapture(_state.value, reader, baseExposureResult)?.also { plan ->
-                activePhotoCapture?.let { it.state = it.state.copy(nightBrightenGain = plan.brightenGain) }
+                activePhotoCapture?.let {
+                    it.state = it.state.copy(nightBrightenGain = plan.brightenGain, nightShotPlan = plan)
+                }
             }
+            // The burst reads its frame count from the state, so the plan goes there before it starts.
+            _state.update { s -> s.copy(nightShotPlan = nightPlan, nightSteadying = false) }
             prepareCaptureLighting(device, reader, baseExposureResult)
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to start low-light capture", e)
             nightPlan = null
+            _state.update { s -> s.copy(nightShotPlan = null, nightSteadying = false) }
             _state.update { s -> s.copy(isCapturing = false) }
             stopShotSensors()
             resetPreviewAfterCapture()
@@ -8411,14 +8438,15 @@ class Camera2Controller(private val context: Context) {
             aeExposureNs = aeExposureNs,
             angularSpeedRadS = shake,
             focalLengthPx = focalPx,
-            frames = state.activeMultiFrameCount,
+            frames = state.nightFrameCount,
             isoRange = state.getIsoRange(),
             exposureRangeNs = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE),
+            fast = state.nightFast,
         )
         PLog.i(
             TAG,
             "Low-light plan: shake=%.4f rad/s focalPx=%.0f ae=ISO%d %.1fms -> frames=%d ISO%d %.1fms gain=%.2f".format(
-                shake, focalPx, aeIso, aeExposureNs / 1e6, state.activeMultiFrameCount,
+                shake, focalPx, aeIso, aeExposureNs / 1e6, plan.frames,
                 plan.iso, plan.exposureTimeNs / 1e6, plan.brightenGain,
             ),
         )
