@@ -49,4 +49,32 @@ class HdrBracketConfigTest {
 
         assertTrue(shutterNs > HdrBracketConfig.YUV_LONG_MAX_SHUTTER_NS)
     }
+
+    private fun histogram(clipped: Float, dark: Float): IntArray = IntArray(256).also {
+        it[255] = (1000 * clipped).toInt()
+        it[5] = (1000 * dark).toInt()
+        it[120] = 1000 - it[255] - it[5]
+    }
+
+    @Test
+    fun adaptiveEvsFollowClippingAndShadows() {
+        assertEquals(HdrBracketConfig.YUV_SHORT_EV to HdrBracketConfig.YUV_LONG_EV, HdrBracketConfig.adaptiveEvs(null))
+        assertEquals(-1f to 1f, HdrBracketConfig.adaptiveEvs(histogram(clipped = 0f, dark = 0f)))
+        // Monitor in a dark room: highlights clipped, most of the frame near black.
+        assertEquals(-2.5f to 3f, HdrBracketConfig.adaptiveEvs(histogram(clipped = 0.1f, dark = 0.6f)))
+        assertEquals(-1.5f to 2f, HdrBracketConfig.adaptiveEvs(histogram(clipped = 0.01f, dark = 0.1f)))
+    }
+
+    @Test
+    fun longFrameUsesShutterBeforeIsoWhenSteady() {
+        // Base ISO 286 at 1/50 s, +3 EV, steady enough for 1/4 s: all of it from the shutter.
+        val (iso, shutterNs) = HdrBracketConfig.planManualExposure(
+            baseIso = 286, baseShutterNs = 20_000_000L, evOffset = 3f,
+            isoLower = 50, isoUpper = 3200, shutterLowerNs = 100_000L, shutterUpperNs = 1_000_000_000L,
+            longShutterLimitNs = 250_000_000L,
+        )
+        assertEquals(286, iso)
+        assertEquals(160_000_000L, shutterNs)
+    }
 }
+

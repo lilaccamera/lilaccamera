@@ -473,6 +473,10 @@ class GlesYuvStacker(
                 applyDenoise = false,
                 label = "renderHdrZeroTexture",
             )
+            // The stack is now in hdrZeroTexture; free its full-size inputs before the fusion pyramid.
+            freeTexturesEarly(accumulatorTexture, refY, refCbCr, curY, curCbCr)
+            accumulatorTexture = 0; currentAccumulatorTexture = 0
+            refY = 0; refCbCr = 0; curY = 0; curCbCr = 0
             renderMertensFusionToOutput(
                 inputTextures = intArrayOf(hdrZeroTexture, hdrHighTexture, hdrLowTexture),
                 exposureProducts = exposureProducts,
@@ -2220,18 +2224,18 @@ class GlesYuvStacker(
                     renderMertensPyrDown(weights.textureId, weights.width, weights.height, it)
                 }
 
-                val laplacians = currentImages.mapIndexed { index, source ->
-                    createMertensRenderTarget(currentWidth, currentHeight, halfFloat = true).also {
-                        renderMertensLaplacian(source.textureId, nextImages[index].textureId, nextImages[index].width, nextImages[index].height, it)
-                    }
-                }
+                // Laplacians are formed inside the weighted sum: three full-size RGBA16F targets fewer.
                 val resultLevel = createMertensRenderTarget(currentWidth, currentHeight, halfFloat = true)
-                renderMertensWeightedSum(laplacians, weights, resultLevel)
+                renderMertensLaplacianWeightedSum(currentImages, nextImages, weights, resultLevel)
                 resultPyramid.add(resultLevel)
 
-                laplacians.forEach { it.release() }
                 currentImages.forEach { it.releaseIfOwned() }
                 weights.release()
+                if (level == 0) {
+                    // The bracket inputs are only read at level 0.
+                    freeTexturesEarly(*inputTextures)
+                    hdrZeroTexture = 0; hdrHighTexture = 0; hdrLowTexture = 0
+                }
 
                 currentImages = nextImages.map { MertensTextureLevel(it.width, it.height, it.textureId, owned = true, owner = it) }
                 currentWeights = nextWeights
@@ -2348,21 +2352,27 @@ class GlesYuvStacker(
         finishMertensPass("renderMertensPyrDown")
     }
 
-    private fun renderMertensLaplacian(
-        baseTexture: Int,
-        nextTexture: Int,
-        nextWidth: Int,
-        nextHeight: Int,
+    private fun renderMertensLaplacianWeightedSum(
+        images: List<MertensTextureLevel>,
+        nextImages: List<MertensRenderTarget>,
+        weights: MertensRenderTarget,
         target: MertensRenderTarget,
     ) {
-        timing.beginPass("renderMertensLaplacian")
+        timing.beginPass("renderMertensLaplacianWeightedSum")
         GLES30.glUseProgram(mertensLaplacianProgram)
         bindMertensTarget(target)
-        bindTexture(mertensLaplacianProgram, "uBaseTexture", 0, baseTexture)
-        bindTexture(mertensLaplacianProgram, "uNextTexture", 1, nextTexture)
-        GLES31.glUniform2i(GLES31.glGetUniformLocation(mertensLaplacianProgram, "uNextSize"), nextWidth, nextHeight)
+        images.forEachIndexed { index, image -> bindTexture(mertensLaplacianProgram, "uImage$index", index, image.textureId) }
+        bindTexture(mertensLaplacianProgram, "uWeights", 3, weights.textureId)
+        nextImages.forEachIndexed { index, next -> bindTexture(mertensLaplacianProgram, "uNext$index", 4 + index, next.textureId) }
+        GLES31.glUniform2i(GLES31.glGetUniformLocation(mertensLaplacianProgram, "uNextSize"), nextImages[0].width, nextImages[0].height)
         GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
-        finishMertensPass("renderMertensLaplacian")
+        finishMertensPass("renderMertensLaplacianWeightedSum")
+    }
+
+    /** Frees textures before [release]; drops them from [textures] so a reused name is never deleted twice. */
+    private fun freeTexturesEarly(vararg ids: Int) {
+        val live = ids.filter { it != 0 && textures.remove(it) }
+        if (live.isNotEmpty()) GLES30.glDeleteTextures(live.size, live.toIntArray(), 0)
     }
 
     private fun renderMertensWeightedSum(
@@ -3842,15 +3852,23 @@ class GlesYuvStacker(
             precision highp int;
             in vec2 vTexCoord;
             out vec4 fragColor;
-            uniform sampler2D uBaseTexture;
-            uniform sampler2D uNextTexture;
+            uniform sampler2D uImage0;
+            uniform sampler2D uImage1;
+            uniform sampler2D uImage2;
+            uniform sampler2D uNext0;
+            uniform sampler2D uNext1;
+            uniform sampler2D uNext2;
+            uniform sampler2D uWeights;
             uniform ivec2 uNextSize;
             $MERTENS_COMMON_PYRAMID_GLSL
             void main() {
                 ivec2 coord = ivec2(gl_FragCoord.xy);
-                vec4 base = texelFetch(uBaseTexture, coord, 0);
-                vec4 up = pyrUpSample(uNextTexture, coord, uNextSize);
-                fragColor = vec4(base.rgb - up.rgb, 1.0);
+                vec3 weights = texelFetch(uWeights, coord, 0).rgb;
+                vec3 color =
+                    (texelFetch(uImage0, coord, 0).rgb - pyrUpSample(uNext0, coord, uNextSize).rgb) * weights.r +
+                    (texelFetch(uImage1, coord, 0).rgb - pyrUpSample(uNext1, coord, uNextSize).rgb) * weights.g +
+                    (texelFetch(uImage2, coord, 0).rgb - pyrUpSample(uNext2, coord, uNextSize).rgb) * weights.b;
+                fragColor = vec4(color, 1.0);
             }
         """.trimIndent()
 
