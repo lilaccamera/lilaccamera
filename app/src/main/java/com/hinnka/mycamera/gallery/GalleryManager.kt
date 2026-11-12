@@ -3662,6 +3662,7 @@ object GalleryManager {
                     stackWhiteLevel.toFloat()
                 },
                 frameCount = finalStackResult.mergedFrameCount,
+                mergedFrameCount = finalStackResult.mergedFrameCount,
                 mgcDenoiseCorrelation = finalStackResult.mgcDenoiseCorrelation,
                 mgcDenoiseReadNoise = finalStackResult.mgcDenoiseReadNoise,
                 mgcDenoiseShotNoise = finalStackResult.mgcDenoiseShotNoise,

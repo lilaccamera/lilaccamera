@@ -3392,7 +3392,7 @@ class RawDemosaicProcessor {
                     !captureUsesHdrNet -> null
                     actualMetadata.shutterSpeed > CameraState.MAX_PHOTO_PREVIEW_SHUTTER_SPEED_NS ->
                         "CAPTURE_SHUTTER_EXCEEDS_PREVIEW_LIMIT"
-                    actualMetadata.frameCount > 1 -> "MERGED_BURST"
+                    actualMetadata.mergedFrameCount > 1 -> "MERGED_BURST"
                     else -> null
                 }
                 val skipHdrNetViewfinderMatch = hdrNetViewfinderSkipReason != null
