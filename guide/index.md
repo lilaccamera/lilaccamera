@@ -15,15 +15,15 @@ hide:
 </div>
 </div>
 
-Lilac Camera is a fork of [PhotonCamera](https://github.com/bjzhou/PhotonCamera) by bjzhou, with an interface rebuilt for small phone screens and processing adapted for low-memory phones.
+Lilac is a camera app for one phone. It does three things a default camera app cannot:
 
-<div class="lilac-cards" markdown="0">
-<a class="lilac-card" href="user/photo-mode/"><strong>Photo and Night</strong><span>Stacking, how many frames, 12 MP and 2 MP, front camera colour</span></a>
-<a class="lilac-card" href="user/pro-mode/"><strong>Pro and HDR</strong><span>RAW bursts, the render queue, keeping bright skies</span></a>
-<a class="lilac-card" href="user/troubleshooting/"><strong>Troubleshooting</strong><span>Every message, what it means and what to do</span></a>
+<div class="lilac-cards lilac-cards--steps" markdown="0">
+<a class="lilac-card" href="#the-best-of-both-worlds"><span class="lilac-card__num">1</span><strong>The best of both worlds</strong><span>GCam's photo processing on Sony's camera hardware</span></a>
+<a class="lilac-card" href="#rebuilt-for-a-46-inch-screen"><span class="lilac-card__num">2</span><strong>Built for a small screen</strong><span>Camera and editor rebuilt for one thumb on 4.6 inches</span></a>
+<a class="lilac-card" href="#960-fps-slow-motion-is-back"><span class="lilac-card__num">3</span><strong>960 fps slow motion</strong><span>Sony's super slow motion, working again on a custom ROM</span></a>
 </div>
 
-## The best of both worlds
+## The best of both worlds { .lilac-step data-step="1" }
 
 GCam processes photos well but knows nothing about Sony's camera. Sony's camera app uses the hardware fully but does not run on custom ROMs. Lilac brings the two together: GCam's HDR+ processing, and the Sony camera features that only Sony's own app used, such as subject tracking, the laser distance sensor and 960 fps slow motion.
 
@@ -64,9 +64,11 @@ Compared with a default camera app:
     - A bright window and monitor in a dark room: a 13-frame Pro burst kept most of the highlight detail. Sony's own JPEG of the same exposure was white there, with about three times the fine noise.
     - A dark room: 10 to 20 stacked front-camera frames reached 1.6 to 2.3 times the signal-to-noise ratio of Sony's camera app.
 
-    One scene each, not a promise for every photo. How each step works: [How a picture is made](user/how-pictures-are-made.md).
+    One scene each, not a promise for every photo.
 
-## Rebuilt for a 4.6-inch screen
+<a class="lilac-next" href="user/how-pictures-are-made/">Next: how a picture is made, from sensor to stacked photo</a>
+
+## Rebuilt for a 4.6-inch screen { .lilac-step data-step="2" }
 
 Lilac's interface is not PhotonCamera's: the camera and the editor were rebuilt so every control is in reach of one thumb on a small phone.
 
@@ -96,16 +98,18 @@ Lilac's interface is not PhotonCamera's: the camera and the editor were rebuilt 
 <figcaption>The bottom of the camera screen: zoom ring, mode dial and buttons, all in thumb reach.</figcaption>
 </figure>
 
-How the screen is laid out, and how the editor fits: [Built for a small screen](user/small-screen.md).
+<a class="lilac-next" href="user/small-screen/">Next: how the camera screen and the editor are laid out</a>
 
-## 960 fps slow motion is back
+## 960 fps slow motion is back { .lilac-step data-step="3" }
 
 The XZ1 Compact's sensor records at 960 frames a second, but on custom ROMs that went away with Sony's camera app. sunplex07's LineageOS 23.2 keeps Sony's slow-motion service, cacao, and Lilac reaches it through its companion app, the Lilac Sony Bridge. So 960 fps works again: 720p bursts that play back 32 times slower.
 
 !!! note "Only tested on sunplex07's LineageOS 23.2"
-    Other ROMs may not ship Sony's cacao service. Details: [slow motion](user/video.md#slow-motion).
+    Other ROMs may not ship Sony's cacao service.
 
-## Which ROM you need
+<a class="lilac-next" href="user/video/#slow-motion">Next: slow motion in Video mode, and its limits</a>
+
+## Get Lilac
 
 | Feature | Needs | Tested on |
 |---|---|---|
@@ -115,16 +119,32 @@ The XZ1 Compact's sensor records at 960 frames a second, but on custom ROMs that
 
 On a ROM without the shim, Pro does not appear on the mode dial. Other phones are not tested.
 
-## How to get it
-
 - **Stable:** inside lilac ROMs that include it; it updates with the ROM.
 - **Beta:** GitHub releases of this project. It installs beside the ROM's copy under its own name.
 
-??? note "All guide pages"
-    **How it works:** [How a picture is made](user/how-pictures-are-made.md) · [Built for a small screen](user/small-screen.md) · [Focus and faces](user/focus.md) · [Sony hardware](user/hardware.md)
+## The guide
 
-    **Using Lilac:** [Getting started](user/getting-started.md) · [Photo and Night](user/photo-mode.md) · [Pro](user/pro-mode.md) · [HDR](user/hdr.md) · [Portrait](user/portrait.md) · [Video](user/video.md) · [Editor](user/editor.md) · [Troubleshooting](user/troubleshooting.md)
+<div class="lilac-map" markdown="0">
+<div><h3>How Lilac works</h3><ul>
+<li><a href="user/how-pictures-are-made/">How a picture is made</a></li>
+<li><a href="user/small-screen/">Built for a small screen</a></li>
+<li><a href="user/focus/">Focus and faces</a></li>
+<li><a href="user/hardware/">Sony hardware</a></li>
+</ul></div>
+<div><h3>Using Lilac</h3><ul>
+<li><a href="user/getting-started/">Getting started</a></li>
+<li><a href="user/photo-mode/">Photo and Night</a></li>
+<li><a href="user/pro-mode/">Pro</a> · <a href="user/hdr/">HDR</a></li>
+<li><a href="user/portrait/">Portrait</a> · <a href="user/video/">Video</a></li>
+<li><a href="user/editor/">Editor</a></li>
+<li><a href="user/troubleshooting/">Troubleshooting</a></li>
+</ul></div>
+<div><h3>Testers and ROMs</h3><ul>
+<li><a href="bridge/install/">Slow-motion bridge</a></li>
+<li><a href="rom/integration/">ROM integration</a></li>
+</ul></div>
+</div>
 
-    **For testers and ROM maintainers:** [Slow-motion bridge](bridge/install.md) · [ROM integration](rom/integration.md)
+The guide explains what Lilac does differently. Camera basics, and the colour tools Lilac shares with PhotonCamera, are not covered.
 
-    The colour tools and other features Lilac shares with PhotonCamera work as before and are not covered here.
+<p class="lilac-credit">Lilac Camera is a fork of <a href="https://github.com/bjzhou/PhotonCamera">PhotonCamera</a> by bjzhou, with an interface rebuilt for small phone screens and processing adapted for low-memory phones.</p>
