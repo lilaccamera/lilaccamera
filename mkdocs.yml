@@ -64,3 +64,4 @@ exclude_docs: |
   check-text.sh
   snippets/
   requirements.txt
+  check-links.py

@@ -24,14 +24,14 @@ Above ISO 320 the back sensor's gain is digital rather than analog.
 From the camera:
 
 <div class="lilac-features" markdown="0">
-<div class="lilac-feature"><img src="../icons/User.svg" alt="" class="lilac-feature__icon"><div><strong>Face detection</strong><span>On the camera chip, up to five faces: face frames, focus, exposure, Portrait and the self-timer lamp. <a href="../focus/#faces">Focus and faces</a></span></div></div>
+<div class="lilac-feature"><img src="../icons/User.svg" alt="" class="lilac-feature__icon"><div><strong>Face detection</strong><span>On the camera chip, up to five faces: face frames, focus, exposure, Portrait and the self-timer lamp. <a href="focus.md#faces">Focus and faces</a></span></div></div>
 <div class="lilac-feature"><img src="../icons/FocusCenteredLine.svg" alt="" class="lilac-feature__icon"><div><strong>Subject tracking</strong><span>Back camera: tap an object and the camera follows it.</span></div></div>
 <div class="lilac-feature"><img src="../icons/FocusLine.svg" alt="" class="lilac-feature__icon"><div><strong>Focus where Lilac points</strong><span>Focus goes to the app's area, not the camera's own choice.</span></div></div>
 <div class="lilac-feature"><img src="../icons/ExposureLine.svg" alt="" class="lilac-feature__icon"><div><strong>Exposure on faces</strong><span>Exposure follows the faces in the picture.</span></div></div>
 <div class="lilac-feature"><img src="../icons/MountainLine.svg" alt="" class="lilac-feature__icon"><div><strong>Laser distance</strong><span>Back camera: used only as a hint that the subject is far.</span></div></div>
 <div class="lilac-feature"><img src="../icons/MoodSmileLine.svg" alt="" class="lilac-feature__icon"><div><strong>Smile scores</strong><span>How much each face smiles, for the smile shutter.</span></div></div>
 <div class="lilac-feature"><img src="../icons/PaletteLine.svg" alt="" class="lilac-feature__icon"><div><strong>Sony's still processing</strong><span>Front camera: removes the pink shadow cast for the Accurate colour.</span></div></div>
-<div class="lilac-feature"><img src="../icons/CameraLine.svg" alt="" class="lilac-feature__icon"><div><strong>Two-stage camera key</strong><span>Half-press to lock focus and exposure, full press to shoot. <a href="../getting-started/#buttons-on-the-side">Buttons on the side</a></span></div></div>
+<div class="lilac-feature"><img src="../icons/CameraLine.svg" alt="" class="lilac-feature__icon"><div><strong>Two-stage camera key</strong><span>Half-press to lock focus and exposure, full press to shoot. <a href="getting-started.md#buttons-on-the-side">Buttons on the side</a></span></div></div>
 </div>
 
 ### Scene and condition detection
