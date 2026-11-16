@@ -74,12 +74,12 @@ What Lilac adds for this phone:
 - **Stacking without RAW.** Photo, Night and Portrait stack the processed frames, so they work on every lilac ROM; Pro is there when the ROM gives RAW.
 - **Sony's camera features** that GCam does not know: subject tracking, the laser distance sensor, smile scores, the front camera's Accurate colour, and 960 fps slow motion.
 
-### 960 fps slow motion
+### 960 fps slow motion is back
 
-Press the camera key while recording video, and a burst at 960 frames a second plays back 32 times slower: 720p, one burst per recording, in bright light.
+The XZ1 Compact's sensor can record at 960 frames a second, but on custom ROMs that went away with Sony's camera app. sunplex07's LineageOS 23.2 keeps Sony's own slow-motion service, cacao, from Sony's software, and Lilac uses it through its small companion app, the Lilac Sony Bridge. So 960 fps works again, in Lilac: 720p bursts that play back 32 times slower.
 
 !!! note "Only tested on sunplex07's LineageOS 23.2"
-    Slow motion runs through Sony's own slow-motion service (cacao), which that ROM keeps from Sony's software, together with the Lilac Sony Bridge. It has not been tested on any other ROM. See [slow motion](user/video.md#slow-motion).
+    Other ROMs may not ship Sony's cacao service; slow motion has not been tested on them. Details: [slow motion](user/video.md#slow-motion).
 
 ### Made for a 4.6-inch screen
 
