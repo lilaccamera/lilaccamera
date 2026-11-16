@@ -106,6 +106,7 @@ import com.hinnka.mycamera.utils.StartupGate
 import com.hinnka.mycamera.utils.VibrationHelper
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
+import com.hinnka.mycamera.slowmotion.BurstPhase
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoFpsPreset
@@ -329,6 +330,7 @@ fun CameraScreen(
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
     var captureButtonBounds by remember { mutableStateOf<Rect?>(null) }
     val noteLine = remember { NoteLineState() }
+    LaunchedEffect(state.slowMotion.resolutionNotice) { if (state.slowMotion.resolutionNotice > 0) noteLine.say(R.string.slow_motion_720_only) }
     // The shutter shows a cross while it waits for smiles; the note says why.
     LaunchedEffect(viewModel.smileWaiting) { if (viewModel.smileWaiting) noteLine.say(R.string.smile_waiting) }
     // Multiple exposure shots counted from the shutter press, so the actions, the count and the shutter ring answer
@@ -2023,10 +2025,11 @@ fun CameraScreen(
                 exposureCount < multipleExposureState.targetCount
             val topEdgeMarks = buildList {
                 if (isVideoMode) {
-                    if (state.videoConfig.torchEnabled && state.videoCapabilities.supportsTorch) {
+                    if (state.videoConfig.torchEnabled && state.videoCapabilities.supportsTorch && !state.slowMotion.enabled) {
                         add(TopEdgeMark(AppIcons.BulbLine))
                     }
                     if (state.videoConfig.logProfile != VideoLogProfile.OFF) add(TopEdgeMark(null, "LOG"))
+                    if (state.slowMotion.enabled && !state.videoRecordingState.isRecording && !state.videoRecordingState.isProcessing) add(TopEdgeMark(null, stringResource(R.string.slow_motion_mark)))
                 } else {
                     if (useLivePhoto) add(TopEdgeMark(AppIcons.LivePhotoLine))
                     if (state.timerSeconds > 0) add(TopEdgeMark(AppIcons.StopwatchLine, "${state.timerSeconds}s"))
@@ -2182,6 +2185,47 @@ fun CameraScreen(
                     },
                     modifier = guidePillPlacement
                 )
+            }
+            // Slow motion caps the exposure at 1/960 s: say so when the scene gives too little light for that.
+            if (
+                state.captureMode == CaptureMode.VIDEO && state.slowMotion.enabled && state.slowMotion.dark &&
+                guidePillBottom != null && activePanel == ActivePanel.NONE && !noteLine.shown
+            ) {
+                ModeGuidePill(
+                    icon = AppIcons.CandleLine,
+                    text = stringResource(R.string.slow_motion_dark_pill),
+                    onClick = {},
+                    modifier = guidePillPlacement
+                )
+            }
+            // While the burst is read out the viewfinder stands still: count the frames that have arrived, then check them off.
+            val burst = state.slowMotion
+            AnimatedVisibility(
+                visible = state.captureMode == CaptureMode.VIDEO && burst.burstPhase != BurstPhase.NONE,
+                enter = fadeIn(tween(150)),
+                exit = fadeOut(tween(300)),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .autoRotate()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .padding(start = 12.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (burst.burstPhase == BurstPhase.CAPTURING) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                    } else {
+                        Icon(AppIcons.CheckLine, contentDescription = null, tint = ModeAmber, modifier = Modifier.size(20.dp))
+                    }
+                    Text(
+                        "${burst.burstFrames} / ${burst.burstTotal}",
+                        color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                        style = TextStyle(shadow = ViewfinderTextShadow)
+                    )
+                }
             }
             // Photo mode offers the camera basics the same way, on every launch until opened once.
             if (
@@ -2419,6 +2463,9 @@ fun CameraScreen(
             onVideoFpsClick = { cycleVideoFps(state)?.let(viewModel::setVideoFps) },
             onVideoTorchToggle = { videoTorchEnabled = !state.videoConfig.torchEnabled },
             onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
+            slowMotionAvailable = state.slowMotion.available && !state.videoRecordingState.isRecording,
+            slowMotionEnabled = state.slowMotion.enabled,
+            onSlowMotionToggle = { viewModel.setSlowMotionEnabled(!state.slowMotion.enabled) },
             showHistogram = showHistogram,
             onHistogramChange = { showHistogram = it },
             videoAspectRatio = state.videoConfig.aspectRatio,
@@ -2909,7 +2956,21 @@ private fun Controls(
                     }
                 }
 
-                if (recording) {
+                if (recording && state.slowMotion.active) {
+                    // A slow-motion recording has no pause and no snapshot: the burst trigger takes the right-hand place.
+                    val sm = state.slowMotion
+                    FramedFooterButton(
+                        onClick = { viewModel.triggerSlowMotion() },
+                        icon = AppIcons.BoltLine,
+                        contentDescription = stringResource(R.string.slow_motion_trigger),
+                        enabled = sm.canTrigger,
+                        tint = ModeAmber,
+                        badge = if (sm.maxBursts > 1) "${sm.bursts}/${sm.maxBursts}" else null,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
+                    )
+                } else if (recording) {
                     FramedFooterButton(
                         onClick = {
                             if (state.videoRecordingState.isPaused) {
@@ -3133,11 +3194,14 @@ internal fun FramedFooterButton(
     onClick: () -> Unit,
     icon: ImageVector,
     contentDescription: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    tint: Color = CameraControlsLayoutDefaults.LineColor.onFooter(),
+    badge: String? = null
 ) {
     val shape = RoundedCornerShape(ThumbnailCorner)
     PhysicalButton(
-        onClick = onClick,
+        onClick = { if (enabled) onClick() },
         modifier = modifier
             .size(CameraControlsLayoutDefaults.SideButtonSize)
             .autoRotate()
@@ -3145,7 +3209,14 @@ internal fun FramedFooterButton(
         shape = shape,
         backgroundColor = Color.Transparent
     ) {
-        Icon(icon, contentDescription = contentDescription, tint = CameraControlsLayoutDefaults.LineColor.onFooter(), modifier = Modifier.size(24.dp))
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = contentDescription, tint = tint.copy(alpha = if (enabled) 1f else 0.35f), modifier = Modifier.size(24.dp))
+            // A counter in the corner, for buttons that can be used several times in a recording.
+            if (badge != null) Text(
+                badge, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.align(Alignment.BottomEnd).offset(x = 14.dp, y = 14.dp)
+            )
+        }
     }
 }
 
