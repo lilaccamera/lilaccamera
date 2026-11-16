@@ -196,8 +196,6 @@ img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
   background: var(--md-primary-fg-color); color: var(--lilac-on-primary); font-size: .85em; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
 }
-.lilac-fig--strip { max-width: 24rem; }
-.lilac-fig--strip svg { border-radius: var(--lilac-radius); }
 
 /* Code blocks share the box radius; on phones they keep their margins instead of running edge to edge. */
 .md-typeset .highlight, .md-typeset pre { border-radius: var(--lilac-radius); }
@@ -232,3 +230,17 @@ img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
 .md-typeset .lilac-map li { margin: 0; padding: .25rem 0; }
 .md-typeset .lilac-credit { color: var(--lilac-muted); font-size: .72rem; margin-top: 2rem; }
 @media screen and (max-width: 44.9375em) { .lilac-map { grid-template-columns: 1fr; } }
+
+/* Home page: the one-hand figure beside its numbered list; side keys on the phone outline. */
+.lilac-split { display: grid; grid-template-columns: minmax(0, 15rem) 1fr; gap: 1.6rem; align-items: center; margin: 1rem 0; }
+.lilac-split .lilac-fig { margin: 0; }
+.md-typeset .lilac-split ol.lilac-key { margin: 0; max-width: none; font-size: .8rem; }
+.md-typeset .lilac-split ol.lilac-key li { margin-bottom: .8rem; }
+.xz-key { fill: #2a2830; }
+.xz-key--on { fill: var(--md-primary-fg-color); }
+@media screen and (max-width: 44.9375em) {
+  .lilac-split { grid-template-columns: 1fr; }
+  .lilac-split .lilac-fig svg { max-width: 17rem; margin: 0 auto; display: block; }
+}
+/* The thumb's reach is animated in the SVG itself; without motion it is not shown, and the list explains it. */
+@media (prefers-reduced-motion: reduce) { .tz-anim { display: none; } }

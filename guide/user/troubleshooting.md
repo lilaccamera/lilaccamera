@@ -17,7 +17,7 @@ Each message is quoted as the app shows it.
 :   A second RAW failure after the restart. Pro refuses further shots until the app restarts. Swipe Lilac away from Recents and open it again. If Pro still fails, restart the phone: that clears memory the camera driver keeps.
 
 **There is no Pro on the mode dial**
-:   Pro needs RAW frames from the camera. The front camera has none, and on the XZ1 Compact the back camera only gives them on a ROM with the raw19 shim. Photo mode still works, with stacking, HDR and looks.
+:   Pro needs the raw19 shim on the ROM and works on the back camera only; see [Pro](pro-mode.md). Photo mode still works.
 
 **"Not available on this camera"**
 :   You tapped the shutter speed or ISO on the front camera, which has no manual control of them. Use EV instead.
@@ -27,19 +27,19 @@ Each message is quoted as the app shows it.
 Pro photos are finished in the background; see [the render queue](pro-mode.md#the-render-queue).
 
 **"Waiting for free memory"**
-:   Each photo waits for about 450 MB of free memory before it starts, and starts anyway after a minute. Close apps you are not using.
+:   The photo waits for free memory before it starts; see [the render queue](pro-mode.md#the-render-queue). Close apps you are not using.
 
 **"Short of memory"** / **"Android keeps stopping it for memory. Swipe the app away to let it finish."**
-:   Android stopped the same photo twice to free memory. Swipe Lilac Camera away from Recents: processing carries on and usually finishes, because closing the app frees its graphics memory. If it still stops, restart the phone. The thumbnail's ring turns amber while this lasts.
+:   Android stopped the same photo twice to free memory. Swipe Lilac Camera away from Recents; if it still stops, restart the phone. See [when renders keep stopping](pro-mode.md#when-renders-keep-stopping).
 
 **"Couldn’t process after 3 tries. The RAW file is kept."**
 :   The photo failed three times or hung for five minutes. Nothing is lost. Open the gallery, tap the layers icon (it shows **!**) and tap **Try again**. Restarting the phone first gives it the most room.
 
 **"Processing starts when you open the app, or tap Process now."**
-:   Processing was stopped, for example by Force stop. Tap **Process now**. Avoid Force stop: it halts processing until the app opens again (progress at save points is kept).
+:   Processing was stopped, for example by Force stop. Tap **Process now**.
 
 **"Only single-frame Pro photos can be re-rendered"**
-:   Merged Pro bursts cannot be re-rendered as a copy, because their noise reduction is baked in.
+:   Merged Pro bursts cannot be re-rendered as a copy; see [Re-render as a copy](pro-mode.md#re-render-as-a-copy).
 
 ## Video
 
@@ -51,7 +51,3 @@ Pro photos are finished in the background; see [the render queue](pro-mode.md#th
 
 **"Stop recording to switch mode"** / **"Locked while recording"**
 :   Modes and settings do not change during a recording. Stop it first.
-
-## After a long session
-
-Camera and graphics drivers keep some memory until the phone restarts. Before a long session of Pro shots, restart the phone.

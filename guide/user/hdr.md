@@ -28,8 +28,6 @@ It happens by itself when:
 - HDR+ frames is 2 or more,
 - the merge mode is Sabre (the default).
 
-In a test scene with a bright monitor and window in a dark room, a 13-frame burst shot 3.3 stops darker kept most of the highlight detail, with the room lifted back. Sony's own JPEG of the same scene was white in all the bright parts and noisier.
-
 ## The HDR ratio slider
 
 **HDR ratio** in Pro's quick settings, just under HDR+ frames: 1× to 20×, default 9.8×. Double-tap it to go back to 9.8×.

@@ -63,4 +63,4 @@ For example, Sony's still HDR: `com.sonymobile.control.stillHdrMode`, Capture ke
 
 ## What Lilac does not reach
 
-Sony's own photo and video service (it does Sony's multi-frame noise reduction, slow motion and SteadyShot video) only talks to privileged system apps. Lilac reaches it only for [slow motion](video.md#slow-motion), through a separate bridge app the ROM must ship. The bridge and Lilac are a matched pair: same release, and a Lilac signed with a key the bridge trusts.
+Sony's own photo and video service (it does Sony's multi-frame noise reduction, slow motion and SteadyShot video) only talks to privileged system apps. Lilac reaches it only for [slow motion](video.md#slow-motion), through a separate [bridge app](../bridge/install.md) the ROM must ship.

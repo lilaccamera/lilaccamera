@@ -54,49 +54,79 @@ Compared with a default camera app:
 
     What Lilac adds: Pro photos are developed one at a time in a separate process that waits for free memory, so they fit in 4 GB; Photo, Night and Portrait stack without RAW, on every ROM; and Sony's camera features that GCam does not know.
 
-??? info "Measured on this phone"
-    - A bright window and monitor in a dark room: a 13-frame Pro burst kept most of the highlight detail. Sony's own JPEG of the same exposure was white there, with about three times the fine noise.
-    - A dark room: 10 to 20 stacked front-camera frames reached 1.6 to 2.3 times the signal-to-noise ratio of Sony's camera app.
-
-    One scene each, not a promise for every photo.
-
 <a class="lilac-next" href="user/how-pictures-are-made/">Next: how a picture is made, from sensor to stacked photo</a>
 
 ## Rebuilt for a 4.6-inch screen { .lilac-step data-step="2" }
 
-Lilac's interface is not PhotonCamera's: the camera and the editor were rebuilt so every control is in reach of one thumb on a small phone.
+Lilac's interface is not PhotonCamera's. The camera and the editor were rebuilt around one rule: a 4.6-inch phone held in one hand.
 
-<figure class="lilac-fig lilac-fig--strip" markdown="0">
-<svg viewBox="0 0 340 161" role="img" aria-labelledby="fs-t fs-d" class="footer-strip">
-<title id="fs-t">The bottom of Lilac's camera screen</title>
-<desc id="fs-d">The bottom of the picture, then the black footer: quick settings on the left and looks on the right, level with the zoom ring that curves round the top of the shutter; below them the last photo, the shutter with the next modes' marks beside it, and the camera switch.</desc>
-<defs><linearGradient id="fs-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6d6670"/><stop offset="1" stop-color="#4a4450"/></linearGradient>
-<linearGradient id="fs-face" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#D7D7D7"/></linearGradient></defs>
-<rect x="0" y="0" width="340" height="160.6" rx="12" fill="#000"/>
-<path d="M0 12A12 12 0 0 1 12 0H328A12 12 0 0 1 340 12V9.4H0Z" fill="url(#fs-g)"/>
-<path d="M121.5 50.8A69.9 69.9 0 0 1 218.5 50.8A12.3 12.3 0 0 1 201.5 68.4A45.3 45.3 0 0 0 138.5 68.4A12.3 12.3 0 0 1 121.5 50.8Z" fill="rgba(0,0,0,.4)" stroke="#C9C7BF" stroke-width="1.89"/>
-<path d="M155.1 36.6A66.1 66.1 0 0 1 184.9 36.6A8.5 8.5 0 0 1 181.0 53.2A49.1 49.1 0 0 0 159.0 53.2A8.5 8.5 0 0 1 155.1 36.6Z" fill="rgba(255,255,255,.16)"/>
-<text x="139.5" y="55.7" text-anchor="middle" style="fill:#9C9A92;font-size:9.4px;font-weight:500">W</text>
-<text x="200.5" y="55.7" text-anchor="middle" style="fill:#9C9A92;font-size:9.4px;font-weight:500">T</text>
-<text x="170.0" y="47.7" text-anchor="middle" style="fill:#EF9F27;font-size:11.3px;font-weight:600">1×</text>
-<image href="icons/Sliders.svg" x="26.4" y="32.1" width="22.7" height="22.7" class="ui-icon"/>
-<image href="icons/Film.svg" x="290.9" y="32.1" width="22.7" height="22.7" class="ui-icon"/>
-<rect x="16.1" y="79.3" width="43.4" height="43.4" rx="11.3" fill="none" stroke="#C9C7BF" stroke-width="1.89"/>
-<rect x="20.8" y="84.1" width="34.0" height="34.0" rx="7.6" fill="url(#fs-g)"/>
-<text x="103.9" y="105.8" text-anchor="middle" opacity="0.75" style="fill:#D3D1C7;font-size:13.2px;font-weight:500">M</text>
-<path d="M15 10l4.553 -2.276a1 1 0 0 1 1.447 .894v6.764a1 1 0 0 1 -1.447 .894l-4.553 -2.276v-4zM5 6h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2v-8a2 2 0 0 1 2 -2z" transform="translate(224.8 89.7) scale(0.944)" fill="none" stroke="#E24B4A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-<circle cx="170.0" cy="101.1" r="36.8" fill="none" stroke="#C9C7BF" stroke-width="1.89"/><circle cx="170.0" cy="101.1" r="34.0" fill="url(#fs-face)"/>
-<rect x="280.5" y="79.3" width="43.4" height="43.4" rx="11.3" fill="none" stroke="#C9C7BF" stroke-width="1.89"/>
-<image href="icons/TurningArrows.svg" x="289.9" y="88.8" width="24.6" height="24.6" class="ui-icon"/>
+<div class="lilac-split" markdown="0">
+<figure class="lilac-fig lilac-fig--phone">
+<svg viewBox="47 0 248 421" role="img" aria-labelledby="tz-t tz-d" class="phone">
+<title id="tz-t">Lilac in one hand</title>
+<desc id="tz-d">The Xperia XZ1 Compact with Lilac's camera screen. An animation shows how far a right thumb reaches from the lower edge, and a touch point moving between the buttons, all inside that reach. Numbered as in the list: 1 thumb reach, 2 picture gestures, 3 shutter with the zoom ring, 4 camera key and volume keys on the right side.</desc>
+<defs><linearGradient id="xz-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5f7189"/><stop offset=".6" stop-color="#8d8790"/><stop offset="1" stop-color="#4a4450"/></linearGradient>
+<linearGradient id="xz-face" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#D7D7D7"/></linearGradient>
+<marker id="tz-a" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0 0L8 4L0 8z" fill="#fff" fill-opacity=".85"/></marker></defs>
+<rect x="72.0" y="8" width="196.0" height="389.0" rx="0" class="xz-body"/>
+<rect x="73.2" y="9.2" width="193.6" height="386.6" rx="0" class="xz-glass"/>
+<rect x="151.9" y="27.3" width="36.2" height="2.4" rx="1.2" class="xz-slot"/>
+<circle cx="117.2" cy="28.5" r="4.8" class="xz-cam"/>
+<circle cx="222.8" cy="28.5" r="1.8" class="xz-slot"/>
+<rect x="151.9" y="375.4" width="36.2" height="2.4" rx="1.2" class="xz-slot"/>
+<rect x="83.6" y="49.0" width="172.8" height="307.2" fill="#000"/>
+<rect x="83.6" y="49.0" width="172.8" height="230.4" fill="url(#xz-g)"/>
+<image href="icons/StopwatchLine.svg" x="159.4" y="53.3" width="9.6" height="9.6" class="ui-icon" opacity="1.0"/>
+<text x="171.0" y="60.5" class="ui-text">3s</text>
+<path d="M145.3 300.4A35.5 35.5 0 0 1 194.7 300.4A6.2 6.2 0 0 1 186.0 309.4A23.0 23.0 0 0 0 154.0 309.4A6.2 6.2 0 0 1 145.3 300.4Z" fill="rgba(0,0,0,.4)" stroke="#C9C7BF" stroke-width="0.96"/>
+<path d="M162.4 293.2A33.6 33.6 0 0 1 177.6 293.2A4.3 4.3 0 0 1 175.6 301.7A25.0 25.0 0 0 0 164.4 301.7A4.3 4.3 0 0 1 162.4 293.2Z" fill="rgba(255,255,255,.16)"/>
+<text x="154.5" y="303.1" text-anchor="middle" class="ui-end">W</text>
+<text x="185.5" y="303.1" text-anchor="middle" class="ui-end">T</text>
+<text x="170.0" y="299.1" text-anchor="middle" class="ui-knob">1×</text>
+<image href="icons/Sliders.svg" x="97.0" y="290.9" width="11.5" height="11.5" class="ui-icon" opacity="1.0"/>
+<image href="icons/Film.svg" x="231.4" y="290.9" width="11.5" height="11.5" class="ui-icon" opacity="1.0"/>
+<rect x="91.8" y="315.0" width="22.0" height="22.0" rx="5.8" fill="none" stroke="#C9C7BF" stroke-width="0.96"/>
+<rect x="94.2" y="317.3" width="17.3" height="17.3" rx="3.8" fill="url(#xz-g)"/>
+<text x="136.4" y="328.5" text-anchor="middle" class="ui-mark">M</text>
+<path d="M15 10l4.553 -2.276a1 1 0 0 1 1.447 .894v6.764a1 1 0 0 1 -1.447 .894l-4.553 -2.276v-4zM5 6h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2v-8a2 2 0 0 1 2 -2z" transform="translate(197.8 320.2) scale(0.480)" fill="none" stroke="#E24B4A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="170.0" cy="326.0" r="18.7" fill="none" stroke="#C9C7BF" stroke-width="0.96"/>
+<circle cx="170.0" cy="326.0" r="17.3" fill="url(#xz-face)"/>
+<rect x="226.2" y="315.0" width="22.0" height="22.0" rx="5.8" fill="none" stroke="#C9C7BF" stroke-width="0.96"/>
+<image href="icons/TurningArrows.svg" x="231.0" y="319.7" width="12.5" height="12.5" class="ui-icon" opacity="1.0"/>
+<clipPath id="tz-clip"><rect x="83.6" y="49.0" width="172.8" height="307.2"/></clipPath>
+<radialGradient id="tz-r" gradientUnits="userSpaceOnUse" cx="258.8" cy="385.0" r="201.6"><stop offset="0" stop-color="#B48BF5" stop-opacity=".55"/><stop offset=".82" stop-color="#B48BF5" stop-opacity=".28"/><stop offset="1" stop-color="#B48BF5" stop-opacity="0"/></radialGradient>
+<g clip-path="url(#tz-clip)" class="tz-anim" opacity="0">
+<animate attributeName="opacity" dur="9s" repeatCount="indefinite" values="0;1;1;0;0" keyTimes="0;.1;.72;.82;1"/>
+<circle cx="258.8" cy="385.0" r="201.6" fill="url(#tz-r)"/>
+<g><animateMotion dur="9s" repeatCount="indefinite" values="170.0,326.0;170.0,326.0;170.0,295.3;237.2,296.7;237.2,326.0;102.8,326.0;102.8,296.7;170.0,326.0;170.0,326.0" keyTimes="0;0.120;0.217;0.313;0.410;0.507;0.603;0.700;1" calcMode="spline" keySplines=".45 0 .25 1;.45 0 .25 1;.45 0 .25 1;.45 0 .25 1;.45 0 .25 1;.45 0 .25 1;.45 0 .25 1;.45 0 .25 1"/>
+<ellipse rx="7.2" ry="8.6" fill="#fff" fill-opacity=".45" stroke="#fff" stroke-opacity=".9" stroke-width="1.2"/>
+</g>
+</g>
+<path d="M170.0 111.4L170.0 207.4" stroke="#fff" stroke-opacity=".85" stroke-width="2" stroke-linecap="round" marker-start="url(#tz-a)" marker-end="url(#tz-a)"/>
+<path d="M126.8 159.4L213.2 159.4" stroke="#fff" stroke-opacity=".85" stroke-width="2" stroke-linecap="round" marker-start="url(#tz-a)" marker-end="url(#tz-a)"/>
+<rect x="268.0" y="182.9" width="2.6" height="36.2" rx="1" class="xz-key"/>
+<rect x="268.0" y="231.2" width="2.6" height="42.2" rx="1" class="xz-key xz-key--on"/>
+<rect x="268.0" y="333.7" width="2.6" height="24.1" rx="1" class="xz-key xz-key--on"/>
+<path d="M56.0 274.6L90.3 274.6" class="key-line"/><circle cx="56.0" cy="274.6" r="7" class="key-dot"/><text x="56.0" y="278.0" text-anchor="middle" class="key-num">1</text>
+<path d="M56.0 121.0L160.4 121.0" class="key-line"/><circle cx="56.0" cy="121.0" r="7" class="key-dot"/><text x="56.0" y="124.4" text-anchor="middle" class="key-num">2</text>
+<path d="M170.0 411.0L170.0 345.2" class="key-line"/><circle cx="170.0" cy="411.0" r="7" class="key-dot"/><text x="170.0" y="414.4" text-anchor="middle" class="key-num">3</text>
+<path d="M286.0 309.6L270.6 345.8" class="key-line"/><circle cx="286.0" cy="309.6" r="7" class="key-dot"/><text x="286.0" y="313.0" text-anchor="middle" class="key-num">4</text>
 </svg>
-<figcaption>The bottom of the camera screen: zoom ring, mode dial and buttons, all in thumb reach.</figcaption>
+<figcaption>Held in the right hand, to scale. The glow is how far the thumb reaches.</figcaption>
 </figure>
+<ol class="lilac-key">
+<li><b>Everything you press is in thumb reach.</b> Holding the phone in one hand, your thumb reaches the lower part of the screen, shaded in the animation. Every button sits there; the top of the screen is only picture.</li>
+<li><b>The picture takes the gestures:</b> swipe down for everyday settings, up for manual controls, sideways for looks.</li>
+<li><b>The shutter is the mode dial</b>, with the zoom ring curved round its top like a compact camera's zoom lever.</li>
+<li><b>The side keys are camera controls:</b> half-press the camera key to focus, press fully to shoot; the volume keys shoot or zoom.</li>
+</ol>
+</div>
 
 <a class="lilac-next" href="user/small-screen/">Next: how the camera screen and the editor are laid out</a>
 
 ## 960 fps slow motion is back { .lilac-step data-step="3" }
 
-The XZ1 Compact's sensor records at 960 frames a second, but on custom ROMs that went away with Sony's camera app. sunplex07's LineageOS 23.2 keeps Sony's slow-motion service, cacao, and Lilac reaches it through its companion app, the Lilac Sony Bridge. So 960 fps works again: 720p bursts that play back 32 times slower.
+The XZ1 Compact's sensor records at 960 frames a second, but on custom ROMs that went away with Sony's camera app. sunplex07's LineageOS 23.2 keeps Sony's slow-motion service, cacao, and Lilac reaches it through its companion app, the Lilac Sony Bridge. So 960 fps works again.
 
 !!! note "Only tested on sunplex07's LineageOS 23.2"
     Other ROMs may not ship Sony's cacao service.
@@ -105,13 +135,9 @@ The XZ1 Compact's sensor records at 960 frames a second, but on custom ROMs that
 
 ## Get Lilac
 
-| Feature | Needs | Tested on |
-|---|---|---|
-| Photo, Night, Portrait, Video | any lilac ROM, Android 11 or newer | |
-| Pro (RAW) | the raw19 camera shim | sunplex07's LineageOS 23.2 |
-| 960 fps slow motion | Sony's cacao service and the [Lilac Sony Bridge](bridge/install.md) | sunplex07's LineageOS 23.2 only |
+--8<-- "rom-requirements.md"
 
-On a ROM without the shim, Pro does not appear on the mode dial. Other phones are not tested.
+Other phones are not tested. Testers can add the bridge themselves: [install the bridge](bridge/install.md). ROM maintainers: [ROM integration](rom/integration.md).
 
 - **Stable:** inside lilac ROMs that include it; it updates with the ROM.
 - **Beta:** GitHub releases of this project. It installs beside the ROM's copy under its own name.

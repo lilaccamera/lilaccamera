@@ -11,7 +11,7 @@ Two prebuilt APKs from a Lilac release, imported as they are:
 | Lilac Camera | `com.mdomokos.lilaccamera` | `/system/app` | the camera |
 | Lilac Sony Bridge | `com.mdomokos.lilaccamera.sonybridge` | `/system/priv-app` | reaches Sony's slow-motion service for Lilac |
 
-Lilac cannot be built in the ROM tree (it is a Gradle build with Compose and its own native libraries), so both come in as prebuilts. Take them from the **same release**: they talk through a shared interface that can change between releases.
+Lilac cannot be built in the ROM tree (it is a Gradle build with Compose and its own native libraries), so both come in as prebuilts. Take them from the **same release**: they are a [matched pair](../bridge/install.md#lilac-and-the-bridge-are-a-matched-pair).
 
 ## Importing them
 
@@ -54,12 +54,10 @@ PRODUCT_PACKAGES += \
 
 Lilac does not bring any of Sony's or the shim's files. Do not copy them from another ROM or firmware: a mismatched set can break the camera.
 
-| For | Needs on the ROM |
-|---|---|
-| Pro mode (RAW) | the **raw19** camera shim, as in sunplex07's LineageOS 23.2 (it wraps Sony's camera HAL as `/vendor/lib/hw/camera.lilac-real.so`). Ask the shim's author about it. |
-| 960 fps slow motion | Sony's photo service from the stock vendor image: `cacaoserver` running as binder service `cacao`, with `/system/lib64/libcacao_client.so` and `/system/lib64/libimageprocessorjni.so` |
+--8<-- "rom-requirements.md"
 
-Without the shim, Pro does not appear in Lilac; without cacao, the Slow-mo switch does not appear. Everything else works on any lilac ROM.
+- **raw19 shim:** it wraps Sony's camera HAL as `/vendor/lib/hw/camera.lilac-real.so`. Ask the shim's author about it. Without it, Pro does not appear in Lilac.
+- **cacao:** Sony's photo service from the stock vendor image, `cacaoserver` running as binder service `cacao`, with `/system/lib64/libcacao_client.so` and `/system/lib64/libimageprocessorjni.so`. Without it, the Slow-mo switch does not appear.
 
 ## What a system install adds
 

@@ -35,6 +35,9 @@ markdown_extensions:
   - def_list
   - attr_list
   - pymdownx.details
+  - pymdownx.snippets:
+      base_path: guide/snippets
+      check_paths: true
   - tables
   - toc:
       permalink: true
@@ -59,4 +62,5 @@ nav:
   - ROM integration: rom/integration.md
 exclude_docs: |
   check-text.sh
+  snippets/
   requirements.txt

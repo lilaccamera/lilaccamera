@@ -2,54 +2,13 @@
 
 Photo mode is for everyday shots. It can merge several frames into one photo to lower noise, which Lilac calls **stacking**. Night is a mode that always stacks, and also brightens.
 
-## How stacking works
+## Stacking
 
-A single photo from a small sensor is noisy, mostly in the dark parts. Noise is random, so it differs from frame to frame, while the scene stays the same. Averaging several frames keeps the scene and cancels much of the noise.
+Photo mode merges a quick burst of frames into one photo with much less noise, which Lilac calls **stacking**. It stacks the camera's processed YUV frames, so it works on every ROM and with moving people, but it starts from Sony's processing. How it works, and how it differs from Pro's RAW stacking: [How a picture is made](how-pictures-are-made.md#how-stacking-works).
 
-In Photo mode Lilac:
-
-1. takes a quick burst of frames,
-2. picks the steadiest early frame as the reference, using the gyroscope,
-3. lines every other frame up with it, in small tiles,
-4. for each pixel, averages in the frames that agree with the reference and gives less weight to those that differ because something moved, so moving things do not leave ghosts,
-5. keeps the brightness of one frame. Stacking lowers noise; it does not brighten. Night does both.
-
-It runs on the phone's graphics chip and keeps all the frames in memory at once.
-
-Turn it on with **Multi-frame** in quick settings: Off, or 3 to 20 frames. Picking a count turns it on. A stacked photo shows **Stacked · N frames** in the gallery.
-
-### Where the frames come from
-
-The camera can hand an app frames in different forms:
-
-| Stream | What it is | Used by |
-|---|---|---|
-| **YUV** | finished frames from Sony's image processor: already denoised, sharpened and toned, 8 bits per colour, 30 per second | Photo, Night, Portrait |
-| **Camera JPEG** | Sony's full still pipeline, as the stock camera makes it: slower, but with Sony's own colours and black level | the front camera's Accurate colour; kept as a version with Camera JPEG |
-| **RAW** | the sensor's own data, before any of Sony's processing | [Pro](pro-mode.md) |
-
-Because Photo mode stacks YUV frames, it starts from Sony's processing. Stacking lowers the noise that is left, but it cannot bring back shadow detail Sony already crushed, or highlights that are white in every frame. Pro stacks RAW frames instead; see [Photo or Pro](pro-mode.md#photo-or-pro).
+Turn it on with **Multi-frame** in quick settings: Off, or 3 to 20 frames. Picking a count turns it on. **5 to 10 frames** give most of the gain; why more frames help less and less: [How many frames](how-pictures-are-made.md#how-many-frames). A stacked photo shows **Stacked · N frames** in the gallery.
 
 **Camera JPEG** in quick settings keeps an extra version of each stacked or Pro shot to compare against. For a Photo stack it is the reference frame before stacking; for Pro it is Sony's own JPEG of the first frame. In the gallery it shows as **Built-in camera**.
-
-### How many frames
-
-Averaging N frames lowers noise by the square root of N. Each extra frame helps less than the one before:
-
-| Frames | Noise left |
-|---|---|
-| 1 | 100 % |
-| 3 | 58 % |
-| 5 | 45 % |
-| 10 | 32 % |
-| 20 | 22 % |
-
-On a tripod Lilac reaches these numbers. Handheld, shake and movement cost frames.
-
-- **5 to 10 frames** is where most of the gain is.
-- **Above about 12 handheld**, blur from shake grows faster than noise falls. 20 frames last about a second.
-- **On a tripod in the dark**, 20 frames are still worth it, but Night is usually the better choice.
-- Colour blotches improve less than grain, because Sony's processing leaves coarse colour noise.
 
 ### Getting the best results
 
@@ -67,7 +26,7 @@ On a tripod Lilac reaches these numbers. Handheld, shake and movement cost frame
 The back sensor has 19 MP (5056 × 3792). Full size is the default, but 12 MP (4000 × 3000) works better on this phone:
 
 - **Faster viewfinder and focus.** A full-size stream puts the sensor in its slowest mode, 10 frames a second. At 12 MP the viewfinder runs about twice as fast, and focus is about 1.7 times faster, because focusing is counted in frames.
-- **Less memory.** A 19 MP frame takes 29 MB, a 12 MP frame 12 MB. A 20-frame stack needs about 575 MB at full size against 240 MB at 12 MP, on a phone with 4 GB shared with everything else.
+- **Less memory.** A 19 MP frame takes 29 MB, a 12 MP frame 12 MB, so a stack needs less than half the memory; see [memory on a 4 GB phone](how-pictures-are-made.md#memory-on-a-4-gb-phone).
 - **Shorter bursts,** so less shake.
 - The extra pixels carry little real detail: the lens and Sony's noise reduction limit what reaches them.
 

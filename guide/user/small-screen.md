@@ -48,17 +48,17 @@ The XZ1 Compact has a 4.6-inch screen of 720 × 1280 pixels. Lilac's interface w
 </figure>
 
 <ol class="lilac-key" markdown="0">
-<li><b>Top line</b> marks only settings you changed, such as a timer.</li>
-<li><b>Picture</b>: tap to focus. Swipe down for everyday settings, up for manual controls, sideways for the next look.</li>
-<li><b>Zoom ring</b>: pull it sideways, or tap W or T.</li>
+<li><b>Top line</b></li>
+<li><b>Picture</b></li>
+<li><b>Zoom ring</b></li>
 <li><b>Quick settings</b></li>
 <li><b>Looks</b></li>
-<li><b>Last photo</b>; its edge shows processing.</li>
-<li><b>Shutter</b>: swipe it sideways to change mode. The marks beside it are the next modes.</li>
+<li><b>Last photo</b></li>
+<li><b>Shutter and mode dial</b></li>
 <li><b>Switch camera</b></li>
 </ol>
 
-What makes it work on a small screen:
+How to use each one: [Getting started](getting-started.md#the-camera-screen). What makes it work on a small screen:
 
 - **No top bar.** The picture starts at the top edge. The top line shows only settings you changed, so it is usually empty.
 - **Everything you press is at the bottom**, within reach of the thumb that holds the phone.
@@ -66,18 +66,17 @@ What makes it work on a small screen:
 - **The zoom ring curves round the top of the shutter**, like the zoom lever round a compact camera's shutter button. Pull it and it springs back.
 - **The picture takes the gestures** for the rest: down for the everyday row, up for manual controls, sideways for looks.
 - **One sheet for quick settings**, rising from the bottom. Tap a setting's name for a one-line explanation.
-- **The side buttons are camera controls.** The two-stage camera key focuses on a half-press and shoots on a full press, as on a compact camera; the volume buttons shoot, or step the zoom or exposure if you prefer. See [Buttons on the side](getting-started.md#buttons-on-the-side).
+- **The side buttons are camera controls,** as on a compact camera, so you can shoot without reaching across the screen. See [Buttons on the side](getting-started.md#buttons-on-the-side).
 - **Short words.** Labels and messages fit in one or two lines; short notes appear for a moment in a small pill above the shutter.
 
 ## The editor
 
 The photo editor follows the same rules:
 
-- **Sections along the bottom:** Look, Light, Color, Effects, Detail, Portrait and Crop. A dot marks the ones you changed.
-- **Slim rulers** you drag with one finger.
+- **Sections along the bottom,** in thumb reach, like the camera's controls.
+- **Slim rulers** you drag with one finger, on the photo's bottom edge.
 - **The icons along the top fade** while your finger is on the photo or a ruler, so nothing covers what you are changing.
-- **Compare by holding:** hold the compare icon, or long-press the photo, to see the original.
-- **Full view:** tap the photo to see it with nothing on top.
-- **Fast preview:** while you edit, small copies keep it quick on a 4 GB phone; Save is always full size. HD shows full size while editing.
+- **Compare by holding:** hold to see the original, let go to return, so comparing needs no extra screen.
+- **Fast preview** from small copies, so editing stays quick on a 4 GB phone.
 
-More: [Getting started](getting-started.md) for the camera, [Editor](editor.md) for each section.
+The editor's controls, one by one: [Editor](editor.md).

@@ -112,8 +112,6 @@ Open a photo in the gallery and tap the pencil. The button waits while a photo i
 ## Around the screen
 
 - **Sections** along the bottom: Look, Light, Color, Effects, Detail, Portrait, Crop. A dot marks a section you changed. Videos have no Portrait or Crop.
-- **Icons** along the top: cancel, undo, redo, HD, full view, compare and Save.
-- **Compare:** hold the compare icon, or long-press the photo, to see the original. Long-press one setting's value to see the photo without just that change.
 - **HD:** full-size preview while editing; slower. Without it the preview uses small copies, and Save is still full size.
 - Tap a setting's name for a one-line explanation.
 

@@ -10,11 +10,7 @@ Like Photo mode, Pro can merge several frames. Lilac calls it **HDR+**: it is th
 
 **HDR+ frames** in quick settings sets how many RAW frames one press takes: 1 to 20, default 3. One frame means a single RAW shot.
 
-Merging RAW is cleaner than merging Photo mode's frames:
-
-- RAW frames are linear: they add up like counts of light, so averaging them is exact.
-- Lilac knows how noisy this sensor is at each brightness (a measured noise profile for the XZ1 Compact), so it knows what is noise and what is detail.
-- After the merge, Lilac's own denoiser, tone mapping and look run once, on the merged frame.
+Merging RAW is cleaner than merging Photo mode's frames: RAW is linear, Lilac knows this sensor's noise, and the processing runs once on the merged frame. Why: [Pro: stacking RAW](how-pictures-are-made.md#pro-stacking-raw).
 
 Each RAW frame is a full-size still, so frames come about 0.44 s apart: 3 frames take about 1.5 s, 13 frames about 6 s. Hold still, or lean on something, for 3 or more frames. A merged burst takes 15 to 22 s from press to saved photo.
 

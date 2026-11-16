@@ -123,9 +123,9 @@ Pro stacks RAW frames before anything has touched them:
 
 - **Linear data.** RAW values are proportional to the light, so frames add up exactly, like photon counts.
 - **A noise model of this sensor.** Lilac uses a noise profile measured on the XZ1 Compact, so it knows how much of each pixel is noise at each brightness. The profile the shim reports is about twice too high and would make the merge throw away good detail.
-- **Processing once, at the end.** After the merge come GCam's denoise tuning, its learned auto exposure and its HDRNet tone mapping, then Lilac's colour and look, on one clean frame instead of many noisy ones. The merge itself is GCam's Sabre by default; see [what comes from GCam](../index.md#the-best-of-both-worlds).
+- **Processing once, at the end.** GCam's denoising, exposure and tone mapping, then Lilac's colour and look, run on one clean frame instead of many noisy ones; see [what comes from GCam](../index.md#the-best-of-both-worlds).
 
-The cost is speed: each RAW frame is a full-size still, so frames come 0.44 s apart and need a steadier hand or a support.
+The cost is speed: each RAW frame is a full-size still, so a burst needs a steadier hand or a support; see [HDR+ frames](pro-mode.md#hdr-frames).
 
 ### How many frames
 
@@ -213,7 +213,7 @@ A merge lowers noise, but cannot bring back light that was never recorded. If a 
 <figcaption>An illustration on a scale of seven stops (each stop doubles the light).</figcaption>
 </figure>
 
-When part of the viewfinder is already white, Lilac shoots the whole burst darker: 1 stop at 0.5 % white, 2 stops at 2 %, 3 stops at 5 %. Each frame then keeps the window but has noisier shadows; merging averages that noise away; the tone mapping lifts the room back up. It never goes darker than the frame count can pay back, about √N in light, so the shadows end up no noisier than one normal frame.
+When part of the viewfinder is already white, Lilac shoots the whole burst darker. Each frame then keeps the window but has noisier shadows; merging averages that noise away; the tone mapping lifts the room back up. How much darker, when, and the limits: [the darker burst](hdr.md#the-darker-burst).
 
 How far the shadows may be lifted is capped by the [HDR ratio](hdr.md#the-hdr-ratio-slider). Photo mode cannot do this: it shoots every frame at Sony's exposure.
 
@@ -250,7 +250,7 @@ Merging needs every frame in memory at once, and developing a RAW needs about 1 
 
 That shapes the design:
 
-- **12 MP on the back camera** in Photo mode needs less than half the memory of full size, and the viewfinder and focus run about twice as fast. See [resolution](photo-mode.md#resolution-12-mp-on-the-back-2-mp-on-the-front).
+- **12 MP on the back camera** in Photo mode needs less than half the memory of full size. See [resolution](photo-mode.md#resolution-12-mp-on-the-back-2-mp-on-the-front).
 - **2 MP on the front camera** uses the sensor's own 2 × 2 pixel binning: less noise, a quarter of the memory.
 - **Pro photos are developed one at a time, in their own process,** which waits for enough free memory and saves its progress. Closing the app frees its graphics memory for the render. See [the render queue](pro-mode.md#the-render-queue).
 
@@ -292,6 +292,6 @@ That shapes the design:
 <figcaption>What happens after you press, in order. Not to scale.</figcaption>
 </figure>
 
-- **Photo:** the burst is over in a fraction of a second; hold still until the ring around the shutter closes. The merge runs right after, and the photo is saved within seconds.
-- **Pro, one frame:** the RAW file is saved at once. Developing waits until about 5 s after your last Pro shot, so shooting and developing never compete for memory, then runs in the background. The thumbnail's edge shows its progress.
-- **Pro, burst:** frames come 0.44 s apart, so hold still for the whole burst, then the merge and develop run in the camera: 15 to 22 s for 13 frames.
+- **Photo:** the burst is over in a fraction of a second, the merge runs right after, and the photo is saved within seconds.
+- **Pro, one frame:** the RAW file is saved at once and developed later in its own process; see [the render queue](pro-mode.md#the-render-queue).
+- **Pro, burst:** hold still for the whole burst; the merge and develop then run in the camera. Timings: [HDR+ frames](pro-mode.md#hdr-frames).
