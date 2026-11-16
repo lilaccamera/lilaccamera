@@ -204,7 +204,7 @@ private val EXTERNAL_GALLERY_REVIEW_ACTIONS = setOf(
     PHOTOS_MARS_REVIEW_SECURE_ACTION
 )
 
-/** Another app's "take a photo" request. Its own activity because results need the standard launch mode. */
+/** Another app's "take a photo" or "record a video" request. Its own activity because results need the standard launch mode. */
 class CaptureActivity : MainActivity()
 
 open class MainActivity : AppCompatActivity() {
@@ -266,8 +266,10 @@ open class MainActivity : AppCompatActivity() {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         StartupTrace.mark("MainActivity.onCreate start")
-        if (intent?.action == MediaStore.ACTION_IMAGE_CAPTURE) {
-            cameraViewModel.captureForCaller = CaptureForCaller(close = ::finish)
+        val asked = intent?.action
+        if (asked == MediaStore.ACTION_IMAGE_CAPTURE || asked == MediaStore.ACTION_VIDEO_CAPTURE) {
+            cameraViewModel.captureForCaller =
+                CaptureForCaller(close = ::finish, video = asked == MediaStore.ACTION_VIDEO_CAPTURE)
         }
 
         // 启用全屏模式

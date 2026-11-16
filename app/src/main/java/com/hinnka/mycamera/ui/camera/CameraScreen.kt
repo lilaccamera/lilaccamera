@@ -473,6 +473,14 @@ fun CameraScreen(
         !state.isPortraitMode
     val ambientLux = rememberAmbientLux(enabled = photoOrNight)
     val lowLightOffer = rememberLowLightOffer(ambientLux, state.currentCameraId)
+    // Automatic flash for another app's photo: the light sensor arms it in the light where Night is
+    // offered and disarms it above that, never in the middle of a shot.
+    if (forCaller != null) LaunchedEffect(forCaller.autoFlash, forCaller.busy, ambientLux) {
+        val lux = ambientLux
+        if (!forCaller.autoFlash || forCaller.busy || lux == null) return@LaunchedEffect
+        if (lux < OfferBelowLux && state.flashMode != 1) viewModel.setQuickFlash(true)
+        else if (lux > WithdrawAboveLux && state.flashMode != 0) viewModel.setQuickFlash(false)
+    }
     val isXpan = state.aspectRatio == AspectRatio.XPAN
     val burstCapturingCount = viewModel.burstImageCount
 
@@ -869,12 +877,17 @@ fun CameraScreen(
         }
     }
 
-    // Another app gets a finished photo at once: Photo mode, never Pro's queued render or a video.
-    // shortcut: the mode stays chosen for the next start of the camera, restore it if that bothers.
+    // Another app gets what it asked for at once: plain Photo mode (never Pro's queued render), or Video.
     LaunchedEffect(forCaller, isCameraInitialized) {
-        val plainPhoto = state.captureMode == CaptureMode.PHOTO && !state.useRaw &&
-            !state.isNightMode && !state.isPortraitMode
-        if (forCaller != null && isCameraInitialized && !plainPhoto) selectShootingMode(CameraShootingMode.PHOTO)
+        val inPlace = if (forCaller?.video == true) {
+            state.captureMode == CaptureMode.VIDEO
+        } else {
+            state.captureMode == CaptureMode.PHOTO && !state.useRaw && !state.isNightMode && !state.isPortraitMode
+        }
+        if (forCaller != null && isCameraInitialized && !inPlace) {
+            viewModel.keepModeForAfterCaller()
+            selectShootingMode(if (forCaller.video) CameraShootingMode.VIDEO else CameraShootingMode.PHOTO)
+        }
     }
 
     fun presetTargetAspectRatio(preset: CameraPreset?): AspectRatio {
@@ -2901,7 +2914,7 @@ private fun Controls(
                 val thumbnailPhotoInsetPx = with(LocalDensity.current) { thumbnailPhotoInset.toPx() }
                 val recording = state.videoRecordingState.isRecording
                 // For another app, Close takes the thumbnail's place.
-                if (forCaller != null) FramedFooterButton(
+                if (forCaller != null && !recording) FramedFooterButton(
                     onClick = forCaller.close,
                     icon = AppIcons.CloseLine,
                     contentDescription = stringResource(R.string.close),
@@ -2910,7 +2923,7 @@ private fun Controls(
                         .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
                 )
                 // While recording, Pause takes the thumbnail's place and Snapshot the switch's.
-                else if (!recording) Box(
+                else if (forCaller == null && !recording) Box(
                     modifier = Modifier
                         .align(Alignment.CenterStart)
                         .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
@@ -2987,7 +3000,8 @@ private fun Controls(
                             .align(Alignment.CenterStart)
                             .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
                     )
-                    FramedFooterButton(
+                    // No snapshots into the gallery while another app waits for its video.
+                    if (forCaller == null) FramedFooterButton(
                         onClick = {
                             viewModel.captureVideoFrame()
                             onSnapshot()
@@ -3040,10 +3054,20 @@ private fun Controls(
 
                 // Quick settings mirror Looks on the left column; not while recording, as the settings can't change then.
                 // For another app, flash is the one setting, in Quick settings' place.
-                if (forCaller != null) {
+                if (forCaller != null && !forCaller.video) {
                     val flashOn = state.flashMode == 1
                     PhysicalButton(
-                        onClick = viewModel::toggleQuickFlash,
+                        // Automatic, then on, then off.
+                        onClick = {
+                            when {
+                                forCaller.autoFlash -> {
+                                    forCaller.autoFlash = false
+                                    viewModel.setQuickFlash(true)
+                                }
+                                flashOn -> viewModel.setQuickFlash(false)
+                                else -> forCaller.autoFlash = true
+                            }
+                        },
                         modifier = Modifier
                             .align(Alignment.CenterStart)
                             .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
@@ -3055,10 +3079,23 @@ private fun Controls(
                     ) {
                         Icon(
                             imageVector = if (flashOn) AppIcons.BoltLine else AppIcons.BoltOffLine,
-                            contentDescription = stringResource(R.string.flash) + " " +
-                                stringResource(if (flashOn) R.string.quick_on else R.string.quick_off),
+                            contentDescription = stringResource(R.string.flash) + " " + stringResource(
+                                when {
+                                    forCaller.autoFlash -> R.string.capture_flash_auto
+                                    flashOn -> R.string.quick_on
+                                    else -> R.string.quick_off
+                                }
+                            ),
                             tint = if (flashOn) ModeAmber else CameraControlsLayoutDefaults.LineColor.onFooter(),
                             modifier = Modifier.size(24.dp)
+                        )
+                        // Automatic: the bolt shows what the next shot will do, the A that the light decides.
+                        if (forCaller.autoFlash) Text(
+                            "A",
+                            color = if (flashOn) ModeAmber else CameraControlsLayoutDefaults.LineColor.onFooter(),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 6.dp)
                         )
                     }
                 }

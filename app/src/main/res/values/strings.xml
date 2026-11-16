@@ -1260,6 +1260,7 @@
     <string name="capture_hold_still_frames">Hold still · %1$d frames</string>
     <string name="capture_processing_frames">Processing %1$d frames</string>
     <string name="capture_processing">Processing</string>
+    <string name="capture_flash_auto">Auto</string>
 
     <!-- LUT Synthesis -->
     <string name="lut_synthesis_title">LUT Synthesis</string>

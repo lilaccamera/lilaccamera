@@ -14,8 +14,8 @@ import kotlinx.coroutines.delay
 
 // The front viewfinder's false magenta goes at about 14 lux; the offer starts below 20 to leave a margin, and
 // goes again only above 30, so it does not flicker at the edge.
-private const val OfferBelowLux = 20f
-private const val WithdrawAboveLux = 30f
+internal const val OfferBelowLux = 20f
+internal const val WithdrawAboveLux = 30f
 private const val OfferAfterMs = 2_000L
 /** Below this the light reading shows on the picture's top edge with the other marks. */
 internal const val LuxMarkBelow = 30f
