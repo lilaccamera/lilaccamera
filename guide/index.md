@@ -65,63 +65,35 @@ A default camera app gets one finished photo from the phone. Lilac takes several
 
 ## Rebuilt for a 4.6-inch screen
 
-Lilac's interface is not PhotonCamera's: it was rebuilt so every control is in reach of one thumb on a small phone.
+Lilac's interface is not PhotonCamera's: the camera and the editor were rebuilt so every control is in reach of one thumb on a small phone.
 
-<figure class="lilac-fig lilac-fig--phone" markdown="0">
-<svg viewBox="0 0 340 421" role="img" aria-labelledby="xz-t xz-d" class="phone">
-<title id="xz-t">Lilac on the Xperia XZ1 Compact</title>
-<desc id="xz-d">The Xperia XZ1 Compact with Lilac's camera screen, numbered as in the key below: 1 top line, 2 picture, 3 zoom ring, 4 quick settings, 5 looks, 6 last photo, 7 shutter and mode dial, 8 camera switch.</desc>
-<defs><linearGradient id="xz-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5f7189"/><stop offset=".6" stop-color="#8d8790"/><stop offset="1" stop-color="#4a4450"/></linearGradient>
-<linearGradient id="xz-face" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#D7D7D7"/></linearGradient></defs>
-<rect x="72.0" y="8" width="196.0" height="389.0" rx="0" class="xz-body"/>
-<rect x="73.2" y="9.2" width="193.6" height="386.6" rx="0" class="xz-glass"/>
-<rect x="151.9" y="27.3" width="36.2" height="2.4" rx="1.2" class="xz-slot"/>
-<circle cx="117.2" cy="28.5" r="4.8" class="xz-cam"/>
-<circle cx="222.8" cy="28.5" r="1.8" class="xz-slot"/>
-<rect x="151.9" y="375.4" width="36.2" height="2.4" rx="1.2" class="xz-slot"/>
-<rect x="83.6" y="49.0" width="172.8" height="307.2" fill="#000"/>
-<rect x="83.6" y="49.0" width="172.8" height="230.4" fill="url(#xz-g)"/>
-<image href="icons/StopwatchLine.svg" x="159.4" y="53.3" width="9.6" height="9.6" class="ui-icon" opacity="1.0"/>
-<text x="171.0" y="60.5" class="ui-text">3s</text>
-<path d="M145.3 300.4A35.5 35.5 0 0 1 194.7 300.4A6.2 6.2 0 0 1 186.0 309.4A23.0 23.0 0 0 0 154.0 309.4A6.2 6.2 0 0 1 145.3 300.4Z" fill="rgba(0,0,0,.4)" stroke="#C9C7BF" stroke-width="0.96"/>
-<path d="M162.4 293.2A33.6 33.6 0 0 1 177.6 293.2A4.3 4.3 0 0 1 175.6 301.7A25.0 25.0 0 0 0 164.4 301.7A4.3 4.3 0 0 1 162.4 293.2Z" fill="rgba(255,255,255,.16)"/>
-<text x="154.5" y="303.1" text-anchor="middle" class="ui-end">W</text>
-<text x="185.5" y="303.1" text-anchor="middle" class="ui-end">T</text>
-<text x="170.0" y="299.1" text-anchor="middle" class="ui-knob">1×</text>
-<image href="icons/Sliders.svg" x="97.0" y="290.9" width="11.5" height="11.5" class="ui-icon" opacity="1.0"/>
-<image href="icons/Film.svg" x="231.4" y="290.9" width="11.5" height="11.5" class="ui-icon" opacity="1.0"/>
-<rect x="91.8" y="315.0" width="22.0" height="22.0" rx="5.8" fill="none" stroke="#C9C7BF" stroke-width="0.96"/>
-<rect x="94.2" y="317.3" width="17.3" height="17.3" rx="3.8" fill="url(#xz-g)"/>
-<text x="136.4" y="328.5" text-anchor="middle" class="ui-mark">M</text>
-<path d="M15 10l4.553 -2.276a1 1 0 0 1 1.447 .894v6.764a1 1 0 0 1 -1.447 .894l-4.553 -2.276v-4zM5 6h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2v-8a2 2 0 0 1 2 -2z" transform="translate(197.8 320.2) scale(0.480)" fill="none" stroke="#E24B4A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-<circle cx="170.0" cy="326.0" r="18.7" fill="none" stroke="#C9C7BF" stroke-width="0.96"/>
-<circle cx="170.0" cy="326.0" r="17.3" fill="url(#xz-face)"/>
-<rect x="226.2" y="315.0" width="22.0" height="22.0" rx="5.8" fill="none" stroke="#C9C7BF" stroke-width="0.96"/>
-<image href="icons/TurningArrows.svg" x="231.0" y="319.7" width="12.5" height="12.5" class="ui-icon" opacity="1.0"/>
-<path d="M56.0 59.6L155.6 59.6" class="key-line"/><circle cx="56.0" cy="59.6" r="7" class="key-dot"/><text x="56.0" y="63.0" text-anchor="middle" class="key-num">1</text>
-<path d="M56.0 164.2L112.4 164.2" class="key-line"/><circle cx="56.0" cy="164.2" r="7" class="key-dot"/><text x="56.0" y="167.6" text-anchor="middle" class="key-num">2</text>
-<path d="M284.0 274.6L182.1 292.6" class="key-line"/><circle cx="284.0" cy="274.6" r="7" class="key-dot"/><text x="284.0" y="278.0" text-anchor="middle" class="key-num">3</text>
-<path d="M56.0 296.7L97.0 296.7" class="key-line"/><circle cx="56.0" cy="296.7" r="7" class="key-dot"/><text x="56.0" y="300.1" text-anchor="middle" class="key-num">4</text>
-<path d="M284.0 298.6L243.0 296.7" class="key-line"/><circle cx="284.0" cy="298.6" r="7" class="key-dot"/><text x="284.0" y="302.0" text-anchor="middle" class="key-num">5</text>
-<path d="M56.0 332.2L92.2 331.3" class="key-line"/><circle cx="56.0" cy="332.2" r="7" class="key-dot"/><text x="56.0" y="335.6" text-anchor="middle" class="key-num">6</text>
-<path d="M170.0 411.0L170.0 345.2" class="key-line"/><circle cx="170.0" cy="411.0" r="7" class="key-dot"/><text x="170.0" y="414.4" text-anchor="middle" class="key-num">7</text>
-<path d="M284.0 337.0L247.8 332.2" class="key-line"/><circle cx="284.0" cy="337.0" r="7" class="key-dot"/><text x="284.0" y="340.4" text-anchor="middle" class="key-num">8</text>
+<figure class="lilac-fig lilac-fig--strip" markdown="0">
+<svg viewBox="0 0 340 161" role="img" aria-labelledby="fs-t fs-d" class="footer-strip">
+<title id="fs-t">The bottom of Lilac's camera screen</title>
+<desc id="fs-d">The bottom of the picture, then the black footer: quick settings on the left and looks on the right, level with the zoom ring that curves round the top of the shutter; below them the last photo, the shutter with the next modes' marks beside it, and the camera switch.</desc>
+<defs><linearGradient id="fs-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6d6670"/><stop offset="1" stop-color="#4a4450"/></linearGradient>
+<linearGradient id="fs-face" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#D7D7D7"/></linearGradient></defs>
+<rect x="0" y="0" width="340" height="160.6" rx="10" fill="#000"/>
+<path d="M0 10A10 10 0 0 1 10 0H330A10 10 0 0 1 340 10V9.4H0Z" fill="url(#fs-g)"/>
+<path d="M121.5 50.8A69.9 69.9 0 0 1 218.5 50.8A12.3 12.3 0 0 1 201.5 68.4A45.3 45.3 0 0 0 138.5 68.4A12.3 12.3 0 0 1 121.5 50.8Z" fill="rgba(0,0,0,.4)" stroke="#C9C7BF" stroke-width="1.89"/>
+<path d="M155.1 36.6A66.1 66.1 0 0 1 184.9 36.6A8.5 8.5 0 0 1 181.0 53.2A49.1 49.1 0 0 0 159.0 53.2A8.5 8.5 0 0 1 155.1 36.6Z" fill="rgba(255,255,255,.16)"/>
+<text x="139.5" y="55.7" text-anchor="middle" font-size="9.4" font-weight="500" style="fill:#9C9A92">W</text>
+<text x="200.5" y="55.7" text-anchor="middle" font-size="9.4" font-weight="500" style="fill:#9C9A92">T</text>
+<text x="170.0" y="47.7" text-anchor="middle" font-size="11.3" font-weight="600" style="fill:#EF9F27">1×</text>
+<image href="icons/Sliders.svg" x="26.4" y="32.1" width="22.7" height="22.7" class="ui-icon"/>
+<image href="icons/Film.svg" x="290.9" y="32.1" width="22.7" height="22.7" class="ui-icon"/>
+<rect x="16.1" y="79.3" width="43.4" height="43.4" rx="11.3" fill="none" stroke="#C9C7BF" stroke-width="1.89"/>
+<rect x="20.8" y="84.1" width="34.0" height="34.0" rx="7.6" fill="url(#fs-g)"/>
+<text x="103.9" y="105.8" text-anchor="middle" font-size="13.2" font-weight="500" style="fill:#D3D1C7" opacity="0.75">M</text>
+<path d="M15 10l4.553 -2.276a1 1 0 0 1 1.447 .894v6.764a1 1 0 0 1 -1.447 .894l-4.553 -2.276v-4zM5 6h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2v-8a2 2 0 0 1 2 -2z" transform="translate(224.8 89.7) scale(0.944)" fill="none" stroke="#E24B4A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="170.0" cy="101.1" r="36.8" fill="none" stroke="#C9C7BF" stroke-width="1.89"/><circle cx="170.0" cy="101.1" r="34.0" fill="url(#fs-face)"/>
+<rect x="280.5" y="79.3" width="43.4" height="43.4" rx="11.3" fill="none" stroke="#C9C7BF" stroke-width="1.89"/>
+<image href="icons/TurningArrows.svg" x="289.9" y="88.8" width="24.6" height="24.6" class="ui-icon"/>
 </svg>
-<figcaption>Lilac on the Xperia XZ1 Compact, to scale.</figcaption>
+<figcaption>The bottom of the camera screen: zoom ring, mode dial and buttons, all in thumb reach.</figcaption>
 </figure>
 
-<ol class="lilac-key" markdown="0">
-<li><b>Top line</b> marks only settings you changed, such as a timer.</li>
-<li><b>Picture</b>: tap to focus. Swipe down for everyday settings, up for manual controls, sideways for the next look.</li>
-<li><b>Zoom ring</b>: pull it sideways, or tap W or T.</li>
-<li><b>Quick settings</b></li>
-<li><b>Looks</b></li>
-<li><b>Last photo</b>; its edge shows processing.</li>
-<li><b>Shutter</b>: swipe it sideways to change mode. The marks beside it are the next modes.</li>
-<li><b>Switch camera</b></li>
-</ol>
-
-The editor follows the same rules: sections along the bottom, slim rulers you drag with one finger, and controls that fade while your finger is on the photo. See [Getting started](user/getting-started.md).
+How the screen is laid out, and how the editor fits: [Built for a small screen](user/small-screen.md).
 
 ## 960 fps slow motion is back
 
@@ -146,7 +118,7 @@ On a ROM without the shim, Pro does not appear on the mode dial. Other phones ar
 - **Beta:** GitHub releases of this project. It installs beside the ROM's copy under its own name.
 
 ??? note "All guide pages"
-    **How it works:** [How a picture is made](user/how-pictures-are-made.md) · [Focus and faces](user/focus.md) · [Sony hardware](user/hardware.md)
+    **How it works:** [How a picture is made](user/how-pictures-are-made.md) · [Built for a small screen](user/small-screen.md) · [Focus and faces](user/focus.md) · [Sony hardware](user/hardware.md)
 
     **Using Lilac:** [Getting started](user/getting-started.md) · [Photo and Night](user/photo-mode.md) · [Pro](user/pro-mode.md) · [HDR](user/hdr.md) · [Portrait](user/portrait.md) · [Video](user/video.md) · [Editor](user/editor.md) · [Troubleshooting](user/troubleshooting.md)
 

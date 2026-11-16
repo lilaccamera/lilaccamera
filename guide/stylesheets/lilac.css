@@ -141,3 +141,5 @@ img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
 .md-typeset ol.lilac-key { list-style: none; counter-reset: key; padding: 0; margin: .4rem auto 1.4rem; max-width: 30rem; font-size: .78rem; }
 .md-typeset ol.lilac-key li { counter-increment: key; position: relative; margin: 0 0 .45rem; padding-left: 1.9em; line-height: 1.5; }
 .md-typeset ol.lilac-key li::before { content: counter(key); position: absolute; left: 0; top: .1em; width: 1.35em; height: 1.35em; border-radius: 50%; background: var(--md-default-fg-color); color: var(--md-default-bg-color); font-size: .85em; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.lilac-fig--strip { max-width: 24rem; }
+.lilac-fig--strip svg { border-radius: 10px; }

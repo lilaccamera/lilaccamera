@@ -43,6 +43,7 @@ nav:
   - Home: index.md
   - How it works:
       - How a picture is made: user/how-pictures-are-made.md
+      - Built for a small screen: user/small-screen.md
       - Focus and faces: user/focus.md
       - Sony hardware: user/hardware.md
   - Using Lilac:
