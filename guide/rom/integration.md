@@ -1,3 +1,7 @@
+---
+icon: lucide/package
+---
+
 # ROM integration (lilac maintainers)
 
 This page is for maintainers of ROMs for the Xperia XZ1 Compact (lilac) who want to ship Lilac Camera, with 960 fps slow motion, as part of the ROM.

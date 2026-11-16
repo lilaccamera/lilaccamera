@@ -1,3 +1,7 @@
+---
+icon: lucide/play
+---
+
 # Getting started
 
 ## First launch
@@ -10,7 +14,7 @@ There is no tour. A small pill, **How to use Lilac**, sits above the shutter in 
 
 ## The camera screen
 
-- **Top line:** small marks for anything not at its default, such as a timer (`3s`), Live, Smile, flash or a light reading like `12 lux`. Tap them to open the everyday row. Sony's [scene icons](hardware.md#what-lilac-uses) can appear at the right end.
+- **Top line:** small marks for anything not at its default, such as a timer (`3s`), Live, Smile, flash or a light reading like `12 lux`. Tap them to open the everyday row. Sony's [scene icons](hardware.md#scene-and-condition-detection) can appear at the right end.
 - **Above the shutter:** quick settings ![Quick settings](../icons/Sliders.svg){ .icon } on the left, the zoom ring in the middle, looks ![Looks](../icons/Film.svg){ .icon } on the right.
 - **Bottom row:** the latest photo on the left, the shutter with the mode dial in the middle, the camera switch ![Switch camera](../icons/TurningArrows.svg){ .icon } on the right.
 

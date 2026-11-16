@@ -1,3 +1,7 @@
+---
+icon: lucide/aperture
+---
+
 # Pro
 
 Pro shoots **RAW**: the sensor's own data, before Sony's processing and noise reduction. Lilac then develops the photo itself, so fine detail is not smeared away. Pro is always full size (19 MP) and works on the back camera only.

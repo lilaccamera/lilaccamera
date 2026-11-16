@@ -1,3 +1,7 @@
+---
+icon: lucide/sun
+---
+
 # HDR
 
 A bright window and a dark room can be seven stops apart: one is 128 times brighter than the other. No single exposure holds both. HDR in Lilac means keeping the bright parts from turning white and lifting the dark parts, without the flat, grey look of heavy HDR.

@@ -1,3 +1,7 @@
+---
+icon: lucide/camera
+---
+
 # Photo and Night
 
 Photo mode is for everyday shots. It can merge several frames into one photo to lower noise, which Lilac calls **stacking**. Night is a mode that always stacks, and also brightens.

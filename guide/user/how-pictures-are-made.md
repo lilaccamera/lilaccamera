@@ -1,3 +1,7 @@
+---
+icon: lucide/layers
+---
+
 # How a picture is made
 
 This page explains what happens between the sensor and the saved photo: which pictures the camera hands to Lilac, how Lilac merges them, and why it works the way it does on a phone with 4 GB of memory.

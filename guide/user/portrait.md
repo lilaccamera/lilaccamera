@@ -1,3 +1,7 @@
+---
+icon: lucide/user-round
+---
+
 # Portrait
 
 Portrait blurs the background behind a person. The blur is added after the shot, and the original stays with the photo, so you can change or remove the blur later.

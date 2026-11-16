@@ -1,3 +1,7 @@
+---
+icon: lucide/sliders-horizontal
+---
+
 # Photo editor
 
 Open a photo in the gallery and tap the pencil. The button waits while a photo is still processing.

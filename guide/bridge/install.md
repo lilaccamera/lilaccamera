@@ -1,3 +1,7 @@
+---
+icon: lucide/plug
+---
+
 # Install the slow-motion bridge
 
 960 fps slow motion needs a small companion app, the **Lilac Sony Bridge**, installed as a privileged system app. If your ROM ships it, you are done: this page is not for you. This page is for **testers** whose ROM has Sony's slow-motion service but not the bridge.

@@ -1,3 +1,7 @@
+---
+icon: lucide/focus
+---
+
 # Focus and faces
 
 Lilac focuses the way Sony's own camera app does: it hands the work to the camera's own subject tracking and face detection, and adds a few rules for this phone's weak spots.

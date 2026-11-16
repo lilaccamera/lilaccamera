@@ -1,3 +1,7 @@
+---
+icon: lucide/life-buoy
+---
+
 # Troubleshooting
 
 Each message is quoted as the app shows it.

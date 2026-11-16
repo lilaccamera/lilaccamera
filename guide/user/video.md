@@ -1,3 +1,7 @@
+---
+icon: lucide/video
+---
+
 # Video
 
 ## Settings

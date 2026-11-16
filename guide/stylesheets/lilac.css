@@ -244,3 +244,15 @@ img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
 }
 /* The thumb's reach is animated in the SVG itself; without motion it is not shown, and the list explains it. */
 @media (prefers-reduced-motion: reduce) { .tz-anim { display: none; } }
+
+/* Sony hardware: feature cards and the scene icons. */
+.lilac-features { display: grid; grid-template-columns: repeat(2, 1fr); gap: .7rem; margin: .8rem 0 1.4rem; }
+.lilac-feature { display: flex; gap: .8rem; align-items: flex-start; padding: .8rem .9rem; border: 1px solid var(--lilac-border); border-radius: var(--lilac-radius); }
+.md-typeset .lilac-feature__icon, .md-typeset .lilac-scene img { width: 1.6rem; height: 1.6rem; flex: none; padding: .35rem; box-sizing: content-box; border-radius: 50%; background: var(--lilac-fill); }
+[data-md-color-scheme="slate"] .lilac-feature__icon, [data-md-color-scheme="slate"] .lilac-scene img { filter: invert(1); background: rgba(0, 0, 0, .35); }
+.lilac-feature strong { display: block; color: var(--lilac-title); }
+.lilac-feature span { display: block; font-size: .78rem; color: var(--lilac-muted); line-height: 1.5; }
+.lilac-scenes { display: grid; grid-template-columns: repeat(auto-fill, minmax(4.6rem, 1fr)); gap: .6rem .4rem; margin: .8rem 0 1.4rem; }
+.lilac-scene { display: flex; flex-direction: column; align-items: center; gap: .3rem; text-align: center; }
+.lilac-scene small { font-size: .68rem; color: var(--lilac-muted); }
+@media screen and (max-width: 44.9375em) { .lilac-features { grid-template-columns: 1fr; } }
