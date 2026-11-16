@@ -79,14 +79,14 @@ Lilac's interface is not PhotonCamera's: the camera and the editor were rebuilt 
 <path d="M0 10A10 10 0 0 1 10 0H330A10 10 0 0 1 340 10V9.4H0Z" fill="url(#fs-g)"/>
 <path d="M121.5 50.8A69.9 69.9 0 0 1 218.5 50.8A12.3 12.3 0 0 1 201.5 68.4A45.3 45.3 0 0 0 138.5 68.4A12.3 12.3 0 0 1 121.5 50.8Z" fill="rgba(0,0,0,.4)" stroke="#C9C7BF" stroke-width="1.89"/>
 <path d="M155.1 36.6A66.1 66.1 0 0 1 184.9 36.6A8.5 8.5 0 0 1 181.0 53.2A49.1 49.1 0 0 0 159.0 53.2A8.5 8.5 0 0 1 155.1 36.6Z" fill="rgba(255,255,255,.16)"/>
-<text x="139.5" y="55.7" text-anchor="middle" font-size="9.4" font-weight="500" style="fill:#9C9A92">W</text>
-<text x="200.5" y="55.7" text-anchor="middle" font-size="9.4" font-weight="500" style="fill:#9C9A92">T</text>
-<text x="170.0" y="47.7" text-anchor="middle" font-size="11.3" font-weight="600" style="fill:#EF9F27">1×</text>
+<text x="139.5" y="55.7" text-anchor="middle" style="fill:#9C9A92;font-size:9.4px;font-weight:500">W</text>
+<text x="200.5" y="55.7" text-anchor="middle" style="fill:#9C9A92;font-size:9.4px;font-weight:500">T</text>
+<text x="170.0" y="47.7" text-anchor="middle" style="fill:#EF9F27;font-size:11.3px;font-weight:600">1×</text>
 <image href="icons/Sliders.svg" x="26.4" y="32.1" width="22.7" height="22.7" class="ui-icon"/>
 <image href="icons/Film.svg" x="290.9" y="32.1" width="22.7" height="22.7" class="ui-icon"/>
 <rect x="16.1" y="79.3" width="43.4" height="43.4" rx="11.3" fill="none" stroke="#C9C7BF" stroke-width="1.89"/>
 <rect x="20.8" y="84.1" width="34.0" height="34.0" rx="7.6" fill="url(#fs-g)"/>
-<text x="103.9" y="105.8" text-anchor="middle" font-size="13.2" font-weight="500" style="fill:#D3D1C7" opacity="0.75">M</text>
+<text x="103.9" y="105.8" text-anchor="middle" opacity="0.75" style="fill:#D3D1C7;font-size:13.2px;font-weight:500">M</text>
 <path d="M15 10l4.553 -2.276a1 1 0 0 1 1.447 .894v6.764a1 1 0 0 1 -1.447 .894l-4.553 -2.276v-4zM5 6h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2v-8a2 2 0 0 1 2 -2z" transform="translate(224.8 89.7) scale(0.944)" fill="none" stroke="#E24B4A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 <circle cx="170.0" cy="101.1" r="36.8" fill="none" stroke="#C9C7BF" stroke-width="1.89"/><circle cx="170.0" cy="101.1" r="34.0" fill="url(#fs-face)"/>
 <rect x="280.5" y="79.3" width="43.4" height="43.4" rx="11.3" fill="none" stroke="#C9C7BF" stroke-width="1.89"/>
