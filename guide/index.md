@@ -75,8 +75,8 @@ Lilac's interface is not PhotonCamera's: the camera and the editor were rebuilt 
 <desc id="fs-d">The bottom of the picture, then the black footer: quick settings on the left and looks on the right, level with the zoom ring that curves round the top of the shutter; below them the last photo, the shutter with the next modes' marks beside it, and the camera switch.</desc>
 <defs><linearGradient id="fs-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6d6670"/><stop offset="1" stop-color="#4a4450"/></linearGradient>
 <linearGradient id="fs-face" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#D7D7D7"/></linearGradient></defs>
-<rect x="0" y="0" width="340" height="160.6" rx="10" fill="#000"/>
-<path d="M0 10A10 10 0 0 1 10 0H330A10 10 0 0 1 340 10V9.4H0Z" fill="url(#fs-g)"/>
+<rect x="0" y="0" width="340" height="160.6" rx="12" fill="#000"/>
+<path d="M0 12A12 12 0 0 1 12 0H328A12 12 0 0 1 340 12V9.4H0Z" fill="url(#fs-g)"/>
 <path d="M121.5 50.8A69.9 69.9 0 0 1 218.5 50.8A12.3 12.3 0 0 1 201.5 68.4A45.3 45.3 0 0 0 138.5 68.4A12.3 12.3 0 0 1 121.5 50.8Z" fill="rgba(0,0,0,.4)" stroke="#C9C7BF" stroke-width="1.89"/>
 <path d="M155.1 36.6A66.1 66.1 0 0 1 184.9 36.6A8.5 8.5 0 0 1 181.0 53.2A49.1 49.1 0 0 0 159.0 53.2A8.5 8.5 0 0 1 155.1 36.6Z" fill="rgba(255,255,255,.16)"/>
 <text x="139.5" y="55.7" text-anchor="middle" style="fill:#9C9A92;font-size:9.4px;font-weight:500">W</text>

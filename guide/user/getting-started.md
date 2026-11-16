@@ -25,7 +25,7 @@ Swipe sideways on the shutter to change mode, or tap the faint mode mark beside 
 | Night | ![Night](../icons/MoonStars.svg){ .icon } | dim scenes; stacks every shot |
 | Portrait | ![Portrait](../icons/User.svg){ .icon } | people, with the background blurred |
 | Pro | <span class="mode-mark">M</span> | RAW photos, developed by Lilac |
-| Photo | <span class="mode-mark" style="color:#3a9a3a">AUTO</span> | everyday shots |
+| Photo | <span class="mode-mark mode-mark--auto">AUTO</span> | everyday shots |
 | Video | ![Video](../icons/MovieCamera.svg){ .icon } | video |
 
 A short flick moves one mode; a slow swipe can cross them all. The dial stops at Night and at Video. It is locked while a video records.
