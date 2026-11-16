@@ -1250,6 +1250,11 @@
     <string name="zoom_in">Enlarge</string>
     <string name="zoom_out">Shrink</string>
     <string name="close">Close</string>
+    <string name="capture_retake">Retake</string>
+    <string name="capture_use_photo">Use photo</string>
+    <string name="capture_hold_still_frames">Hold still · %1$d frames</string>
+    <string name="capture_processing_frames">Processing %1$d frames</string>
+    <string name="capture_processing">Processing</string>
 
     <!-- LUT Synthesis -->
     <string name="lut_synthesis_title">LUT Synthesis</string>
