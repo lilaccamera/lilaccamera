@@ -246,7 +246,7 @@ img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
 @media (prefers-reduced-motion: reduce) { .tz-anim { display: none; } }
 
 /* Sony hardware: feature cards and the scene icons. */
-.lilac-features { display: grid; grid-template-columns: repeat(2, 1fr); gap: .7rem; margin: .8rem 0 1.4rem; }
+.lilac-features { display: grid; grid-template-columns: repeat(2, 1fr); align-items: start; gap: .7rem; margin: .8rem 0 1.4rem; }
 .lilac-feature { display: flex; gap: .8rem; align-items: flex-start; padding: .8rem .9rem; border: 1px solid var(--lilac-border); border-radius: var(--lilac-radius); }
 .md-typeset .lilac-feature__icon, .md-typeset .lilac-scene img { width: 1.6rem; height: 1.6rem; flex: none; padding: .35rem; box-sizing: content-box; border-radius: 50%; background: var(--lilac-fill); }
 [data-md-color-scheme="slate"] .lilac-feature__icon, [data-md-color-scheme="slate"] .lilac-scene img { filter: invert(1); background: rgba(0, 0, 0, .35); }
@@ -256,4 +256,18 @@ img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
 .lilac-scene { display: flex; flex-direction: column; align-items: center; gap: .3rem; text-align: center; }
 .lilac-scene small { font-size: .68rem; color: var(--lilac-muted); }
 @media screen and (max-width: 44.9375em) { .lilac-features { grid-template-columns: 1fr; } }
-.md-typeset .lilac-feature span.lilac-feature__enables { margin-top: .35rem; color: var(--md-default-fg-color); font-size: .76rem; }
+/* "In Lilac": a small closed note under each card; it opens on click. */
+.md-typeset details.lilac-feature__enables { margin: .35rem 0 0; padding: 0; border: 0; background: none; box-shadow: none; font-size: .72rem; }
+.md-typeset details.lilac-feature__enables > summary {
+  display: inline-flex; align-items: center; gap: .25rem; min-height: 24px; padding: 0 .55rem; margin: 0;
+  border-radius: 999px; background: var(--lilac-fill); color: var(--lilac-title); font-weight: 600; cursor: pointer; list-style: none;
+}
+.md-typeset details.lilac-feature__enables > summary::-webkit-details-marker { display: none; }
+.md-typeset details.lilac-feature__enables > summary::before { content: none; }
+.md-typeset details.lilac-feature__enables > summary::after {
+  content: "›"; position: static; width: auto; height: auto; background: none; -webkit-mask: none; mask: none;
+  transform: none; transition: transform .15s; color: inherit; font-size: 1.1em; line-height: 1;
+}
+.md-typeset details.lilac-feature__enables[open] > summary::after { transform: rotate(90deg); }
+.md-typeset details.lilac-feature__enables > summary:focus-visible { outline: 2px solid var(--md-primary-fg-color); outline-offset: 2px; }
+.md-typeset details.lilac-feature__enables > p { margin: .4rem 0 0; color: var(--lilac-muted); line-height: 1.5; }
