@@ -15,7 +15,7 @@ Open a photo in the gallery and tap the pencil. The button waits while a photo i
 <circle cx="222.8" cy="28.5" r="1.8" class="xz-slot"/>
 <rect x="151.9" y="375.4" width="36.2" height="2.4" rx="1.2" class="xz-slot"/>
 <rect x="83.6" y="49.0" width="172.8" height="307.2" fill="#000"/>
-<rect x="83.6" y="109.0" width="172.8" height="129.6" fill="url(#ed-g)"/>
+<rect x="83.6" y="49.0" width="172.8" height="230.4" fill="url(#ed-g)"/>
 <image href="../icons/CloseLine.svg" x="90.8" y="53.3" width="10.6" height="10.6" class="ui-icon"/>
 <image href="../icons/UndoLine.svg" x="111.9" y="53.3" width="10.6" height="10.6" class="ui-icon"/>
 <image href="../icons/RedoLine.svg" x="133.0" y="53.3" width="10.6" height="10.6" class="ui-icon"/>
@@ -23,37 +23,37 @@ Open a photo in the gallery and tap the pencil. The button waits while a photo i
 <image href="../icons/MaximizeLine.svg" x="188.0" y="53.6" width="10.1" height="10.1" class="ui-icon"/>
 <image href="../icons/ContrastLine.svg" x="209.1" y="53.6" width="10.1" height="10.1" class="ui-icon"/>
 <text x="239.1" y="61.2" text-anchor="middle" style="font-size:7.2px;font-weight:600;fill:#E8E6DF">Save</text>
-<path d="M96.1 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M101.4 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M106.6 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M111.9 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M117.2 220.4V227.1" stroke="#fff" stroke-opacity="0.95" stroke-width="0.67"/>
-<path d="M122.5 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M127.8 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M133.0 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M138.3 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M143.6 220.4V227.1" stroke="#fff" stroke-opacity="0.95" stroke-width="0.67"/>
-<path d="M148.9 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M154.2 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M159.4 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M164.7 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M170.0 220.4V227.1" stroke="#fff" stroke-opacity="0.95" stroke-width="0.67"/>
-<path d="M175.3 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M180.6 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M185.8 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M191.1 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M196.4 220.4V227.1" stroke="#fff" stroke-opacity="0.95" stroke-width="0.67"/>
-<path d="M201.7 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M207.0 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M212.2 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M217.5 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M222.8 220.4V227.1" stroke="#fff" stroke-opacity="0.95" stroke-width="0.67"/>
-<path d="M228.1 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M233.4 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M238.6 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M243.9 222.3V227.1" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
-<path d="M170.0 218.5V229.0" stroke="#EF9F27" stroke-width="1.20" stroke-linecap="round"/>
-<text x="170.0" y="235.6" text-anchor="middle" style="font-size:5.0px;font-weight:500;fill:#fff">+0.3</text>
+<path d="M96.1 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M101.4 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M106.6 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M111.9 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M117.2 261.2V267.9" stroke="#fff" stroke-opacity="0.95" stroke-width="0.67"/>
+<path d="M122.5 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M127.8 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M133.0 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M138.3 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M143.6 261.2V267.9" stroke="#fff" stroke-opacity="0.95" stroke-width="0.67"/>
+<path d="M148.9 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M154.2 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M159.4 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M164.7 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M170.0 261.2V267.9" stroke="#fff" stroke-opacity="0.95" stroke-width="0.67"/>
+<path d="M175.3 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M180.6 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M185.8 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M191.1 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M196.4 261.2V267.9" stroke="#fff" stroke-opacity="0.95" stroke-width="0.67"/>
+<path d="M201.7 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M207.0 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M212.2 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M217.5 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M222.8 261.2V267.9" stroke="#fff" stroke-opacity="0.95" stroke-width="0.67"/>
+<path d="M228.1 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M233.4 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M238.6 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M243.9 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
+<path d="M170.0 259.3V269.8" stroke="#EF9F27" stroke-width="1.20" stroke-linecap="round"/>
+<text x="170.0" y="276.4" text-anchor="middle" style="font-size:5.0px;font-weight:500;fill:#fff">+0.3</text>
 <image href="../icons/ExposureLine.svg" x="97.0" y="284.7" width="11.5" height="11.5" class="ui-icon ui-amber"/>
 <text x="102.8" y="306.5" text-anchor="middle" style="font-size:7.2px;font-weight:500;fill:#EF9F27">+0.3</text>
 <circle cx="111.4" cy="303.9" r="1.2" style="fill:#EF9F27"/>
@@ -92,8 +92,8 @@ Open a photo in the gallery and tap the pencil. The button waits while a photo i
 <text x="244.3" y="347.1" text-anchor="middle" style="font-size:5.3px;font-weight:400;fill:#B4B2A9">Crop</text>
 <path d="M56.0 58.6L90.3 58.6" class="key-line"/><circle cx="56.0" cy="58.6" r="7" class="key-dot"/><text x="56.0" y="62.0" text-anchor="middle" class="key-num">1</text>
 <path d="M284.0 58.6L251.6 58.6" class="key-line"/><circle cx="284.0" cy="58.6" r="7" class="key-dot"/><text x="284.0" y="62.0" text-anchor="middle" class="key-num">2</text>
-<path d="M56.0 145.0L102.8 145.0" class="key-line"/><circle cx="56.0" cy="145.0" r="7" class="key-dot"/><text x="56.0" y="148.4" text-anchor="middle" class="key-num">3</text>
-<path d="M284.0 225.2L242.0 225.2" class="key-line"/><circle cx="284.0" cy="225.2" r="7" class="key-dot"/><text x="284.0" y="228.6" text-anchor="middle" class="key-num">4</text>
+<path d="M56.0 154.6L102.8 154.6" class="key-line"/><circle cx="56.0" cy="154.6" r="7" class="key-dot"/><text x="56.0" y="158.0" text-anchor="middle" class="key-num">3</text>
+<path d="M284.0 266.0L242.0 266.0" class="key-line"/><circle cx="284.0" cy="266.0" r="7" class="key-dot"/><text x="284.0" y="269.4" text-anchor="middle" class="key-num">4</text>
 <path d="M56.0 298.6L90.3 298.6" class="key-line"/><circle cx="56.0" cy="298.6" r="7" class="key-dot"/><text x="56.0" y="302.0" text-anchor="middle" class="key-num">5</text>
 <path d="M56.0 337.0L88.4 337.0" class="key-line"/><circle cx="56.0" cy="337.0" r="7" class="key-dot"/><text x="56.0" y="340.4" text-anchor="middle" class="key-num">6</text>
 </svg>
