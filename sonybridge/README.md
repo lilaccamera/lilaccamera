@@ -96,10 +96,10 @@ Install a Lilac build beside the others for testing with `-PdebugIdSuffix=slowmo
 
 - `tools/slowmo-test.sh`: one recording through the debug broadcast, then `ffprobe` checks of the file.
 - `tools/slowmo-len.sh`: several recordings, burst length per run.
-- `tools/slowmo-rearm.sh`: the experiments for a second burst (see below).
 
 The debug broadcast: `adb shell am broadcast -a com.mdomokos.lilaccamera.SLOWMO -p <package> --es cmd start|trigger|stop`
 (extras `--ei width 1280 --ei height 720 --ei frames 91|177`). Do not pass empty string arguments; the shell drops them.
+The experiments for a second burst (re-arm variants) were run with a temporary debug command and are not part of the code; their results are under Findings.
 
 ## Findings and limits
 

@@ -35,9 +35,6 @@ interface ISonyBridge {
     /** Creates the encoder and muxer writing a video-only MP4 into file, and hands the encoder to the service. */
     int prepare(in ParcelFileDescriptor file);
 
-    /** Experiment: hands the same encoder surface to the service again (a re-arm step between bursts). */
-    int reprepare();
-
     /** Starts the ordinary video recording; the trigger only works while it runs. */
     int startVideo();
 
