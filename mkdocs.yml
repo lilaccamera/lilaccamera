@@ -1,0 +1,40 @@
+site_name: Lilac Camera
+site_description: How to use Lilac Camera on the Xperia XZ1 Compact
+docs_dir: guide
+strict: true
+
+theme:
+  name: material
+  language: en
+  palette:
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: lucide/moon
+        name: Switch to dark mode
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: lucide/sun
+        name: Switch to light mode
+
+extra_css:
+  - stylesheets/lilac.css
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+exclude_docs: |
+  check-text.sh
+  requirements.txt

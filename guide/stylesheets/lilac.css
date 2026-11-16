@@ -1,0 +1,11 @@
+/* Colours from the app icon. */
+:root > * {
+  --md-primary-fg-color:        #7550D4;
+  --md-primary-fg-color--light: #B48BF5;
+  --md-primary-fg-color--dark:  #5E44A8;
+  --md-accent-fg-color:         #5E44A8;
+}
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color:        #B48BF5;
+  --md-accent-fg-color:         #E2C6FF;
+}
