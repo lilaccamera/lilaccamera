@@ -43,7 +43,7 @@ A default camera app, such as Aperture on LineageOS, asks the camera for a photo
 <div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/FocusLine.svg" alt="">Focus</div>
 <div class="lilac-compare__row" role="row"><span role="cell">Tap to focus on a point</span><span role="cell" class="lilac-compare__lilac">Sony's subject tracking, face selection, laser distance and half-press lock, as in Sony's own app</span></div>
 <div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/MovieCamera.svg" alt="">Slow motion</div>
-<div class="lilac-compare__row" role="row"><span role="cell">None: the phone offers apps no high-speed mode</span><span role="cell" class="lilac-compare__lilac">960 fps bursts at 720p, through Sony's own slow-motion service</span></div>
+<div class="lilac-compare__row" role="row"><span role="cell">None: the phone offers apps no high-speed mode</span><span role="cell" class="lilac-compare__lilac">960 fps bursts at 720p, through Sony's own slow-motion service (tested on sunplex07's LineageOS 23.2)</span></div>
 </div>
 
 How each step works, with diagrams and charts: [How a picture is made](user/how-pictures-are-made.md).
@@ -76,11 +76,10 @@ What Lilac adds for this phone:
 
 ### 960 fps slow motion
 
-The XZ1 Compact's sensor can record a burst at **960 frames a second**, 32 times slower than real time on playback. Only Sony's own camera app used it, and that app does not run on custom ROMs. Lilac reaches the sensor's slow-motion mode through Sony's own service on the ROM, so the feature is back. As far as we know, Lilac is the first app outside Sony's to record it.
+Press the camera key while recording video, and a burst at 960 frames a second plays back 32 times slower: 720p, one burst per recording, in bright light.
 
-- Press the camera key during a recording, and the next fifth of a second becomes about 6 seconds of slow motion, inside a normal video with sound.
-- 720p, one burst per recording, and bright light (each frame is at most 1/960 s).
-- It needs the ROM to ship Sony's slow-motion service and Lilac's small companion app, the Lilac Sony Bridge. See [slow motion](user/video.md#slow-motion).
+!!! note "Only tested on sunplex07's LineageOS 23.2"
+    Slow motion runs through Sony's own slow-motion service (cacao), which that ROM keeps from Sony's software, together with the Lilac Sony Bridge. It has not been tested on any other ROM. See [slow motion](user/video.md#slow-motion).
 
 ### Made for a 4.6-inch screen
 
@@ -103,7 +102,7 @@ Lilac uses Sony's own face detection, subject tracking, laser distance sensor, s
 ## Which phone and ROM
 
 - **Phone:** Xperia XZ1 Compact (lilac). Other phones are not tested.
-- **ROM:** any lilac ROM runs Photo, Night, Portrait and Video. Pro needs RAW, which comes from the raw19 shim in sunplex07's unofficial LineageOS 23.2 for lilac. Without it, Pro does not appear on the mode dial. Slow motion needs Sony's slow-motion service, which that ROM keeps from Sony's software, and the Lilac Sony Bridge.
+- **ROM:** any lilac ROM runs Photo, Night, Portrait and Video. Pro needs RAW, which comes from the raw19 shim in sunplex07's unofficial LineageOS 23.2 for lilac. Without it, Pro does not appear on the mode dial. Slow motion has only been tested on that ROM: it needs Sony's cacao slow-motion service, which the ROM keeps from Sony's software, and the Lilac Sony Bridge.
 - **Android:** 11 or newer.
 
 ## How to get it
