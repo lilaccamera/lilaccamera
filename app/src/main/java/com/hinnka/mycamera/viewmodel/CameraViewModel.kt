@@ -1890,6 +1890,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             cameraJpegShots.remove(id)?.let { settings -> viewModelScope.launch { saveCameraJpeg(settings, jpeg) } }
         }
         cameraController.onPhotoCaptureFailed = { id ->
+            captureForCaller?.busy = false
             cameraJpegShots.remove(id)
             pendingCaptureSettings.remove(id)?.let { settings ->
                 settings.processingFinished = true
@@ -3133,7 +3134,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     multipleExposureState = multipleExposureState.copy(isProcessing = false)
                     return@withContext
                 }
-                val shouldAutoSave = userPreferencesRepository.latest().autoSaveAfterCapture
+                val shouldAutoSave = userPreferencesRepository.latest().autoSaveAfterCapture && captureForCaller == null
                 val photoQualityValue = userPreferencesRepository.latest().photoQuality
                 val sharpeningValue = 0f
                 val noiseReductionValue = 0f
@@ -3259,6 +3260,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * Set while another app waits for a photo: one stacked photo at a time, from any shutter (screen,
+     * camera key, volume key), and no copy in the system gallery.
+     */
+    var captureForCaller: com.hinnka.mycamera.ui.camera.CaptureForCaller? = null
+        set(value) {
+            field = value
+            cameraController.quickCapture = value != null
+            // Settings applied before this was known go through the limits again.
+            val current = cameraController.state.value
+            cameraController.setPhotoResolutionCapMp(current.photoResolutionCapMp)
+            cameraController.setFrontPhotoResolutionCapMp(current.frontPhotoResolutionCapMp)
+        }
+
     fun capture() {
         if (state.value.captureMode == CaptureMode.VIDEO) {
             if (state.value.videoRecordingState.isProcessing) {
@@ -3284,7 +3299,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         countdownJob?.takeIf { it.isActive }?.let { job ->
             job.cancel()
             cameraController.setCountdownValue(0)
+            captureForCaller?.busy = false
             return
+        }
+        captureForCaller?.let { request ->
+            if (request.busy) return
+            request.busy = true
         }
 
         startupPrewarmJob?.takeIf { it.isActive }?.let { job ->
@@ -4352,6 +4372,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun onShutterKeyFullPress() {
         if (state.value.isPreviewActive) capture()
+    }
+
+    /** Flash for another app's photo: off or on, no torch. It starts off with every request. */
+    fun toggleQuickFlash() {
+        cameraController.setFlashMode(if (state.value.flashMode == 1) 0 else 1)
     }
 
     fun toggleFlash() {
@@ -5944,7 +5969,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val lutIdToSave = settings.lutId
             val aspectRatio = settings.state.aspectRatio
             val frameIdToSave = settings.frameId
-            val shouldAutoSave = settings.preferences.autoSaveAfterCapture
+            val shouldAutoSave = settings.preferences.autoSaveAfterCapture && captureForCaller == null
             val userPrefs: UserPreferences? = settings.preferences
             val isRawCapture = isRawCaptureFormat(image.format)
             val sharpeningValue = resolveCaptureSharpening(
@@ -6149,7 +6174,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         try {
             val context = getApplication<Application>()
             val currentState = state.value
-            val shouldAutoSave = userPreferencesRepository.latest().autoSaveAfterCapture
+            val shouldAutoSave = userPreferencesRepository.latest().autoSaveAfterCapture && captureForCaller == null
             val sharpeningValue = 0f
             val noiseReductionValue = 0f
             val chromaNoiseReductionValue = 0f
@@ -6376,7 +6401,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val lutIdToSave = settings.lutId
             val aspectRatio = settings.state.aspectRatio
             val frameIdToSave = settings.frameId
-            val shouldAutoSave = settings.preferences.autoSaveAfterCapture
+            val shouldAutoSave = settings.preferences.autoSaveAfterCapture && captureForCaller == null
             val isRawStack = images.firstOrNull()?.format?.let(::isRawCaptureFormat) == true
             val userPrefs: UserPreferences? = settings.preferences
             val sharpeningValue = resolveCaptureSharpening(
@@ -6619,7 +6644,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         try {
             if (orderedImages.size != expectedFrameCount) return
             val context = getApplication<Application>()
-            val shouldAutoSave = settings.preferences.autoSaveAfterCapture
+            val shouldAutoSave = settings.preferences.autoSaveAfterCapture && captureForCaller == null
             val sharpeningValue = 0f
             val noiseReductionValue = 0f
             val chromaNoiseReductionValue = 0f

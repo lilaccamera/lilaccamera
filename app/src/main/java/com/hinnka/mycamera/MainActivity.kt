@@ -43,6 +43,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -78,6 +79,10 @@ import com.hinnka.mycamera.lut.creator.LutCreatorViewModel
 import com.hinnka.mycamera.render.RenderQueue
 import com.hinnka.mycamera.screencapture.ScreenCaptureRenderConfigStore
 import com.hinnka.mycamera.ui.camera.CameraScreen
+import com.hinnka.mycamera.ui.camera.CaptureForCaller
+import com.hinnka.mycamera.ui.camera.CaptureForCallerFlow
+import com.hinnka.mycamera.ui.camera.LocalCaptureForCaller
+import android.provider.MediaStore
 import com.hinnka.mycamera.data.FilmData
 import com.hinnka.mycamera.ui.camera.ColorWalkScreen
 import com.hinnka.mycamera.ui.camera.FilmDetailScreen
@@ -199,7 +204,10 @@ private val EXTERNAL_GALLERY_REVIEW_ACTIONS = setOf(
     PHOTOS_MARS_REVIEW_SECURE_ACTION
 )
 
-class MainActivity : AppCompatActivity() {
+/** Another app's "take a photo" request. Its own activity because results need the standard launch mode. */
+class CaptureActivity : MainActivity()
+
+open class MainActivity : AppCompatActivity() {
 
     private val cameraViewModel: CameraViewModel by viewModels()
     private val userPreferencesRepository by lazy {
@@ -258,6 +266,9 @@ class MainActivity : AppCompatActivity() {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         StartupTrace.mark("MainActivity.onCreate start")
+        if (intent?.action == MediaStore.ACTION_IMAGE_CAPTURE) {
+            cameraViewModel.captureForCaller = CaptureForCaller(close = ::finish)
+        }
 
         // 启用全屏模式
         StartupTrace.measure("MainActivity.enableEdgeToEdge") {
@@ -356,7 +367,8 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
 
-                        if (hasPermissions) {
+                        val captureForCaller = cameraViewModel.captureForCaller
+                        if (hasPermissions) CompositionLocalProvider(LocalCaptureForCaller provides captureForCaller) {
                             NavigationHost(
                                 cameraViewModel = cameraViewModel,
                                 galleryViewModel = galleryViewModel,
@@ -370,6 +382,7 @@ class MainActivity : AppCompatActivity() {
                                     finish()
                                 }
                             )
+                            captureForCaller?.let { CaptureForCallerFlow(cameraViewModel, it) }
                         } else {
                             PermissionScreen(
                                 onRequestPermission = {

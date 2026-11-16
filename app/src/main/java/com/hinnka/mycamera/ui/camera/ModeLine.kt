@@ -206,6 +206,8 @@ internal fun ModeLine(
     modifier: Modifier = Modifier,
     // Drawn under the shutter in the mode zone; presses that start on it are its own.
     collar: (@Composable () -> Unit)? = null,
+    // Off when another app asked for a photo: the shutter and collar stay, the mode marks go.
+    marks: Boolean = true,
     shutter: @Composable (Modifier) -> Unit
 ) {
     val context = LocalContext.current
@@ -497,7 +499,7 @@ internal fun ModeLine(
         }
 
         val dim = when {
-            recording -> 0f
+            recording || !marks -> 0f
             videoProcessing -> 0.35f
             else -> 1f
         }

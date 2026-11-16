@@ -8820,6 +8820,7 @@ class Camera2Controller(private val context: Context) {
 
     /** Caps the Photo-mode (YUV) capture size of the back cameras; 0 = full sensor size. RAW is always full size. */
     fun setPhotoResolutionCapMp(megapixels: Int) {
+        val megapixels = quickCap(megapixels, 12)
         if (_state.value.photoResolutionCapMp == megapixels) return
         _state.update { s -> s.copy(photoResolutionCapMp = megapixels) }
         if (!isFrontCameraOpen()) restartPhotoSession("photo resolution cap: $megapixels MP")
@@ -8827,7 +8828,7 @@ class Camera2Controller(private val context: Context) {
 
     /** Caps the front camera's Photo-mode capture size; 0 = full sensor size. */
     fun setFrontPhotoResolutionCapMp(megapixels: Int) = updateFrontSession("front photo resolution cap: $megapixels MP") {
-        it.copy(frontPhotoResolutionCapMp = megapixels)
+        it.copy(frontPhotoResolutionCapMp = quickCap(megapixels, 2))
     }
 
     /** Front camera "Accurate" colour (see frontStillJpegReader); the JPEG output is part of the session. */
@@ -9284,9 +9285,22 @@ class Camera2Controller(private val context: Context) {
         _state.update { s -> s.copy(rawCfaCorrectionModes = modes.toMap()) }
     }
 
+    /**
+     * Another app's photo is a quick one: always stacked, whatever the settings say, and at most
+     * 12 MP from the back cameras and 2 MP from the front.
+     */
+    var quickCapture = false
+
+    private fun quickCap(megapixels: Int, limit: Int): Int = when {
+        !quickCapture -> megapixels
+        megapixels == 0 -> limit
+        else -> minOf(megapixels, limit)
+    }
+
     fun setMultiFrameOutputScale(outputScale: Float?) {
         val currentState = _state.value
-        val normalizedScale = outputScale?.let(MultiFrameConfig::normalizeOutputScale)
+        val normalizedScale = (outputScale ?: MultiFrameConfig.DEFAULT_SUPER_RESOLUTION_SCALE.takeIf { quickCapture })
+            ?.let(MultiFrameConfig::normalizeOutputScale)
         _state.update { s -> s.copy(
             multiFrameOutputScale = normalizedScale,
         ) }

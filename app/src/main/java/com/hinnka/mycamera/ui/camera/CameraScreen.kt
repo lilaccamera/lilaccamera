@@ -259,6 +259,7 @@ fun CameraScreen(
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
     val isCameraInitialized by viewModel.isInitialized.collectAsState()
+    val forCaller = LocalCaptureForCaller.current
     val controlsArrival = remember { Animatable(if (controlsArrivalPlayed) 1f else 0f) }
     LaunchedEffect(isCameraInitialized) {
         if (!isCameraInitialized || controlsArrivalPlayed) return@LaunchedEffect
@@ -866,6 +867,14 @@ fun CameraScreen(
         }
     }
 
+    // Another app gets a finished photo at once: Photo mode, never Pro's queued render or a video.
+    // shortcut: the mode stays chosen for the next start of the camera, restore it if that bothers.
+    LaunchedEffect(forCaller, isCameraInitialized) {
+        val plainPhoto = state.captureMode == CaptureMode.PHOTO && !state.useRaw &&
+            !state.isNightMode && !state.isPortraitMode
+        if (forCaller != null && isCameraInitialized && !plainPhoto) selectShootingMode(CameraShootingMode.PHOTO)
+    }
+
     fun presetTargetAspectRatio(preset: CameraPreset?): AspectRatio {
         return try {
             AspectRatio.valueOf(preset?.aspectRatio ?: AspectRatio.RATIO_4_3.name)
@@ -1143,7 +1152,9 @@ fun CameraScreen(
         }
         // XPAN keeps its manual values on the side bar, so there a swipe only moves the everyday row.
         val onPictureSwipe by rememberUpdatedState<(Boolean) -> Unit> { up ->
-            if (up) {
+            if (forCaller != null) {
+                // No settings sheets or manual values for another app's photo.
+            } else if (up) {
                 if (everydayRowShown) everydayRowShown = false else if (!isXpan) manualControlsShown = true
             } else if (manualControlsShown && !isXpan) {
                 manualControlsShown = false
@@ -1430,6 +1441,7 @@ fun CameraScreen(
                                                 if (
                                                     horizontal &&
                                                     !afterLongPress &&
+                                                    forCaller == null &&
                                                     nextLut != null &&
                                                     // The look stays fixed during a recording.
                                                     !state.videoRecordingState.isRecording &&
@@ -2051,7 +2063,10 @@ fun CameraScreen(
                     TopEdgeLine(
                         marks = topEdgeMarks,
                         histogram = topEdgeHistogram,
-                        onClick = { if (recordingLine) noteLine.say(R.string.video_locked_while_recording) else everydayRowShown = true },
+                        onClick = {
+                            if (recordingLine) noteLine.say(R.string.video_locked_while_recording)
+                            else if (forCaller == null) everydayRowShown = true
+                        },
                         center = if (recordingLine) {
                             {
                                 RecordingPill(
@@ -2151,7 +2166,7 @@ fun CameraScreen(
             }
             // In low light Photo mode offers Night in the same place; a tap rolls the dial there.
             val photoMode = state.captureMode == CaptureMode.PHOTO && !proMode && !state.isPortraitMode &&
-                !state.isNightMode
+                !state.isNightMode && forCaller == null
             val offerNight = photoMode && lowLightOffer.offered && !lowLightOffer.dismissed &&
                 modeLine.shownMode == CameraShootingMode.PHOTO && !modeLine.lift.isRunning && modeLine.lift.value == 0f
             if (
@@ -2308,6 +2323,33 @@ fun CameraScreen(
                             }
                         }
                 )
+            }
+            // Another app's photo: the wait is named where the guides sit, on the picture.
+            if (forCaller != null && guidePillBottom != null) {
+                val progress = state.photoCaptureProgress
+                // 0 = pressed, no frame yet; 1 = frames arriving; 2 = every frame is in.
+                var stage by remember { mutableIntStateOf(0) }
+                val vibration = remember(context) { VibrationHelper(context) }
+                LaunchedEffect(forCaller.busy) { if (!forCaller.busy) stage = 0 }
+                LaunchedEffect(progress?.captureId, progress?.lastFrameArrived) {
+                    val framesIn = if (progress == null) stage == 1 else progress.lastFrameArrived
+                    if (framesIn && stage < 2) {
+                        stage = 2
+                        // A light tick: the phone may move again.
+                        vibration.vibrate(VibrationHelper.LIGHT_TICK_MS)
+                    } else if (progress != null && !framesIn) {
+                        stage = 1
+                    }
+                }
+                val frames = state.activeMultiFrameCount
+                val wait = when {
+                    !forCaller.busy || state.countdownValue > 0 -> null
+                    // From the press, so the note never names the processing before the frames are taken.
+                    stage < 2 -> if (frames > 1) stringResource(R.string.capture_hold_still_frames, frames) else null
+                    frames > 1 -> stringResource(R.string.capture_processing_frames, frames)
+                    else -> stringResource(R.string.capture_processing)
+                }
+                if (wait != null) ModeGuidePill(icon = AppIcons.InfoLine, text = wait, onClick = {}, modifier = guidePillPlacement)
             }
 
             // A short white flash over the picture when Snapshot takes a photo while recording.
@@ -2726,7 +2768,8 @@ private fun Controls(
     val captureProcessingState by viewModel.captureProcessingState.collectAsState()
     val capturedThumbnail by viewModel.capturedThumbnail.collectAsState()
     // Same rule as the lilac refusal in Camera2Controller.reservePhotoCapture.
-    val captureBusy = state.captureBusy
+    val forCaller = LocalCaptureForCaller.current
+    val captureBusy = state.captureBusy || forCaller?.busy == true
 
     Box(
         modifier = modifier,
@@ -2759,8 +2802,9 @@ private fun Controls(
                     selected = shootingMode,
                     proAvailable = state.isRawSupported,
                     // Free while a mode loads: a further choice waits for that load (see selectShootingMode).
-                    enabled = !state.videoRecordingState.isRecording &&
+                    enabled = forCaller == null && !state.videoRecordingState.isRecording &&
                         !state.videoRecordingState.isProcessing,
+                    marks = forCaller == null,
                     recording = state.videoRecordingState.isRecording,
                     videoProcessing = state.videoRecordingState.isProcessing,
                     onSelect = onCaptureModeSelected,
@@ -2784,7 +2828,7 @@ private fun Controls(
                         isVideoProcessing = state.videoRecordingState.isProcessing,
                         isPaused = state.videoRecordingState.isPaused,
                         allowLongPress = state.captureMode == CaptureMode.PHOTO &&
-                            !useMultipleExposure,
+                            !useMultipleExposure && forCaller == null,
                         multipleExposureEnabled = useMultipleExposure && state.captureMode == CaptureMode.PHOTO,
                         // Moves at each press; empty again once the picture is saved or discarded.
                         multipleExposureProgress = exposureCount.toFloat() /
@@ -2809,8 +2853,17 @@ private fun Controls(
                 val thumbnailPhotoInset = CameraControlsLayoutDefaults.LineWidth + CameraControlsLayoutDefaults.LineGap
                 val thumbnailPhotoInsetPx = with(LocalDensity.current) { thumbnailPhotoInset.toPx() }
                 val recording = state.videoRecordingState.isRecording
+                // For another app, Close takes the thumbnail's place.
+                if (forCaller != null) FramedFooterButton(
+                    onClick = forCaller.close,
+                    icon = AppIcons.CloseLine,
+                    contentDescription = stringResource(R.string.close),
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
+                )
                 // While recording, Pause takes the thumbnail's place and Snapshot the switch's.
-                if (!recording) Box(
+                else if (!recording) Box(
                     modifier = Modifier
                         .align(Alignment.CenterStart)
                         .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
@@ -2925,7 +2978,30 @@ private fun Controls(
                 }
 
                 // Quick settings mirror Looks on the left column; not while recording, as the settings can't change then.
-                if (!state.videoRecordingState.isRecording && !state.videoRecordingState.isProcessing) {
+                // For another app, flash is the one setting, in Quick settings' place.
+                if (forCaller != null) {
+                    val flashOn = state.flashMode == 1
+                    PhysicalButton(
+                        onClick = viewModel::toggleQuickFlash,
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
+                            .offset(y = -LooksRise)
+                            .size(CameraControlsLayoutDefaults.SideButtonSize)
+                            .autoRotate(),
+                        shape = RoundedCornerShape(ThumbnailCorner),
+                        backgroundColor = Color.Transparent
+                    ) {
+                        Icon(
+                            imageVector = if (flashOn) AppIcons.BoltLine else AppIcons.BoltOffLine,
+                            contentDescription = stringResource(R.string.flash) + " " +
+                                stringResource(if (flashOn) R.string.quick_on else R.string.quick_off),
+                            tint = if (flashOn) ModeAmber else CameraControlsLayoutDefaults.LineColor.onFooter(),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+                if (forCaller == null && !state.videoRecordingState.isRecording && !state.videoRecordingState.isProcessing) {
                     PhysicalButton(
                         onClick = onQuickSettingsClick,
                         modifier = Modifier
@@ -2953,7 +3029,7 @@ private fun Controls(
                 // Looks can't change during a recording. In Night the button is Night's Fast / Accurate switch;
                 // its icon springs over as the dial reaches Night (looks stay on the sideways swipe).
                 val nightSwitch = line.shownMode == CameraShootingMode.NIGHT
-                if (!isXpan && !recording) {
+                if (!isXpan && !recording && forCaller == null) {
                     PhysicalButton(
                         onClick = {
                             if (nightSwitch) {
@@ -3053,7 +3129,7 @@ private fun DrawScope.drawCenterCropped(image: ImageBitmap, rect: Rect, alpha: F
 
 /** A footer button in the switch's 48 dp frame: a 2 dp outline, then a line icon. */
 @Composable
-private fun FramedFooterButton(
+internal fun FramedFooterButton(
     onClick: () -> Unit,
     icon: ImageVector,
     contentDescription: String,
