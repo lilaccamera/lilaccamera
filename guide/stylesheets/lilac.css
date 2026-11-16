@@ -45,3 +45,59 @@ img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
 .lilac-fig rect.bar:hover, .lilac-fig circle.dot:hover { opacity: .8; }
 :root { --lilac-fill: rgba(117, 80, 212, .12); }
 [data-md-color-scheme="slate"] { --lilac-fill: rgba(180, 139, 245, .16); }
+
+/* "Lilac banner" look: deep purple header, home page hero band and cards. */
+:root {
+  --lilac-deep: #3B2A66;
+  --lilac-pale: #E2C6FF;
+  --lilac-card-title: #5E44A8;
+  --lilac-card-border: #E5DEF3;
+}
+[data-md-color-scheme="slate"] {
+  --lilac-deep: #2E2152;
+  --lilac-card-title: #E2C6FF;
+  --lilac-card-border: #4A3A75;
+  --md-typeset-a-color: #B48BF5;
+}
+.md-header { background-color: var(--lilac-deep); color: #fff; }
+.md-header .md-header__button, .md-header .md-header__title, .md-header .md-header__topic,
+.md-header .md-search__icon, .md-header .md-header__option { color: #fff; }
+.md-header .md-logo img { height: 1.6rem; width: auto; border-radius: 22%; }
+.md-tabs { background-color: var(--lilac-deep); color: #fff; }
+
+.lilac-hero {
+  display: flex; align-items: center; gap: 1.4rem;
+  background: var(--lilac-deep); color: #fff;
+  border-radius: 1rem; padding: 2rem 1.6rem; margin: 0 0 1.4rem;
+}
+.lilac-hero__icon { width: 96px; height: 96px; flex: none; border-radius: 22%; }
+.md-typeset .lilac-hero h1 { color: #fff; margin: 0 0 .3rem; font-weight: 700; }
+.lilac-hero__tagline { color: var(--lilac-pale); margin: 0 0 1rem; font-size: 1.05em; }
+.lilac-hero__buttons { display: flex; flex-wrap: wrap; gap: .6rem; }
+.md-typeset .lilac-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 0 1.2rem; border-radius: 22px;
+  font-weight: 600; text-decoration: none; border: 2px solid #B48BF5;
+}
+.md-typeset .lilac-btn--primary { background: #B48BF5; color: #21005D; }
+.md-typeset .lilac-btn--primary:hover, .md-typeset .lilac-btn--primary:focus { background: var(--lilac-pale); border-color: var(--lilac-pale); color: #21005D; }
+.md-typeset .lilac-btn--outline { background: transparent; color: #fff; }
+.md-typeset .lilac-btn--outline:hover, .md-typeset .lilac-btn--outline:focus { background: rgba(255, 255, 255, .1); color: #fff; }
+
+.lilac-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: .8rem; margin: 1.2rem 0 1.6rem; }
+.md-typeset a.lilac-card {
+  display: flex; flex-direction: column; gap: .3rem; min-height: 44px;
+  padding: 1rem 1.1rem; border: 1px solid var(--lilac-card-border); border-radius: .8rem;
+  color: var(--md-default-fg-color--light); text-decoration: none;
+  background: var(--md-default-bg-color);
+}
+.md-typeset a.lilac-card strong { color: var(--lilac-card-title); font-size: 1.05em; }
+.md-typeset a.lilac-card:hover, .md-typeset a.lilac-card:focus { border-color: var(--md-primary-fg-color); }
+
+@media screen and (max-width: 44.9375em) {
+  .lilac-hero { flex-direction: column; align-items: flex-start; gap: 1rem; padding: 1.4rem 1.1rem; margin: 0 -.4rem 1.2rem; }
+  .lilac-hero__icon { width: 64px; height: 64px; }
+  .lilac-hero__buttons { width: 100%; }
+  .md-typeset .lilac-btn { flex: 1 1 100%; }
+  .lilac-cards { grid-template-columns: 1fr; }
+}

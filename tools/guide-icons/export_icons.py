@@ -9,7 +9,7 @@ Usage: python3 tools/guide-icons/export_icons.py   (from the repo root; needs gi
 Output: guide/icons/<Name>.svg (the folder is rewritten), black on transparent; the site's CSS
 inverts them in dark mode. Rerun it after changing AppIcons.kt.
 """
-import pathlib, re, subprocess
+import pathlib, re, subprocess, sys
 import xml.etree.ElementTree as ET
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -75,3 +75,18 @@ for name in ("Sliders", "Film", "MoonStars", "User", "MovieCamera", "TurningArro
     assert name in lilac, f"{name} not exported"
 assert "Layers" not in lilac and "CameraAlt" not in lilac, "an upstream icon was exported"
 print(f"{len(lilac)} Lilac icons written to {OUT.relative_to(ROOT)} ({len(icons) - len(lilac)} upstream skipped)")
+
+# The app icon for the site's header, home page and favicon: the "Realistic" launcher icon on its
+# deep purple background, cut to the launcher's rounded square. Same geometry as the app's icon.
+sys.path.insert(0, str(ROOT / "tools/lilac-icon"))
+import lilac_icon  # noqa: E402
+
+app_icon = lilac_icon.svg(lilac_icon.realistic(), "#3B2A66")
+app_icon = re.sub(r'<rect width="108" height="108" fill="#3B2A66"/>',
+                  '<rect x="18" y="18" width="72" height="72" rx="16" fill="#3B2A66"/>', app_icon, count=1)
+assert 'rx="16"' in app_icon, "icon background not found in lilac_icon.svg()"
+app_icon = app_icon.replace(' width="288" height="288"', "")
+ET.fromstring(app_icon)
+(ROOT / "guide/images").mkdir(exist_ok=True)
+(ROOT / "guide/images/lilac-icon.svg").write_text(app_icon)
+print("app icon written to guide/images/lilac-icon.svg")

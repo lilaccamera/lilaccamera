@@ -6,14 +6,18 @@ strict: true
 theme:
   name: material
   language: en
+  logo: images/lilac-icon.svg
+  favicon: images/lilac-icon.svg
   palette:
-    - scheme: default
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       primary: custom
       accent: custom
       toggle:
         icon: lucide/moon
         name: Switch to dark mode
-    - scheme: slate
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
       primary: custom
       accent: custom
       toggle:

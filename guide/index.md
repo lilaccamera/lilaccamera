@@ -1,6 +1,26 @@
-# Lilac Camera
+---
+hide:
+  - toc
+---
 
-Lilac Camera is a fork of [PhotonCamera](https://github.com/bjzhou/PhotonCamera) by bjzhou, adapted for low-memory phones.
+<div class="lilac-hero" markdown="0">
+<img class="lilac-hero__icon" src="images/lilac-icon.svg" alt="" width="96" height="96">
+<div class="lilac-hero__text">
+<h1>Lilac Camera</h1>
+<p class="lilac-hero__tagline">Stacked photos and RAW for the Xperia XZ1 Compact</p>
+<div class="lilac-hero__buttons">
+<a class="lilac-btn lilac-btn--primary" href="user/getting-started/">Get started</a>
+</div>
+</div>
+</div>
+
+Lilac Camera is a fork of [PhotonCamera](https://github.com/bjzhou/PhotonCamera) by bjzhou, with an interface rebuilt for small phone screens and processing adapted for low-memory phones.
+
+<div class="lilac-cards" markdown="0">
+<a class="lilac-card" href="user/photo-mode/"><strong>Photo and Night</strong><span>Stacking, how many frames, 12 MP and 2 MP, front camera colour</span></a>
+<a class="lilac-card" href="user/pro-mode/"><strong>Pro and HDR</strong><span>RAW bursts, the render queue, keeping bright skies</span></a>
+<a class="lilac-card" href="user/troubleshooting/"><strong>Troubleshooting</strong><span>Every message, what it means and what to do</span></a>
+</div>
 
 Lilac takes several frames for every photo and merges them, so less noise reaches the picture and more of the light does. It is built for the Sony Xperia XZ1 Compact (lilac): a 4.6-inch screen, 4 GB of memory and a capable 19 MP sensor that most camera apps leave underused.
 
@@ -67,7 +87,7 @@ These are tests of one scene each, not a promise for every photo; how to get the
 
 ### Made for a 4.6-inch screen
 
-Every control was placed for one thumb on a small phone:
+Lilac's interface is not PhotonCamera's: it was rebuilt for small screens, with every control placed for one thumb:
 
 - **No top bar.** The picture starts at the top edge; the top line shows only settings you changed.
 - **Everything at the bottom.** Modes are on the shutter itself (swipe it sideways), the zoom ring sits right above it, and quick settings rise from the bottom.
