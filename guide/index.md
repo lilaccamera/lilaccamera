@@ -73,8 +73,8 @@ Lilac's interface is not PhotonCamera's: it was rebuilt so every control is in r
 <desc id="xz-d">The Xperia XZ1 Compact with Lilac's camera screen, numbered as in the key below: 1 top line, 2 picture, 3 zoom ring, 4 quick settings, 5 looks, 6 last photo, 7 shutter and mode dial, 8 camera switch.</desc>
 <defs><linearGradient id="xz-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5f7189"/><stop offset=".6" stop-color="#8d8790"/><stop offset="1" stop-color="#4a4450"/></linearGradient>
 <linearGradient id="xz-face" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#D7D7D7"/></linearGradient></defs>
-<rect x="72.0" y="8" width="196.0" height="389.0" rx="9.7" class="xz-body"/>
-<rect x="73.2" y="9.2" width="193.6" height="386.6" rx="9.0" class="xz-glass"/>
+<rect x="72.0" y="8" width="196.0" height="389.0" rx="0" class="xz-body"/>
+<rect x="73.2" y="9.2" width="193.6" height="386.6" rx="0" class="xz-glass"/>
 <rect x="151.9" y="27.3" width="36.2" height="2.4" rx="1.2" class="xz-slot"/>
 <circle cx="117.2" cy="28.5" r="4.8" class="xz-cam"/>
 <circle cx="222.8" cy="28.5" r="1.8" class="xz-slot"/>
