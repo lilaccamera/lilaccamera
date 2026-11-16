@@ -28,6 +28,8 @@ plugins:
 
 markdown_extensions:
   - admonition
+  - def_list
+  - attr_list
   - pymdownx.details
   - tables
   - toc:
@@ -35,6 +37,18 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Using Lilac:
+      - Getting started: user/getting-started.md
+      - Photo and Night: user/photo-mode.md
+      - Pro: user/pro-mode.md
+      - HDR: user/hdr.md
+      - Portrait: user/portrait.md
+      - Video: user/video.md
+      - Editor: user/editor.md
+  - How it works:
+      - Focus and faces: user/focus.md
+      - Sony hardware: user/hardware.md
+  - Troubleshooting: user/troubleshooting.md
 exclude_docs: |
   check-text.sh
   requirements.txt
