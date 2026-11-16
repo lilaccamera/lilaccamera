@@ -116,17 +116,27 @@ img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
   border: 1px solid var(--lilac-border); border-radius: var(--lilac-radius); overflow: hidden;
   margin: 1.2rem 0 1.4rem; font-size: .8rem; box-shadow: var(--lilac-shadow);
 }
-.lilac-compare__row { display: grid; grid-template-columns: 1fr 1fr; }
-.lilac-compare__row > span { padding: .5rem .8rem .7rem; line-height: 1.45; color: var(--lilac-muted); }
-.lilac-compare__row > span.lilac-compare__lilac { background: var(--lilac-fill); color: var(--md-default-fg-color); border-left: 2px solid var(--md-primary-fg-color); }
-.lilac-compare__row--head > span { font-weight: 700; color: var(--md-default-fg-color); padding-top: .7rem; }
+.lilac-compare__row { display: grid; grid-template-columns: 9.5rem 1fr 1fr; }
+.lilac-compare__row + .lilac-compare__row > span { border-top: 1px solid var(--lilac-border); }
+.lilac-compare__row > span { padding: .6rem .8rem; line-height: 1.45; color: var(--lilac-muted); }
+.lilac-compare__row > span.lilac-compare__lilac { background: var(--lilac-fill); color: var(--md-default-fg-color); box-shadow: inset 2px 0 var(--md-primary-fg-color); }
+.lilac-compare__row--head > span { font-weight: 700; color: var(--md-default-fg-color); }
 .lilac-compare__row--head > span.lilac-compare__lilac { color: var(--lilac-title); }
 .lilac-compare__row--head small { display: block; font-weight: 400; color: var(--lilac-muted); opacity: 1; }
-.lilac-compare__topic { display: flex; align-items: center; gap: .45rem; padding: .55rem .8rem .1rem; border-top: 1px solid var(--lilac-border); font-weight: 700; color: var(--lilac-title); }
-.md-typeset .lilac-compare__topic img.icon { height: 1.35em; }
+.lilac-compare__row > span.lilac-compare__topic { display: flex; align-items: flex-start; gap: .45rem; font-weight: 700; color: var(--lilac-title); }
+.md-typeset .lilac-compare__topic img.icon { height: 1.35em; flex: none; }
 @media screen and (max-width: 44.9375em) {
   .lilac-compare { margin-left: -.4rem; margin-right: -.4rem; font-size: .74rem; }
-  .lilac-compare__row > span { padding: .45rem .6rem .6rem; }
+  /* Phones: the topic sits above its two cells; the Lilac fill carries on through the topic line. */
+  .lilac-compare__row { grid-template-columns: 1fr 1fr; }
+  .lilac-compare__row > span { padding: .1rem .6rem .6rem; }
+  .lilac-compare__row > span.lilac-compare__topic {
+    grid-column: 1 / -1; padding-top: .55rem;
+    background: linear-gradient(to right, transparent 50%, var(--md-primary-fg-color) 50%, var(--md-primary-fg-color) calc(50% + 2px), var(--lilac-fill) calc(50% + 2px));
+  }
+  .lilac-compare__row + .lilac-compare__row > span:not(.lilac-compare__topic) { border-top: 0; }
+  .lilac-compare__row--head > span.lilac-compare__topic { display: none; }
+  .lilac-compare__row--head > span { padding-top: .6rem; }
 }
 
 /* Tags: where Lilac uses GCam's pipeline or Sony's features. */

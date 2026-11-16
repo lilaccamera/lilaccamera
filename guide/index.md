@@ -30,19 +30,13 @@ GCam processes photos well but knows nothing about Sony's camera. Sony's camera 
 Compared with a default camera app:
 
 <div class="lilac-compare" markdown="0" role="table" aria-label="A default camera app compared with Lilac">
-<div class="lilac-compare__row lilac-compare__row--head" role="row"><span role="columnheader">Default camera app<small>such as Aperture</small></span><span role="columnheader" class="lilac-compare__lilac">Lilac</span></div>
-<div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/StackLine.svg" alt="">Each photo</div>
-<div class="lilac-compare__row" role="row"><span role="cell">One finished JPEG from Sony's processor</span><span role="cell" class="lilac-compare__lilac">3 to 20 frames merged into one: less noise, more detail</span></div>
-<div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/SensorLine.svg" alt="">Starting point</div>
-<div class="lilac-compare__row" role="row"><span role="cell">Sony's picture, noise already smoothed away with detail</span><span role="cell" class="lilac-compare__lilac">RAW frames merged before any processing <span class="lilac-tag lilac-tag--gcam">GCam</span></span></div>
-<div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/SunHighLine.svg" alt="">Bright skies</div>
-<div class="lilac-compare__row" role="row"><span role="cell">One exposure: what clips stays white</span><span role="cell" class="lilac-compare__lilac">A darker RAW burst; HDRNet lifts the shadows <span class="lilac-tag lilac-tag--gcam">GCam</span></span></div>
-<div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/MoonStars.svg" alt="">Dim light</div>
-<div class="lilac-compare__row" role="row"><span role="cell">One frame, heavily smoothed</span><span role="cell" class="lilac-compare__lilac">Night: 6 to 12 frames merged and brightened</span></div>
-<div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/FocusLine.svg" alt="">Focus</div>
-<div class="lilac-compare__row" role="row"><span role="cell">Tap a point</span><span role="cell" class="lilac-compare__lilac">Subject tracking, face choice, laser distance <span class="lilac-tag lilac-tag--sony">Sony</span></span></div>
-<div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/MovieCamera.svg" alt="">Slow motion</div>
-<div class="lilac-compare__row" role="row"><span role="cell">None</span><span role="cell" class="lilac-compare__lilac">960 fps at 720p <span class="lilac-tag lilac-tag--sony">Sony</span></span></div>
+<div class="lilac-compare__row lilac-compare__row--head" role="row"><span role="columnheader" class="lilac-compare__topic"></span><span role="columnheader">Default camera app<small>such as Aperture</small></span><span role="columnheader" class="lilac-compare__lilac">Lilac</span></div>
+<div class="lilac-compare__row" role="row"><span role="rowheader" class="lilac-compare__topic"><img class="icon" src="icons/StackLine.svg" alt="">Each photo</span><span role="cell">One finished JPEG from Sony's processor</span><span role="cell" class="lilac-compare__lilac">3 to 20 frames merged into one: less noise, more detail</span></div>
+<div class="lilac-compare__row" role="row"><span role="rowheader" class="lilac-compare__topic"><img class="icon" src="icons/SensorLine.svg" alt="">Starting point</span><span role="cell">Sony's picture, noise already smoothed away with detail</span><span role="cell" class="lilac-compare__lilac">RAW frames merged before any processing <span class="lilac-tag lilac-tag--gcam">GCam</span></span></div>
+<div class="lilac-compare__row" role="row"><span role="rowheader" class="lilac-compare__topic"><img class="icon" src="icons/SunHighLine.svg" alt="">Bright skies</span><span role="cell">One exposure: what clips stays white</span><span role="cell" class="lilac-compare__lilac">A darker RAW burst; HDRNet lifts the shadows <span class="lilac-tag lilac-tag--gcam">GCam</span></span></div>
+<div class="lilac-compare__row" role="row"><span role="rowheader" class="lilac-compare__topic"><img class="icon" src="icons/MoonStars.svg" alt="">Dim light</span><span role="cell">One frame, heavily smoothed</span><span role="cell" class="lilac-compare__lilac">Night: 6 to 12 frames merged and brightened</span></div>
+<div class="lilac-compare__row" role="row"><span role="rowheader" class="lilac-compare__topic"><img class="icon" src="icons/FocusLine.svg" alt="">Focus</span><span role="cell">Tap a point</span><span role="cell" class="lilac-compare__lilac">Subject tracking, face choice, laser distance <span class="lilac-tag lilac-tag--sony">Sony</span></span></div>
+<div class="lilac-compare__row" role="row"><span role="rowheader" class="lilac-compare__topic"><img class="icon" src="icons/MovieCamera.svg" alt="">Slow motion</span><span role="cell">None</span><span role="cell" class="lilac-compare__lilac">960 fps at 720p <span class="lilac-tag lilac-tag--sony">Sony</span></span></div>
 </div>
 <p class="lilac-legend" markdown="0"><span class="lilac-tag lilac-tag--gcam">GCam</span> the same HDR+ pipeline and models as Google's camera app &nbsp; <span class="lilac-tag lilac-tag--sony">Sony</span> Sony's own camera features</p>
 
