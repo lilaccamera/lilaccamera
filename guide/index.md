@@ -33,11 +33,11 @@ A default camera app, such as Aperture on LineageOS, asks the camera for a photo
 <div class="lilac-compare" markdown="0" role="table" aria-label="A default camera app compared with Lilac">
 <div class="lilac-compare__row lilac-compare__row--head" role="row"><span role="columnheader">A default camera app<small>such as Aperture</small></span><span role="columnheader" class="lilac-compare__lilac">Lilac</span></div>
 <div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/StackLine.svg" alt="">Each photo</div>
-<div class="lilac-compare__row" role="row"><span role="cell">One finished JPEG, made by Sony's processor</span><span role="cell" class="lilac-compare__lilac">A burst of 3 to 20 frames merged into one: less noise, more fine detail</span></div>
+<div class="lilac-compare__row" role="row"><span role="cell">One finished JPEG, made by Sony's processor</span><span role="cell" class="lilac-compare__lilac">A burst of 3 to 20 frames merged into one, as GCam does: less noise, more fine detail</span></div>
 <div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/SensorLine.svg" alt="">Starting point</div>
 <div class="lilac-compare__row" role="row"><span role="cell">Sony's finished picture: noise already smoothed away with some of the detail</span><span role="cell" class="lilac-compare__lilac">RAW frames from the sensor, merged before any processing (on sunplex07's LineageOS 23.2)</span></div>
 <div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/SunHighLine.svg" alt="">Bright windows and skies</div>
-<div class="lilac-compare__row" role="row"><span role="cell">One exposure: what clips stays white</span><span role="cell" class="lilac-compare__lilac">A darker RAW burst keeps them; the merge cleans the shadows it leaves</span></div>
+<div class="lilac-compare__row" role="row"><span role="cell">One exposure: what clips stays white</span><span role="cell" class="lilac-compare__lilac">GCam's HDR+ approach: a darker RAW burst keeps them, then GCam's HDRNet lifts the shadows</span></div>
 <div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/MoonStars.svg" alt="">Dim light</div>
 <div class="lilac-compare__row" role="row"><span role="cell">One frame; Sony smooths the noise, and detail with it</span><span role="cell" class="lilac-compare__lilac">Night: 6 to 12 frames merged and brightened, planned from how steady you hold</span></div>
 <div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/FocusLine.svg" alt="">Focus</div>
@@ -54,6 +54,25 @@ What that gives, measured side by side on this phone:
 - In a dark room, 10 to 20 stacked front-camera frames reached 1.6 to 2.3 times the signal-to-noise ratio of Sony's own camera app.
 
 These are tests of one scene each, not a promise for every photo; how to get the most from each mode is in the guide.
+
+### Lilac and GCam
+
+If you have used GCam, Google's camera app ported to other phones, the ideas will be familiar: Lilac's Pro mode is built on the same HDR+ pipeline. PhotonCamera rebuilt it from the GCam ports MGC and AGC to run through Android's standard camera interface on the graphics chip, and Lilac carries it with GCam's own model files:
+
+| GCam | In Lilac |
+|---|---|
+| HDR+: a burst of darker RAW frames, merged | Pro's HDR+ frames, and the [darker burst](user/hdr.md#the-darker-burst) |
+| Sabre, the handheld multi-frame merge | the **Sabre** merge mode (default) |
+| HDR+ spatial merge with bracketed frames | the **Spatial** merge mode |
+| Learned auto exposure (scene models for long, short and portrait shots) | the same models decide how far shadows are lifted, capped by the [HDR ratio](user/hdr.md#the-hdr-ratio-slider) (9.8×, GCam's own default) |
+| HDRNet tone mapping | the same HDRNet model |
+| GCam's denoise tuning | its luma, chroma and Sabre denoise settings |
+
+What Lilac adds for this phone:
+
+- **It fits in 4 GB.** Pro photos are developed one at a time in a separate process that waits for free memory, instead of all at once in the camera.
+- **Stacking without RAW.** Photo, Night and Portrait stack the processed frames, so they work on every lilac ROM; Pro is there when the ROM gives RAW.
+- **Sony's camera features** that GCam does not know: subject tracking, the laser distance sensor, smile scores, the front camera's Accurate colour, and 960 fps slow motion.
 
 ### 960 fps slow motion
 
