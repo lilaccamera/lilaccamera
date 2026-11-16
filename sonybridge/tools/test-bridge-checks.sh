@@ -9,6 +9,7 @@ cat > "$T/adb" <<'FAKE'
 # FAKE_CACAO=found|missing  FAKE_SHIM=found|missing  FAKE_ERR=1 (adb itself fails)
 echo "$*" >> "$FAKE_LOG"; a="$*"; f="${a#shell ls }"
 if [ "${FAKE_ERR:-}" = 1 ]; then echo "error: no devices/emulators found" >&2; exit 1; fi
+if [ "${FAKE_ERR:-}" = serial ]; then echo "adb: device 'abc' not found" >&2; exit 1; fi
 case "$*" in
   "shell service check cacao")
     [ "${FAKE_CACAO:-found}" = found ] && echo "Service cacao: found" || echo "Service cacao: not found" ;;
@@ -65,5 +66,14 @@ test_default_adb() {
   grep -q 'service check cacao' "$FAKE_LOG" || { bad $FUNCNAME "fake adb not called"; return; }
   ok $FUNCNAME
 }
-for t in test_default_adb test_all_present test_cacao_missing_declined test_shim_missing_accepted test_adb_error_stops; do $t; done
+test_unknown_device_stops() {
+  # adb's own "device ... not found" (a stale ANDROID_SERIAL) must not read as "cacao missing".
+  FAKE_ERR=serial run y install "$T/bridge.apk"
+  [ $RC -eq 1 ] || { bad $FUNCNAME "exit $RC"; return; }
+  echo "$OUT" | grep -qi 'could not check' || { bad $FUNCNAME "no 'could not check'"; return; }
+  echo "$OUT" | grep -qi 'missing' && { bad $FUNCNAME "says missing"; return; }
+  grep -q '^push' "$FAKE_LOG" && { bad $FUNCNAME "pushed"; return; }
+  ok $FUNCNAME
+}
+for t in test_unknown_device_stops test_default_adb test_all_present test_cacao_missing_declined test_shim_missing_accepted test_adb_error_stops; do $t; done
 [ $fails -eq 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

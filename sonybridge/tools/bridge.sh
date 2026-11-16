@@ -32,8 +32,8 @@ file_state() {
 check_cacao() {
   local out f rc=0; out=$(adb shell service check cacao 2>&1) || true
   case "$out" in
-    *"not found"*) rc=1 ;;
-    *": found"*) for f in $CACAO_LIBS; do file_state "$f" || { rc=$?; break; }; done ;;
+    *"Service cacao: not found"*) rc=1 ;;
+    *"Service cacao: found"*) for f in $CACAO_LIBS; do file_state "$f" || { rc=$?; break; }; done ;;
     *) rc=2 ;;
   esac
   case $rc in
