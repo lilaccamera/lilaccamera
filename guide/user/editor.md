@@ -22,7 +22,7 @@ Open a photo in the gallery and tap the pencil. The button waits while a photo i
 <text x="172.9" y="60.9" text-anchor="middle" style="font-size:6.2px;font-weight:500;fill:#E8E6DF">HD</text>
 <image href="../icons/MaximizeLine.svg" x="188.0" y="53.6" width="10.1" height="10.1" class="ui-icon"/>
 <image href="../icons/ContrastLine.svg" x="209.1" y="53.6" width="10.1" height="10.1" class="ui-icon"/>
-<text x="239.1" y="61.2" text-anchor="middle" style="font-size:7.2px;font-weight:600;fill:#E8E6DF">Save</text>
+<text x="248.7" y="61.2" text-anchor="end" style="font-size:7.2px;font-weight:600;fill:#E8E6DF">Save</text>
 <path d="M96.1 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
 <path d="M101.4 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
 <path d="M106.6 263.1V267.9" stroke="#fff" stroke-opacity="0.6" stroke-width="0.48"/>
@@ -91,7 +91,7 @@ Open a photo in the gallery and tap the pencil. The button waits while a photo i
 <image href="../icons/CropLine.svg" x="239.1" y="330.3" width="10.6" height="10.6" class="ui-icon"/>
 <text x="244.3" y="347.1" text-anchor="middle" style="font-size:5.3px;font-weight:400;fill:#B4B2A9">Crop</text>
 <path d="M56.0 58.6L90.3 58.6" class="key-line"/><circle cx="56.0" cy="58.6" r="7" class="key-dot"/><text x="56.0" y="62.0" text-anchor="middle" class="key-num">1</text>
-<path d="M284.0 58.6L251.6 58.6" class="key-line"/><circle cx="284.0" cy="58.6" r="7" class="key-dot"/><text x="284.0" y="62.0" text-anchor="middle" class="key-num">2</text>
+<path d="M284.0 58.6L256.4 58.6" class="key-line"/><circle cx="284.0" cy="58.6" r="7" class="key-dot"/><text x="284.0" y="62.0" text-anchor="middle" class="key-num">2</text>
 <path d="M56.0 154.6L102.8 154.6" class="key-line"/><circle cx="56.0" cy="154.6" r="7" class="key-dot"/><text x="56.0" y="158.0" text-anchor="middle" class="key-num">3</text>
 <path d="M284.0 266.0L242.0 266.0" class="key-line"/><circle cx="284.0" cy="266.0" r="7" class="key-dot"/><text x="284.0" y="269.4" text-anchor="middle" class="key-num">4</text>
 <path d="M56.0 298.6L90.3 298.6" class="key-line"/><circle cx="56.0" cy="298.6" r="7" class="key-dot"/><text x="56.0" y="302.0" text-anchor="middle" class="key-num">5</text>
