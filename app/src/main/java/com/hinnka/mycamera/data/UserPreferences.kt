@@ -174,7 +174,12 @@ class UserPreferences internal constructor(
     var shutterSoundEnabled by bool("shutter_sound_enabled", true)  // 快门声音
     var vibrationEnabled by bool("vibration_enabled", true)  // 拍摄震动
     var keepScreenOn by bool("keep_screen_on", false)  // 屏幕常亮
-    var volumeKeyAction by enum("volume_key_action", VolumeKeyAction.CAPTURE)  // 音量键操作
+    // A phone with a camera key already has a shutter button, so its volume keys zoom unless set otherwise.
+    var volumeKeyAction by enum(
+        "volume_key_action",
+        if (android.view.KeyCharacterMap.deviceHasKey(android.view.KeyEvent.KEYCODE_CAMERA)) VolumeKeyAction.ZOOM
+        else VolumeKeyAction.CAPTURE
+    )
     var autoSaveAfterCapture by bool("auto_save_after_capture", true)  // 自动保存
     var retainCaptureSettings by bool("retain_capture_settings", false)  // 保留拍摄参数；关闭时须同时清除 customCaptureSettings
     var edgeLevel by int("edge_level", 1)  // 锐化等级：0=Off, 1=Fast, 2=High Quality, 3=Real-time
