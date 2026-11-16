@@ -116,3 +116,23 @@ img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
   .lilac-compare { margin-left: -.4rem; margin-right: -.4rem; font-size: .74rem; }
   .lilac-compare__row > span { padding: .45rem .6rem .6rem; }
 }
+
+/* Tags in the comparison: where Lilac uses GCam's pipeline or Sony's features. */
+.lilac-tag { display: inline-block; margin-left: .3em; padding: 0 .45em; border-radius: .6em; font-size: .78em; font-weight: 700; line-height: 1.6; vertical-align: .05em; white-space: nowrap; }
+.lilac-tag--gcam { background: var(--md-primary-fg-color); color: var(--md-primary-bg-color, #fff); }
+.lilac-tag--sony { background: var(--md-default-fg-color--lightest); color: var(--md-default-fg-color); border: 1px solid var(--md-default-fg-color--lighter); }
+.md-typeset .lilac-legend { font-size: .72rem; color: var(--md-default-fg-color--light); margin: -.6rem 0 1.2rem; }
+.md-typeset .lilac-legend .lilac-tag { margin-left: 0; }
+
+/* The phone mockup: the camera UI is dark in both site themes. */
+.lilac-fig--phone { max-width: 26rem; }
+.lilac-fig .bezel { fill: #15121c; stroke: var(--md-default-fg-color--lighter); stroke-width: 1; }
+.lilac-fig .ui-icon { filter: invert(1); }
+.lilac-fig text.ui-text { fill: #fff; font-size: 7px; }
+.lilac-fig text.ui-mark { fill: rgba(255, 255, 255, .55); font-size: 8px; font-weight: 600; }
+.lilac-fig .ui-ring { fill: rgba(255, 255, 255, .12); stroke: rgba(255, 255, 255, .7); stroke-width: 1; }
+.lilac-fig .ui-shutter { fill: none; stroke: #fff; stroke-width: 2; }
+.lilac-fig .gesture { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; opacity: .9; }
+.lilac-fig .leader { fill: none; stroke: var(--md-primary-fg-color); stroke-width: 1; }
+.lilac-fig .leader-dot { fill: var(--md-primary-fg-color); stroke: #fff; stroke-width: 1; }
+.lilac-fig--phone text.sub { font-size: 11px; fill: var(--md-default-fg-color); }

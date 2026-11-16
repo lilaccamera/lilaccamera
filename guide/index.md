@@ -22,113 +22,111 @@ Lilac Camera is a fork of [PhotonCamera](https://github.com/bjzhou/PhotonCamera)
 <a class="lilac-card" href="user/troubleshooting/"><strong>Troubleshooting</strong><span>Every message, what it means and what to do</span></a>
 </div>
 
-Lilac takes several frames for every photo and merges them, so less noise reaches the picture and more of the light does. It is built for the Sony Xperia XZ1 Compact (lilac): a 4.6-inch screen, 4 GB of memory and a capable 19 MP sensor that most camera apps leave underused.
+## What Lilac does
 
-## What it does differently
-
-### What a camera app gets, and what Lilac does with it
-
-A default camera app, such as Aperture on LineageOS, asks the camera for a photo and gets one finished JPEG: already denoised, sharpened and toned by Sony's image processor. Lilac asks for more, and does more with it.
+A default camera app gets one finished photo from the phone. Lilac takes several frames and merges them, starting from the sensor's RAW data where the ROM allows. Its Pro mode runs GCam's HDR+ pipeline, and it uses Sony's own camera features.
 
 <div class="lilac-compare" markdown="0" role="table" aria-label="A default camera app compared with Lilac">
-<div class="lilac-compare__row lilac-compare__row--head" role="row"><span role="columnheader">A default camera app<small>such as Aperture</small></span><span role="columnheader" class="lilac-compare__lilac">Lilac</span></div>
+<div class="lilac-compare__row lilac-compare__row--head" role="row"><span role="columnheader">Default camera app<small>such as Aperture</small></span><span role="columnheader" class="lilac-compare__lilac">Lilac</span></div>
 <div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/StackLine.svg" alt="">Each photo</div>
-<div class="lilac-compare__row" role="row"><span role="cell">One finished JPEG, made by Sony's processor</span><span role="cell" class="lilac-compare__lilac">A burst of 3 to 20 frames merged into one, as GCam does: less noise, more fine detail</span></div>
+<div class="lilac-compare__row" role="row"><span role="cell">One finished JPEG from Sony's processor</span><span role="cell" class="lilac-compare__lilac">3 to 20 frames merged into one: less noise, more detail</span></div>
 <div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/SensorLine.svg" alt="">Starting point</div>
-<div class="lilac-compare__row" role="row"><span role="cell">Sony's finished picture: noise already smoothed away with some of the detail</span><span role="cell" class="lilac-compare__lilac">RAW frames from the sensor, merged before any processing (on sunplex07's LineageOS 23.2)</span></div>
-<div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/SunHighLine.svg" alt="">Bright windows and skies</div>
-<div class="lilac-compare__row" role="row"><span role="cell">One exposure: what clips stays white</span><span role="cell" class="lilac-compare__lilac">GCam's HDR+ approach: a darker RAW burst keeps them, then GCam's HDRNet lifts the shadows</span></div>
+<div class="lilac-compare__row" role="row"><span role="cell">Sony's picture, noise already smoothed away with detail</span><span role="cell" class="lilac-compare__lilac">RAW frames merged before any processing <span class="lilac-tag lilac-tag--gcam">GCam</span></span></div>
+<div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/SunHighLine.svg" alt="">Bright skies</div>
+<div class="lilac-compare__row" role="row"><span role="cell">One exposure: what clips stays white</span><span role="cell" class="lilac-compare__lilac">A darker RAW burst; HDRNet lifts the shadows <span class="lilac-tag lilac-tag--gcam">GCam</span></span></div>
 <div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/MoonStars.svg" alt="">Dim light</div>
-<div class="lilac-compare__row" role="row"><span role="cell">One frame; Sony smooths the noise, and detail with it</span><span role="cell" class="lilac-compare__lilac">Night: 6 to 12 frames merged and brightened, planned from how steady you hold</span></div>
+<div class="lilac-compare__row" role="row"><span role="cell">One frame, heavily smoothed</span><span role="cell" class="lilac-compare__lilac">Night: 6 to 12 frames merged and brightened</span></div>
 <div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/FocusLine.svg" alt="">Focus</div>
-<div class="lilac-compare__row" role="row"><span role="cell">Tap to focus on a point</span><span role="cell" class="lilac-compare__lilac">Sony's subject tracking, face selection, laser distance and half-press lock, as in Sony's own app</span></div>
+<div class="lilac-compare__row" role="row"><span role="cell">Tap a point</span><span role="cell" class="lilac-compare__lilac">Subject tracking, face choice, laser distance <span class="lilac-tag lilac-tag--sony">Sony</span></span></div>
 <div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/MovieCamera.svg" alt="">Slow motion</div>
-<div class="lilac-compare__row" role="row"><span role="cell">None: the phone offers apps no high-speed mode</span><span role="cell" class="lilac-compare__lilac">960 fps bursts at 720p, through Sony's own slow-motion service (tested on sunplex07's LineageOS 23.2)</span></div>
+<div class="lilac-compare__row" role="row"><span role="cell">None</span><span role="cell" class="lilac-compare__lilac">960 fps at 720p <span class="lilac-tag lilac-tag--sony">Sony</span></span></div>
 </div>
+<p class="lilac-legend" markdown="0"><span class="lilac-tag lilac-tag--gcam">GCam</span> the same HDR+ pipeline and models as Google's camera app &nbsp; <span class="lilac-tag lilac-tag--sony">Sony</span> Sony's own camera features</p>
 
-How each step works, with diagrams and charts: [How a picture is made](user/how-pictures-are-made.md).
+??? info "What comes from GCam"
+    PhotonCamera rebuilt GCam's HDR+ pipeline from the GCam ports MGC and AGC, to run through Android's standard camera interface on the graphics chip. Lilac's Pro mode carries it with GCam's own model files:
 
-What that gives, measured side by side on this phone:
+    | GCam | In Lilac |
+    |---|---|
+    | HDR+: a burst of darker RAW frames | Pro's HDR+ frames and the [darker burst](user/hdr.md#the-darker-burst) |
+    | Sabre, the handheld merge | the **Sabre** merge mode (default) |
+    | HDR+ spatial merge with brackets | the **Spatial** merge mode |
+    | Learned auto exposure | the same models, capped by the [HDR ratio](user/hdr.md#the-hdr-ratio-slider) (9.8×, GCam's default) |
+    | HDRNet tone mapping | the same HDRNet model |
+    | Denoise tuning | GCam's luma, chroma and Sabre settings |
 
-- In a scene with a bright window and monitor in a dark room, a 13-frame Pro burst kept most of the highlight detail, while Sony's own JPEG of the same exposure was white there and had about three times the fine noise.
-- In a dark room, 10 to 20 stacked front-camera frames reached 1.6 to 2.3 times the signal-to-noise ratio of Sony's own camera app.
+    What Lilac adds: Pro photos are developed one at a time in a separate process that waits for free memory, so they fit in 4 GB; Photo, Night and Portrait stack without RAW, on every ROM; and Sony's camera features that GCam does not know.
 
-These are tests of one scene each, not a promise for every photo; how to get the most from each mode is in the guide.
+??? info "Measured on this phone"
+    - A bright window and monitor in a dark room: a 13-frame Pro burst kept most of the highlight detail. Sony's own JPEG of the same exposure was white there, with about three times the fine noise.
+    - A dark room: 10 to 20 stacked front-camera frames reached 1.6 to 2.3 times the signal-to-noise ratio of Sony's camera app.
 
-### Lilac and GCam
+    One scene each, not a promise for every photo. How each step works: [How a picture is made](user/how-pictures-are-made.md).
 
-If you have used GCam, Google's camera app ported to other phones, the ideas will be familiar: Lilac's Pro mode is built on the same HDR+ pipeline. PhotonCamera rebuilt it from the GCam ports MGC and AGC to run through Android's standard camera interface on the graphics chip, and Lilac carries it with GCam's own model files:
+## Rebuilt for a 4.6-inch screen
 
-| GCam | In Lilac |
-|---|---|
-| HDR+: a burst of darker RAW frames, merged | Pro's HDR+ frames, and the [darker burst](user/hdr.md#the-darker-burst) |
-| Sabre, the handheld multi-frame merge | the **Sabre** merge mode (default) |
-| HDR+ spatial merge with bracketed frames | the **Spatial** merge mode |
-| Learned auto exposure (scene models for long, short and portrait shots) | the same models decide how far shadows are lifted, capped by the [HDR ratio](user/hdr.md#the-hdr-ratio-slider) (9.8×, GCam's own default) |
-| HDRNet tone mapping | the same HDRNet model |
-| GCam's denoise tuning | its luma, chroma and Sabre denoise settings |
+Lilac's interface is not PhotonCamera's: it was rebuilt so every control is in reach of one thumb on a small phone.
 
-What Lilac adds for this phone:
+<figure class="lilac-fig lilac-fig--phone" markdown="0">
+<svg viewBox="0 0 340 264" role="img" aria-labelledby="ph-t ph-d" class="phone">
+<title id="ph-t">Lilac's camera screen on a 4.6-inch phone</title>
+<desc id="ph-d">The camera screen at the phone's 720 by 1280 proportions. The picture fills the top, with a thin line of marks for settings you changed. Swipe down on it for everyday settings, up for manual controls, sideways for looks. Below it: quick settings, the zoom ring and the looks button; then the last photo, the shutter with the mode dial, and the camera switch.</desc>
+<defs><linearGradient id="ph-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b6f8f"/><stop offset=".55" stop-color="#8a7f86"/><stop offset="1" stop-color="#3a3340"/></linearGradient>
+<marker id="ph-a" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L8 4L0 8z" fill="#fff"/></marker></defs>
+<rect x="100" y="6" width="140" height="243.6" rx="16" class="bezel"/>
+<rect x="106" y="14" width="128" height="227.6" fill="#000"/>
+<rect x="106" y="14" width="128" height="170.7" fill="url(#ph-g)"/>
+<text x="170.0" y="24" text-anchor="middle" class="ui-text">3s · 12 lux</text>
+<path d="M130 50V80" class="gesture" marker-end="url(#ph-a)"/>
+<path d="M210 146V116" class="gesture" marker-end="url(#ph-a)"/>
+<path d="M156.0 166H128" class="gesture" marker-end="url(#ph-a)"/><path d="M184.0 166H212" class="gesture" marker-end="url(#ph-a)"/>
+<image href="icons/Sliders.svg" x="114.0" y="193.7" width="12" height="12" class="ui-icon"/>
+<image href="icons/Film.svg" x="214.0" y="193.7" width="12" height="12" class="ui-icon"/>
+<rect x="144.0" y="193.66666666666666" width="52" height="12" rx="6" class="ui-ring"/><text x="170.0" y="202.66666666666666" text-anchor="middle" class="ui-text">W  1×  T</text>
+<rect x="111" y="219.66666666666666" width="18" height="18" rx="4" fill="url(#ph-g)" stroke="#fff" stroke-width="1.2"/>
+<circle cx="170.0" cy="228.66666666666666" r="13" class="ui-shutter"/><circle cx="170.0" cy="228.66666666666666" r="10" fill="#fff"/>
+<text x="146.0" y="231.66666666666666" text-anchor="middle" class="ui-mark">M</text><text x="194.0" y="231.66666666666666" text-anchor="middle" class="ui-mark">▶</text>
+<image href="icons/TurningArrows.svg" x="213.5" y="222.2" width="13" height="13" class="ui-icon"/>
+<path d="M88.0 20.0L150.0 21.0" class="leader"/><circle cx="150.0" cy="21.0" r="2" class="leader-dot"/><text x="92" y="24" text-anchor="end" class="sub"><tspan x="92" dy="0">Only changed</tspan><tspan x="92" dy="12">settings show</tspan></text>
+<path d="M88.0 62.0L130.0 64.0" class="leader"/><circle cx="130.0" cy="64.0" r="2" class="leader-dot"/><text x="92" y="66" text-anchor="end" class="sub"><tspan x="92" dy="0">Swipe down:</tspan><tspan x="92" dy="12">everyday row</tspan></text>
+<path d="M88.0 160.0L130.0 166.0" class="leader"/><circle cx="130.0" cy="166.0" r="2" class="leader-dot"/><text x="92" y="164" text-anchor="end" class="sub"><tspan x="92" dy="0">Swipe sideways:</tspan><tspan x="92" dy="12">next look</tspan></text>
+<path d="M88.0 199.7L120.0 199.7" class="leader"/><circle cx="120.0" cy="199.7" r="2" class="leader-dot"/><text x="92" y="203.66666666666666" text-anchor="end" class="sub"><tspan x="92" dy="0">Quick settings</tspan></text>
+<path d="M88.0 228.7L120.0 228.7" class="leader"/><circle cx="120.0" cy="228.7" r="2" class="leader-dot"/><text x="92" y="232.66666666666666" text-anchor="end" class="sub"><tspan x="92" dy="0">Last photo</tspan></text>
+<path d="M252.0 124.0L210.0 130.0" class="leader"/><circle cx="210.0" cy="130.0" r="2" class="leader-dot"/><text x="248" y="128" text-anchor="start" class="sub"><tspan x="248" dy="0">Swipe up:</tspan><tspan x="248" dy="12">manual controls</tspan></text>
+<path d="M252.0 181.7L190.0 197.7" class="leader"/><circle cx="190.0" cy="197.7" r="2" class="leader-dot"/><text x="248" y="185.66666666666666" text-anchor="start" class="sub"><tspan x="248" dy="0">Zoom ring</tspan></text>
+<path d="M252.0 203.7L220.0 202.7" class="leader"/><circle cx="220.0" cy="202.7" r="2" class="leader-dot"/><text x="248" y="207.66666666666666" text-anchor="start" class="sub"><tspan x="248" dy="0">Looks</tspan></text>
+<path d="M252.0 234.7L181.0 234.7" class="leader"/><circle cx="181.0" cy="234.7" r="2" class="leader-dot"/><text x="248" y="238.66666666666666" text-anchor="start" class="sub"><tspan x="248" dy="0">Shutter: swipe</tspan><tspan x="248" dy="12">for modes</tspan></text>
+</svg>
+<figcaption>At the XZ1 Compact's proportions (720 × 1280): the picture takes the gestures, the buttons sit at the bottom.</figcaption>
+</figure>
 
-- **It fits in 4 GB.** Pro photos are developed one at a time in a separate process that waits for free memory, instead of all at once in the camera.
-- **Stacking without RAW.** Photo, Night and Portrait stack the processed frames, so they work on every lilac ROM; Pro is there when the ROM gives RAW.
-- **Sony's camera features** that GCam does not know: subject tracking, the laser distance sensor, smile scores, the front camera's Accurate colour, and 960 fps slow motion.
+The editor follows the same rules: sections along the bottom, slim rulers you drag with one finger, and controls that fade while your finger is on the photo. See [Getting started](user/getting-started.md).
 
-### 960 fps slow motion is back
+## 960 fps slow motion is back
 
-The XZ1 Compact's sensor can record at 960 frames a second, but on custom ROMs that went away with Sony's camera app. sunplex07's LineageOS 23.2 keeps Sony's own slow-motion service, cacao, from Sony's software, and Lilac uses it through its small companion app, the Lilac Sony Bridge. So 960 fps works again, in Lilac: 720p bursts that play back 32 times slower.
+The XZ1 Compact's sensor records at 960 frames a second, but on custom ROMs that went away with Sony's camera app. sunplex07's LineageOS 23.2 keeps Sony's slow-motion service, cacao, and Lilac reaches it through its companion app, the Lilac Sony Bridge. So 960 fps works again: 720p bursts that play back 32 times slower.
 
 !!! note "Only tested on sunplex07's LineageOS 23.2"
-    Other ROMs may not ship Sony's cacao service; slow motion has not been tested on them. Details: [slow motion](user/video.md#slow-motion).
+    Other ROMs may not ship Sony's cacao service. Details: [slow motion](user/video.md#slow-motion).
 
-### Made for a 4.6-inch screen
+## Which ROM you need
 
-Lilac's interface is not PhotonCamera's: it was rebuilt for small screens, with every control placed for one thumb:
+| Feature | Needs | Tested on |
+|---|---|---|
+| Photo, Night, Portrait, Video | any lilac ROM, Android 11 or newer | |
+| Pro (RAW) | the raw19 camera shim | sunplex07's LineageOS 23.2 |
+| 960 fps slow motion | Sony's cacao service and the Lilac Sony Bridge | sunplex07's LineageOS 23.2 only |
 
-- **No top bar.** The picture starts at the top edge; the top line shows only settings you changed.
-- **Everything at the bottom.** Modes are on the shutter itself (swipe it sideways), the zoom ring sits right above it, and quick settings rise from the bottom.
-- **Gestures on the picture:** swipe down for the everyday settings, up for manual controls, sideways for looks.
-- **Short words.** Every label and message is written to fit the screen in one line or two.
-- **The editor too:** sections along the bottom, slim rulers you drag with one finger, controls that fade while your finger is on the photo, and a full view with nothing on top.
-
-### Built for 4 GB of memory
-
-Developing one 19 MP RAW needs about 1 GB. Lilac develops Pro photos one at a time in a separate process that waits for free memory, keeps its progress, and carries on when you swipe the app away. You can see the line and pause it.
-
-### Uses the camera Sony built
-
-Lilac uses Sony's own face detection, subject tracking, laser distance sensor, smile scores and two-stage camera key, the way Sony's camera app does. See [Sony hardware](user/hardware.md).
-
-## Which phone and ROM
-
-- **Phone:** Xperia XZ1 Compact (lilac). Other phones are not tested.
-- **ROM:** any lilac ROM runs Photo, Night, Portrait and Video. Pro needs RAW, which comes from the raw19 shim in sunplex07's unofficial LineageOS 23.2 for lilac. Without it, Pro does not appear on the mode dial. Slow motion has only been tested on that ROM: it needs Sony's cacao slow-motion service, which the ROM keeps from Sony's software, and the Lilac Sony Bridge.
-- **Android:** 11 or newer.
+On a ROM without the shim, Pro does not appear on the mode dial. Other phones are not tested.
 
 ## How to get it
 
-- **Stable:** comes inside lilac ROMs that include it. It updates with the ROM.
-- **Beta:** published as GitHub releases of this project. It installs beside the ROM's copy under its own name, so both can be on the phone.
+- **Stable:** inside lilac ROMs that include it; it updates with the ROM.
+- **Beta:** GitHub releases of this project. It installs beside the ROM's copy under its own name.
 
-!!! note
-    Lilac covers the features this fork changed. The colour tools and other features it shares with PhotonCamera work as before and are not covered here.
+??? note "All guide pages"
+    **How it works:** [How a picture is made](user/how-pictures-are-made.md) · [Focus and faces](user/focus.md) · [Sony hardware](user/hardware.md)
 
-## Guide
+    **Using Lilac:** [Getting started](user/getting-started.md) · [Photo and Night](user/photo-mode.md) · [Pro](user/pro-mode.md) · [HDR](user/hdr.md) · [Portrait](user/portrait.md) · [Video](user/video.md) · [Editor](user/editor.md) · [Troubleshooting](user/troubleshooting.md)
 
-**How it works**
-
-- [How a picture is made](user/how-pictures-are-made.md): the camera's streams, stacking, RAW, the darker burst, memory
-- [Focus and faces](user/focus.md): tap focus, the camera key, dim light, the two face detectors
-- [Sony hardware](user/hardware.md): what Lilac uses from the camera, and vendor keys
-
-**Using Lilac**
-
-- [Getting started](user/getting-started.md): the camera screen, modes, quick settings, manual controls and symbols
-- [Photo and Night](user/photo-mode.md): how many frames, 12 MP and 2 MP, front camera colour
-- [Pro](user/pro-mode.md): HDR+ frames, the render queue, Photo or Pro
-- [HDR](user/hdr.md): the darker burst and the HDR ratio
-- [Portrait](user/portrait.md): the live guide, the blur after the shot, Quick or Depth
-- [Video](user/video.md): stabilisation, slow motion, overheating
-- [Editor](user/editor.md): editing photos and developing Pro photos again
-
-[Troubleshooting](user/troubleshooting.md): every message, what it means and what to do.
+    The colour tools and other features Lilac shares with PhotonCamera work as before and are not covered here.

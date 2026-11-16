@@ -123,7 +123,7 @@ Pro stacks RAW frames before anything has touched them:
 
 - **Linear data.** RAW values are proportional to the light, so frames add up exactly, like photon counts.
 - **A noise model of this sensor.** Lilac uses a noise profile measured on the XZ1 Compact, so it knows how much of each pixel is noise at each brightness. The profile the shim reports is about twice too high and would make the merge throw away good detail.
-- **Processing once, at the end.** After the merge come GCam's denoise tuning, its learned auto exposure and its HDRNet tone mapping, then Lilac's colour and look, on one clean frame instead of many noisy ones. The merge itself is GCam's Sabre by default; see [Lilac and GCam](../index.md#lilac-and-gcam).
+- **Processing once, at the end.** After the merge come GCam's denoise tuning, its learned auto exposure and its HDRNet tone mapping, then Lilac's colour and look, on one clean frame instead of many noisy ones. The merge itself is GCam's Sabre by default; see [what comes from GCam](../index.md#what-lilac-does).
 
 The cost is speed: each RAW frame is a full-size still, so frames come 0.44 s apart and need a steadier hand or a support.
 

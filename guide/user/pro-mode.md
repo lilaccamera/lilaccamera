@@ -6,7 +6,7 @@ Pro needs RAW from the camera. On the XZ1 Compact that comes from the raw19 shim
 
 ## HDR+ frames
 
-Like Photo mode, Pro can merge several frames. Lilac calls it **HDR+**: it is the pipeline of Google's camera app (GCam), with GCam's merge, learned exposure and HDRNet tone mapping (see [Lilac and GCam](../index.md#lilac-and-gcam)). The idea: merging many frames removes noise, so the photo can be exposed darker to keep the highlights, and the shadows are lifted back afterwards. It has nothing to do with Sony's HDR.
+Like Photo mode, Pro can merge several frames. Lilac calls it **HDR+**: it is the pipeline of Google's camera app (GCam), with GCam's merge, learned exposure and HDRNet tone mapping (see [what comes from GCam](../index.md#what-lilac-does)). The idea: merging many frames removes noise, so the photo can be exposed darker to keep the highlights, and the shadows are lifted back afterwards. It has nothing to do with Sony's HDR.
 
 **HDR+ frames** in quick settings sets how many RAW frames one press takes: 1 to 20, default 3. One frame means a single RAW shot.
 
