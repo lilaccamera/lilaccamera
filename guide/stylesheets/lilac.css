@@ -124,15 +124,20 @@ img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
 .md-typeset .lilac-legend { font-size: .72rem; color: var(--md-default-fg-color--light); margin: -.6rem 0 1.2rem; }
 .md-typeset .lilac-legend .lilac-tag { margin-left: 0; }
 
-/* The phone mockup: the camera UI is dark in both site themes. */
-.lilac-fig--phone { max-width: 26rem; }
-.lilac-fig .bezel { fill: #15121c; stroke: var(--md-default-fg-color--lighter); stroke-width: 1; }
-.lilac-fig .ui-icon { filter: invert(1); }
-.lilac-fig text.ui-text { fill: #fff; font-size: 7px; }
-.lilac-fig text.ui-mark { fill: rgba(255, 255, 255, .55); font-size: 8px; font-weight: 600; }
-.lilac-fig .ui-ring { fill: rgba(255, 255, 255, .12); stroke: rgba(255, 255, 255, .7); stroke-width: 1; }
-.lilac-fig .ui-shutter { fill: none; stroke: #fff; stroke-width: 2; }
-.lilac-fig .gesture { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; opacity: .9; }
-.lilac-fig .leader { fill: none; stroke: var(--md-primary-fg-color); stroke-width: 1; }
-.lilac-fig .leader-dot { fill: var(--md-primary-fg-color); stroke: #fff; stroke-width: 1; }
-.lilac-fig--phone text.sub { font-size: 11px; fill: var(--md-default-fg-color); }
+/* The phone drawing: an Xperia XZ1 Compact in Sony help-guide style, with numbered markers and a key. */
+.lilac-fig--phone { max-width: 24rem; }
+.lilac-fig .xz-body { fill: #1b1b1f; stroke: var(--md-default-fg-color--light); stroke-width: 1.2; }
+.lilac-fig .xz-glass { fill: #0d0d10; }
+.lilac-fig .xz-slot { fill: #3a3a40; }
+.lilac-fig .xz-cam { fill: #26262c; stroke: #4a4a52; stroke-width: 1; }
+.lilac-fig .ui-icon { filter: invert(84%) sepia(6%) saturate(180%) hue-rotate(15deg); }
+.lilac-fig text.ui-text { fill: #fff; font-size: 7px; font-weight: 500; }
+.lilac-fig text.ui-end { fill: #9C9A92; font-size: 4.8px; font-weight: 500; }
+.lilac-fig text.ui-knob { fill: #EF9F27; font-size: 5.8px; font-weight: 600; }
+.lilac-fig text.ui-mark { fill: #D3D1C7; font-size: 6.7px; font-weight: 500; opacity: .75; }
+.lilac-fig .key-line { fill: none; stroke: var(--md-default-fg-color--light); stroke-width: .8; }
+.lilac-fig .key-dot { fill: var(--md-default-fg-color); }
+.lilac-fig text.key-num { fill: var(--md-default-bg-color); font-size: 9px; font-weight: 700; }
+.md-typeset ol.lilac-key { list-style: none; counter-reset: key; padding: 0; margin: .4rem auto 1.4rem; max-width: 30rem; font-size: .78rem; }
+.md-typeset ol.lilac-key li { counter-increment: key; position: relative; margin: 0 0 .45rem; padding-left: 1.9em; line-height: 1.5; }
+.md-typeset ol.lilac-key li::before { content: counter(key); position: absolute; left: 0; top: .1em; width: 1.35em; height: 1.35em; border-radius: 50%; background: var(--md-default-fg-color); color: var(--md-default-bg-color); font-size: .85em; font-weight: 700; display: flex; align-items: center; justify-content: center; }

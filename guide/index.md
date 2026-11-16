@@ -68,37 +68,58 @@ A default camera app gets one finished photo from the phone. Lilac takes several
 Lilac's interface is not PhotonCamera's: it was rebuilt so every control is in reach of one thumb on a small phone.
 
 <figure class="lilac-fig lilac-fig--phone" markdown="0">
-<svg viewBox="0 0 340 264" role="img" aria-labelledby="ph-t ph-d" class="phone">
-<title id="ph-t">Lilac's camera screen on a 4.6-inch phone</title>
-<desc id="ph-d">The camera screen at the phone's 720 by 1280 proportions. The picture fills the top, with a thin line of marks for settings you changed. Swipe down on it for everyday settings, up for manual controls, sideways for looks. Below it: quick settings, the zoom ring and the looks button; then the last photo, the shutter with the mode dial, and the camera switch.</desc>
-<defs><linearGradient id="ph-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b6f8f"/><stop offset=".55" stop-color="#8a7f86"/><stop offset="1" stop-color="#3a3340"/></linearGradient>
-<marker id="ph-a" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L8 4L0 8z" fill="#fff"/></marker></defs>
-<rect x="100" y="6" width="140" height="243.6" rx="16" class="bezel"/>
-<rect x="106" y="14" width="128" height="227.6" fill="#000"/>
-<rect x="106" y="14" width="128" height="170.7" fill="url(#ph-g)"/>
-<text x="170.0" y="24" text-anchor="middle" class="ui-text">3s · 12 lux</text>
-<path d="M130 50V80" class="gesture" marker-end="url(#ph-a)"/>
-<path d="M210 146V116" class="gesture" marker-end="url(#ph-a)"/>
-<path d="M156.0 166H128" class="gesture" marker-end="url(#ph-a)"/><path d="M184.0 166H212" class="gesture" marker-end="url(#ph-a)"/>
-<image href="icons/Sliders.svg" x="114.0" y="193.7" width="12" height="12" class="ui-icon"/>
-<image href="icons/Film.svg" x="214.0" y="193.7" width="12" height="12" class="ui-icon"/>
-<rect x="144.0" y="193.66666666666666" width="52" height="12" rx="6" class="ui-ring"/><text x="170.0" y="202.66666666666666" text-anchor="middle" class="ui-text">W  1×  T</text>
-<rect x="111" y="219.66666666666666" width="18" height="18" rx="4" fill="url(#ph-g)" stroke="#fff" stroke-width="1.2"/>
-<circle cx="170.0" cy="228.66666666666666" r="13" class="ui-shutter"/><circle cx="170.0" cy="228.66666666666666" r="10" fill="#fff"/>
-<text x="146.0" y="231.66666666666666" text-anchor="middle" class="ui-mark">M</text><text x="194.0" y="231.66666666666666" text-anchor="middle" class="ui-mark">▶</text>
-<image href="icons/TurningArrows.svg" x="213.5" y="222.2" width="13" height="13" class="ui-icon"/>
-<path d="M88.0 20.0L150.0 21.0" class="leader"/><circle cx="150.0" cy="21.0" r="2" class="leader-dot"/><text x="92" y="24" text-anchor="end" class="sub"><tspan x="92" dy="0">Only changed</tspan><tspan x="92" dy="12">settings show</tspan></text>
-<path d="M88.0 62.0L130.0 64.0" class="leader"/><circle cx="130.0" cy="64.0" r="2" class="leader-dot"/><text x="92" y="66" text-anchor="end" class="sub"><tspan x="92" dy="0">Swipe down:</tspan><tspan x="92" dy="12">everyday row</tspan></text>
-<path d="M88.0 160.0L130.0 166.0" class="leader"/><circle cx="130.0" cy="166.0" r="2" class="leader-dot"/><text x="92" y="164" text-anchor="end" class="sub"><tspan x="92" dy="0">Swipe sideways:</tspan><tspan x="92" dy="12">next look</tspan></text>
-<path d="M88.0 199.7L120.0 199.7" class="leader"/><circle cx="120.0" cy="199.7" r="2" class="leader-dot"/><text x="92" y="203.66666666666666" text-anchor="end" class="sub"><tspan x="92" dy="0">Quick settings</tspan></text>
-<path d="M88.0 228.7L120.0 228.7" class="leader"/><circle cx="120.0" cy="228.7" r="2" class="leader-dot"/><text x="92" y="232.66666666666666" text-anchor="end" class="sub"><tspan x="92" dy="0">Last photo</tspan></text>
-<path d="M252.0 124.0L210.0 130.0" class="leader"/><circle cx="210.0" cy="130.0" r="2" class="leader-dot"/><text x="248" y="128" text-anchor="start" class="sub"><tspan x="248" dy="0">Swipe up:</tspan><tspan x="248" dy="12">manual controls</tspan></text>
-<path d="M252.0 181.7L190.0 197.7" class="leader"/><circle cx="190.0" cy="197.7" r="2" class="leader-dot"/><text x="248" y="185.66666666666666" text-anchor="start" class="sub"><tspan x="248" dy="0">Zoom ring</tspan></text>
-<path d="M252.0 203.7L220.0 202.7" class="leader"/><circle cx="220.0" cy="202.7" r="2" class="leader-dot"/><text x="248" y="207.66666666666666" text-anchor="start" class="sub"><tspan x="248" dy="0">Looks</tspan></text>
-<path d="M252.0 234.7L181.0 234.7" class="leader"/><circle cx="181.0" cy="234.7" r="2" class="leader-dot"/><text x="248" y="238.66666666666666" text-anchor="start" class="sub"><tspan x="248" dy="0">Shutter: swipe</tspan><tspan x="248" dy="12">for modes</tspan></text>
+<svg viewBox="0 0 340 421" role="img" aria-labelledby="xz-t xz-d" class="phone">
+<title id="xz-t">Lilac on the Xperia XZ1 Compact</title>
+<desc id="xz-d">The Xperia XZ1 Compact with Lilac's camera screen, numbered as in the key below: 1 top line, 2 picture, 3 zoom ring, 4 quick settings, 5 looks, 6 last photo, 7 shutter and mode dial, 8 camera switch.</desc>
+<defs><linearGradient id="xz-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5f7189"/><stop offset=".6" stop-color="#8d8790"/><stop offset="1" stop-color="#4a4450"/></linearGradient>
+<linearGradient id="xz-face" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#D7D7D7"/></linearGradient></defs>
+<rect x="72.0" y="8" width="196.0" height="389.0" rx="9.7" class="xz-body"/>
+<rect x="73.2" y="9.2" width="193.6" height="386.6" rx="9.0" class="xz-glass"/>
+<rect x="151.9" y="27.3" width="36.2" height="2.4" rx="1.2" class="xz-slot"/>
+<circle cx="117.2" cy="28.5" r="4.8" class="xz-cam"/>
+<circle cx="222.8" cy="28.5" r="1.8" class="xz-slot"/>
+<rect x="151.9" y="375.4" width="36.2" height="2.4" rx="1.2" class="xz-slot"/>
+<rect x="83.6" y="49.0" width="172.8" height="307.2" fill="#000"/>
+<rect x="83.6" y="49.0" width="172.8" height="230.4" fill="url(#xz-g)"/>
+<image href="icons/StopwatchLine.svg" x="159.4" y="53.3" width="9.6" height="9.6" class="ui-icon" opacity="1.0"/>
+<text x="171.0" y="60.5" class="ui-text">3s</text>
+<path d="M145.3 300.4A35.5 35.5 0 0 1 194.7 300.4A6.2 6.2 0 0 1 186.0 309.4A23.0 23.0 0 0 0 154.0 309.4A6.2 6.2 0 0 1 145.3 300.4Z" fill="rgba(0,0,0,.4)" stroke="#C9C7BF" stroke-width="0.96"/>
+<path d="M162.4 293.2A33.6 33.6 0 0 1 177.6 293.2A4.3 4.3 0 0 1 175.6 301.7A25.0 25.0 0 0 0 164.4 301.7A4.3 4.3 0 0 1 162.4 293.2Z" fill="rgba(255,255,255,.16)"/>
+<text x="154.5" y="303.1" text-anchor="middle" class="ui-end">W</text>
+<text x="185.5" y="303.1" text-anchor="middle" class="ui-end">T</text>
+<text x="170.0" y="299.1" text-anchor="middle" class="ui-knob">1×</text>
+<image href="icons/Sliders.svg" x="97.0" y="290.9" width="11.5" height="11.5" class="ui-icon" opacity="1.0"/>
+<image href="icons/Film.svg" x="231.4" y="290.9" width="11.5" height="11.5" class="ui-icon" opacity="1.0"/>
+<rect x="91.8" y="315.0" width="22.0" height="22.0" rx="5.8" fill="none" stroke="#C9C7BF" stroke-width="0.96"/>
+<rect x="94.2" y="317.3" width="17.3" height="17.3" rx="3.8" fill="url(#xz-g)"/>
+<text x="136.4" y="328.5" text-anchor="middle" class="ui-mark">M</text>
+<path d="M15 10l4.553 -2.276a1 1 0 0 1 1.447 .894v6.764a1 1 0 0 1 -1.447 .894l-4.553 -2.276v-4zM5 6h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2v-8a2 2 0 0 1 2 -2z" transform="translate(197.8 320.2) scale(0.480)" fill="none" stroke="#E24B4A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="170.0" cy="326.0" r="18.7" fill="none" stroke="#C9C7BF" stroke-width="0.96"/>
+<circle cx="170.0" cy="326.0" r="17.3" fill="url(#xz-face)"/>
+<rect x="226.2" y="315.0" width="22.0" height="22.0" rx="5.8" fill="none" stroke="#C9C7BF" stroke-width="0.96"/>
+<image href="icons/TurningArrows.svg" x="231.0" y="319.7" width="12.5" height="12.5" class="ui-icon" opacity="1.0"/>
+<path d="M56.0 59.6L155.6 59.6" class="key-line"/><circle cx="56.0" cy="59.6" r="7" class="key-dot"/><text x="56.0" y="63.0" text-anchor="middle" class="key-num">1</text>
+<path d="M56.0 164.2L112.4 164.2" class="key-line"/><circle cx="56.0" cy="164.2" r="7" class="key-dot"/><text x="56.0" y="167.6" text-anchor="middle" class="key-num">2</text>
+<path d="M284.0 274.6L182.1 292.6" class="key-line"/><circle cx="284.0" cy="274.6" r="7" class="key-dot"/><text x="284.0" y="278.0" text-anchor="middle" class="key-num">3</text>
+<path d="M56.0 296.7L97.0 296.7" class="key-line"/><circle cx="56.0" cy="296.7" r="7" class="key-dot"/><text x="56.0" y="300.1" text-anchor="middle" class="key-num">4</text>
+<path d="M284.0 298.6L243.0 296.7" class="key-line"/><circle cx="284.0" cy="298.6" r="7" class="key-dot"/><text x="284.0" y="302.0" text-anchor="middle" class="key-num">5</text>
+<path d="M56.0 332.2L92.2 331.3" class="key-line"/><circle cx="56.0" cy="332.2" r="7" class="key-dot"/><text x="56.0" y="335.6" text-anchor="middle" class="key-num">6</text>
+<path d="M170.0 411.0L170.0 345.2" class="key-line"/><circle cx="170.0" cy="411.0" r="7" class="key-dot"/><text x="170.0" y="414.4" text-anchor="middle" class="key-num">7</text>
+<path d="M284.0 337.0L247.8 332.2" class="key-line"/><circle cx="284.0" cy="337.0" r="7" class="key-dot"/><text x="284.0" y="340.4" text-anchor="middle" class="key-num">8</text>
 </svg>
-<figcaption>At the XZ1 Compact's proportions (720 × 1280): the picture takes the gestures, the buttons sit at the bottom.</figcaption>
+<figcaption>Lilac on the Xperia XZ1 Compact, to scale.</figcaption>
 </figure>
+
+<ol class="lilac-key" markdown="0">
+<li><b>Top line</b> marks only settings you changed, such as a timer.</li>
+<li><b>Picture</b>: tap to focus. Swipe down for everyday settings, up for manual controls, sideways for the next look.</li>
+<li><b>Zoom ring</b>: pull it sideways, or tap W or T.</li>
+<li><b>Quick settings</b></li>
+<li><b>Looks</b></li>
+<li><b>Last photo</b>; its edge shows processing.</li>
+<li><b>Shutter</b>: swipe it sideways to change mode. The marks beside it are the next modes.</li>
+<li><b>Switch camera</b></li>
+</ol>
 
 The editor follows the same rules: sections along the bottom, slim rulers you drag with one finger, and controls that fade while your finger is on the photo. See [Getting started](user/getting-started.md).
 
