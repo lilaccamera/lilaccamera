@@ -9,3 +9,9 @@
   --md-primary-fg-color:        #B48BF5;
   --md-accent-fg-color:         #E2C6FF;
 }
+
+/* The app's own icons (guide/icons, exported from AppIcons.kt), sized to the text. */
+img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
+[data-md-color-scheme="slate"] img.icon { filter: invert(1); }
+.mode-mark { font-weight: 600; font-size: 0.8em; letter-spacing: 0.04em; }
+.md-typeset table img.icon { height: 1.8em; }
