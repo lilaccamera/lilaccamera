@@ -22,9 +22,11 @@ Lilac Camera is a fork of [PhotonCamera](https://github.com/bjzhou/PhotonCamera)
 <a class="lilac-card" href="user/troubleshooting/"><strong>Troubleshooting</strong><span>Every message, what it means and what to do</span></a>
 </div>
 
-## What Lilac does
+## The best of both worlds
 
-A default camera app gets one finished photo from the phone. Lilac takes several frames and merges them, starting from the sensor's RAW data where the ROM allows. Its Pro mode runs GCam's HDR+ pipeline, and it uses Sony's own camera features.
+GCam processes photos well but knows nothing about Sony's camera. Sony's camera app uses the hardware fully but does not run on custom ROMs. Lilac brings the two together: GCam's HDR+ processing, and the Sony camera features that only Sony's own app used, such as subject tracking, the laser distance sensor and 960 fps slow motion.
+
+Compared with a default camera app:
 
 <div class="lilac-compare" markdown="0" role="table" aria-label="A default camera app compared with Lilac">
 <div class="lilac-compare__row lilac-compare__row--head" role="row"><span role="columnheader">Default camera app<small>such as Aperture</small></span><span role="columnheader" class="lilac-compare__lilac">Lilac</span></div>
