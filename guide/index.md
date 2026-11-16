@@ -11,7 +11,7 @@ It is built and tested on one phone: the Sony Xperia XZ1 Compact (codename lilac
 ## Which phone and ROM
 
 - **Phone:** Xperia XZ1 Compact (lilac). Other phones are not tested.
-- **ROM:** a lilac ROM that ships the raw19 shim. The shim gives apps the camera's RAW frames, which Pro mode needs. Without it, Photo mode still works and the Pro button is greyed out.
+- **ROM:** a lilac ROM that ships the raw19 shim. The shim gives apps the camera's RAW frames, which Pro mode needs. Without it, Photo mode still works and Pro does not appear on the mode dial.
 - **Android:** 11 or newer.
 
 ## How to get it

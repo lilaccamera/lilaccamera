@@ -7,8 +7,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -31,6 +29,10 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-24.04
+    # Only this job, which runs no third-party Python, may publish to Pages.
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

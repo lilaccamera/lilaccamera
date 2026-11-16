@@ -30,7 +30,7 @@ Use 30 or 60 fps with EIS+: at 24 fps the camera refuses the frame rate and clos
 The back sensor can record a very short burst at **960 frames a second** into its own memory. Lilac writes that burst into a normal 30 fps video, so it plays back 32 times slower.
 
 !!! note "Needs the Lilac Sony Bridge"
-    Slow motion goes through Sony's own super-slow-motion service, which only a privileged system app can reach. Your ROM must ship Lilac's companion app, the Lilac Sony Bridge, signed to match your Lilac. Without it the slow-motion switch does not appear. Ask your ROM maintainer.
+    Slow motion goes through Sony's own super-slow-motion service, which only a privileged system app can reach. Your ROM must ship Lilac's companion app, the Lilac Sony Bridge. The bridge and Lilac are a matched pair: they must come from the same release, and the bridge only serves a Lilac signed with a key it trusts. Without it the slow-motion switch does not appear. Ask your ROM maintainer.
 
 **How to use it**
 
