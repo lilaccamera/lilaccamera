@@ -7,7 +7,7 @@ hide:
 <img class="lilac-hero__icon" src="images/lilac-icon.svg" alt="" width="96" height="96">
 <div class="lilac-hero__text">
 <h1>Lilac Camera</h1>
-<p class="lilac-hero__tagline">Stacked photos and RAW for the Xperia XZ1 Compact</p>
+<p class="lilac-hero__tagline">Stacked photos, RAW and 960 fps slow motion for the Xperia XZ1 Compact</p>
 <div class="lilac-hero__buttons">
 <a class="lilac-btn lilac-btn--primary" href="user/getting-started/">Get started</a>
 </div>
@@ -26,57 +26,27 @@ Lilac takes several frames for every photo and merges them, so less noise reache
 
 ## What it does differently
 
-### More of each picture comes from the sensor
+### What a camera app gets, and what Lilac does with it
 
-A phone camera hands apps finished pictures: already denoised, sharpened and toned by the phone's image processor. Lilac starts earlier where it can, and merges frames wherever it can.
+A default camera app, such as Aperture on LineageOS, asks the camera for a photo and gets one finished JPEG: already denoised, sharpened and toned by Sony's image processor. Lilac asks for more, and does more with it.
 
-- **Photo mode stacks the processed stream,** the same pictures that normally become the JPEG, so it works on any ROM.
-- **Pro mode stacks RAW frames,** the sensor's own data before any processing, and develops the photo itself. RAW needs a ROM that gives it to apps: on the XZ1 Compact that is **sunplex07's unofficial LineageOS 23.2 for lilac**, with its raw19 camera shim.
+<div class="lilac-compare" markdown="0" role="table" aria-label="A default camera app compared with Lilac">
+<div class="lilac-compare__row lilac-compare__row--head" role="row"><span role="columnheader">A default camera app<small>such as Aperture</small></span><span role="columnheader" class="lilac-compare__lilac">Lilac</span></div>
+<div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/StackLine.svg" alt="">Each photo</div>
+<div class="lilac-compare__row" role="row"><span role="cell">One finished JPEG, made by Sony's processor</span><span role="cell" class="lilac-compare__lilac">A burst of 3 to 20 frames merged into one: less noise, more fine detail</span></div>
+<div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/SensorLine.svg" alt="">Starting point</div>
+<div class="lilac-compare__row" role="row"><span role="cell">Sony's finished picture: noise already smoothed away with some of the detail</span><span role="cell" class="lilac-compare__lilac">RAW frames from the sensor, merged before any processing (on sunplex07's LineageOS 23.2)</span></div>
+<div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/SunHighLine.svg" alt="">Bright windows and skies</div>
+<div class="lilac-compare__row" role="row"><span role="cell">One exposure: what clips stays white</span><span role="cell" class="lilac-compare__lilac">A darker RAW burst keeps them; the merge cleans the shadows it leaves</span></div>
+<div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/MoonStars.svg" alt="">Dim light</div>
+<div class="lilac-compare__row" role="row"><span role="cell">One frame; Sony smooths the noise, and detail with it</span><span role="cell" class="lilac-compare__lilac">Night: 6 to 12 frames merged and brightened, planned from how steady you hold</span></div>
+<div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/FocusLine.svg" alt="">Focus</div>
+<div class="lilac-compare__row" role="row"><span role="cell">Tap to focus on a point</span><span role="cell" class="lilac-compare__lilac">Sony's subject tracking, face selection, laser distance and half-press lock, as in Sony's own app</span></div>
+<div class="lilac-compare__topic" role="rowheader"><img class="icon" src="icons/MovieCamera.svg" alt="">Slow motion</div>
+<div class="lilac-compare__row" role="row"><span role="cell">None: the phone offers apps no high-speed mode</span><span role="cell" class="lilac-compare__lilac">960 fps bursts at 720p, through Sony's own slow-motion service</span></div>
+</div>
 
-<figure class="lilac-fig" markdown="0">
-<svg viewBox="0 0 340 330" role="img" aria-labelledby="hs-t hs-d">
-<title id="hs-t">Three streams from one sensor</title>
-<desc id="hs-d">The sensor feeds three streams. Sony's image processor gives YUV frames, which Lilac stacks in Photo, Night and Portrait. Sony's still pipeline gives a camera JPEG, used for the front camera's Accurate colour. The raw19 shim gives 10-bit RAW frames, which Lilac merges and develops in Pro.</desc>
-<defs><marker id="hs-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" class="arrow-head"/></marker></defs>
-<rect x="60" y="6" width="220" height="40" rx="8" class="box-sony"/>
-<text x="170" y="24" text-anchor="middle" class="strong">Sensor</text>
-<text x="170" y="39" text-anchor="middle" class="sub">Sony IMX400 · 19 MP</text>
-<path d="M24 46V286" class="line"/><path d="M60 26H24" class="line"/>
-<g>
-<path d="M24 98H34" class="line"/>
-<rect x="34" y="70" width="128" height="56" rx="8" class="box-sony"/>
-<text x="98" y="92" text-anchor="middle">Sony's processor</text>
-<text x="98" y="109" text-anchor="middle" class="sub">YUV · 30 per second</text>
-<path d="M162 98H186" class="line" marker-end="url(#hs-a)"/>
-<rect x="188" y="70" width="146" height="56" rx="8" class="box-lilac"/>
-<text x="261" y="92" text-anchor="middle">Photo · Night · Portrait</text>
-<text x="261" y="109" text-anchor="middle" class="sub">stacked by Lilac</text>
-</g>
-<g>
-<path d="M24 178H34" class="line"/>
-<rect x="34" y="150" width="128" height="56" rx="8" class="box-sony"/>
-<text x="98" y="172" text-anchor="middle">Sony's still pipeline</text>
-<text x="98" y="189" text-anchor="middle" class="sub">camera JPEG · slow</text>
-<path d="M162 178H186" class="line" marker-end="url(#hs-a)"/>
-<rect x="188" y="150" width="146" height="56" rx="8" class="box-lilac"/>
-<text x="261" y="172" text-anchor="middle">Front camera colour</text>
-<text x="261" y="189" text-anchor="middle" class="sub">Accurate mode</text>
-</g>
-<g>
-<path d="M24 258H34" class="line"/>
-<rect x="34" y="230" width="128" height="56" rx="8" class="box-sony"/>
-<text x="98" y="252" text-anchor="middle">raw19 shim (ROM)</text>
-<text x="98" y="269" text-anchor="middle" class="sub">RAW · 10-bit</text>
-<path d="M162 258H186" class="line" marker-end="url(#hs-a)"/>
-<rect x="188" y="230" width="146" height="56" rx="8" class="box-lilac"/>
-<text x="261" y="252" text-anchor="middle">Pro</text>
-<text x="261" y="269" text-anchor="middle" class="sub">merged and developed</text>
-</g>
-<rect x="34" y="304" width="12" height="12" rx="3" class="box-sony"/><text x="52" y="314" class="sub">the phone's camera</text>
-<rect x="188" y="304" width="12" height="12" rx="3" class="box-lilac"/><text x="206" y="314" class="sub">Lilac</text>
-</svg>
-<figcaption>One sensor, three streams. How each works: <a href="user/how-pictures-are-made/">How a picture is made</a>.</figcaption>
-</figure>
+How each step works, with diagrams and charts: [How a picture is made](user/how-pictures-are-made.md).
 
 What that gives, measured side by side on this phone:
 
@@ -84,6 +54,14 @@ What that gives, measured side by side on this phone:
 - In a dark room, 10 to 20 stacked front-camera frames reached 1.6 to 2.3 times the signal-to-noise ratio of Sony's own camera app.
 
 These are tests of one scene each, not a promise for every photo; how to get the most from each mode is in the guide.
+
+### 960 fps slow motion
+
+The XZ1 Compact's sensor can record a burst at **960 frames a second**, 32 times slower than real time on playback. Only Sony's own camera app used it, and that app does not run on custom ROMs. Lilac reaches the sensor's slow-motion mode through Sony's own service on the ROM, so the feature is back. As far as we know, Lilac is the first app outside Sony's to record it.
+
+- Press the camera key during a recording, and the next fifth of a second becomes about 6 seconds of slow motion, inside a normal video with sound.
+- 720p, one burst per recording, and bright light (each frame is at most 1/960 s).
+- It needs the ROM to ship Sony's slow-motion service and Lilac's small companion app, the Lilac Sony Bridge. See [slow motion](user/video.md#slow-motion).
 
 ### Made for a 4.6-inch screen
 
@@ -106,7 +84,7 @@ Lilac uses Sony's own face detection, subject tracking, laser distance sensor, s
 ## Which phone and ROM
 
 - **Phone:** Xperia XZ1 Compact (lilac). Other phones are not tested.
-- **ROM:** any lilac ROM runs Photo, Night, Portrait and Video. Pro needs RAW, which comes from the raw19 shim in sunplex07's unofficial LineageOS 23.2 for lilac. Without it, Pro does not appear on the mode dial.
+- **ROM:** any lilac ROM runs Photo, Night, Portrait and Video. Pro needs RAW, which comes from the raw19 shim in sunplex07's unofficial LineageOS 23.2 for lilac. Without it, Pro does not appear on the mode dial. Slow motion needs Sony's slow-motion service, which that ROM keeps from Sony's software, and the Lilac Sony Bridge.
 - **Android:** 11 or newer.
 
 ## How to get it

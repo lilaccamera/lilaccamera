@@ -101,3 +101,18 @@ img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
   .md-typeset .lilac-btn { flex: 1 1 100%; }
   .lilac-cards { grid-template-columns: 1fr; }
 }
+
+/* Home page: a default camera app compared with Lilac. Two columns even on a phone; each topic is a full-width label. */
+.lilac-compare { border: 1px solid var(--lilac-card-border); border-radius: .8rem; overflow: hidden; margin: 1.2rem 0 1.4rem; font-size: .8rem; }
+.lilac-compare__row { display: grid; grid-template-columns: 1fr 1fr; }
+.lilac-compare__row > span { padding: .5rem .8rem .7rem; line-height: 1.45; color: var(--md-default-fg-color--light); }
+.lilac-compare__row > span.lilac-compare__lilac { background: var(--lilac-fill); color: var(--md-default-fg-color); border-left: 2px solid var(--md-primary-fg-color); }
+.lilac-compare__row--head > span { font-weight: 700; color: var(--md-default-fg-color); padding-top: .7rem; }
+.lilac-compare__row--head > span.lilac-compare__lilac { color: var(--lilac-card-title); }
+.lilac-compare__row--head small { display: block; font-weight: 400; color: var(--md-default-fg-color--light); }
+.lilac-compare__topic { display: flex; align-items: center; gap: .45rem; padding: .55rem .8rem .1rem; border-top: 1px solid var(--lilac-card-border); font-weight: 700; color: var(--lilac-card-title); }
+.md-typeset .lilac-compare__topic img.icon { height: 1.35em; }
+@media screen and (max-width: 44.9375em) {
+  .lilac-compare { margin-left: -.4rem; margin-right: -.4rem; font-size: .74rem; }
+  .lilac-compare__row > span { padding: .45rem .6rem .6rem; }
+}
