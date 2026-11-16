@@ -12,6 +12,8 @@ The list below holds:
 - **Codec:** H.264 (default) plays everywhere; H.265 makes smaller files.
 - **Microphone:** which microphone records the sound.
 
+The camera key, or the volume buttons when set to Shutter, start and stop the recording too.
+
 While recording, the top line shows the time, and the space left once under 20 minutes remain. The footer gives **Pause** and **Snapshot** (a photo from the video).
 
 ## Stabilisation
@@ -30,7 +32,7 @@ Use 30 or 60 fps with EIS+: at 24 fps the camera refuses the frame rate and clos
 The back sensor can record a very short burst at **960 frames a second** into its own memory. Lilac writes that burst into a normal 30 fps video, so it plays back 32 times slower.
 
 !!! note "Only tested on sunplex07's LineageOS 23.2, with the Lilac Sony Bridge"
-    Slow motion goes through Sony's own super-slow-motion service (cacao), which only a privileged system app can reach. sunplex07's unofficial LineageOS 23.2 for lilac keeps it from Sony's software; slow motion has not been tested on any other ROM. Your ROM must ship Lilac's companion app, the Lilac Sony Bridge. The bridge and Lilac are a matched pair: they must come from the same release, and the bridge only serves a Lilac signed with a key it trusts. Without it the slow-motion switch does not appear. Ask your ROM maintainer.
+    Slow motion goes through Sony's own super-slow-motion service (cacao), which only a privileged system app can reach. sunplex07's unofficial LineageOS 23.2 for lilac keeps it from Sony's software; slow motion has not been tested on any other ROM. Your ROM must ship Lilac's companion app, the Lilac Sony Bridge. The bridge and Lilac are a matched pair: they must come from the same release, and the bridge only serves a Lilac signed with a key it trusts. Without it the slow-motion switch does not appear. Ask your ROM maintainer. Testers whose ROM has the service but not the bridge: [install the bridge](../bridge/install.md).
 
 **How to use it**
 

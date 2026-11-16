@@ -71,7 +71,15 @@ Tap quick settings ![Quick settings](../icons/Sliders.svg){ .icon }. A sheet ris
 
 ## Zoom
 
-Pull the ring above the shutter sideways. The further you pull, the faster it zooms; it springs back when you let go. Tap **W** or **T** to step, or hold them to keep zooming. The ring stops at 4×; pinching reaches the full range.
+Pull the ring above the shutter sideways. The further you pull, the faster it zooms; it springs back when you let go. Tap **W** or **T** to step, or hold them to keep zooming. The ring stops at 4×; pinching reaches the full range. With Volume Key Action set to Focal Switch, the volume buttons step the zoom too (see [Buttons on the side](#buttons-on-the-side)).
+
+## Buttons on the side
+
+The XZ1 Compact's side buttons work as camera controls, so you can shoot without reaching across the screen:
+
+- **Camera key, half-press:** focuses and holds focus and exposure while you keep it there. See [Focus and faces](focus.md#the-camera-key).
+- **Camera key, full press:** takes the photo, or starts and stops a video. During a slow-motion recording it fires the 960 fps burst.
+- **Volume buttons:** take the photo by default. In Settings › System & Controls › **Volume Key Action** you can make them **Focal Switch** (zoom: up steps in, down steps out, one stop at a time, like tapping T or W), **Exposure Comp.** (up brightens, down darkens) or **Volume Control** (they change the volume as usual).
 
 ## Looks
 

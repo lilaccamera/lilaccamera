@@ -21,9 +21,11 @@ The front camera has fixed focus, so a tap only sets the exposure.
 On the XZ1 Compact's two-stage camera key:
 
 - **Half-press** locks focus and exposure on the tracked object or the main face, or the centre if there is neither, for as long as you hold it. An amber **AE-L** mark shows that exposure is held.
-- **Full press** shoots.
+- **Full press** shoots: a photo, or in Video it starts and stops the recording.
 
 Letting go during a burst waits until the burst has finished.
+
+The volume buttons can shoot too (the default), or step the zoom or the exposure instead: see [Buttons on the side](getting-started.md#buttons-on-the-side).
 
 ## Focus in dim light
 

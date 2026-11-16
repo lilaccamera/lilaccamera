@@ -66,6 +66,7 @@ What makes it work on a small screen:
 - **The zoom ring curves round the top of the shutter**, like the zoom lever round a compact camera's shutter button. Pull it and it springs back.
 - **The picture takes the gestures** for the rest: down for the everyday row, up for manual controls, sideways for looks.
 - **One sheet for quick settings**, rising from the bottom. Tap a setting's name for a one-line explanation.
+- **The side buttons are camera controls.** The two-stage camera key focuses on a half-press and shoots on a full press, as on a compact camera; the volume buttons shoot, or step the zoom or exposure if you prefer. See [Buttons on the side](getting-started.md#buttons-on-the-side).
 - **Short words.** Labels and messages fit in one or two lines; short notes appear for a moment in a small pill above the shutter.
 
 ## The editor
