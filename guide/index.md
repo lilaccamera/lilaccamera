@@ -148,9 +148,9 @@ Other phones are not tested. Testers can add the bridge themselves: [install the
 <div class="lilac-map" markdown="0">
 <div><h3>How Lilac works</h3><ul>
 <li><a href="user/how-pictures-are-made/">How a picture is made</a></li>
+<li><a href="user/hardware/">Sony hardware</a></li>
 <li><a href="user/small-screen/">Built for a small screen</a></li>
 <li><a href="user/focus/">Focus and faces</a></li>
-<li><a href="user/hardware/">Sony hardware</a></li>
 </ul></div>
 <div><h3>Using Lilac</h3><ul>
 <li><a href="user/getting-started/">Getting started</a></li>
