@@ -10,6 +10,7 @@ hide:
 <p class="lilac-hero__tagline">Stacked photos, RAW and 960 fps slow motion for the Xperia XZ1 Compact</p>
 <div class="lilac-hero__buttons">
 <a class="lilac-btn lilac-btn--primary" href="user/getting-started/">Get started</a>
+<a class="lilac-btn lilac-btn--outline" href="rom/integration/">For ROM maintainers</a>
 </div>
 </div>
 </div>
@@ -110,7 +111,7 @@ The XZ1 Compact's sensor records at 960 frames a second, but on custom ROMs that
 |---|---|---|
 | Photo, Night, Portrait, Video | any lilac ROM, Android 11 or newer | |
 | Pro (RAW) | the raw19 camera shim | sunplex07's LineageOS 23.2 |
-| 960 fps slow motion | Sony's cacao service and the Lilac Sony Bridge | sunplex07's LineageOS 23.2 only |
+| 960 fps slow motion | Sony's cacao service and the [Lilac Sony Bridge](bridge/install.md) | sunplex07's LineageOS 23.2 only |
 
 On a ROM without the shim, Pro does not appear on the mode dial. Other phones are not tested.
 
@@ -123,5 +124,7 @@ On a ROM without the shim, Pro does not appear on the mode dial. Other phones ar
     **How it works:** [How a picture is made](user/how-pictures-are-made.md) · [Built for a small screen](user/small-screen.md) · [Focus and faces](user/focus.md) · [Sony hardware](user/hardware.md)
 
     **Using Lilac:** [Getting started](user/getting-started.md) · [Photo and Night](user/photo-mode.md) · [Pro](user/pro-mode.md) · [HDR](user/hdr.md) · [Portrait](user/portrait.md) · [Video](user/video.md) · [Editor](user/editor.md) · [Troubleshooting](user/troubleshooting.md)
+
+    **For testers and ROM maintainers:** [Slow-motion bridge](bridge/install.md) · [ROM integration](rom/integration.md)
 
     The colour tools and other features Lilac shares with PhotonCamera work as before and are not covered here.

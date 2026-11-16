@@ -188,3 +188,11 @@ img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
 }
 .lilac-fig--strip { max-width: 24rem; }
 .lilac-fig--strip svg { border-radius: var(--lilac-radius); }
+
+/* Code blocks share the box radius; on phones they keep their margins instead of running edge to edge. */
+.md-typeset .highlight, .md-typeset pre { border-radius: var(--lilac-radius); }
+.md-typeset .highlight { overflow: hidden; }
+.md-typeset .highlight pre, .md-typeset .highlight .filename { border-radius: 0; }
+@media screen and (max-width: 44.9375em) {
+  .md-typeset > :is(.highlight, pre), .md-typeset li > :is(.highlight, pre) { margin-left: 0; margin-right: 0; }
+}

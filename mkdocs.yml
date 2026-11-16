@@ -55,6 +55,8 @@ nav:
       - Video: user/video.md
       - Editor: user/editor.md
   - Troubleshooting: user/troubleshooting.md
+  - Slow-motion bridge: bridge/install.md
+  - ROM integration: rom/integration.md
 exclude_docs: |
   check-text.sh
   requirements.txt
