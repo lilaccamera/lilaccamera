@@ -20,4 +20,8 @@ host = sys.argv[1] if len(sys.argv) > 1 else subprocess.check_output(["tailscale
 site = pathlib.Path(__file__).resolve().parent.parent / "site"
 handler = functools.partial(NoCache, directory=str(site))
 print(f"Serving {site} at http://{host}:8766/", flush=True)
-http.server.ThreadingHTTPServer((host, 8766), handler).serve_forever()
+class Server(http.server.ThreadingHTTPServer):
+    request_queue_size = 128  # the default 5 drops connections when a page asks for dozens of icons at once
+
+
+Server((host, 8766), handler).serve_forever()
