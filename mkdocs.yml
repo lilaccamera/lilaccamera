@@ -37,6 +37,10 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - How it works:
+      - How a picture is made: user/how-pictures-are-made.md
+      - Focus and faces: user/focus.md
+      - Sony hardware: user/hardware.md
   - Using Lilac:
       - Getting started: user/getting-started.md
       - Photo and Night: user/photo-mode.md
@@ -45,9 +49,6 @@ nav:
       - Portrait: user/portrait.md
       - Video: user/video.md
       - Editor: user/editor.md
-  - How it works:
-      - Focus and faces: user/focus.md
-      - Sony hardware: user/hardware.md
   - Troubleshooting: user/troubleshooting.md
 exclude_docs: |
   check-text.sh

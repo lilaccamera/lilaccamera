@@ -15,3 +15,33 @@ img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
 [data-md-color-scheme="slate"] img.icon { filter: invert(1); }
 .mode-mark { font-weight: 600; font-size: 0.8em; letter-spacing: 0.04em; }
 .md-typeset table img.icon { height: 1.8em; }
+
+/* Diagrams and charts: drawn with the theme's colours, so they follow light and dark mode. */
+.lilac-fig { max-width: 30rem; margin: 1.6em auto; }
+.lilac-fig svg { display: block; width: 100%; height: auto; overflow: visible; }
+.lilac-fig figcaption { font-size: .75rem; color: var(--md-default-fg-color--light); text-align: center; margin-top: .4em; }
+.lilac-fig text { fill: var(--md-default-fg-color); font-size: 12px; }
+.lilac-fig text.strong { font-weight: 600; }
+.lilac-fig text.sub, .lilac-fig text.tick { fill: var(--md-default-fg-color--light); font-size: 11px; }
+.lilac-fig .box-sony { fill: var(--md-default-fg-color--lightest); stroke: var(--md-default-fg-color--light); stroke-width: 1; }
+.lilac-fig .box-lilac { fill: var(--lilac-fill); stroke: var(--md-primary-fg-color); stroke-width: 1.5; }
+.lilac-fig .line { fill: none; stroke: var(--md-default-fg-color--light); stroke-width: 1.5; }
+.lilac-fig .arrow-head { fill: var(--md-default-fg-color--light); }
+.lilac-fig .grid { stroke: var(--md-default-fg-color--lightest); stroke-width: 1; }
+.lilac-fig .axis { stroke: var(--md-default-fg-color--light); stroke-width: 1; }
+.lilac-fig .band { fill: var(--lilac-fill); }
+.lilac-fig .series { fill: none; stroke: var(--md-primary-fg-color); stroke-width: 2; stroke-linecap: round; }
+.lilac-fig .dot { fill: var(--md-primary-fg-color); stroke: var(--md-default-bg-color); stroke-width: 2; }
+.lilac-fig .range { fill: none; stroke: var(--md-default-fg-color); stroke-width: 2; stroke-linecap: round; }
+.lilac-fig .bar { fill: var(--md-primary-fg-color); }
+.lilac-fig .clip { fill: var(--md-default-bg-color); stroke: var(--md-default-fg-color--light); stroke-width: 1; }
+.lilac-fig .noisy { stroke: var(--md-default-fg-color--light); stroke-width: 1; }
+.lilac-fig .hatch { stroke: var(--md-default-fg-color--light); stroke-width: 1.5; }
+.lilac-fig .scene { stroke: var(--md-default-fg-color--light); stroke-width: 1; }
+.lilac-fig .g0 { stop-color: #1b1726; }
+.lilac-fig .g1 { stop-color: #fffbe8; }
+.lilac-fig .num { fill: var(--md-primary-fg-color); }
+.lilac-fig text.num-t { fill: var(--md-primary-bg-color, #fff); font-weight: 600; }
+.lilac-fig rect.bar:hover, .lilac-fig circle.dot:hover { opacity: .8; }
+:root { --lilac-fill: rgba(117, 80, 212, .12); }
+[data-md-color-scheme="slate"] { --lilac-fill: rgba(180, 139, 245, .16); }
