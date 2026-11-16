@@ -21,17 +21,18 @@ Above ISO 320 the back sensor's gain is digital rather than analog.
 
 ## What Lilac uses
 
-From the camera:
+Each Sony hardware feature below, and what it makes possible in Lilac:
 
 <div class="lilac-features" markdown="0">
-<div class="lilac-feature"><img src="../icons/User.svg" alt="" class="lilac-feature__icon"><div><strong>Face detection</strong><span>On the camera chip, up to five faces: face frames, focus, exposure, Portrait and the self-timer lamp. <a href="focus.md#faces">Focus and faces</a></span></div></div>
-<div class="lilac-feature"><img src="../icons/FocusCenteredLine.svg" alt="" class="lilac-feature__icon"><div><strong>Subject tracking</strong><span>Back camera: tap an object and the camera follows it.</span></div></div>
-<div class="lilac-feature"><img src="../icons/FocusLine.svg" alt="" class="lilac-feature__icon"><div><strong>Focus where Lilac points</strong><span>Focus goes to the app's area, not the camera's own choice.</span></div></div>
-<div class="lilac-feature"><img src="../icons/ExposureLine.svg" alt="" class="lilac-feature__icon"><div><strong>Exposure on faces</strong><span>Exposure follows the faces in the picture.</span></div></div>
-<div class="lilac-feature"><img src="../icons/MountainLine.svg" alt="" class="lilac-feature__icon"><div><strong>Laser distance</strong><span>Back camera: used only as a hint that the subject is far.</span></div></div>
-<div class="lilac-feature"><img src="../icons/MoodSmileLine.svg" alt="" class="lilac-feature__icon"><div><strong>Smile scores</strong><span>How much each face smiles, for the smile shutter.</span></div></div>
-<div class="lilac-feature"><img src="../icons/PaletteLine.svg" alt="" class="lilac-feature__icon"><div><strong>Sony's still processing</strong><span>Front camera: removes the pink shadow cast for the Accurate colour.</span></div></div>
-<div class="lilac-feature"><img src="../icons/CameraLine.svg" alt="" class="lilac-feature__icon"><div><strong>Two-stage camera key</strong><span>Half-press to lock focus and exposure, full press to shoot. <a href="getting-started.md#buttons-on-the-side">Buttons on the side</a></span></div></div>
+<div class="lilac-feature"><img src="../icons/User.svg" alt="" class="lilac-feature__icon"><div><strong>Face detection</strong><span>On the camera chip, up to five faces, at no cost to the phone.</span><span class="lilac-feature__enables">In Lilac: <a href="focus.md#faces">face frames, focus and exposure on faces</a> · <a href="portrait.md">Portrait's viewfinder</a> · the self-timer lamp</span></div></div>
+<div class="lilac-feature"><img src="../icons/FocusCenteredLine.svg" alt="" class="lilac-feature__icon"><div><strong>Subject tracking</strong><span>Back camera: the camera follows an object as it moves.</span><span class="lilac-feature__enables">In Lilac: <a href="focus.md#tap-to-focus">tap to track</a> · <a href="focus.md#the-camera-key">half-press locks on the tracked object</a></span></div></div>
+<div class="lilac-feature"><img src="../icons/FocusLine.svg" alt="" class="lilac-feature__icon"><div><strong>Focus area</strong><span>The camera focuses on the area the app gives it.</span><span class="lilac-feature__enables">In Lilac: <a href="focus.md#tap-to-focus">tap to focus</a> · <a href="focus.md#focus-in-dim-light">larger focus areas in dim light</a></span></div></div>
+<div class="lilac-feature"><img src="../icons/ExposureLine.svg" alt="" class="lilac-feature__icon"><div><strong>Exposure on faces</strong><span>The camera meters on the faces it finds.</span><span class="lilac-feature__enables">In Lilac: exposure that follows faces</span></div></div>
+<div class="lilac-feature"><img src="../icons/MountainLine.svg" alt="" class="lilac-feature__icon"><div><strong>Laser distance sensor</strong><span>Back camera: measures distance in the middle of the frame, up to about 2 m.</span><span class="lilac-feature__enables">In Lilac: <a href="focus.md#focus-in-dim-light">the far-focus fallback when focus fails</a></span></div></div>
+<div class="lilac-feature"><img src="../icons/MoodSmileLine.svg" alt="" class="lilac-feature__icon"><div><strong>Smile scores</strong><span>How much each face smiles, 0 to 100.</span><span class="lilac-feature__enables">In Lilac: <a href="photo-mode.md#smile-shutter">Smile shutter</a></span></div></div>
+<div class="lilac-feature"><img src="../icons/PaletteLine.svg" alt="" class="lilac-feature__icon"><div><strong>Still processing</strong><span>Sony's full photo pipeline, with the true black level.</span><span class="lilac-feature__enables">In Lilac: <a href="photo-mode.md#front-camera-colour-fast-or-accurate">front camera Accurate colour</a> · Night's Accurate on the front camera · Pro's Camera JPEG copy</span></div></div>
+<div class="lilac-feature"><img src="../icons/CameraLine.svg" alt="" class="lilac-feature__icon"><div><strong>Two-stage camera key</strong><span>A half-press and a full press, like a compact camera.</span><span class="lilac-feature__enables">In Lilac: <a href="getting-started.md#buttons-on-the-side">focus lock, shutter and video start</a> · the slow-motion burst</span></div></div>
+<div class="lilac-feature"><img src="../icons/MovieCamera.svg" alt="" class="lilac-feature__icon"><div><strong>Super slow motion service</strong><span>Sony's cacao service records 960 frames a second (ROM support needed).</span><span class="lilac-feature__enables">In Lilac: <a href="video.md#slow-motion">960 fps slow motion</a></span></div></div>
 </div>
 
 ### Scene and condition detection

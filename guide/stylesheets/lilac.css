@@ -256,3 +256,4 @@ img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
 .lilac-scene { display: flex; flex-direction: column; align-items: center; gap: .3rem; text-align: center; }
 .lilac-scene small { font-size: .68rem; color: var(--lilac-muted); }
 @media screen and (max-width: 44.9375em) { .lilac-features { grid-template-columns: 1fr; } }
+.md-typeset .lilac-feature span.lilac-feature__enables { margin-top: .35rem; color: var(--md-default-fg-color); font-size: .76rem; }
