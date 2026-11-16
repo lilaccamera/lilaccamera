@@ -3274,6 +3274,40 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             cameraController.setFrontPhotoResolutionCapMp(current.frontPhotoResolutionCapMp)
         }
 
+    // What the other app's photo changed or left behind, undone when its screen closes.
+    private var modeBeforeCaller: List<Any>? = null
+    private val callerPhotoIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /** Called before the camera is switched to Photo mode for another app: the mode is put back afterwards. */
+    fun keepModeForAfterCaller() {
+        if (modeBeforeCaller != null) return
+        val prefs = userPreferencesRepository.current
+        modeBeforeCaller = listOf(prefs.captureMode, prefs.useRaw, prefs.useJpgMax, prefs.useRawMax)
+    }
+
+    private fun undoCallerSession() {
+        if (captureForCaller == null) return
+        modeBeforeCaller?.let { (mode, raw, jpgMax, rawMax) ->
+            userPreferencesRepository.updateAsync {
+                captureMode = mode as CaptureMode
+                useRaw = raw as Boolean
+                useJpgMax = jpgMax as Boolean
+                useRawMax = rawMax as Boolean
+            }
+        }
+        // A shot still being saved when the screen closes is not kept either.
+        // shortcut: waits 10 s for the cancelled save to stop writing; a process killed sooner leaves the photo.
+        val context = getApplication<Application>()
+        val ids = callerPhotoIds.toList()
+        if (ids.isNotEmpty()) {
+            @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
+            kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+                delay(10_000)
+                ids.forEach { GalleryManager.deletePhoto(context, it) }
+            }
+        }
+    }
+
     fun capture() {
         if (state.value.captureMode == CaptureMode.VIDEO) {
             if (state.value.videoRecordingState.isProcessing) {
@@ -3578,6 +3612,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (settings.state.useRaw && settings.state.isRawSupported) RenderQueue.holdForProShot(getApplication())
             settings.captureId = id
             pendingCaptureSettings[id] = settings
+            if (captureForCaller != null) callerPhotoIds += settings.photoId
             if (settings.state.useRaw && settings.state.isRawSupported && settings.preferences.saveCameraJpeg &&
                 !settings.multipleExposure
             ) {
@@ -4391,9 +4426,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.setSlowMotionEnabled(enabled)
     }
 
-    /** Flash for another app's photo: off or on, no torch. It starts off with every request. */
-    fun toggleQuickFlash() {
-        cameraController.setFlashMode(if (state.value.flashMode == 1) 0 else 1)
+    /** Flash for another app's photo: off or on, no torch. */
+    fun setQuickFlash(on: Boolean) {
+        cameraController.setFlashMode(if (on) 1 else 0)
     }
 
     fun toggleFlash() {
@@ -7038,6 +7073,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     override fun onCleared() {
         super.onCleared()
+        undoCallerSession()
         cameraController.onEnhancedStabilizationUnavailable = null
         cameraController.onVideoStoppedForHeat = null
         videoHeatJob?.cancel()
