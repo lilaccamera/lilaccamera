@@ -76,6 +76,27 @@ The [user guide](https://lilaccamera.github.io/) explains what Lilac does differ
 - **Testers and ROMs:** [slow-motion bridge](https://lilaccamera.github.io/bridge/install/), [ROM integration](https://lilaccamera.github.io/rom/integration/)
 
 <details>
+<summary><b>Build from source</b></summary>
+
+You need JDK 17 and the Android SDK with platform 36, NDK 29.0.14206865 and CMake 3.22.1 (install them in the SDK Manager). Put the SDK path in `local.properties`, which Android Studio writes for you:
+
+```properties
+sdk.dir=/path/to/Android/sdk
+```
+
+Then build Lilac and the [slow-motion bridge](https://lilaccamera.github.io/bridge/install/) from the repository root. The Gradle wrapper downloads Gradle itself.
+
+```bash
+./gradlew assembleDefaultDebug :sonybridge:assembleDebug
+```
+
+- **Lilac:** `app/build/outputs/apk/default/debug/app-default-debug.apk`. It installs as `io.github.lilaccamera.debug`, beside a ROM's copy.
+- **Bridge:** `sonybridge/build/outputs/apk/debug/sonybridge-debug.apk`. It needs a system install; follow the [bridge page](https://lilaccamera.github.io/bridge/install/). The bridge serves only a Lilac signed with the same key, and both debug builds use the repository's public debug key.
+- **Release builds:** `assembleDefaultRelease` signs with your own key, passed as `-PRELEASE_STORE_FILE`, `-PRELEASE_STORE_PASSWORD`, `-PRELEASE_KEY_ALIAS` and `-PRELEASE_KEY_PASSWORD`. Never share a debug build: its key is public.
+
+</details>
+
+<details>
 <summary><b>What PhotonCamera came with</b></summary>
 
 Lilac is a fork of [PhotonCamera](https://github.com/bjzhou/PhotonCamera) by bjzhou, an open-source Android camera application focused on static photography, designed to simulate the handling and image quality of modern mirrorless digital cameras. This is the feature list of the original app. The upstream README is also available in [English](./README_EN.md), [简体中文](./README_CN.md) and [日本語](./README_JA.md).
