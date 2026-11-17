@@ -7,6 +7,7 @@ touch "$T/bridge.apk"
 cat > "$T/adb" <<'FAKE'
 #!/bin/bash
 # FAKE_CACAO=found|missing  FAKE_SHIM=found|missing  FAKE_ERR=1 (adb itself fails)
+# FAKE_FORWARDER=on|off|none (state in dumpsys)  FAKE_LOG_LINE=text (what the bridge logged)
 echo "$*" >> "$FAKE_LOG"; a="$*"; f="${a#shell ls }"
 if [ "${FAKE_ERR:-}" = 1 ]; then echo "error: no devices/emulators found" >&2; exit 1; fi
 if [ "${FAKE_ERR:-}" = serial ]; then echo "adb: device 'abc' not found" >&2; exit 1; fi
@@ -15,6 +16,15 @@ case "$*" in
     [ "${FAKE_CACAO:-found}" = found ] && echo "Service cacao: found" || echo "Service cacao: not found" ;;
   "shell ls /system/lib64/"*)
     if [ "${FAKE_CACAO:-found}" = found ]; then echo "$f"; else echo "ls: $f: No such file or directory"; exit 1; fi ;;
+  "shell dumpsys package io.github.lilaccamera.sonybridge")
+    echo "    pkgFlags=[ SYSTEM HAS_CODE ]"
+    case "${FAKE_FORWARDER:-none}" in
+      on) printf '      enabledComponents:\n        io.github.lilaccamera.sonybridge.CaptureForwardActivity\n' ;;
+      off) printf '      disabledComponents:\n        io.github.lilaccamera.sonybridge.CaptureForwardActivity\n' ;;
+    esac
+    echo "      gids=[3003]" ;;
+  "logcat -d -s LilacSonyBridge:I")
+    [ -n "${FAKE_LOG_LINE:-}" ] && echo "11-17 10:00:00.000  1234  1234 I LilacSonyBridge: $FAKE_LOG_LINE" ;;
   "shell ls /vendor/lib/hw/"*)
     if [ "${FAKE_SHIM:-found}" = found ]; then echo "ls: $f: Permission denied"; else echo "ls: $f: No such file or directory"; fi; exit 1 ;;
 esac
@@ -75,5 +85,18 @@ test_unknown_device_stops() {
   grep -q '^push' "$FAKE_LOG" && { bad $FUNCNAME "pushed"; return; }
   ok $FUNCNAME
 }
-for t in test_unknown_device_stops test_default_adb test_all_present test_cacao_missing_declined test_shim_missing_accepted test_adb_error_stops; do $t; done
+test_check_reports_forwarder() {
+  FAKE_FORWARDER=on FAKE_LOG_LINE="forwarder on, serves io.github.lilaccamera, interface 2" run n check
+  [ $RC -eq 0 ] || { bad $FUNCNAME "exit $RC"; return; }
+  echo "$OUT" | grep -q 'request forwarder: on$' || { bad $FUNCNAME "forwarder not reported on"; return; }
+  echo "$OUT" | grep -q '^forwarder on, serves io.github.lilaccamera, interface 2$' || { bad $FUNCNAME "no served Lilac or version"; return; }
+  FAKE_FORWARDER=off run n check
+  echo "$OUT" | grep -q 'request forwarder: off$' || { bad $FUNCNAME "forwarder not reported off"; return; }
+  echo "$OUT" | grep -q 'no report in the log' || { bad $FUNCNAME "missing log line not explained"; return; }
+  FAKE_FORWARDER=none run n check
+  echo "$OUT" | grep -q 'request forwarder: off (never' || { bad $FUNCNAME "default state not reported"; return; }
+  touched && { bad $FUNCNAME "phone touched: $(tr '\n' ';' < "$FAKE_LOG")"; return; }
+  ok $FUNCNAME
+}
+for t in test_check_reports_forwarder test_unknown_device_stops test_default_adb test_all_present test_cacao_missing_declined test_shim_missing_accepted test_adb_error_stops; do $t; done
 [ $fails -eq 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

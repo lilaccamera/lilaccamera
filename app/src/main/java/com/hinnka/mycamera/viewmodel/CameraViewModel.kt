@@ -3274,27 +3274,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             cameraController.setFrontPhotoResolutionCapMp(current.frontPhotoResolutionCapMp)
         }
 
-    // What the other app's photo changed or left behind, undone when its screen closes.
-    private var modeBeforeCaller: List<Any>? = null
+    // The other app's photos, deleted when its screen closes.
     private val callerPhotoIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-
-    /** Called before the camera is switched to Photo mode for another app: the mode is put back afterwards. */
-    fun keepModeForAfterCaller() {
-        if (modeBeforeCaller != null) return
-        val prefs = userPreferencesRepository.current
-        modeBeforeCaller = listOf(prefs.captureMode, prefs.useRaw, prefs.useJpgMax, prefs.useRawMax)
-    }
 
     private fun undoCallerSession() {
         if (captureForCaller == null) return
-        modeBeforeCaller?.let { (mode, raw, jpgMax, rawMax) ->
-            userPreferencesRepository.updateAsync {
-                captureMode = mode as CaptureMode
-                useRaw = raw as Boolean
-                useJpgMax = jpgMax as Boolean
-                useRawMax = rawMax as Boolean
-            }
-        }
+        // The settings the screen changed (kept in the settings themselves, see UserPreferences.beginCallerCapture).
+        userPreferencesRepository.updateAsync { endCallerCapture() }
         // A shot still being saved when the screen closes is not kept either.
         // shortcut: waits 10 s for the cancelled save to stop writing; a process killed sooner leaves the photo.
         val context = getApplication<Application>()

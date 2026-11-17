@@ -2,7 +2,6 @@ package io.github.lilaccamera.sonybridge
 
 import android.app.Service
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
@@ -20,7 +19,7 @@ import com.sonymobile.imageprocessor.bypasscamera2.BypassCamera
 /**
  * The privileged half of Lilac's 960 fps slow motion (see [ISonyBridge]). It owns Sony's native session, the H.264
  * encoder and the muxer; the encoder lives here because the photo service may only call back into a privileged process.
- * Only Lilac may use it: the caller must be a Lilac package signed with the same key as this app.
+ * Only Lilac may use it: the caller must be a Lilac package signed with a pinned certificate (see [LilacTrust]).
  */
 class BridgeService : Service() {
     private val lock = Any()
@@ -40,10 +39,7 @@ class BridgeService : Service() {
     private fun enforceCaller() {
         val uid = Binder.getCallingUid()
         if (uid == Process.myUid()) return
-        val names = packageManager.getPackagesForUid(uid)
-        val ok = names != null && names.any { it == LILAC || it.startsWith("$LILAC.") } &&
-            (packageManager.checkSignatures(uid, Process.myUid()) == PackageManager.SIGNATURE_MATCH ||
-                packageManager.hasSigningCertificate(uid, RELEASE_CERT, PackageManager.CERT_INPUT_SHA256))
+        val ok = packageManager.getPackagesForUid(uid).orEmpty().any { LilacTrust.isTrusted(this, it) }
         if (!ok) throw SecurityException("uid $uid is not allowed to use the Sony bridge")
     }
 
@@ -107,7 +103,7 @@ class BridgeService : Service() {
     }
 
     private val binder = object : ISonyBridge.Stub() {
-        override fun version() = 1
+        override fun version() = INTERFACE_VERSION
 
         override fun getCapabilities(): Bundle {
             enforceCaller()
@@ -144,7 +140,10 @@ class BridgeService : Service() {
         override fun release() = call("release") { finishEncoder(); camera.release() }
     }
 
-    override fun onBind(intent: Intent): IBinder = binder
+    override fun onBind(intent: Intent): IBinder {
+        runCatching { CaptureForwardActivity.refresh(this) }.onFailure { log("forwarder check failed: $it") }
+        return binder
+    }
 
     // The caller is gone or let go: never leave Sony's session open.
     override fun onUnbind(intent: Intent): Boolean {
@@ -153,15 +152,9 @@ class BridgeService : Service() {
         return false
     }
 
-    private companion object {
-        const val TAG = "LilacSonyBridge"
-        const val LILAC = "io.github.lilaccamera"
-
-        // SHA-256 of the certificate that signs the project's GitHub releases. A ROM re-signs its own
-        // Lilac and bridge with its key; this also lets the ROM's bridge serve a release-signed Lilac
-        // (the beta installed beside the ROM's copy).
-        val RELEASE_CERT: ByteArray =
-            "CA67BBFA7DB7174346664DB24FAA924509A9523E95D0B19B8E193B8538108CAD".chunked(2)
-                .map { it.toInt(16).toByte() }.toByteArray()
+    companion object {
+        private const val TAG = "LilacSonyBridge"
+        /** [ISonyBridge.version]; raise it with every new call. */
+        const val INTERFACE_VERSION = 2
     }
 }

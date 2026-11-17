@@ -126,6 +126,43 @@ class UserPreferences internal constructor(
             storedCaptureMode = value
         }
     var aspectRatio by string("aspect_ratio", "RATIO_4_3")
+
+    /**
+     * What the capture screen for another app changed (mode, RAW, look, effects), put back when it closes. Kept
+     * here rather than in memory, so a process killed while that screen is open still puts them back on the next
+     * ordinary start. Written only when empty: a capture screen recreated after a kill keeps the first copy.
+     */
+    private var settingsBeforeCaller by nullableString("settings_before_caller")
+    val hasSettingsBeforeCaller: Boolean get() = settingsBeforeCaller != null
+
+    /** Switches to what another app asked for: Video, or Photo without RAW, look or effects. */
+    fun beginCallerCapture(video: Boolean) {
+        if (settingsBeforeCaller == null) {
+            settingsBeforeCaller =
+                SettingsBeforeCaller(captureMode, useRaw, useJpgMax, useRawMax, lutId, activeEffectParamsJson).encode()
+        }
+        captureMode = if (video) CaptureMode.VIDEO else CaptureMode.PHOTO
+        if (!video) {
+            useRaw = false
+            useRawMax = false
+            lutId = "none"
+            activeEffectParams = EffectParams.DEFAULT
+        }
+    }
+
+    /** Puts back what [beginCallerCapture] changed and forgets it; nothing when nothing is kept. */
+    fun endCallerCapture() {
+        val stored = settingsBeforeCaller ?: return
+        SettingsBeforeCaller.decode(stored)?.let { saved ->
+            captureMode = saved.captureMode
+            useRaw = saved.useRaw
+            useJpgMax = saved.useJpgMax
+            useRawMax = saved.useRawMax
+            lutId = saved.lutId
+            activeEffectParamsJson = saved.effectsJson
+        }
+        settingsBeforeCaller = null
+    }
     var videoLutId by nullableString("video_lut_id")
     var rawBaselineLutId by nullableString("raw_baseline_lut_id")
     var rawDcpId by nullableString("raw_dcp_id")
@@ -778,6 +815,39 @@ private fun nullableString(key: String): ReadWriteProperty<UserPreferences, Stri
     KeyField(stringPreferencesKey(key), null, { it }, { it })
 
 /** 以枚举名存储；存储值无法识别时回退到 [default]。 */
+/** The settings [UserPreferences.beginCallerCapture] keeps, one per line; the effects JSON is last as it is free text. */
+internal data class SettingsBeforeCaller(
+    val captureMode: CaptureMode,
+    val useRaw: Boolean,
+    val useJpgMax: Boolean,
+    val useRawMax: Boolean,
+    val lutId: String?,
+    val effectsJson: String,
+) {
+    fun encode(): String =
+        listOf(captureMode.name, useRaw, useJpgMax, useRawMax, lutId?.let { "=$it" } ?: "-", effectsJson).joinToString("\n")
+
+    companion object {
+        /** Null for a value this code did not write, which is then dropped rather than half applied. */
+        fun decode(stored: String): SettingsBeforeCaller? {
+            val v = stored.split("\n", limit = 6)
+            if (v.size != 6) return null
+            return SettingsBeforeCaller(
+                captureMode = enumValues<CaptureMode>().firstOrNull { it.name == v[0] } ?: return null,
+                useRaw = v[1].toBooleanStrictOrNull() ?: return null,
+                useJpgMax = v[2].toBooleanStrictOrNull() ?: return null,
+                useRawMax = v[3].toBooleanStrictOrNull() ?: return null,
+                lutId = when {
+                    v[4] == "-" -> null
+                    v[4].startsWith("=") -> v[4].substring(1)
+                    else -> return null
+                },
+                effectsJson = v[5],
+            )
+        }
+    }
+}
+
 /** True until a capture mode is written in this process; see [UserPreferences.captureMode]. */
 @Volatile
 private var videoIsFromLastRun = true

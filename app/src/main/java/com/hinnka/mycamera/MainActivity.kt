@@ -112,6 +112,8 @@ import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.StartupGate
 import com.hinnka.mycamera.utils.StartupTrace
 import com.hinnka.mycamera.video.CaptureMode
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryTab
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
@@ -290,9 +292,28 @@ open class MainActivity : AppCompatActivity() {
         StartupTrace.mark("MainActivity.onCreate start")
         showOverLockScreen()
         val asked = intent?.action
-        if (asked == MediaStore.ACTION_IMAGE_CAPTURE || asked == MediaStore.ACTION_VIDEO_CAPTURE) {
-            cameraViewModel.captureForCaller =
-                CaptureForCaller(close = ::finish, video = asked == MediaStore.ACTION_VIDEO_CAPTURE)
+        // The secure request comes from the lock screen; it is answered like a photo request, still locked.
+        if (asked == MediaStore.ACTION_IMAGE_CAPTURE || asked == MediaStore.ACTION_IMAGE_CAPTURE_SECURE ||
+            asked == MediaStore.ACTION_VIDEO_CAPTURE) {
+            val video = asked == MediaStore.ACTION_VIDEO_CAPTURE
+            // Saved before anything reads the settings, so the camera opens in the asked mode at once instead
+            // of opening in the last-used one and reopening (about 1 s). The settings write takes milliseconds.
+            // A photo for another app is the stacked photo with no look, so the viewfinder shows none either.
+            runBlocking {
+                userPreferencesRepository.update { beginCallerCapture(video) }
+                userPreferencesRepository.flow { it.captureMode to it.useRaw }
+                    .first { (mode, raw) -> mode == (if (video) CaptureMode.VIDEO else CaptureMode.PHOTO) && (video || !raw) }
+            }
+            cameraViewModel.captureForCaller = CaptureForCaller(close = ::finish, video = video)
+        } else {
+            // A process killed while the capture screen for another app was open never put the user's settings
+            // back; do it before anything reads them. Reads the settings that startup reads anyway.
+            runBlocking {
+                if (userPreferencesRepository.latest().hasSettingsBeforeCaller) {
+                    userPreferencesRepository.update { endCallerCapture() }
+                    userPreferencesRepository.flow { it.hasSettingsBeforeCaller }.first { !it }
+                }
+            }
         }
 
         // 启用全屏模式

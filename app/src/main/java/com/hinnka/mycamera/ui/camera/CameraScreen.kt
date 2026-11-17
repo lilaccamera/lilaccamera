@@ -893,7 +893,6 @@ fun CameraScreen(
             state.captureMode == CaptureMode.PHOTO && !state.useRaw && !state.isNightMode && !state.isPortraitMode
         }
         if (forCaller != null && isCameraInitialized && !inPlace) {
-            viewModel.keepModeForAfterCaller()
             selectShootingMode(if (forCaller.video) CameraShootingMode.VIDEO else CameraShootingMode.PHOTO)
         }
     }

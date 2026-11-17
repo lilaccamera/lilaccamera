@@ -2,7 +2,8 @@
 # Installs, removes or checks the Lilac Sony Bridge as a privileged system app on the connected phone (adb root needed).
 #   bridge.sh install [apk]   push the APK to /system/priv-app/LilacSonyBridge and reboot (default: the debug build)
 #   bridge.sh uninstall       delete that folder and reboot
-#   bridge.sh check           show whether the system app is installed, privileged and has its permission
+#   bridge.sh check           show whether the system app is installed, privileged and has its permission,
+#                             its interface version, the request forwarder's state and which Lilac it serves
 # A system app is only scanned at boot, so every new build needs install + reboot. Set ANDROID_SERIAL to pick a phone.
 # Undo of everything this script does: `bridge.sh uninstall`. No vendor file, SELinux setting or bootloader is touched.
 # install first checks, without changing anything, that the ROM has Sony's photo service (cacao) and the raw19 RAW
@@ -87,7 +88,15 @@ case "${1:-check}" in
     ;;
   check)
     echo "-- package:";   adb shell pm path "$PKG" || echo "not installed"
-    echo "-- flags:";     adb shell dumpsys package "$PKG" | grep -E "^\s+(flags|privateFlags|pkgFlags)=|IMAGE_PROCESSOR" | head -6 || true
+    dp=$(adb shell dumpsys package "$PKG" 2>/dev/null || true)
+    echo "-- flags:";     echo "$dp" | grep -E "^\s+(flags|privateFlags|pkgFlags)=|IMAGE_PROCESSOR" | head -6 || true
+    # The forwarder is off in the manifest; the bridge switches it on or off at boot, on bind and on package removal.
+    fw=$(echo "$dp" | awk '/disabledComponents:/{f="off";next} /enabledComponents:/{f="on";next} /:$/{f=""}
+      f!="" && /CaptureForwardActivity/ && !done {print f; done=1}')
+    echo "-- request forwarder: ${fw:-off (never switched on since install)}"
+    echo "-- interface version and the Lilac it serves (logged at boot and when Lilac connects):"
+    adb logcat -d -s LilacSonyBridge:I | grep "forwarder " | tail -1 | sed 's/.*: forwarder/forwarder/' | grep . ||
+      echo "no report in the log since it was last cleared; open Lilac once, then check again"
     rc=0; check_cacao || rc=1; check_shim || rc=1
     echo "-- last capability report from the bridge (written when Lilac asks):"
     adb logcat -d -s LilacSonyBridge:I | grep "capabilities:" | tail -1 || true

@@ -105,7 +105,10 @@ fun CaptureForCallerFlow(viewModel: CameraViewModel, request: CaptureForCaller) 
                 return@collect
             }
             rendering = true
-            val file = renderForCaller(context, photoId)
+            // The stacked photo as saved, with no look: the capture screen shows none either. Rendering a look
+            // took about 2 s on lilac. The render stays for a photo saved without its JPEG.
+            val file = GalleryManager.getPhotoFile(context, photoId).takeIf { it.length() > 0L }
+                ?: renderForCaller(context, photoId)
             rendering = false
             if (file != null) {
                 shot = Shot(photoId, file)

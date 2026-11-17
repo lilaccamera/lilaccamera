@@ -1,7 +1,8 @@
 # Lilac Sony Bridge
 
 A small privileged system app that lets Lilac Camera use Sony's 960 fps super slow motion on the Xperia XZ1 Compact
-(`lilac`) running LineageOS with Sony's stock vendor image. Lilac itself stays an ordinary, updatable app.
+(`lilac`) running LineageOS with Sony's stock vendor image, and passes other apps' photo and video requests to Lilac.
+Lilac itself stays an ordinary, updatable app.
 
 ## What it is for
 
@@ -31,18 +32,42 @@ SlowMotionRemux: video file + sound + frame times -> the final MP4 in the normal
 ```
 
 - **Interface:** `src/main/aidl/.../ISonyBridge.aidl` (compiled into both apps; the app adds that folder as an AIDL source
-  directory). The two apps must be installed together: the transaction codes follow the method order.
-- **Access control:** every call checks that the caller's package is `io.github.lilaccamera` or starts with
-  `io.github.lilaccamera.` **and** that it is signed either with the bridge's own key or with the certificate of
-  the project's GitHub releases (SHA-256 pinned in `BridgeService.RELEASE_CERT`). A bridge re-signed with a ROM's key
-  therefore serves the ROM's Lilac and the release-signed beta installed beside it; a debug-signed bridge serves
-  debug-signed builds and release-signed ones.
+  directory). It only grows: new methods go at the end (the transaction codes follow the method order) and raise
+  `version()` (`BridgeService.INTERFACE_VERSION`). Lilac's `SonyBridgeClient` reads the version once on connect and
+  offers each feature only from the version that brought it, so a newer Lilac works with an older bridge (a ROM's).
+  Version 1: 960 fps slow motion. Version 2: pinned certificates and the request forwarder; no new calls.
+- **Access control (pinned certificates):** every call checks that the caller's package is `io.github.lilaccamera` or
+  starts with `io.github.lilaccamera.` **and** that one of its signing certificates (the whole signing history, so a
+  rotated key keeps working) has a SHA-256 in `LilacTrust.PINNED`: today the certificate of the project's GitHub
+  releases; the beta's goes beside it once that key exists. A release bridge trusts nothing else, so the key the bridge
+  itself is signed with does not matter: a ROM may ship it presigned, or sign it with any key, AOSP's public test keys
+  included, without opening it to other apps. Only a debug bridge (debuggable) also trusts its own key, so debug
+  builds of the two pair up. The check is one pure function, `LilacTrust.isTrustedCaller`, unit-tested in
+  `src/test`.
 - **Cleanup:** the bridge releases Sony's session when the client unbinds or dies. The client always calls `release`.
 - **Visibility:** Lilac declares a `<queries>` entry for the bridge package. The feature is offered only when the device
   is `lilac`, the bridge is installed and `getCapabilities()` reports 960 fps at 1280x720.
 - **Class names:** `com.sonymobile.imageprocessor.bypasscamera2.BypassCamera` and `BypassCameraParameters.Capability`
   mirror names the ROM's native library binds to by name. They contain no Sony code. Do not rename them or shrink the
   app (minification is off).
+
+## The request forwarder
+
+Since Android 11, `IMAGE_CAPTURE`, `IMAGE_CAPTURE_SECURE` and `VIDEO_CAPTURE` requests that name no app are offered
+only to system apps. `CaptureForwardActivity` (no window, `Theme.NoDisplay`, labelled "Lilac Camera") takes them as the
+system app it is, names Lilac's `com.hinnka.mycamera.CaptureActivity` in a copy of the request, adds
+`FLAG_ACTIVITY_FORWARD_RESULT`, starts it and finishes. The copy keeps the caller's `ClipData` and read/write grant
+flags, so the grant on the caller's output file passes on; Lilac's answer goes straight back to the caller. The bridge
+handles no result.
+
+- **Which Lilac:** the stable package if installed and trusted (as above), else the beta.
+- **When it is on:** the activity is disabled in the manifest. `CaptureForwardActivity.refresh` enables it only while a
+  trusted Lilac is installed **and** that Lilac is not a system app (a system Lilac answers the requests itself; both
+  would be listed). It runs at `BOOT_COMPLETED` and `PACKAGE_FULLY_REMOVED` (`ForwarderReceiver`) and whenever Lilac
+  binds (Lilac binds once per start, when its camera first opens, in any mode). A Lilac installed after boot is therefore offered
+  from its first start. A request that arrives with Lilac gone is answered "cancelled" and the forwarder switches off.
+- Each check logs `forwarder on|off, serves <package>, interface <n>`; `tools/bridge.sh check` shows that line and the
+  activity's state.
 
 ## The call sequence (Lilac's `SlowMotionRecorder` and `Camera2Controller`)
 
@@ -78,7 +103,7 @@ frame, its stamp in the file and its arrival time (elapsed realtime). `SlowMotio
 ```bash
 ./gradlew :sonybridge:assembleDebug              # signed with the debug key; use assembleRelease for the release key
 sonybridge/tools/bridge.sh install               # push to /system/priv-app/LilacSonyBridge, chmod 644, chcon, reboot
-sonybridge/tools/bridge.sh check                 # installed, privileged, permission, cacao service present
+sonybridge/tools/bridge.sh check                 # installed, privileged, permission, cacao, interface version, forwarder
 sonybridge/tools/bridge.sh uninstall             # delete the folder and reboot
 ```
 
@@ -89,7 +114,8 @@ access, which is why the script first uninstalls any normal install of the packa
 "busy"; the reboot restores it. Nothing else is changed: no vendor file, no SELinux setting, no trim area.
 
 The bridge asks for no privileged permission, so the ROM's privileged-permission allowlist check does not apply.
-A bridge signed with the key of the Lilac build you use must be installed, or Lilac is refused.
+A release bridge serves only Lilac builds signed with a pinned certificate; a debug bridge also serves debug-signed
+Lilac builds. Any other Lilac is refused.
 
 Install a Lilac build beside the others for testing with `-PdebugIdSuffix=slowmo`
 (`io.github.lilaccamera.debug.slowmo`); the debug-signed bridge serves it.
@@ -126,7 +152,8 @@ The experiments for a second burst (re-arm variants) were run with a temporary d
 | `UnsatisfiedLinkError` / "not accessible for the namespace" | The bridge is not installed under `/system/priv-app`. |
 | `avc: denied { find } for name=cacao` | The bridge runs as an ordinary app (installed under `/system/app` or normally). |
 | `Permission failure: com.sonymobile.permission.IMAGE_PROCESSOR` | The bridge's manifest lost the permission lines. |
-| Bind refused, "not allowed to use the Sony bridge" | Lilac's package or signature does not match the bridge's. |
+| Bind refused, "not allowed to use the Sony bridge" | Lilac's package is not `io.github.lilaccamera[.*]`, or its certificate is not pinned (a release bridge refuses debug-signed Lilac builds). |
+| Other apps do not list Lilac | `bridge.sh check` shows the forwarder off: Lilac is missing, not signed with a pinned certificate, or a system app (then it is listed itself). |
 | Everything returns 0 but no frames | The video recording was not started before the trigger, or the mode was stopped by a timeout. |
 | `nativeFinalize` hangs | The service is wedged: `adb root`, `adb shell 'stop cacaoserver; start cacaoserver'`. |
 | A finished file stops playing where the burst starts | The sound track has a hole (see above). |

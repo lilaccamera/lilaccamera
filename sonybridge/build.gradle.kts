@@ -16,8 +16,8 @@ android {
     }
 
     signingConfigs {
-        // Same key handling as :app. The bridge only serves callers signed with its own key,
-        // so it must be signed with the key of the Lilac build that will use it.
+        // Same key handling as :app. A release bridge serves only Lilac builds signed with a pinned
+        // certificate, whatever key signs the bridge; a debug bridge also serves Lilac signed with its own key.
         getByName("debug") {
             storeFile = rootProject.file("app/debug.keystore")
             storePassword = "android"
@@ -55,4 +55,8 @@ android {
     }
     lint { checkReleaseBuilds = false }
     buildFeatures { aidl = true }
+}
+
+dependencies {
+    testImplementation(libs.junit)
 }

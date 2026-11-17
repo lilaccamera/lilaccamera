@@ -27,6 +27,9 @@ data class SlowMotionCapabilities(
 class SonyBridgeClient(private val context: Context, private val onDied: () -> Unit = {}) {
     @Volatile var bridge: ISonyBridge? = null
         private set
+    /** The bridge's interface version, read once on connect; a feature is offered only from the version that brought it. */
+    @Volatile var version = 0
+        private set
     private var connection: ServiceConnection? = null
 
     /** Binds and waits for the connection; false when the companion is missing or does not answer. */
@@ -35,7 +38,9 @@ class SonyBridgeClient(private val context: Context, private val onDied: () -> U
         val latch = CountDownLatch(1)
         val connection = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName, binder: IBinder) {
-                bridge = ISonyBridge.Stub.asInterface(binder)
+                val b = ISonyBridge.Stub.asInterface(binder)
+                version = runCatching { b.version() }.getOrDefault(0)
+                bridge = b
                 latch.countDown()
             }
 
@@ -69,6 +74,9 @@ class SonyBridgeClient(private val context: Context, private val onDied: () -> U
         private const val TAG = "SonyBridgeClient"
         const val PACKAGE = "io.github.lilaccamera.sonybridge"
 
+        /** First interface version with each feature. */
+        const val SLOW_MOTION_SINCE = 1
+
         /** Whether the slow-motion feature could exist at all here; cheap, no binding. */
         fun isCompanionInstalled(context: Context): Boolean =
             DeviceQuirks.isLilac && try {
@@ -86,7 +94,7 @@ class SonyBridgeClient(private val context: Context, private val onDied: () -> U
             if (!isCompanionInstalled(context)) return null
             val client = SonyBridgeClient(context)
             try {
-                if (!client.connect()) return null
+                if (!client.connect() || client.version < SLOW_MOTION_SINCE) return null
                 val bundle = client.bridge?.capabilities ?: return null
                 PLog.i(TAG, "Sony bridge capabilities: superSlow=${bundle.getBoolean("superSlow")} " +
                     "info=${bundle.getStringArrayList("info")} frameNums=${bundle.getIntegerArrayList("frameNums")}")

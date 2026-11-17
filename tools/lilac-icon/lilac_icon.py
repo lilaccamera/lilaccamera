@@ -1,6 +1,7 @@
 """Lilac Camera icon: one geometry, emitted as Android VectorDrawables and SVG previews.
 
-Usage: python3 lilac_icon.py <android_res_dir> <svg_out_dir>
+Usage: python3 lilac_icon.py <android_res_dir> <svg_out_dir> [bridge_res_dir]
+With bridge_res_dir it also writes the launcher icon layers there (the bridge's "Lilac Camera" chooser entry).
 Canvas is the 108-unit adaptive icon canvas; launchers show the middle 72 units.
 """
 import math, os, re, sys
@@ -172,25 +173,33 @@ def svg(shapes, bg):
             f'<defs>{"".join(defs)}</defs><rect width="108" height="108" fill="{bg}"/>{"".join(body)}</svg>\n')
 
 
+def launcher_icon(res):
+    """The adaptive launcher icon's layers: foreground, themed monochrome and the background colours."""
+    with open(os.path.join(res, 'drawable/ic_launcher_foreground.xml'), 'w') as fh:
+        fh.write(vd(realistic(), 'Lilac Camera icon, realistic style.'))
+    with open(os.path.join(res, 'drawable/ic_launcher_monochrome.xml'), 'w') as fh:
+        fh.write(vd(themed(), 'Themed icon layer: launchers keep only the alpha, so depth comes from transparency.'))
+    # Launcher background: light lilac in light theme, deep purple in dark theme.
+    for folder, col in (('values', '#F6F2FC'), ('values-night', '#3B2A66')):
+        with open(os.path.join(res, folder, 'ic_launcher_background.xml'), 'w') as fh:
+            fh.write(f'<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">{col}</color>\n</resources>\n')
+
+
 if __name__ == '__main__':
     res, svg_dir = sys.argv[1], sys.argv[2]
     assert abs(BODY[2] / BODY[3] - 1.3) < 0.01, 'body must stay 1.3 : 1'
     corner = math.hypot(BODY[2] / 2, BODY[3] / 2)
     assert corner < 33, f'body corner {corner:.1f} leaves the 66-unit safe zone'
     assert DOT[0] + DOT[2] < X - math.sqrt(R ** 2 - (DOT[1] - Y) ** 2), 'flash dot overlaps the lens'
-    with open(os.path.join(res, 'drawable/ic_launcher_foreground.xml'), 'w') as fh:
-        fh.write(vd(realistic(), 'Lilac Camera icon, realistic style.'))
-    with open(os.path.join(res, 'drawable/ic_launcher_monochrome.xml'), 'w') as fh:
-        fh.write(vd(themed(), 'Themed icon layer: launchers keep only the alpha, so depth comes from transparency.'))
+    for d in [res] + sys.argv[3:4]:
+        for sub in ('drawable', 'values', 'values-night'):
+            os.makedirs(os.path.join(d, sub), exist_ok=True)
+        launcher_icon(d)
     # Frame editor "Lilac Camera" logo (key "photon"): the one-colour mark, cropped to the camera.
     mark = (BODY[0], Y - R, BODY[2], 2 * R)
     for name, col in (('ic_photon.xml', '#000000'), ('ic_photon_light.xml', '#FFFFFF')):
         with open(os.path.join(res, 'drawable', name), 'w') as fh:
             fh.write(vd(themed(col), 'Lilac Camera frame logo.', mark))
-    # Launcher background: light lilac in light theme, deep purple in dark theme.
-    for folder, col in (('values', '#F6F2FC'), ('values-night', '#3B2A66')):
-        with open(os.path.join(res, folder, 'ic_launcher_background.xml'), 'w') as fh:
-            fh.write(f'<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">{col}</color>\n</resources>\n')
     print(f'frame logo aspect {mark[2] / mark[3]:.3f} : 1')
     for name, shapes, bg in [('Realistic', realistic(), '#3B2A66'), ('Realistic Light', realistic(), '#F6F2FC'),
                              ('Flat', flat(), '#3B2A66'), ('Flat Light', flat(True), '#F6F2FC'),

@@ -8,18 +8,18 @@ This page is for maintainers of ROMs for the Xperia XZ1 Compact (lilac) who want
 
 ## What you ship
 
-Two prebuilt APKs from a stable Lilac release (the one marked **Latest**; pre-releases are betas), imported as they are:
+Prebuilt APKs from a stable Lilac release (the one marked **Latest**; pre-releases are betas), imported as they are. Either both apps, or only the bridge:
 
 | App | Package | Installed to | Why |
 |---|---|---|---|
-| Lilac Camera | `io.github.lilaccamera` | `/system/app` | the camera |
-| Lilac Sony Bridge | `io.github.lilaccamera.sonybridge` | `/system/priv-app` | reaches Sony's slow-motion service for Lilac |
+| Lilac Camera | `io.github.lilaccamera` | `/system/app` | the camera (optional) |
+| Lilac Sony Bridge | `io.github.lilaccamera.sonybridge` | `/system/priv-app` | reaches Sony's slow-motion service for Lilac, and passes other apps' photo and video requests to it |
 
-Lilac cannot be built in the ROM tree (it is a Gradle build with Compose and its own native libraries), so both come in as prebuilts. Take them from the **same release**: they are a [matched pair](../bridge/install.md#lilac-and-the-bridge-are-a-matched-pair).
+Lilac cannot be built in the ROM tree (it is a Gradle build with Compose and its own native libraries), so both come in as prebuilts. With only the bridge, users install Lilac from GitHub and get the same features.
 
 ## Importing them
 
-Keep the release signature (`presigned`). Both APKs are then signed with the same key, so the pair always matches, and users can update the ROM's copies from later releases like any app, without waiting for a new ROM build.
+Keep the release signatures (`presigned`); do not re-sign either APK. The bridge trusts Lilac by the certificate of the project's releases, pinned in the bridge, not by the key the bridge itself is signed with. Users update the ROM's copies from later releases like any app, without waiting for a new ROM build. A newer Lilac works with an older bridge: the interface between them only grows, and Lilac uses only what the installed bridge offers.
 
 ```text title="Android.bp"
 android_app_import {
@@ -35,10 +35,12 @@ android_app_import {
 android_app_import {
     name: "LilacSonyBridge",
     apk: "LilacSonyBridge.apk",
-    // signed with the same key as LilacCamera
     presigned: true,
     // installs to /system/priv-app
     privileged: true,
+    dex_preopt: {
+        enabled: true,
+    },
 }
 ```
 
@@ -48,12 +50,10 @@ PRODUCT_PACKAGES += \
     LilacSonyBridge
 ```
 
-- **No privapp-permissions XML is needed.** The bridge asks for no privileged permission; it only uses the signature permission it declares itself.
-- **Do not sign either app with the platform key.** Lilac does not need platform rights, and the bridge must not trust platform-signed apps.
-- **If your ROM must re-sign** prebuilts, use `default_dev_cert: true` for both instead. The pair still matches, and the bridge also serves Lilac Beta (it trusts the release key's certificate). Users can then update the ROM's copies only through the ROM.
+For the bridge alone, leave out the `LilacCamera` module and its line in `PRODUCT_PACKAGES`.
 
-!!! warning "Release keys"
-    When re-signing, a ROM signed with AOSP's public test keys makes the bridge reachable by any app signed with those keys, as long as it uses Lilac's package name. Re-sign only with your own private keys.
+- **No privapp-permissions XML is needed.** The bridge asks for no privileged permission; it only uses the signature permission it declares itself.
+- **Do not sign either app with the platform key.** Lilac does not need platform rights.
 
 ## What the ROM must already have
 
@@ -66,7 +66,7 @@ Lilac does not bring any of Sony's or the shim's files. Do not copy them from an
 
 ## What a system install adds
 
-- **Capture requests from other apps.** Since Android 11, an app that asks the system to take a photo or video (a messenger's camera button, for example) is only offered camera apps that came with the system. As a system app, Lilac answers those requests with its own capture screen.
+- **Capture requests from other apps.** Since Android 11, an app that asks the system to take a photo or video (a messenger's camera button, for example) is only offered camera apps that came with the system. As a system app, Lilac answers those requests with its own capture screen. With only the bridge, the bridge takes those requests and passes them to a Lilac installed from GitHub, so it is offered as "Lilac Camera" all the same; the bridge does this only while Lilac is installed as an ordinary app, so a system Lilac is never listed twice.
 - **Default camera.** You can make Lilac the default camera, or replace the ROM's camera with it.
 - **Compiled from the first start.** Dexpreopt compiles Lilac at build time. A sideloaded release runs uncompiled until Android compiles it in the background (or `adb shell cmd package compile -m speed -f io.github.lilaccamera`).
 
@@ -80,6 +80,6 @@ adb shell "dumpsys package io.github.lilaccamera.sonybridge | grep -E 'privateFl
 adb shell service check cacao
 ```
 
-Expected: the path is under `/system/priv-app/LilacSonyBridge/`, the flags include `PRIVILEGED`, the permission `com.sonymobile.permission.IMAGE_PROCESSOR` is listed, and `Service cacao: found`. On a debug-capable build, `bridge.sh check` from the release runs the same checks and also looks for the shim.
+Expected: the path is under `/system/priv-app/LilacSonyBridge/`, the flags include `PRIVILEGED`, the permission `com.sonymobile.permission.IMAGE_PROCESSOR` is listed, and `Service cacao: found`. On a debug-capable build, `bridge.sh check` from the release runs the same checks, looks for the shim, and reports the bridge's interface version, whether it passes on photo and video requests, and which Lilac it serves.
 
 Then in Lilac: Video mode, swipe down on the picture, and the **Slow-mo** switch is there.

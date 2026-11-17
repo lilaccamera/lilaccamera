@@ -15,15 +15,16 @@ icon: lucide/plug
 ## What it does, and what it leaves alone
 
 - **Unlocks** 960 fps slow motion at 720p in Lilac's Video mode.
+- **Offers Lilac to other apps:** when an app asks for a photo or video (a messenger's camera button, a contact photo), Android lists only cameras that came with the system. The bridge is one, so it lists "Lilac Camera" and passes the request on to Lilac. It does this only while Lilac is installed as an ordinary app.
 - **Adds** one folder, `/system/priv-app/LilacSonyBridge`, with one APK in it.
 - **Does not touch** vendor files, SELinux settings or the bootloader. `bridge.sh uninstall` removes everything it added.
 
 Why a separate app: Sony's slow-motion service (cacao) only talks to privileged system apps, and its libraries can only be loaded by one. Lilac itself stays an ordinary app you can update; the bridge does the privileged part.
 
-## Lilac and the bridge are a matched pair
+## Lilac and the bridge
 
-- **Same release:** the two apps talk through a shared interface that can change between releases. Install the bridge from the **same release** as your Lilac, and again whenever Lilac updates. Lilac Beta uses whichever bridge is installed; if a beta needs a newer bridge, its release notes say so.
-- **Signature:** the bridge serves a Lilac signed with its own key or with the key of this project's releases. The bridge from a release therefore serves both Lilac and Lilac Beta.
+- **Any newer Lilac works with your bridge:** the interface between them only grows, and Lilac uses only what the installed bridge offers. A feature that needs a newer bridge says so in the release notes.
+- **Signature:** the bridge serves only a Lilac signed with the certificate of this project's releases (Lilac and, once it has its own key, Lilac Beta), whatever key the bridge itself is signed with. A Lilac built and signed by anyone else is refused.
 
 ## Install
 
@@ -45,7 +46,7 @@ From the [GitHub release](https://github.com/lilaccamera/lilaccamera/releases/la
 
     The script checks the phone again, copies the APK into place and reboots.
 
-3. **Check again** after the reboot. The package line should show `/system/priv-app/LilacSonyBridge/`, and the flags `PRIVILEGED`.
+3. **Check again** after the reboot. The package line should show `/system/priv-app/LilacSonyBridge/`, and the flags `PRIVILEGED`. The request forwarder line says `on` and names the Lilac it serves once Lilac is installed; if Lilac was installed after the reboot, open it once first (that is when Lilac connects to the bridge).
 
 4. In Lilac, switch to Video and swipe down on the picture: a **Slow-mo** switch appears. See [slow motion](../user/video.md#slow-motion).
 
