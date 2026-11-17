@@ -1340,6 +1340,11 @@ class VideoRecorder(
             }
         }
 
+        // 120 fps and faster: marked like Android's own high-frame-rate recordings, so galleries can offer slow playback
+        if (muxerStopSucceeded && requestedExternalFrameInput && requestedFps >= 120) {
+            val marked = runCatching { Mp4CaptureRate.write(output.descriptor.fileDescriptor, requestedFps.toFloat()) }
+            PLog.i(TAG, "Capture rate $requestedFps written: ${marked.getOrElse { it.toString() }}")
+        }
         try {
             output.descriptor.close()
         } catch (_: Exception) {
