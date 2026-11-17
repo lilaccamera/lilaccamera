@@ -32,8 +32,8 @@ SlowMotionRemux: video file + sound + frame times -> the final MP4 in the normal
 
 - **Interface:** `src/main/aidl/.../ISonyBridge.aidl` (compiled into both apps; the app adds that folder as an AIDL source
   directory). The two apps must be installed together: the transaction codes follow the method order.
-- **Access control:** every call checks that the caller's package is `com.mdomokos.lilaccamera` or starts with
-  `com.mdomokos.lilaccamera.` **and** that its signature equals the bridge's own. A debug-signed bridge therefore
+- **Access control:** every call checks that the caller's package is `io.github.lilaccamera` or starts with
+  `io.github.lilaccamera.` **and** that its signature equals the bridge's own. A debug-signed bridge therefore
   serves debug-signed Lilac builds only, and a bridge signed with the release key serves the release app only.
 - **Cleanup:** the bridge releases Sony's session when the client unbinds or dies. The client always calls `release`.
 - **Visibility:** Lilac declares a `<queries>` entry for the bridge package. The feature is offered only when the device
@@ -90,14 +90,14 @@ The bridge asks for no privileged permission, so the ROM's privileged-permission
 A bridge signed with the key of the Lilac build you use must be installed, or Lilac is refused.
 
 Install a Lilac build beside the others for testing with `-PdebugIdSuffix=slowmo`
-(`com.mdomokos.lilaccamera.debug.slowmo`); the debug-signed bridge serves it.
+(`io.github.lilaccamera.debug.slowmo`); the debug-signed bridge serves it.
 
 ## Test tools (debug builds, Lilac in the foreground in video mode)
 
 - `tools/slowmo-test.sh`: one recording through the debug broadcast, then `ffprobe` checks of the file.
 - `tools/slowmo-len.sh`: several recordings, burst length per run.
 
-The debug broadcast: `adb shell am broadcast -a com.mdomokos.lilaccamera.SLOWMO -p <package> --es cmd start|trigger|stop`
+The debug broadcast: `adb shell am broadcast -a io.github.lilaccamera.SLOWMO -p <package> --es cmd start|trigger|stop`
 (extras `--ei width 1280 --ei height 720 --ei frames 91|177`). Do not pass empty string arguments; the shell drops them.
 The experiments for a second burst (re-arm variants) were run with a temporary debug command and are not part of the code; their results are under Findings.
 

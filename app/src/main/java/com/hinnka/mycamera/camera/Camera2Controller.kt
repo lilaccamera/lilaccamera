@@ -9366,7 +9366,7 @@ class Camera2Controller(private val context: Context) {
     }
 
     /**
-     * Debug builds on lilac: `adb shell am broadcast -a com.mdomokos.lilaccamera.SLOWMO -p <package> --es cmd start`
+     * Debug builds on lilac: `adb shell am broadcast -a io.github.lilaccamera.SLOWMO -p <package> --es cmd start`
      * (extras `--ei frames 91`, `--ei width 1280 --ei height 720`), then `--es cmd trigger`, then `--es cmd stop`.
      * Needs the camera open in video mode.
      */
@@ -9384,7 +9384,7 @@ class Camera2Controller(private val context: Context) {
                 }
             }
         }
-        context.registerReceiver(receiver, android.content.IntentFilter("com.mdomokos.lilaccamera.SLOWMO"), Context.RECEIVER_EXPORTED)
+        context.registerReceiver(receiver, android.content.IntentFilter("io.github.lilaccamera.SLOWMO"), Context.RECEIVER_EXPORTED)
         slowMotionDebugReceiver = receiver
     }
 

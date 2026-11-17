@@ -10,7 +10,7 @@
 # /vendor/lib/hw/camera.lilac-real.so and takes its place, so that file exists only on ROMs with the shim.
 # Set ADB to use another adb binary.
 set -euo pipefail
-PKG=com.mdomokos.lilaccamera.sonybridge
+PKG=io.github.lilaccamera.sonybridge
 DIR=/system/priv-app/LilacSonyBridge
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DEFAULT_APK="$HERE/../build/outputs/apk/debug/sonybridge-debug.apk"

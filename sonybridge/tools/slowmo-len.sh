@@ -1,8 +1,8 @@
 #!/bin/bash
 # Burst length experiment: N recordings asking for 177 frames, one line each with the burst's frame count, the camera
 # temperature and free memory before it. Usage: slowmo-len.sh [runs] [package]. Needs the Lilac debug app in the foreground.
-PKG=${2:-com.mdomokos.lilaccamera.debug.slowmo}
-b() { adb shell am broadcast -a com.mdomokos.lilaccamera.SLOWMO -p "$PKG" --es cmd "$1" --ei width 1280 --ei height 720 --ei frames 177 >/dev/null; }
+PKG=${2:-io.github.lilaccamera.debug.slowmo}
+b() { adb shell am broadcast -a io.github.lilaccamera.SLOWMO -p "$PKG" --es cmd "$1" --ei width 1280 --ei height 720 --ei frames 177 >/dev/null; }
 for n in $(seq ${1:-4}); do
   mem=$(adb shell "grep -E 'MemAvailable' /proc/meminfo" | awk '{print int($2/1024)}'); temp=$(adb shell 'cat /sys/class/thermal/thermal_zone0/temp' | tr -d '\r')
   adb logcat -c; b start

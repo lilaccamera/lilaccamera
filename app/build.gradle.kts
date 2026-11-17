@@ -23,7 +23,7 @@ android {
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        applicationId = "com.mdomokos.lilaccamera"
+        applicationId = "io.github.lilaccamera"
         minSdk = 30
         targetSdk = 36
         versionCode = 164

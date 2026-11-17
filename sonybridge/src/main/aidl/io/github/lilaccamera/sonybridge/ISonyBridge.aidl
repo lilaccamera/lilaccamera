@@ -1,4 +1,4 @@
-package com.mdomokos.lilaccamera.sonybridge;
+package io.github.lilaccamera.sonybridge;
 
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;

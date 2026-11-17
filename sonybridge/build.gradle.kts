@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.mdomokos.lilaccamera.sonybridge"
+    namespace = "io.github.lilaccamera.sonybridge"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.mdomokos.lilaccamera.sonybridge"
+        applicationId = "io.github.lilaccamera.sonybridge"
         minSdk = 30
         targetSdk = 36
         versionCode = 1
