@@ -17,8 +17,11 @@
 
     <!-- No launcher activity: a bound service and the request forwarder. It works only as a privileged system app
          (/system/priv-app), see tools/bridge.sh. -->
+    <!-- The chooser shows the app's icon, not the activity's (only apps holding
+         SUBSTITUTE_SHARE_TARGET_APP_NAME_AND_ICON get their own), so the icon is the app's. -->
     <application
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="Lilac Sony Bridge">
         <service
             android:name=".BridgeService"
@@ -31,7 +34,6 @@
             android:enabled="false"
             android:excludeFromRecents="true"
             android:exported="true"
-            android:icon="@mipmap/ic_launcher"
             android:label="Lilac Camera"
             android:noHistory="true"
             android:theme="@android:style/Theme.NoDisplay">
