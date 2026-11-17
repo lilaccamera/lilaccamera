@@ -12,8 +12,8 @@ Two prebuilt APKs from a Lilac release, imported as they are:
 
 | App | Package | Installed to | Why |
 |---|---|---|---|
-| Lilac Camera | `com.mdomokos.lilaccamera` | `/system/app` | the camera |
-| Lilac Sony Bridge | `com.mdomokos.lilaccamera.sonybridge` | `/system/priv-app` | reaches Sony's slow-motion service for Lilac |
+| Lilac Camera | `io.github.lilaccamera` | `/system/app` | the camera |
+| Lilac Sony Bridge | `io.github.lilaccamera.sonybridge` | `/system/priv-app` | reaches Sony's slow-motion service for Lilac |
 
 Lilac cannot be built in the ROM tree (it is a Gradle build with Compose and its own native libraries), so both come in as prebuilts. Take them from the **same release**: they are a [matched pair](../bridge/install.md#lilac-and-the-bridge-are-a-matched-pair).
 
@@ -67,15 +67,15 @@ Lilac does not bring any of Sony's or the shim's files. Do not copy them from an
 
 - **Capture requests from other apps.** Since Android 11, an app that asks the system to take a photo or video (a messenger's camera button, for example) is only offered camera apps that came with the system. As a system app, Lilac answers those requests with its own capture screen.
 - **Default camera.** You can make Lilac the default camera, or replace the ROM's camera with it.
-- **Compiled from the first start.** Dexpreopt compiles Lilac at build time. A sideloaded release runs uncompiled until Android compiles it in the background (or `adb shell cmd package compile -m speed -f com.mdomokos.lilaccamera`).
+- **Compiled from the first start.** Dexpreopt compiles Lilac at build time. A sideloaded release runs uncompiled until Android compiles it in the background (or `adb shell cmd package compile -m speed -f io.github.lilaccamera`).
 
 ## Checking a build
 
 On the built ROM, with adb:
 
 ```bash
-adb shell pm path com.mdomokos.lilaccamera.sonybridge
-adb shell "dumpsys package com.mdomokos.lilaccamera.sonybridge | grep -E 'privateFlags|IMAGE_PROCESSOR'"
+adb shell pm path io.github.lilaccamera.sonybridge
+adb shell "dumpsys package io.github.lilaccamera.sonybridge | grep -E 'privateFlags|IMAGE_PROCESSOR'"
 adb shell service check cacao
 ```
 
