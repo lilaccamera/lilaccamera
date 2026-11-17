@@ -2,6 +2,7 @@ package com.hinnka.mycamera.lut
 
 import android.content.Context
 import android.graphics.SurfaceTexture
+import android.hardware.HardwareBuffer
 import android.opengl.EGL14
 import android.opengl.EGLConfig
 import android.opengl.EGLContext
@@ -50,6 +51,8 @@ class RealtimeVideoRenderer(
     private val enhancedStabilizationEnabled: Boolean,
     private val enhancedStabilizationStrength: Float,
     private val enhancedStabilizationLookahead: Int = DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD,
+    /** Frames come as hardware buffers in the sensor's orientation (Sony's video route) through [renderExternalFrame]. */
+    private val externalFrames: Boolean = false,
 ) {
     companion object {
         private const val TAG = "RealtimeVideoRenderer"
@@ -190,7 +193,7 @@ class RealtimeVideoRenderer(
             }
         }
         cameraSurface = Surface(cameraSurfaceTexture)
-        if (enhancedStabilizationEnabled) {
+        if (enhancedStabilizationEnabled || externalFrames) {
             check(
                 mgcEisPresentationTransform.captureFromSensorOrientation(
                     sensorOrientationDegrees,
@@ -199,6 +202,8 @@ class RealtimeVideoRenderer(
                 "Camera reported non-cardinal sensor orientation $sensorOrientationDegrees"
             }
             updateCameraTransformGeometry(mgcEisPresentationTransform.matrix)
+        }
+        if (enhancedStabilizationEnabled) {
             stabilizationSession = stabilizationCoordinator?.createSession(
                 useCase = StabilizationUseCase.VIDEO,
                 strength = enhancedStabilizationStrength,
@@ -265,6 +270,38 @@ class RealtimeVideoRenderer(
         } else {
             if (!cameraFrameUpdated || cameraTimestampNs <= 0L) return null
         }
+        return drawToEncoder(
+            sourceTextureSource, sourceTextureTarget, sourceTextureId, sourceStMatrix, sourceCropRect,
+            timestampNs, mapPresentationTimeNs,
+        )
+    }
+
+    /**
+     * Draws one hardware buffer (Sony's video route: sensor orientation, sensor time stamp) into the encoder. The
+     * GPU has finished reading the buffer when this returns, so its owner may reuse it. Recording GL thread only.
+     */
+    fun renderExternalFrame(
+        buffer: HardwareBuffer,
+        timestampNs: Long,
+        mapPresentationTimeNs: (cameraTimestampNs: Long) -> Long,
+    ): Long? {
+        if (!initialized || !externalFrames || !makeCurrent()) return null
+        val rendered = mgcEisHardwareBufferRenderer.renderUnstabilized(buffer, timestampNs) ?: return null
+        return drawToEncoder(
+            PreviewColorTextureSource.TEXTURE_2D, GLES30.GL_TEXTURE_2D, rendered.textureId,
+            mgcEisPresentationTransform.matrix, cameraCropRect, timestampNs, mapPresentationTimeNs,
+        )
+    }
+
+    private fun drawToEncoder(
+        sourceTextureSource: PreviewColorTextureSource,
+        sourceTextureTarget: Int,
+        sourceTextureId: Int,
+        sourceStMatrix: FloatArray,
+        sourceCropRect: FloatArray,
+        timestampNs: Long,
+        mapPresentationTimeNs: (cameraTimestampNs: Long) -> Long,
+    ): Long? {
         if (timestampNs <= 0L) return null
         val presentationTimeNs = mapPresentationTimeNs(timestampNs)
         if (presentationTimeNs <= 0L) return null

@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.HardwareBuffer
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
@@ -128,6 +129,7 @@ class VideoRecorder(
     private var requestedEnhancedStabilization = false
     private var requestedEnhancedStabilizationStrength = DEFAULT_VIDEO_STABILIZATION_STRENGTH
     private var requestedEnhancedStabilizationLookahead = DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
+    private var requestedExternalFrameInput = false
     private var cameraInputStarted = false
     private var requestedCameraTimestampSource = CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_UNKNOWN
     private var requestedSensorOrientationDegrees = 0
@@ -199,10 +201,13 @@ class VideoRecorder(
         enhancedStabilizationLookahead: Int = DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD,
         recordingPath: VideoRecordingPath = VideoRecordingPath.DCIM_PHOTON,
         recordingTreeUri: String? = null,
+        /** Frames arrive through [submitExternalFrame] (Sony's video route) instead of the camera surface. */
+        externalFrameInput: Boolean = false,
         onError: ((String) -> Unit)? = null,
         onFinished: ((Uri?) -> Unit)? = null
     ): Boolean {
         if (isRecording) return false
+        requestedExternalFrameInput = externalFrameInput
 
         requestedOrientationHintDegrees = normalizeOrientationHint(orientationHintDegrees)
         requestedOutputSize = Size(size.width.align16(), size.height.align16())
@@ -348,6 +353,38 @@ class VideoRecorder(
 
     fun isRecording(): Boolean = isRecording && !stopRequested
 
+    /**
+     * One frame of an external-input recording. [onDone] runs once the frame is no longer needed (drawn, or dropped
+     * while paused or stopping), on any thread; the buffer must stay valid until then.
+     */
+    fun submitExternalFrame(buffer: HardwareBuffer, timestampNs: Long, onDone: () -> Unit) {
+        if (!isRecording || stopRequested || isPaused || !requestedExternalFrameInput) { onDone(); return }
+        if (!isPaused) statsIncomingFrames += 1
+        scope.launch(renderDispatcher) {
+            try {
+                val videoRenderer = renderer
+                if (videoRenderer == null || !isRecording || isPaused) return@launch
+                val renderStartMs = SystemClock.elapsedRealtime()
+                val presentationTimeNs = videoRenderer.renderExternalFrame(
+                    buffer, timestampNs, ::mapCameraTimestampToBoottimeNs,
+                ) ?: return@launch
+                establishTimelineOrigin(presentationTimeNs / 1_000L)
+                val renderCostMs = (SystemClock.elapsedRealtime() - renderStartMs).coerceAtLeast(0L)
+                statsAcceptedFrames += 1
+                statsRenderedFrames += 1
+                statsRenderTimeTotalMs += renderCostMs
+                if (renderCostMs > statsRenderTimeMaxMs) statsRenderTimeMaxMs = renderCostMs
+                logRenderStatsIfNeeded()
+            } catch (e: Exception) {
+                PLog.e(TAG, "Failed to render external recording frame", e)
+                errorCallback?.invoke("Failed to render external recording frame")
+                if (!stopRequested) forceStop()
+            } finally {
+                onDone()
+            }
+        }
+    }
+
     fun setPreferredAudioInputId(audioInputId: String) {
         preferredAudioInputId = audioInputId.ifBlank { VIDEO_AUDIO_INPUT_AUTO }
     }
@@ -371,6 +408,7 @@ class VideoRecorder(
             enhancedStabilizationEnabled = requestedEnhancedStabilization,
             enhancedStabilizationStrength = requestedEnhancedStabilizationStrength,
             enhancedStabilizationLookahead = requestedEnhancedStabilizationLookahead,
+            externalFrames = requestedExternalFrameInput,
         )
         renderer = realtimeRenderer
         realtimeRenderer.initialize(
@@ -428,6 +466,7 @@ class VideoRecorder(
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                 setInteger(MediaFormat.KEY_BIT_RATE, videoBitrate)
                 setInteger(MediaFormat.KEY_FRAME_RATE, requestedFps)
+                if (requestedExternalFrameInput) setInteger(MediaFormat.KEY_OPERATING_RATE, requestedFps)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
                 setInteger(MediaFormat.KEY_PRIORITY, 0)
                 setInteger(MediaFormat.KEY_BITRATE_MODE, bitrateMode)

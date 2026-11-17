@@ -6,6 +6,7 @@ import android.graphics.ColorSpace
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.SurfaceTexture
+import android.hardware.HardwareBuffer
 import android.hardware.camera2.*
 import android.hardware.camera2.params.ColorSpaceTransform
 import android.hardware.camera2.params.MeteringRectangle
@@ -61,6 +62,7 @@ import com.hinnka.mycamera.slowmotion.BurstPhase
 import com.hinnka.mycamera.slowmotion.SlowMotionSpec
 import com.hinnka.mycamera.slowmotion.SonyBridgeClient
 import com.hinnka.mycamera.slowmotion.SonyVideoMode
+import io.github.lilaccamera.sonybridge.IFrameSink
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VIDEO_AUDIO_INPUT_AUTO
@@ -9035,8 +9037,11 @@ class Camera2Controller(private val context: Context) {
         videoCaptureStatsFrames = 0
         videoCaptureStatsFirstTimestampNs = 0L
         val isFrontCamera = isCurrentCameraFrontFacing()
-        val useEnhancedStabilization = shouldUseVideoEnhancedStabilization()
-        val cameraInputSize = if (useEnhancedStabilization) {
+        val sonyMode = enteredSonyMode
+        val useEnhancedStabilization = sonyMode == null && shouldUseVideoEnhancedStabilization()
+        val cameraInputSize = if (sonyMode != null) {
+            Size(sonyMode.width, sonyMode.height)
+        } else if (useEnhancedStabilization) {
             _state.value.videoCapabilities.enhancedStabilizationInputSizesByResolution[
                 _state.value.videoConfig.resolution
             ]
@@ -9071,16 +9076,21 @@ class Camera2Controller(private val context: Context) {
             size = outputSize,
             cameraInputSize = cameraInputSize,
             fps = _state.value.videoConfig.fps.fps,
-            bitrateMbps = _state.value.videoConfig.bitrate.bitrateMbps,
+            // Sony's rates keep the chosen quality per frame: the bitrate grows with the rate
+            bitrateMbps = _state.value.videoConfig.bitrate.bitrateMbps * (sonyMode?.fps ?: 30) / 30,
             codecMime = _state.value.videoConfig.codec.mimeType,
             colorConfig = VideoEncoderColorRequest(
                 logProfile = logProfile,
                 hasActiveLut = recordingLut != null && (recordingRecipe?.lutIntensity ?: 1f) > 0f
             ),
             colorLayers = colorLayers,
-            cameraTimestampSource = getActiveOpenCameraCharacteristics()
-                ?.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE)
-                ?: CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_UNKNOWN,
+            cameraTimestampSource = if (sonyMode != null) {
+                CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME // Sony's frames carry elapsedRealtimeNanos
+            } else {
+                getActiveOpenCameraCharacteristics()
+                    ?.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE)
+                    ?: CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_UNKNOWN
+            },
             sensorOrientationDegrees = _state.value.getCurrentCameraInfo()?.sensorOrientation
                 ?: cachedSensorOrientation,
             orientationHintDegrees = resolveDedicatedVideoOrientationHintDegrees(orientationOffsetDegrees),
@@ -9092,6 +9102,7 @@ class Camera2Controller(private val context: Context) {
                 _state.value.videoConfig.enhancedStabilizationLookahead,
             recordingPath = _state.value.videoConfig.recordingPath,
             recordingTreeUri = _state.value.videoConfig.recordingTreeUri,
+            externalFrameInput = sonyMode != null,
             onError = { message ->
                 PLog.e(TAG, "Video recording error: $message")
                 onCameraError?.invoke(-1, message, false)
@@ -9100,7 +9111,11 @@ class Camera2Controller(private val context: Context) {
             PLog.i(TAG, "Video saved: $uri")
             val completeRecording = Runnable {
                 _state.update { s -> s.copy(videoRecordingState = VideoRecordingState()) }
-                if (cameraDevice != null && previewSurface != null) {
+                if (sonyMode != null) {
+                    sonyRecording = false
+                    // a fresh mode change and session for the next recording, as in every tested run
+                    if (cameraDevice != null && enteredSonyMode != null) previewSurfaceTexture?.let { openCamera(it) }
+                } else if (cameraDevice != null && previewSurface != null) {
                     createPreviewSession(openGeneration = cameraOpenGeneration)
                 }
                 onVideoSaved?.invoke(uri)
@@ -9114,7 +9129,7 @@ class Camera2Controller(private val context: Context) {
             videoRecordingState = VideoRecordingState(isRecording = true, elapsedMs = 0L)
         ) }
         videoRecordingPausedMs = 0L
-        createPreviewSession(openGeneration = cameraOpenGeneration)
+        if (sonyMode != null) startSonyFrames() else createPreviewSession(openGeneration = cameraOpenGeneration)
     }
 
     private fun isCurrentCameraFrontFacing(): Boolean {
@@ -9448,6 +9463,57 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    /** A recording through Sony's route is running: its frames come from the bridge, not from the camera session. */
+    @Volatile private var sonyRecording = false
+
+    private val sonyFrameSink = object : IFrameSink.Stub() {
+        override fun onFrame(buffer: HardwareBuffer, timestampNs: Long, frameId: Int) {
+            val bridge = sonyVideoBridge?.bridge
+            videoRecorder.submitExternalFrame(buffer, timestampNs) {
+                buffer.close()
+                runCatching { bridge?.releaseFrame(frameId) }
+            }
+        }
+    }
+
+    /** Sony's prepare and start wait for the service's callbacks (up to seconds): off the camera thread. */
+    private fun startSonyFrames() {
+        sonyRecording = true
+        Thread({
+            val result = try {
+                sonyVideoBridge?.bridge?.startFrames(sonyFrameSink) ?: -100
+            } catch (e: Exception) {
+                PLog.e(TAG, "Sony frames did not start", e)
+                -99
+            }
+            PLog.i(TAG, "Sony frames started: result=$result")
+            cameraHandler?.post {
+                if (result == 0 && videoRecorder.onCameraInputStarted()) {
+                    startVideoRecordingTicker()
+                } else {
+                    sonyRecording = false
+                    videoRecorder.forceStop()
+                    _state.update { s -> s.copy(videoRecordingState = VideoRecordingState()) }
+                    onCameraError?.invoke(-1, "Sony's video route did not start", false)
+                }
+            }
+        }, "sony-frames-start").start()
+    }
+
+    /** Sony's stop first, so the frames still in flight (1.5 s with Intelligent Active) reach the file; then the file. */
+    private fun stopSonyRecording() {
+        stopVideoRecordingTicker()
+        _state.update { s -> s.copy(
+            videoRecordingState = s.videoRecordingState.copy(isRecording = false, isPaused = false, isProcessing = true)
+        ) }
+        val bridge = sonyVideoBridge?.bridge
+        Thread({
+            val result = runCatching { bridge?.stopFrames() }.getOrElse { PLog.e(TAG, "Sony frames stop failed", it); -99 }
+            PLog.i(TAG, "Sony frames stopped: result=$result")
+            videoRecorder.stopRecording()
+        }, "sony-frames-stop").start()
+    }
+
     /** Gives Sony's native session back; only with the camera closed (Sony's order). Slow motion keeps its own. */
     private fun releaseSonyVideoMode() {
         enteredSonyMode = null
@@ -9613,7 +9679,7 @@ class Camera2Controller(private val context: Context) {
     fun pauseVideoRecording() {
         if (!_state.value.videoRecordingState.isRecording || _state.value.videoRecordingState.isPaused) return
         videoRecorder.pauseRecording()
-        if (videoRecorder.usesDedicatedCameraInput) {
+        if (videoRecorder.usesDedicatedCameraInput && !sonyRecording) {
             updateDedicatedVideoRepeatingTarget(includeVideoSurface = false)
         }
         videoRecordingPauseStartElapsedMs = SystemClock.elapsedRealtime()
@@ -9624,7 +9690,7 @@ class Camera2Controller(private val context: Context) {
 
     fun resumeVideoRecording() {
         if (!_state.value.videoRecordingState.isRecording || !_state.value.videoRecordingState.isPaused) return
-        if (videoRecorder.usesDedicatedCameraInput &&
+        if (videoRecorder.usesDedicatedCameraInput && !sonyRecording &&
             !updateDedicatedVideoRepeatingTarget(includeVideoSurface = true)
         ) {
             PLog.e(TAG, "Cannot resume dedicated video input because the recording surface is unavailable")
@@ -9641,6 +9707,10 @@ class Camera2Controller(private val context: Context) {
         if (!_state.value.videoRecordingState.isRecording) return
         if (slowMotion != null) {
             stopSlowMotion()
+            return
+        }
+        if (sonyRecording) {
+            stopSonyRecording()
             return
         }
         videoCaptureStatsWindowStartMs = 0L
