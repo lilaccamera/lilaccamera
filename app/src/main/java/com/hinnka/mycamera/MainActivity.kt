@@ -111,7 +111,6 @@ import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.StartupGate
 import com.hinnka.mycamera.utils.StartupTrace
-import com.hinnka.mycamera.model.EffectParams
 import com.hinnka.mycamera.video.CaptureMode
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -300,23 +299,21 @@ open class MainActivity : AppCompatActivity() {
             // Saved before anything reads the settings, so the camera opens in the asked mode at once instead
             // of opening in the last-used one and reopening (about 1 s). The settings write takes milliseconds.
             // A photo for another app is the stacked photo with no look, so the viewfinder shows none either.
-            val before = runBlocking {
-                val before = userPreferencesRepository.latest()
-                userPreferencesRepository.update {
-                    captureMode = if (video) CaptureMode.VIDEO else CaptureMode.PHOTO
-                    if (!video) {
-                        useRaw = false
-                        useRawMax = false
-                        lutId = "none"
-                        activeEffectParams = EffectParams.DEFAULT
-                    }
-                }
+            runBlocking {
+                userPreferencesRepository.update { beginCallerCapture(video) }
                 userPreferencesRepository.flow { it.captureMode to it.useRaw }
                     .first { (mode, raw) -> mode == (if (video) CaptureMode.VIDEO else CaptureMode.PHOTO) && (video || !raw) }
-                before
             }
-            cameraViewModel.keepModeForAfterCaller(before)
             cameraViewModel.captureForCaller = CaptureForCaller(close = ::finish, video = video)
+        } else {
+            // A process killed while the capture screen for another app was open never put the user's settings
+            // back; do it before anything reads them. Reads the settings that startup reads anyway.
+            runBlocking {
+                if (userPreferencesRepository.latest().hasSettingsBeforeCaller) {
+                    userPreferencesRepository.update { endCallerCapture() }
+                    userPreferencesRepository.flow { it.hasSettingsBeforeCaller }.first { !it }
+                }
+            }
         }
 
         // 启用全屏模式
