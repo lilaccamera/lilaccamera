@@ -1,6 +1,7 @@
 #!/bin/bash
-# Fails when a guide page refers to private planning notes: wiki links,
-# task IDs (T12, T4b), compatibility row IDs (L5) or the planning tools.
+# Fails when a guide page contains planning shorthand a reader of the guide
+# cannot follow: wiki links ([[...]]), IDs such as T12, T4b or L5, or the
+# words listed in the second pattern.
 # Usage: guide/check-text.sh [dir]   (default: guide)
 dir="${1:-guide}"
 found=0
