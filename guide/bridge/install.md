@@ -22,12 +22,12 @@ Why a separate app: Sony's slow-motion service (cacao) only talks to privileged 
 
 ## Lilac and the bridge are a matched pair
 
-- **Same release:** the two apps talk through a shared interface that can change between releases. Install the bridge from the **same release** as your Lilac, and again whenever Lilac updates.
-- **Same signature:** the bridge serves only a Lilac signed with the same key as itself. A bridge from one source does not work with a Lilac from another.
+- **Same release:** the two apps talk through a shared interface that can change between releases. Install the bridge from the **same release** as your Lilac, and again whenever Lilac updates. Lilac Beta uses whichever bridge is installed; if a beta needs a newer bridge, its release notes say so.
+- **Signature:** the bridge serves a Lilac signed with its own key or with the key of this project's releases. The bridge from a release therefore serves both Lilac and Lilac Beta.
 
 ## Install
 
-From the GitHub release of your Lilac build, download the bridge APK and `bridge.sh`. Connect the phone, then on the computer:
+From the [GitHub release](https://github.com/lilaccamera/lilaccamera/releases/latest) of your Lilac, download `LilacSonyBridge.apk` and `bridge.sh`. Connect the phone, then on the computer:
 
 1. **Check the phone first.** Nothing is changed:
 
