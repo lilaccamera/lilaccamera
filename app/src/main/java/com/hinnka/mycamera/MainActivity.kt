@@ -483,7 +483,7 @@ open class MainActivity : AppCompatActivity() {
             return true
         }
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == 767 || keyCode == 781) {
-            if (cameraViewModel.handleVolumeKey(keyCode == KeyEvent.KEYCODE_VOLUME_UP)) {
+            if (cameraViewModel.handleVolumeKey(keyCode == KeyEvent.KEYCODE_VOLUME_UP, event?.repeatCount ?: 0)) {
                 return true
             }
         }
@@ -497,6 +497,9 @@ open class MainActivity : AppCompatActivity() {
             return true
         }
         if (keyCode == KeyEvent.KEYCODE_CAMERA) return true
+        if ((keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == 767 || keyCode == 781) &&
+            cameraViewModel.handleVolumeKeyUp()
+        ) return true
         return super.onKeyUp(keyCode, event)
     }
 
@@ -780,6 +783,7 @@ fun NavigationHost(
     navController.addOnDestinationChangedListener { _, destination, _ ->
         BuglyHelper.setUserScene(context, destination.route.hashCode())
     }
+    cameraViewModel.cameraScreenShown = currentRoute == null || currentRoute == Routes.CAMERA
     val containerSize = LocalWindowInfo.current.containerSize
     cameraViewModel.isExpanded =
         (containerSize.width * 1f / containerSize.height) > AspectRatio.RATIO_4_3.getValue(false)

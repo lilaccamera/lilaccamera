@@ -15,6 +15,8 @@ data class SlowMotionUiState(
     val maxBursts: Int = SlowMotionSpec.MAX_BURSTS,
     /** Counts the times the switch was turned off because the resolution was changed; the screen says why. */
     val resolutionNotice: Int = 0,
+    /** Counts the times a Sony frame rate (60, 120) fell back to 30, because the size changed or Sony's route failed. */
+    val rateNotice: Int = 0,
     /** The burst being captured: frames arrived so far, of [burstTotal]; then done for a moment, then none. */
     val burstPhase: BurstPhase = BurstPhase.NONE,
     val burstFrames: Int = 0,

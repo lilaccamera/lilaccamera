@@ -1,6 +1,7 @@
 package com.hinnka.mycamera.lut
 
 import android.media.Image
+import android.hardware.HardwareBuffer
 import android.opengl.EGL14
 import android.opengl.EGL15
 import android.opengl.EGLSync
@@ -40,6 +41,14 @@ internal class MgcEisHardwareBufferRenderer(private val tag: String) {
         }
     }
 
+    private val identityHomographies = FloatArray(STABILIZATION_ROW_COUNT * 9).also { values ->
+        repeat(STABILIZATION_ROW_COUNT) { row ->
+            values[row * 9] = 1f
+            values[row * 9 + 4] = 1f
+            values[row * 9 + 8] = 1f
+        }
+    }
+
     private var programId = 0
     private var positionLocation = -1
     private var textureCoordinateLocation = -1
@@ -57,16 +66,31 @@ internal class MgcEisHardwareBufferRenderer(private val tag: String) {
      * until this function returns because the EGLImage is created from its HardwareBuffer.
      */
     fun render(frame: StabilizationFrame): Frame? {
-        val width = frame.image.width
-        val height = frame.image.height
-        if (width <= 0 || height <= 0) return null
-        val source = frame.image.image
         val hardwareBuffer = try {
-            source.hardwareBuffer
+            frame.image.image.hardwareBuffer
         } catch (error: IllegalStateException) {
             PLog.w(tag, "MGC cannot access HardwareBuffer ts=${frame.timestampNs}: ${error.message}")
             return null
         } ?: return null
+        return render(hardwareBuffer, frame.image.width, frame.image.height, frame.timestampNs,
+            frame.transform?.rowHomographies ?: droppedFrameHomographies)
+    }
+
+    /**
+     * Draws a buffer from another source (Sony's video route) unchanged: no stabilisation, no crop. The buffer may be
+     * returned to its owner once this returns.
+     */
+    fun renderUnstabilized(hardwareBuffer: HardwareBuffer, timestampNs: Long): Frame? =
+        render(hardwareBuffer, hardwareBuffer.width, hardwareBuffer.height, timestampNs, identityHomographies)
+
+    private fun render(
+        hardwareBuffer: HardwareBuffer,
+        width: Int,
+        height: Int,
+        timestampNs: Long,
+        rowHomographies: FloatArray,
+    ): Frame? {
+        if (width <= 0 || height <= 0) return null
         if (!ensure(width, height)) return null
 
         val imageHandle = GlesHardwareBufferImage.create(hardwareBuffer)
@@ -80,11 +104,11 @@ internal class MgcEisHardwareBufferRenderer(private val tag: String) {
 
         return try {
             if (!GlesHardwareBufferImage.bind(imageHandle, sourceTextureId)) {
-                PLog.w(tag, "MGC EGLImage bind failed ts=${frame.timestampNs}")
+                PLog.w(tag, "MGC EGLImage bind failed ts=$timestampNs")
                 return null
             }
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, outputFramebufferId)
-            GLES30.glViewport(0, 0, source.width, source.height)
+            GLES30.glViewport(0, 0, width, height)
             GLES30.glClearColor(0f, 0f, 0f, 1f)
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
             GLES30.glUseProgram(programId)
@@ -94,7 +118,7 @@ internal class MgcEisHardwareBufferRenderer(private val tag: String) {
             mesh.draw(
                 positionLocation = positionLocation,
                 textureCoordinateLocation = textureCoordinateLocation,
-                rowHomographies = frame.transform?.rowHomographies ?: droppedFrameHomographies,
+                rowHomographies = rowHomographies,
             )
             // The camera owns this HardwareBuffer and may recycle it as soon as Image.close()
             // returns.  A GL draw only enqueues sampling work, so a memory barrier alone cannot
@@ -111,9 +135,9 @@ internal class MgcEisHardwareBufferRenderer(private val tag: String) {
                 loggedZeroCopy = true
                 PLog.i(tag, "MGC HardwareBuffer EGLImage renderer active")
             }
-            Frame(frame.timestampNs, outputTextureId)
+            Frame(timestampNs, outputTextureId)
         } catch (error: RuntimeException) {
-            PLog.w(tag, "MGC EGLImage draw failed ts=${frame.timestampNs}: ${error.message}")
+            PLog.w(tag, "MGC EGLImage draw failed ts=$timestampNs: ${error.message}")
             null
         } finally {
             GlesHardwareBufferImage.destroy(imageHandle)
