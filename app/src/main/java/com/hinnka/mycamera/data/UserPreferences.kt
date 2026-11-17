@@ -114,7 +114,17 @@ class UserPreferences internal constructor(
 
     override fun toString(): String = "UserPreferences($raw)"
 
-    var captureMode by enum("capture_mode", CaptureMode.PHOTO)
+    private var storedCaptureMode by enum("capture_mode", CaptureMode.PHOTO)
+    /**
+     * A new process opens the camera for photos, as a phone's own camera does: a Video mode left from
+     * the last run reads as Photo until a mode is chosen in this process.
+     */
+    var captureMode: CaptureMode
+        get() = storedCaptureMode.takeUnless { it == CaptureMode.VIDEO && videoIsFromLastRun } ?: CaptureMode.PHOTO
+        set(value) {
+            videoIsFromLastRun = false
+            storedCaptureMode = value
+        }
     var aspectRatio by string("aspect_ratio", "RATIO_4_3")
     var videoLutId by nullableString("video_lut_id")
     var rawBaselineLutId by nullableString("raw_baseline_lut_id")
@@ -768,6 +778,10 @@ private fun nullableString(key: String): ReadWriteProperty<UserPreferences, Stri
     KeyField(stringPreferencesKey(key), null, { it }, { it })
 
 /** 以枚举名存储；存储值无法识别时回退到 [default]。 */
+/** True until a capture mode is written in this process; see [UserPreferences.captureMode]. */
+@Volatile
+private var videoIsFromLastRun = true
+
 private inline fun <reified E : Enum<E>> enum(key: String, default: E): ReadWriteProperty<UserPreferences, E> =
     KeyField(stringPreferencesKey(key), default, { stored -> enumValues<E>().firstOrNull { it.name == stored } ?: default }, { it.name })
 
