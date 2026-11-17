@@ -74,7 +74,7 @@ Other phones are not tested. Testers can add the bridge themselves: [install the
 
 The [user guide](https://lilaccamera.github.io/) explains what Lilac does differently; its source is in [`guide/`](guide/index.md). Camera basics, and the colour tools Lilac shares with PhotonCamera, are not covered there.
 
-- **How Lilac works:** [how a picture is made](https://lilaccamera.github.io/user/how-pictures-are-made/), [Sony hardware](https://lilaccamera.github.io/user/hardware/), [built for a small screen](https://lilaccamera.github.io/user/small-screen/), [focus and faces](https://lilaccamera.github.io/user/focus/)
+- **How Lilac works:** [how a picture is made](https://lilaccamera.github.io/user/how-pictures-are-made/), [Sony hardware](https://lilaccamera.github.io/user/hardware/), [built for a small screen](https://lilaccamera.github.io/user/small-screen/), [focus and faces](https://lilaccamera.github.io/user/focus/), [optimizations and tweaks](https://lilaccamera.github.io/user/optimizations/)
 - **Using Lilac:** [getting started](https://lilaccamera.github.io/user/getting-started/), [Photo and Night](https://lilaccamera.github.io/user/photo-mode/), [Pro](https://lilaccamera.github.io/user/pro-mode/), [HDR](https://lilaccamera.github.io/user/hdr/), [Portrait](https://lilaccamera.github.io/user/portrait/), [Video](https://lilaccamera.github.io/user/video/), [Editor](https://lilaccamera.github.io/user/editor/), [Troubleshooting](https://lilaccamera.github.io/user/troubleshooting/)
 - **Testers and ROMs:** [slow-motion bridge](https://lilaccamera.github.io/bridge/install/), [ROM integration](https://lilaccamera.github.io/rom/integration/)
 
@@ -131,48 +131,6 @@ The bridge must sit in `/system/priv-app/`, which is on the read-only system par
 - **Check:** run the adb checks from step 5 above (they work with normal adb), or look for **Lilac Sony Bridge** in Settings › Apps with system apps shown. Then do step 6 above.
 
 To undo, run `bash bridge.sh uninstall`, or delete `/system/priv-app/LilacSonyBridge` in the file browser and reboot. Lilac keeps working and only the Slow-mo switch goes away. The script touches no vendor files, SELinux settings or bootloader. If you built from source, use `sonybridge/tools/bridge.sh` and your own `sonybridge-debug.apk` with a debug-signed Lilac. More in the [bridge guide](https://lilaccamera.github.io/bridge/install/).
-
-</details>
-
-<details>
-<summary><b>Optimizations for a 4 GB phone</b></summary>
-
-### Start-up and mode switches
-
-Measured on an Xperia XZ1 Compact over adb, release builds, medians of 6 cold starts (4 to 7 runs for the switches), in seconds from the launch command. "Before" is Lilac as it was before this start-up work.
-
-| | Before | Lilac |
-|---|---|---|
-| Camera connected | 1.02 | **0.40** |
-| First frame, Photo | 1.78 | **1.41** |
-| First frame, Pro | 1.59 | **1.25** |
-| Video → Photo, tap to first frame | 1.45 (camera opened twice) | **0.99** |
-| Photo → Pro, tap to first frame | 0.87 | 0.81 |
-| Reopen after Home, camera already closed | | 0.80 to 0.84 |
-
-What changed:
-
-- **The camera starts before the screen is ready.** It opens as soon as the settings are loaded and configures its session before the preview exists, so it connects at 0.40 s instead of 1.02 s.
-- **The splash no longer waits for the gallery.** The gallery list and other warm-up work run after the first frame.
-- **A mode switch opens the camera once.** Video → Photo used to open it twice, and Photo ↔ Pro waited 0.25 to 0.3 s for the settings to be saved first.
-- **No black cover.** The old switch showed black for 1.07 to 1.32 s. Now the viewfinder fades in over 150 ms on the first drawn frame, and Photo ↔ Pro has no cover at all.
-- **Changing the LUT no longer restarts the camera.**
-- **Leaving the app keeps the camera open for a few seconds,** so a quick return is instant.
-
-For comparison, Open Camera reaches its first frame at 0.90 s and Aperture at 1.52 s. Lilac's remaining gap in Photo mode is the full-resolution sensor readout (about 0.26 s), kept on purpose for stacking quality. Debug builds start about 3 times slower (3.5 s against 1.1 s to a live preview) because Android does not compile them, and a freshly sideloaded release is uncompiled until Android's idle job runs (first frame 1.45 s, 1.26 s after `adb shell cmd package compile -m speed -f io.github.lilaccamera`).
-
-### Memory
-
-A 19 MP photo needs more graphics memory than a 4 GB phone can spare, so Android's low-memory killer used to end the app or its render process.
-
-- **Full-size RAW buffers are freed after each photo,** about 612 MB at 5056x3792, instead of staying resident for the next one.
-- **The HDR outputs free what they no longer read.** The render process peaked at 1.42 GB while building the gain map; its full-size buffers are now released before that stage.
-- **Bracketed HDR fusion peaks about a third lower** than its former 1.5 GB at 19 MP, with the same maths and the same output.
-- **The render queue waits for free memory.** It starts a render at 450 MB free and waits at most 1 minute (it used to wait for 600 MB for up to 2 minutes). After a stacked Photo shot about 500 MB stay free, and a render started at 517 MB finished where renders started at 200 to 330 MB were killed.
-- **The gallery detail view renders at 1.5 times the screen's long edge** (1920 px on 1280x720) instead of up to 4096 px, which left about 300 MB of graphics memory in the app. Deep zoom is a little softer.
-- **The editor works on small copies** (a half-size RAW preview, 2048 px for denoise and blur) and Save repeats the work in full. An HD switch previews at full size.
-
-These are measurements from test builds on one phone, not a benchmark suite. The numbers will differ on other phones and ROMs.
 
 </details>
 
