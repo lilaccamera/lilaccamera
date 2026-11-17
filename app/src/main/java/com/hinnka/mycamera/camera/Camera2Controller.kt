@@ -3711,11 +3711,12 @@ class Camera2Controller(private val context: Context) {
         // createCaptureSession closes the previous session before onConfigured runs.
         // Stop exposing it while the replacement is being configured.
         invalidateCaptureSession(captureSession, "preview session replacement")
+        val sonyMode = enteredSonyMode
+        lastSonySessionMode = sonyMode.takeIf { captureMode == CaptureMode.VIDEO && surface != null && slowMotionSpec == null }
         if (captureMode == CaptureMode.VIDEO && slowMotionSpec != null && surface != null) {
             createSlowMotionSession(device, surface, handler, openGeneration)
             return
         }
-        val sonyMode = enteredSonyMode
         if (captureMode == CaptureMode.VIDEO && sonyMode != null && surface != null) {
             createSonyVideoSession(device, surface, handler, openGeneration)
             return
@@ -9415,6 +9416,8 @@ class Camera2Controller(private val context: Context) {
     /** The mode the bridge entered for the camera now opening or open; its session then has Sony's shape. */
     private var enteredSonyMode: SonyVideoMode? = null
     private var sonyVideoReader: ImageReader? = null
+    /** The Sony mode of the last camera session, null when it was an ordinary one: decides one mode change or two. */
+    private var lastSonySessionMode: SonyVideoMode? = null
 
     /** The mode the current video settings need, or null for the camera's own route. */
     private fun wantedSonyVideoMode(): SonyVideoMode? {
@@ -9446,10 +9449,11 @@ class Camera2Controller(private val context: Context) {
         val result = try {
             if (!client.connect() || client.version < SonyBridgeClient.VIDEO_MODES_SINCE) -100 else {
                 val bridge = client.bridge ?: throw IllegalStateException("bridge gone")
-                // Sony's camera software sets its streaming rate from the previous mode change when the session is
-                // set up (after a capability query it falls back to 30 fps): change mode, set up again, change again.
+                // Sony's camera software takes its streaming rate from the previous Sony mode change; an ordinary camera
+                // session in between resets it to 30 fps. So the mode is changed twice (the second change costs about
+                // 200 ms) unless the last session was Sony's at this same mode.
                 var r = 0
-                repeat(2) {
+                repeat(if (lastSonySessionMode == wanted) 1 else 2) {
                     if (r == 0) r = bridge.open(0).takeIf { it != 0 } ?: bridge.enterVideoMode(
                         wanted.mode, SonyVideoMode.PREVIEW_WIDTH, SonyVideoMode.PREVIEW_HEIGHT, wanted.width, wanted.height, wanted.fps
                     )
