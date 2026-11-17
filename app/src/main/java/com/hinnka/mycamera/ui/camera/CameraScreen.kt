@@ -338,6 +338,7 @@ fun CameraScreen(
     var captureButtonBounds by remember { mutableStateOf<Rect?>(null) }
     val noteLine = remember { NoteLineState() }
     LaunchedEffect(state.slowMotion.resolutionNotice) { if (state.slowMotion.resolutionNotice > 0) noteLine.say(R.string.slow_motion_720_only) }
+    LaunchedEffect(state.slowMotion.rateNotice) { if (state.slowMotion.rateNotice > 0) noteLine.say(R.string.video_rate_back_to_30) }
     // The shutter shows a cross while it waits for smiles; the note says why.
     LaunchedEffect(viewModel.smileWaiting) { if (viewModel.smileWaiting) noteLine.say(R.string.smile_waiting) }
     // Multiple exposure shots counted from the shutter press, so the actions, the count and the shutter ring answer

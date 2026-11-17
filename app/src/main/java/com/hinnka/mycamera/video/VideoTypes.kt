@@ -75,7 +75,9 @@ enum class VideoFpsPreset(val fps: Int) {
     FPS_25(25),
     FPS_30(30),
     FPS_50(50),
-    FPS_60(60);
+    FPS_60(60),
+    /** Only through Sony's video route on lilac (see [VideoCapabilities.sonyRouteFps]). */
+    FPS_120(120);
 
     fun getDisplayName(): String = fps.toString()
 }
@@ -191,7 +193,9 @@ data class VideoCapabilities(
     val recordingSizesByResolution: Map<VideoResolutionPreset, Size> = emptyMap(),
     val openGatePortraitAspectRatio: Float = 3f / 4f,
     val availableStabilizationModes: List<VideoStabilizationMode> = emptyList(),
-    val supportsTorch: Boolean = false
+    val supportsTorch: Boolean = false,
+    /** Rates in [availableFps] that the camera cannot run itself; they need Sony's video route (lilac). */
+    val sonyRouteFps: List<VideoFpsPreset> = emptyList(),
 )
 
 data class VideoRecordingState(

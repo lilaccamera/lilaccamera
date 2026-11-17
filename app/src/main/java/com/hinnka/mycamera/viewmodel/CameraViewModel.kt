@@ -4409,6 +4409,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (VideoResolutionPreset.HD_720P !in state.value.videoCapabilities.availableResolutions) return
             setVideoResolution(VideoResolutionPreset.HD_720P)
         }
+        // slow motion records its ordinary part through the camera's own route
+        if (enabled && state.value.videoConfig.fps in state.value.videoCapabilities.sonyRouteFps) {
+            setVideoFps(VideoFpsPreset.FPS_30)
+        }
         cameraController.setSlowMotionEnabled(enabled)
     }
 

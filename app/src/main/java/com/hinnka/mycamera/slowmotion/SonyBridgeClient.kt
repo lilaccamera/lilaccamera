@@ -18,7 +18,31 @@ data class SlowMotionCapabilities(
     val sizes: List<Pair<Int, Int>>,
     /** Burst lengths in frames. */
     val frameNums: List<Int>,
+    /** Sony's other video modes and their sizes (bridge version 3 and later; empty before). */
+    val videoModes: List<SonyVideoMode> = emptyList(),
 )
+
+/** One of Sony's video modes at one size and rate, as the bridge's enterVideoMode takes it. */
+data class SonyVideoMode(val mode: Int, val width: Int, val height: Int, val fps: Int) {
+    companion object {
+        const val NORMAL = 0 // also the high frame rates, chosen by fps
+        const val STEADYSHOT = 1
+        const val INTELLIGENT_ACTIVE = 2
+
+        /** Sony's app uses this viewfinder size for every video mode; the spike confirmed it for each one. */
+        const val PREVIEW_WIDTH = 1280
+        const val PREVIEW_HEIGHT = 720
+
+        /** Vendor session mode of Sony's own camera app for video (any size but VGA). */
+        const val SESSION_MODE = 0x8003
+
+        /** Parses the bridge's "w/h/fps" entries. */
+        fun parse(mode: Int, entries: List<String>?): List<SonyVideoMode> = entries.orEmpty().mapNotNull { entry ->
+            val p = entry.split("/").mapNotNull { it.toIntOrNull() }
+            if (p.size == 3) SonyVideoMode(mode, p[0], p[1], p[2]) else null
+        }
+    }
+}
 
 /**
  * Binds to the privileged companion (the LilacSonyBridge system app) that owns Sony's native calls.
@@ -76,6 +100,7 @@ class SonyBridgeClient(private val context: Context, private val onDied: () -> U
 
         /** First interface version with each feature. */
         const val SLOW_MOTION_SINCE = 1
+        const val VIDEO_MODES_SINCE = 3
 
         /** Whether the slow-motion feature could exist at all here; cheap, no binding. */
         fun isCompanionInstalled(context: Context): Boolean =
@@ -97,14 +122,19 @@ class SonyBridgeClient(private val context: Context, private val onDied: () -> U
                 if (!client.connect() || client.version < SLOW_MOTION_SINCE) return null
                 val bundle = client.bridge?.capabilities ?: return null
                 PLog.i(TAG, "Sony bridge capabilities: superSlow=${bundle.getBoolean("superSlow")} " +
-                    "info=${bundle.getStringArrayList("info")} frameNums=${bundle.getIntegerArrayList("frameNums")}")
+                    "info=${bundle.getStringArrayList("info")} frameNums=${bundle.getIntegerArrayList("frameNums")} " +
+                    "version=${client.version} highFps=${bundle.getStringArrayList("highFps")}")
                 if (!bundle.getBoolean("superSlow")) return null
                 // each entry is "width/height/fps"
                 val sizes = bundle.getStringArrayList("info").orEmpty().mapNotNull { entry ->
                     val p = entry.split("/").mapNotNull { it.toIntOrNull() }
                     if (p.size == 3 && p[2] == SlowMotionSpec.FPS) p[0] to p[1] else null
                 }.distinct()
-                return SlowMotionCapabilities(sizes, bundle.getIntegerArrayList("frameNums").orEmpty().distinct())
+                val videoModes = if (client.version < VIDEO_MODES_SINCE) emptyList() else
+                    SonyVideoMode.parse(SonyVideoMode.NORMAL, bundle.getStringArrayList("highFps")) +
+                        SonyVideoMode.parse(SonyVideoMode.STEADYSHOT, bundle.getStringArrayList("steadyShot")) +
+                        SonyVideoMode.parse(SonyVideoMode.INTELLIGENT_ACTIVE, bundle.getStringArrayList("intelligentActive"))
+                return SlowMotionCapabilities(sizes, bundle.getIntegerArrayList("frameNums").orEmpty().distinct(), videoModes)
             } catch (e: Exception) {
                 PLog.w(TAG, "Sony bridge capability query failed: ${e.message}")
                 return null

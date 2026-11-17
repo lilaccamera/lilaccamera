@@ -9,6 +9,7 @@ import android.os.Build
 import android.util.Size
 import com.hinnka.mycamera.camera.DeviceQuirks
 import com.hinnka.mycamera.camera.readMetadataOrNull
+import com.hinnka.mycamera.slowmotion.SonyVideoMode
 import com.hinnka.mycamera.utils.PLog
 import kotlin.math.abs
 
@@ -25,6 +26,7 @@ object VideoCapabilitiesResolver {
         characteristics: CameraCharacteristics,
         requestedConfig: VideoConfig,
         algorithmicStabilizationSupported: Boolean = false,
+        sonyHighFrameRates: List<SonyVideoMode> = emptyList(),
     ): VideoCapabilitySnapshot {
         // Resolve from one metadata snapshot. Session caches are cleared while reopening,
         // which must not turn a supported user selection into an unsupported capability.
@@ -92,11 +94,15 @@ object VideoCapabilitiesResolver {
         )
         val cameraInputSize = cameraInputSizesByResolution[resolvedResolution] ?: previewSize
 
-        val availableFps = resolveAvailableFps(
+        val cameraFps = resolveAvailableFps(
             characteristics = characteristics,
             cameraInputSize = cameraInputSize,
             previewSize = previewSize
         )
+        val sonyRouteFps = sonyRouteFps(
+            resolvedResolution, requestedConfig.aspectRatio, sonyHighFrameRates, cameraFps,
+        )
+        val availableFps = (cameraFps + sonyRouteFps).sortedBy { it.fps }
         val resolvedFps = requestedConfig.fps.takeIf { availableFps.contains(it) }
             ?: VideoFpsPreset.FPS_30.takeIf { availableFps.contains(it) }
             ?: availableFps.firstOrNull()
@@ -105,7 +111,8 @@ object VideoCapabilitiesResolver {
         val enhancedCameraInputSize =
             enhancedStabilizationInputSizesByResolution[resolvedResolution]
         val enhancedStabilizationAvailable = algorithmicStabilizationSupported &&
-            enhancedCameraInputSize != null
+            enhancedCameraInputSize != null &&
+            resolvedFps !in sonyRouteFps // Sony's route hands over frames without the motion data EIS+ needs
 
         /*PLog.d(
             TAG,
@@ -159,7 +166,8 @@ object VideoCapabilitiesResolver {
                 recordingSizesByResolution = recordingSizesByResolution,
                 openGatePortraitAspectRatio = openGateAspect,
                 availableStabilizationModes = availableStabilizationModes,
-                supportsTorch = isFlashSupported
+                supportsTorch = isFlashSupported,
+                sonyRouteFps = sonyRouteFps,
             ),
             previewSize = previewSize,
             recordingSize = recordingSize
@@ -318,7 +326,7 @@ object VideoCapabilitiesResolver {
                 return strictAvailableFps
             }
 
-            val optimisticFps = VideoFpsPreset.entries.filter { it.fps > advertisedMaxFps }
+            val optimisticFps = VideoFpsPreset.entries.filter { it.fps in (advertisedMaxFps + 1)..60 }
             if (optimisticFps.isNotEmpty()) {
                 return (strictAvailableFps + optimisticFps).distinctBy { it.fps }
             }
@@ -327,6 +335,24 @@ object VideoCapabilitiesResolver {
         return strictAvailableFps.ifEmpty {
             listOf(VideoFpsPreset.FPS_30)
         }
+    }
+
+    /**
+     * Rates Sony's video route adds at this resolution: its high-frame-rate sizes (1080p60, 720p120 on lilac) at
+     * 16:9, for rates the camera does not run itself.
+     */
+    internal fun sonyRouteFps(
+        resolution: VideoResolutionPreset,
+        aspectRatio: VideoAspectRatio,
+        sonyHighFrameRates: List<SonyVideoMode>,
+        cameraFps: List<VideoFpsPreset>,
+    ): List<VideoFpsPreset> {
+        if (aspectRatio != VideoAspectRatio.RATIO_16_9) return emptyList()
+        return sonyHighFrameRates
+            .filter { maxOf(it.width, it.height) == resolution.longEdge && minOf(it.width, it.height) == resolution.shortEdge }
+            .mapNotNull { mode -> VideoFpsPreset.entries.firstOrNull { it.fps == mode.fps } }
+            .filter { it !in cameraFps }
+            .distinct()
     }
 
     private fun resolveRecordingOutputSizes(characteristics: CameraCharacteristics): List<Size> {
