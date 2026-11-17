@@ -7,6 +7,7 @@ import android.hardware.camera2.CaptureRequest
 import android.media.MediaRecorder
 import android.os.Build
 import android.util.Size
+import com.hinnka.mycamera.camera.DeviceQuirks
 import com.hinnka.mycamera.camera.readMetadataOrNull
 import com.hinnka.mycamera.utils.PLog
 import kotlin.math.abs
@@ -292,6 +293,7 @@ object VideoCapabilitiesResolver {
         return selectAvailableFps(
             fixedRates = outputRanges.filter { it.lower == it.upper }.map { it.upper }.toSet(),
             maxFpsByDuration = maxFpsByDuration,
+            optimistic = !DeviceQuirks.onlyListedVideoFps,
         )
     }
 
@@ -299,16 +301,20 @@ object VideoCapabilitiesResolver {
      * Rates to offer: those the camera lists as a fixed range (fps, fps), within what the stream sizes allow. A rate
      * merely inside a wider range (24 in 15 to 30) is not offered, because recording asks for the fixed range and a
      * camera may refuse one it does not list. When the camera lists 30 or less, 50 and 60 are still offered
-     * optimistically (many cameras run them with a forced fixed range).
+     * optimistically (many cameras run them with a forced fixed range), unless [optimistic] is off.
      */
-    internal fun selectAvailableFps(fixedRates: Set<Int>, maxFpsByDuration: Int): List<VideoFpsPreset> {
+    internal fun selectAvailableFps(
+        fixedRates: Set<Int>,
+        maxFpsByDuration: Int,
+        optimistic: Boolean = true,
+    ): List<VideoFpsPreset> {
         val strictAvailableFps = VideoFpsPreset.entries.filter { preset ->
             preset.fps <= maxFpsByDuration && preset.fps in fixedRates
         }
 
         if (strictAvailableFps.isNotEmpty()) {
             val advertisedMaxFps = strictAvailableFps.maxOf { it.fps }
-            if (advertisedMaxFps >= 50) {
+            if (advertisedMaxFps >= 50 || !optimistic) {
                 return strictAvailableFps
             }
 
