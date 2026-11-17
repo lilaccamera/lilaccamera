@@ -6,12 +6,15 @@
 
 <p align="center">Stacked photos, RAW and 960 fps slow motion for the Xperia XZ1 Compact</p>
 
+<p align="center">Started as a fork of <a href="https://github.com/bjzhou/PhotonCamera">PhotonCamera</a> by bjzhou.</p>
+
 <p align="center">
   <a href="https://lilaccamera.github.io/"><img src="https://img.shields.io/badge/Read%20the%20user%20guide-7550D4?style=for-the-badge" alt="Read the user guide"></a>
 </p>
 
 <p align="center">
-  <a href="https://lilaccamera.github.io/user/getting-started/">Get started</a> ·
+  <a href="https://lilaccamera.github.io/user/how-pictures-are-made/">How a picture is made</a> ·
+  <a href="https://lilaccamera.github.io/#get-lilac">Get started</a> ·
   <a href="https://github.com/lilaccamera/lilaccamera/releases">Beta releases</a> ·
   <a href="https://lilaccamera.github.io/rom/integration/">For ROM maintainers</a>
 </p>
@@ -74,6 +77,62 @@ The [user guide](https://lilaccamera.github.io/) explains what Lilac does differ
 - **How Lilac works:** [how a picture is made](https://lilaccamera.github.io/user/how-pictures-are-made/), [Sony hardware](https://lilaccamera.github.io/user/hardware/), [built for a small screen](https://lilaccamera.github.io/user/small-screen/), [focus and faces](https://lilaccamera.github.io/user/focus/)
 - **Using Lilac:** [getting started](https://lilaccamera.github.io/user/getting-started/), [Photo and Night](https://lilaccamera.github.io/user/photo-mode/), [Pro](https://lilaccamera.github.io/user/pro-mode/), [HDR](https://lilaccamera.github.io/user/hdr/), [Portrait](https://lilaccamera.github.io/user/portrait/), [Video](https://lilaccamera.github.io/user/video/), [Editor](https://lilaccamera.github.io/user/editor/), [Troubleshooting](https://lilaccamera.github.io/user/troubleshooting/)
 - **Testers and ROMs:** [slow-motion bridge](https://lilaccamera.github.io/bridge/install/), [ROM integration](https://lilaccamera.github.io/rom/integration/)
+
+<details>
+<summary><b>Run Lilac on sunplex07's LineageOS, with the slow-motion bridge</b></summary>
+
+Photo, Night, Portrait and Video need nothing but the Lilac APK. Two features need more from the ROM:
+
+- **Pro (RAW)** needs the raw19 camera shim. The bridge does not change that.
+- **960 fps slow motion at 720p** in Video mode needs Sony's cacao service plus the **Lilac Sony Bridge**. That is all the bridge enables. It is a small app with no icon: Sony's slow-motion service only talks to privileged system apps, so the bridge runs that part while Lilac stays an ordinary app you can update.
+
+sunplex07's LineageOS 23.2 for lilac has both the shim and cacao; it is the only ROM this was tested on. If your ROM ships the bridge, skip this.
+
+The bridge must sit in `/system/priv-app/`, which is on the read-only system partition. There are two ways to put it there; either one **reboots the phone**:
+
+- **With adb and `bridge.sh`** (steps 1 to 6). This needs a computer with adb and **rooted adb**: USB debugging and **Rooted debugging** on (Settings › System › Developer options), which exists only on debug-capable (userdebug) builds such as sunplex07's. The script runs `adb root` and remounts the system partition itself. `bridge.sh check` and the checks in step 5 work without root.
+- **With a root file browser** (below the steps), if you have root on the phone but not rooted adb.
+
+1. **Install Lilac** from the [GitHub releases](https://github.com/lilaccamera/lilaccamera/releases) like any APK.
+2. **Download `LilacSonyBridge.apk` and `bridge.sh` from the same release.** The bridge serves only a Lilac of the same release and signed with the same key, so install it again whenever Lilac updates.
+3. **Check the phone.** Nothing is changed:
+
+    ```bash
+    bash bridge.sh check
+    ```
+
+    You want `cacao: found` and `raw19 shim: found`. Without cacao, slow motion cannot work on this ROM; without the shim, Pro mode is missing. The script asks before installing anyway.
+
+4. **Install the bridge.** The script copies the APK to `/system/priv-app/LilacSonyBridge/` and reboots:
+
+    ```bash
+    bash bridge.sh install LilacSonyBridge.apk
+    ```
+
+5. **Check after the reboot:**
+
+    ```bash
+    adb shell pm path io.github.lilaccamera.sonybridge
+    adb shell "dumpsys package io.github.lilaccamera.sonybridge | grep -E 'privateFlags|IMAGE_PROCESSOR'"
+    ```
+
+    The path is under `/system/priv-app/LilacSonyBridge/` and the flags include `PRIVILEGED`.
+
+6. **Use it:** in Lilac, switch to Video and swipe down on the picture. A **Slow-mo** switch appears.
+
+**With a root file browser instead of the script.** This does by hand what `bridge.sh install` does. It has not been tried on the phone.
+
+- **Prepare:** do steps 1 and 2 above. A copy of the bridge installed as a normal app hides the system copy, so uninstall it first if you have one (Settings › Apps).
+- **Check the ROM** without the script: these files must exist, `/system/lib64/libcacao_client.so` and `/system/lib64/libimageprocessorjni.so` (Sony's slow-motion service) and `/vendor/lib/hw/camera.lilac-real.so` (the RAW shim, only for Pro).
+- **Unlock:** in the file browser, give it root and mount `/system` read-write (most have a switch for this).
+- **Place:** create the folder `/system/priv-app/LilacSonyBridge` and copy the APK into it under exactly the name `LilacSonyBridge.apk`.
+- **Permissions:** set the file's permissions to `rw-r--r--` (644), owned by root. The script also sets the SELinux label `u:object_r:system_file:s0`, which a file browser cannot; a file made inside that folder normally gets it anyway. If the bridge does not work after the reboot, check the label first (`ls -Z`).
+- **Reboot:** mount `/system` read-only again if the browser asks, then **reboot**. Android picks up system apps only at boot.
+- **Check:** run the adb checks from step 5 above (they work with normal adb), or look for **Lilac Sony Bridge** in Settings › Apps with system apps shown. Then do step 6 above.
+
+To undo, run `bash bridge.sh uninstall`, or delete `/system/priv-app/LilacSonyBridge` in the file browser and reboot. Lilac keeps working and only the Slow-mo switch goes away. The script touches no vendor files, SELinux settings or bootloader. If you built from source, use `sonybridge/tools/bridge.sh` and your own `sonybridge-debug.apk` with a debug-signed Lilac. More in the [bridge guide](https://lilaccamera.github.io/bridge/install/).
+
+</details>
 
 <details>
 <summary><b>Optimizations for a 4 GB phone</b></summary>
@@ -141,7 +200,7 @@ Then build Lilac and the [slow-motion bridge](https://lilaccamera.github.io/brid
 <details>
 <summary><b>What PhotonCamera came with</b></summary>
 
-Lilac is a fork of [PhotonCamera](https://github.com/bjzhou/PhotonCamera) by bjzhou, an open-source Android camera application focused on static photography, designed to simulate the handling and image quality of modern mirrorless digital cameras. This is the feature list of the original app. The upstream README is also available in [English](./README_EN.md), [简体中文](./README_CN.md) and [日本語](./README_JA.md).
+Lilac started as a fork of [PhotonCamera](https://github.com/bjzhou/PhotonCamera) by bjzhou, an open-source Android camera application focused on static photography, designed to simulate the handling and image quality of modern mirrorless digital cameras. This is the feature list of the original app. The upstream README is also available in [English](./README_EN.md), [简体中文](./README_CN.md) and [日本語](./README_JA.md).
 
 ### 1. Advanced LUT Support
 * **Multi-format Compatibility**: Supports importing and applying `.cube`, `.png` (Halfs/Fulls), and `.xmp` profile files.
