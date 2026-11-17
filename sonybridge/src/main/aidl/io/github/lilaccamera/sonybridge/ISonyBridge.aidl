@@ -11,9 +11,15 @@ import android.os.ParcelFileDescriptor;
  *
  * Call order: open, enterSuperSlow, (caller opens its camera session and waits for the viewfinder),
  * prepare, startVideo, trigger, stop, frameTimes, release. Always call release.
+ *
+ * The interface only grows: new methods go at the end (transaction codes follow the order) and raise the version,
+ * so an older bridge keeps working with a newer Lilac, which checks version() before using a newer call.
  */
 interface ISonyBridge {
-    /** Protocol version, 1. */
+    /**
+     * Interface version. 1: 960 fps slow motion (everything below). 2: the bridge trusts Lilac by pinned
+     * certificate; no new calls.
+     */
     int version();
 
     /**
