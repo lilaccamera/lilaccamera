@@ -6,7 +6,6 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
 import android.media.MediaRecorder
 import android.os.Build
-import android.util.Range
 import android.util.Size
 import com.hinnka.mycamera.camera.readMetadataOrNull
 import com.hinnka.mycamera.utils.PLog
@@ -98,6 +97,7 @@ object VideoCapabilitiesResolver {
             previewSize = previewSize
         )
         val resolvedFps = requestedConfig.fps.takeIf { availableFps.contains(it) }
+            ?: VideoFpsPreset.FPS_30.takeIf { availableFps.contains(it) }
             ?: availableFps.firstOrNull()
             ?: VideoFpsPreset.FPS_30
 
@@ -289,10 +289,21 @@ object VideoCapabilitiesResolver {
             Int.MAX_VALUE
         }
 
+        return selectAvailableFps(
+            fixedRates = outputRanges.filter { it.lower == it.upper }.map { it.upper }.toSet(),
+            maxFpsByDuration = maxFpsByDuration,
+        )
+    }
+
+    /**
+     * Rates to offer: those the camera lists as a fixed range (fps, fps), within what the stream sizes allow. A rate
+     * merely inside a wider range (24 in 15 to 30) is not offered, because recording asks for the fixed range and a
+     * camera may refuse one it does not list. When the camera lists 30 or less, 50 and 60 are still offered
+     * optimistically (many cameras run them with a forced fixed range).
+     */
+    internal fun selectAvailableFps(fixedRates: Set<Int>, maxFpsByDuration: Int): List<VideoFpsPreset> {
         val strictAvailableFps = VideoFpsPreset.entries.filter { preset ->
-            preset.fps <= maxFpsByDuration && outputRanges.any { range ->
-                supportsFps(range, preset.fps)
-            }
+            preset.fps <= maxFpsByDuration && preset.fps in fixedRates
         }
 
         if (strictAvailableFps.isNotEmpty()) {
@@ -303,11 +314,6 @@ object VideoCapabilitiesResolver {
 
             val optimisticFps = VideoFpsPreset.entries.filter { it.fps > advertisedMaxFps }
             if (optimisticFps.isNotEmpty()) {
-                /*PLog.w(
-                    TAG,
-                    "Camera reports max $advertisedMaxFps fps only, keeping optimistic presets=${optimisticFps.map { it.fps }} " +
-                        "for cameraInput=${cameraInputSize.width}x${cameraInputSize.height}"
-                )*/
                 return (strictAvailableFps + optimisticFps).distinctBy { it.fps }
             }
         }
@@ -315,10 +321,6 @@ object VideoCapabilitiesResolver {
         return strictAvailableFps.ifEmpty {
             listOf(VideoFpsPreset.FPS_30)
         }
-    }
-
-    private fun supportsFps(range: Range<Int>, fps: Int): Boolean {
-        return range.upper >= fps && range.lower <= fps
     }
 
     private fun resolveRecordingOutputSizes(characteristics: CameraCharacteristics): List<Size> {
