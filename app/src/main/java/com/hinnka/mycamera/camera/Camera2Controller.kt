@@ -9446,9 +9446,15 @@ class Camera2Controller(private val context: Context) {
         val result = try {
             if (!client.connect() || client.version < SonyBridgeClient.VIDEO_MODES_SINCE) -100 else {
                 val bridge = client.bridge ?: throw IllegalStateException("bridge gone")
-                bridge.open(0).takeIf { it != 0 } ?: bridge.enterVideoMode(
-                    wanted.mode, SonyVideoMode.PREVIEW_WIDTH, SonyVideoMode.PREVIEW_HEIGHT, wanted.width, wanted.height, wanted.fps
-                )
+                // Sony's camera software sets its streaming rate from the previous mode change when the session is
+                // set up (after a capability query it falls back to 30 fps): change mode, set up again, change again.
+                var r = 0
+                repeat(2) {
+                    if (r == 0) r = bridge.open(0).takeIf { it != 0 } ?: bridge.enterVideoMode(
+                        wanted.mode, SonyVideoMode.PREVIEW_WIDTH, SonyVideoMode.PREVIEW_HEIGHT, wanted.width, wanted.height, wanted.fps
+                    )
+                }
+                r
             }
         } catch (e: Exception) {
             PLog.e(TAG, "Sony video mode change failed", e)
@@ -9550,7 +9556,7 @@ class Camera2Controller(private val context: Context) {
         val reader = sonyVideoReader ?: ImageReader.newInstance(
             SonyVideoMode.PREVIEW_WIDTH, SonyVideoMode.PREVIEW_HEIGHT, ImageFormat.YUV_420_888, 1
         ).also { r ->
-            r.setOnImageAvailableListener({ it.acquireLatestImage()?.close() }, handler)
+            r.setOnImageAvailableListener({ it.acquireNextImage()?.close() }, handler) // one buffer: latest needs two
             sonyVideoReader = r
         }
         try {
