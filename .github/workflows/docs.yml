@@ -1,0 +1,60 @@
+name: Docs site
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r guide/requirements.txt
+      - run: guide/check-text.sh guide
+      - run: zensical build --strict
+      - run: python3 guide/check-links.py site
+      - uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    # Only this job, which runs no third-party Python, holds the deploy key. GitHub
+    # serves <org>.github.io only from a repo of that name, so the site is pushed there.
+    permissions:
+      actions: read
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n github-pages -D artifact
+      - env:
+          DOCS_DEPLOY_KEY: ${{ secrets.DOCS_DEPLOY_KEY }}
+          SITE_REPO: ${{ github.repository_owner }}/${{ github.repository_owner }}.github.io
+        run: |
+          mkdir -p ~/.ssh site
+          printf '%s\n' "$DOCS_DEPLOY_KEY" > ~/.ssh/docs_key
+          chmod 600 ~/.ssh/docs_key
+          # GitHub's published host key, pinned instead of trusting ssh-keyscan
+          echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' >> ~/.ssh/known_hosts
+          tar -xf artifact/artifact.tar -C site
+          touch site/.nojekyll
+          cd site
+          git init -q -b main
+          git add -A
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -qm "Site from $GITHUB_REPOSITORY@$GITHUB_SHA"
+          # The site repo keeps no history of its own: each deploy replaces it.
+          GIT_SSH_COMMAND='ssh -i ~/.ssh/docs_key -o IdentitiesOnly=yes' \
+            git push -f "git@github.com:$SITE_REPO.git" main
+          rm ~/.ssh/docs_key

@@ -1,3 +1,7 @@
+# Lilac Camera
+
+Lilac Camera is a fork of [PhotonCamera](https://github.com/bjzhou/PhotonCamera) by bjzhou, with an interface rebuilt for small phone screens and processing adapted for low-memory phones. The user guide is at [lilaccamera.github.io](https://lilaccamera.github.io/); its source is in [`guide/`](guide/index.md). The upstream README follows.
+
 # Photon Camera
 
 [English](./README_EN.md) | [简体中文](./README_CN.md) | [日本語](./README_JA.md)

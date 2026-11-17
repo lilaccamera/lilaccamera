@@ -1,0 +1,69 @@
+site_name: Lilac Camera
+site_description: How to use Lilac Camera on the Xperia XZ1 Compact
+site_url: https://lilaccamera.github.io/
+repo_url: https://github.com/lilaccamera/lilaccamera
+docs_dir: guide
+strict: true
+
+theme:
+  name: material
+  language: en
+  logo: images/lilac-icon.svg
+  favicon: images/lilac-icon.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: lucide/moon
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: lucide/sun
+        name: Switch to light mode
+
+extra_css:
+  - stylesheets/lilac.css
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - def_list
+  - attr_list
+  - pymdownx.details
+  - pymdownx.snippets:
+      base_path: guide/snippets
+      check_paths: true
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - How it works:
+      - How a picture is made: user/how-pictures-are-made.md
+      - Sony hardware: user/hardware.md
+      - Built for a small screen: user/small-screen.md
+      - Focus and faces: user/focus.md
+  - Using Lilac:
+      - Getting started: user/getting-started.md
+      - Photo and Night: user/photo-mode.md
+      - Pro: user/pro-mode.md
+      - HDR: user/hdr.md
+      - Portrait: user/portrait.md
+      - Video: user/video.md
+      - Editor: user/editor.md
+  - Troubleshooting: user/troubleshooting.md
+  - Slow-motion bridge: bridge/install.md
+  - ROM integration: rom/integration.md
+exclude_docs: |
+  check-text.sh
+  snippets/
+  requirements.txt
+  check-links.py
