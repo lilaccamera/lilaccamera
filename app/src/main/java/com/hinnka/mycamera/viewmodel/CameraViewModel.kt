@@ -3275,23 +3275,28 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
     // What the other app's photo changed or left behind, undone when its screen closes.
-    private var modeBeforeCaller: List<Any>? = null
+    private var modeBeforeCaller: List<Any?>? = null
     private val callerPhotoIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /** Called before the mode is switched for another app ([prefs]: the settings before it): put back afterwards. */
     fun keepModeForAfterCaller(prefs: UserPreferences = userPreferencesRepository.current) {
         if (modeBeforeCaller != null) return
-        modeBeforeCaller = listOf(prefs.captureMode, prefs.useRaw, prefs.useJpgMax, prefs.useRawMax)
+        modeBeforeCaller = listOf(
+            prefs.captureMode, prefs.useRaw, prefs.useJpgMax, prefs.useRawMax, prefs.lutId, prefs.activeEffectParams,
+        )
     }
 
     private fun undoCallerSession() {
         if (captureForCaller == null) return
-        modeBeforeCaller?.let { (mode, raw, jpgMax, rawMax) ->
+        modeBeforeCaller?.let { before ->
+            val (mode, raw, jpgMax, rawMax, look) = before
             userPreferencesRepository.updateAsync {
                 captureMode = mode as CaptureMode
                 useRaw = raw as Boolean
                 useJpgMax = jpgMax as Boolean
                 useRawMax = rawMax as Boolean
+                lutId = look as String?
+                activeEffectParams = before[5] as EffectParams
             }
         }
         // A shot still being saved when the screen closes is not kept either.

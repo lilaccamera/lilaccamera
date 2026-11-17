@@ -111,6 +111,7 @@ import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.StartupGate
 import com.hinnka.mycamera.utils.StartupTrace
+import com.hinnka.mycamera.model.EffectParams
 import com.hinnka.mycamera.video.CaptureMode
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -298,11 +299,17 @@ open class MainActivity : AppCompatActivity() {
             val video = asked == MediaStore.ACTION_VIDEO_CAPTURE
             // Saved before anything reads the settings, so the camera opens in the asked mode at once instead
             // of opening in the last-used one and reopening (about 1 s). The settings write takes milliseconds.
+            // A photo for another app is the stacked photo with no look, so the viewfinder shows none either.
             val before = runBlocking {
                 val before = userPreferencesRepository.latest()
                 userPreferencesRepository.update {
                     captureMode = if (video) CaptureMode.VIDEO else CaptureMode.PHOTO
-                    if (!video) { useRaw = false; useRawMax = false }
+                    if (!video) {
+                        useRaw = false
+                        useRawMax = false
+                        lutId = "none"
+                        activeEffectParams = EffectParams.DEFAULT
+                    }
                 }
                 userPreferencesRepository.flow { it.captureMode to it.useRaw }
                     .first { (mode, raw) -> mode == (if (video) CaptureMode.VIDEO else CaptureMode.PHOTO) && (video || !raw) }
