@@ -5,6 +5,7 @@ import com.hinnka.mycamera.BuildConfig
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.SystemPropertiesUtil
 import java.io.File
+import kotlin.concurrent.thread
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.ln
@@ -109,20 +110,42 @@ object ShadowCastFix {
             PLog.d(TAG, "no correction ($params) in ${System.currentTimeMillis() - start} ms")
             return params
         }
-        val band = IntArray(w * BAND_ROWS)
-        var y = 0
-        while (y < h) {
-            val rows = min(BAND_ROWS, h - y)
-            bitmap.getPixels(band, 0, w, 0, y, w, rows)
-            correct(band, w * rows, params)
-            bitmap.setPixels(band, 0, w, 0, y, w, rows)
-            y += rows
+        val bands = (h + BAND_ROWS - 1) / BAND_ROWS
+        inParallel(bands) { from, to ->
+            val band = IntArray(w * BAND_ROWS)
+            for (i in from until to) {
+                val y = i * BAND_ROWS
+                val rows = min(BAND_ROWS, h - y)
+                bitmap.getPixels(band, 0, w, 0, y, w, rows)
+                correct(band, w * rows, params)
+                bitmap.setPixels(band, 0, w, 0, y, w, rows)
+            }
         }
         PLog.d(TAG, "${w}x$h $params in ${System.currentTimeMillis() - start} ms")
         return params
     }
 
-    /** Measures the correction. [read] fills its array with `rows` full rows of ARGB pixels from row `y`. */
+    /**
+     * Splits [count] items into contiguous ranges and runs [work] on each in its own thread. Half the cores
+     * less one (3 of 8 on a Snapdragon 835): the camera, the viewfinder and other apps keep the rest.
+     * Each thread holds one band buffer (about 1 MB at 4000 px wide), so memory stays small.
+     */
+    private fun inParallel(count: Int, work: (from: Int, to: Int) -> Unit) {
+        val threads = (Runtime.getRuntime().availableProcessors() / 2 - 1).coerceIn(1, count.coerceAtLeast(1))
+        val chunk = (count + threads - 1) / threads
+        var failure: Throwable? = null
+        (1 until threads).map { t ->
+            thread(name = "ShadowCastFix-$t") {
+                try { work(t * chunk, min(count, (t + 1) * chunk)) } catch (e: Throwable) { failure = e }
+            }
+        }.also { work(0, min(count, chunk)) }.forEach { it.join() }
+        failure?.let { throw it }
+    }
+
+    /**
+     * Measures the correction. [read] fills its array with `rows` full rows of ARGB pixels from row `y`;
+     * it is called from several threads at once, for different rows.
+     */
     internal fun estimate(width: Int, height: Int, read: (y: Int, rows: Int, out: IntArray) -> Unit): Params? {
         val step = max(1, width / SMALL_WIDTH)
         val sw = width / step
@@ -132,27 +155,29 @@ object ShadowCastFix {
         val r = FloatArray(n)
         val g = FloatArray(n)
         val b = FloatArray(n)
-        val rows = IntArray(width * step)
         val area = (step * step).toFloat()
-        for (by in 0 until sh) {
-            read(by * step, step, rows)
-            for (bx in 0 until sw) {
-                var sr = 0f
-                var sg = 0f
-                var sb = 0f
-                for (yy in 0 until step) {
-                    val base = yy * width + bx * step
-                    for (xx in 0 until step) {
-                        val p = rows[base + xx]
-                        sr += toLinear[(p shr 16) and 0xFF]
-                        sg += toLinear[(p shr 8) and 0xFF]
-                        sb += toLinear[p and 0xFF]
+        inParallel(sh) { from, to ->
+            val rows = IntArray(width * step)
+            for (by in from until to) {
+                read(by * step, step, rows)
+                for (bx in 0 until sw) {
+                    var sr = 0f
+                    var sg = 0f
+                    var sb = 0f
+                    for (yy in 0 until step) {
+                        val base = yy * width + bx * step
+                        for (xx in 0 until step) {
+                            val p = rows[base + xx]
+                            sr += toLinear[(p shr 16) and 0xFF]
+                            sg += toLinear[(p shr 8) and 0xFF]
+                            sb += toLinear[p and 0xFF]
+                        }
                     }
+                    val i = by * sw + bx
+                    r[i] = sr / area
+                    g[i] = sg / area
+                    b[i] = sb / area
                 }
-                val i = by * sw + bx
-                r[i] = sr / area
-                g[i] = sg / area
-                b[i] = sb / area
             }
         }
 
