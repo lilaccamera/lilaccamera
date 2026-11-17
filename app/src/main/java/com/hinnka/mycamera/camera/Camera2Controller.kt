@@ -9505,6 +9505,7 @@ class Camera2Controller(private val context: Context) {
 
     private val sonyFrameSink = object : IFrameSink.Stub() {
         override fun onFrame(buffer: HardwareBuffer, timestampNs: Long, frameId: Int) {
+            lastSonyFrameNs = timestampNs
             val bridge = sonyVideoBridge?.bridge
             videoRecorder.submitExternalFrame(buffer, timestampNs) {
                 buffer.close()
@@ -9537,14 +9538,25 @@ class Camera2Controller(private val context: Context) {
         }, "sony-frames-start").start()
     }
 
-    /** Sony's stop first, so the frames still in flight (1.5 s with Intelligent Active) reach the file; then the file. */
+    /** Sensor time of the newest frame from Sony's route (same clock as elapsedRealtimeNanos). */
+    @Volatile private var lastSonyFrameNs = 0L
+
+    /**
+     * The file ends at the press. Intelligent Active hands each frame over about 1.5 s after it was taken, so Sony's
+     * stop waits until a frame from the press time has arrived (or 2.5 s); then Sony's stop, then the file.
+     */
     private fun stopSonyRecording() {
+        val pressNs = SystemClock.elapsedRealtimeNanos()
+        videoRecorder.endAt(pressNs)
         stopVideoRecordingTicker()
         _state.update { s -> s.copy(
             videoRecordingState = s.videoRecordingState.copy(isRecording = false, isPaused = false, isProcessing = true)
         ) }
         val bridge = sonyVideoBridge?.bridge
         Thread({
+            val waitUntil = SystemClock.elapsedRealtime() + 2_500
+            while (lastSonyFrameNs < pressNs && SystemClock.elapsedRealtime() < waitUntil) Thread.sleep(10)
+            PLog.i(TAG, "Sony tail waited: newest frame ${(lastSonyFrameNs - pressNs) / 1_000_000} ms after the press")
             val result = runCatching { bridge?.stopFrames() }.getOrElse { PLog.e(TAG, "Sony frames stop failed", it); -99 }
             PLog.i(TAG, "Sony frames stopped: result=$result")
             videoRecorder.stopRecording()

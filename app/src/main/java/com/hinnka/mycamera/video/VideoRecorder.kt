@@ -353,12 +353,22 @@ class VideoRecorder(
 
     fun isRecording(): Boolean = isRecording && !stopRequested
 
+    /** Boottime (µs) after which no frame or sound goes into the file; for sources whose frames arrive late. */
+    @Volatile private var endTimeUs = UNSET_TIMESTAMP
+
+    /** Ends the file at [endNs] (boottime) though frames and sound keep arriving until [stopRecording]. */
+    fun endAt(endNs: Long) {
+        endTimeUs = endNs / 1_000L
+    }
+
     /**
      * One frame of an external-input recording. [onDone] runs once the frame is no longer needed (drawn, or dropped
      * while paused or stopping), on any thread; the buffer must stay valid until then.
      */
     fun submitExternalFrame(buffer: HardwareBuffer, timestampNs: Long, onDone: () -> Unit) {
         if (!isRecording || stopRequested || isPaused || !requestedExternalFrameInput) { onDone(); return }
+        val endUs = endTimeUs
+        if (endUs != UNSET_TIMESTAMP && mapCameraTimestampToBoottimeNs(timestampNs) / 1_000L > endUs) { onDone(); return }
         if (!isPaused) statsIncomingFrames += 1
         scope.launch(renderDispatcher) {
             try {
@@ -1194,6 +1204,8 @@ class VideoRecorder(
             if (originUs == UNSET_TIMESTAMP || info.presentationTimeUs < originUs) {
                 return null
             }
+            val endUs = endTimeUs
+            if (endUs != UNSET_TIMESTAMP && info.presentationTimeUs > endUs) return null
             info.presentationTimeUs - originUs -
                 pausedDurationBetweenLocked(originUs, info.presentationTimeUs)
         }
@@ -1457,6 +1469,7 @@ class VideoRecorder(
         synchronized(timelineLock) {
             cameraTimestampToBoottimeOffsetNs = UNSET_TIMESTAMP
             timelineOriginUs = UNSET_TIMESTAMP
+            endTimeUs = UNSET_TIMESTAMP
             pauseIntervals = mutableListOf()
             activePauseStartTimeUs = UNSET_TIMESTAMP
         }
