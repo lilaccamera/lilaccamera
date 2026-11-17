@@ -9,6 +9,8 @@ build
 .cxx
 local.properties
 app/*/release
+# The release build type's own sources are tracked.
+!app/src/release
 app/release.jks
 .gradle-home
 /MGC
