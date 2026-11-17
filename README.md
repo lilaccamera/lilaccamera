@@ -7,8 +7,11 @@
 <p align="center">Stacked photos, RAW and 960 fps slow motion for the Xperia XZ1 Compact</p>
 
 <p align="center">
+  <a href="https://lilaccamera.github.io/"><img src="https://img.shields.io/badge/Read%20the%20user%20guide-7550D4?style=for-the-badge" alt="Read the user guide"></a>
+</p>
+
+<p align="center">
   <a href="https://lilaccamera.github.io/user/getting-started/">Get started</a> ·
-  <a href="https://lilaccamera.github.io/">User guide</a> ·
   <a href="https://github.com/lilaccamera/lilaccamera/releases">Beta releases</a> ·
   <a href="https://lilaccamera.github.io/rom/integration/">For ROM maintainers</a>
 </p>
