@@ -7,14 +7,57 @@
         android:name="com.sonymobile.permission.IMAGE_PROCESSOR"
         android:protectionLevel="signature" />
     <uses-permission android:name="com.sonymobile.permission.IMAGE_PROCESSOR" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <!-- No launcher activity: a bound service only. It works only as a privileged system app
-         (/system/priv-app), see tools/install.sh. -->
+    <!-- The Lilac builds the photo and video request forwarder may serve. -->
+    <queries>
+        <package android:name="io.github.lilaccamera" />
+        <package android:name="io.github.lilaccamera.beta" />
+    </queries>
+
+    <!-- No launcher activity: a bound service and the request forwarder. It works only as a privileged system app
+         (/system/priv-app), see tools/bridge.sh. -->
     <application
         android:allowBackup="false"
         android:label="Lilac Sony Bridge">
         <service
             android:name=".BridgeService"
             android:exported="true" />
+
+        <!-- Other apps' photo and video requests, passed on to Lilac. Off until a trusted Lilac is found
+             (CaptureForwardActivity.refresh), so the chooser never lists an entry that leads nowhere. -->
+        <activity
+            android:name=".CaptureForwardActivity"
+            android:enabled="false"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="Lilac Camera"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.media.action.IMAGE_CAPTURE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.media.action.IMAGE_CAPTURE_SECURE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.media.action.VIDEO_CAPTURE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".ForwarderReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

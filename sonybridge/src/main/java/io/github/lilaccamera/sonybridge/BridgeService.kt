@@ -140,7 +140,10 @@ class BridgeService : Service() {
         override fun release() = call("release") { finishEncoder(); camera.release() }
     }
 
-    override fun onBind(intent: Intent): IBinder = binder
+    override fun onBind(intent: Intent): IBinder {
+        runCatching { CaptureForwardActivity.refresh(this) }.onFailure { log("forwarder check failed: $it") }
+        return binder
+    }
 
     // The caller is gone or let go: never leave Sony's session open.
     override fun onUnbind(intent: Intent): Boolean {

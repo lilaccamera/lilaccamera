@@ -18,7 +18,7 @@ import android.os.ParcelFileDescriptor;
 interface ISonyBridge {
     /**
      * Interface version. 1: 960 fps slow motion (everything below). 2: the bridge trusts Lilac by pinned
-     * certificate; no new calls.
+     * certificate and forwards other apps' photo and video requests to it; no new calls.
      */
     int version();
 
