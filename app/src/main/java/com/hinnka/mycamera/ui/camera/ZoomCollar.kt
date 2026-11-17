@@ -66,7 +66,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 // The collar zooms no further than this, and leaves out the stops above it; pinch zoom keeps the full range.
-private const val COLLAR_MAX_ZOOM = 4f
+internal const val COLLAR_MAX_ZOOM = 4f
 // Zoom speed at a full turn: the ratio changes by a factor of e per second.
 private const val ZOOM_RATE = 1.0f
 

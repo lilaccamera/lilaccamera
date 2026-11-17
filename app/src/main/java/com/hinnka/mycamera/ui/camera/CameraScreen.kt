@@ -161,6 +161,8 @@ private var controlsArrivalPlayed = false
 // without, and a swipe that hides or shows them is remembered until the app restarts.
 private val manualControlsShownByMode = mutableMapOf<CameraShootingMode, Boolean>()
 private const val ZoomStopAnimationCompletionThreshold = 0.001f
+/** Volume-key zoom speed: 1x to 4x in two seconds. */
+private const val VOLUME_ZOOM_DOUBLINGS_PER_SECOND = 1f
 private const val RawCaptureTapDebounceMillis = 1000L
 private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
 private const val DefaultIso = 100f
@@ -784,6 +786,22 @@ fun CameraScreen(
         }
     }
 
+    // A held volume key zooms like a drag on the zoom collar: smoothly, within the collar's range, until let go.
+    LaunchedEffect(viewModel.volumeZoomDirection) {
+        val direction = viewModel.volumeZoomDirection
+        if (direction == 0) return@LaunchedEffect
+        var last = withFrameNanos { it }
+        while (true) {
+            val now = withFrameNanos { it }
+            val seconds = (now - last) / 1e9f
+            last = now
+            val current = viewModel.zoomRatioByMain
+            val next = (current * 2f.pow(direction * seconds * VOLUME_ZOOM_DOUBLINGS_PER_SECOND))
+                .coerceIn(viewModel.globalMinZoom, minOf(COLLAR_MAX_ZOOM, viewModel.globalMaxZoom))
+            if (next != current) setZoomWithPreviewTransition(next)
+        }
+    }
+
     fun animateZoomStopWithPreviewTransition(targetZoom: Float) {
         lensSwitchTransition.cancelPendingSwitch()
         cancelZoomStopAnimation()
@@ -807,6 +825,10 @@ fun CameraScreen(
         } else {
             animateCurrentLensToZoomStop(targetZoom)
         }
+    }
+
+    LaunchedEffect(viewModel.volumeZoomStep) {
+        viewModel.volumeZoomStep?.let { animateZoomStopWithPreviewTransition(it.targetZoom) }
     }
 
     var showProUnavailableDialog by remember { mutableStateOf(false) }

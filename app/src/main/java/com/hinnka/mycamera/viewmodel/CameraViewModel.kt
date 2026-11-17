@@ -18,6 +18,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -1425,6 +1426,31 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     var isExpanded by mutableStateOf(false)
 
+    /** A volume key held for zoom: 1 in, -1 out, 0 none; the camera screen zooms while it is set. */
+    var volumeZoomDirection by mutableIntStateOf(0)
+        private set
+    private var volumeZoomHold: Job? = null
+
+    /** A volume-key tap's target zoom stop; a new object for every tap, so the same stop twice still animates. */
+    class VolumeZoomStep(val targetZoom: Float)
+    var volumeZoomStep by mutableStateOf<VolumeZoomStep?>(null)
+        private set
+    private var volumeZoomTapUp = true
+
+    /** Key released: a tap steps one zoom stop, a hold ends the smooth zoom. True when the release is consumed. */
+    fun handleVolumeKeyUp(): Boolean {
+        val hold = volumeZoomHold
+        if (hold != null) {
+            hold.cancel()
+            volumeZoomHold = null
+            handleVolumeZoom(volumeZoomTapUp)
+            return true
+        }
+        if (volumeZoomDirection == 0) return false
+        volumeZoomDirection = 0
+        return true
+    }
+
     /** The camera screen is the one showing (not the gallery, settings or an editor); hardware keys act only then. */
     @Volatile var cameraScreenShown = true
 
@@ -1593,6 +1619,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // 用于处理音量键连续按下的时间戳，防止抖动和过快响应
     private var lastVolumeKeyEventTime = 0L
     private val VOLUME_KEY_DEBOUNCE_TIME = 200L // 毫秒
+    private val VOLUME_ZOOM_HOLD_MS = 300L // shorter is a tap (one zoom stop), longer a smooth zoom
 
     private var hasAppliedDefaultFocalLength = false
     private var earlyCameraStart: Deferred<Boolean?>? = null
@@ -5492,10 +5519,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 处理音量键按下
      * @return 是否消费了该事件
      */
-    fun handleVolumeKey(isUp: Boolean): Boolean {
+    fun handleVolumeKey(isUp: Boolean, repeatCount: Int = 0): Boolean {
         val action = userPreferencesRepository.current.volumeKeyAction
         // elsewhere (a video playing in the gallery, say) the keys keep their ordinary volume role
         if (action == VolumeKeyAction.NONE || !cameraScreenShown) return false
+        if (action == VolumeKeyAction.ZOOM) {
+            // a tap steps to the next zoom stop (on release); held, the camera screen zooms smoothly until let go
+            if (repeatCount == 0 && volumeZoomHold == null && volumeZoomDirection == 0) {
+                volumeZoomHold = viewModelScope.launch {
+                    delay(VOLUME_ZOOM_HOLD_MS)
+                    volumeZoomHold = null
+                    volumeZoomDirection = if (isUp) 1 else -1
+                }
+                volumeZoomTapUp = isUp
+            }
+            return true
+        }
 
         val currentTime = System.currentTimeMillis()
         if (currentTime - lastVolumeKeyEventTime < VOLUME_KEY_DEBOUNCE_TIME) {
@@ -5526,10 +5565,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 true
             }
 
-            VolumeKeyAction.ZOOM -> {
-                handleVolumeZoom(isUp)
-                true
-            }
+            VolumeKeyAction.ZOOM -> true
         }
     }
 
@@ -5575,22 +5611,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             (currentIndex - 1).coerceAtLeast(0)
         }
 
-        if (nextIndex != currentIndex) {
-            val targetZoom = zoomStops[nextIndex]
-
-            if (isCurrentLensCustomZoomRatioStop(targetZoom)) {
-                setZoomRatio(targetZoom)
-                return
-            }
-
-            // 5. 检查是否需要切换镜头 (逻辑同步自 ZoomCollar.kt)
-            val optimalLens = findOptimalLens(targetZoom, availableCameras, currentCamera.cameraId)
-            if (optimalLens != null && optimalLens.cameraId != currentCamera.cameraId) {
-                switchToLensAndSetZoomRatio(optimalLens.cameraId, targetZoom)
-            } else {
-                setZoomRatio(targetZoom)
-            }
-        }
+        // the camera screen animates the viewfinder and the collar there, as a tap on the collar does
+        if (nextIndex != currentIndex) volumeZoomStep = VolumeZoomStep(zoomStops[nextIndex])
     }
 
     /**
