@@ -26,8 +26,11 @@ android {
         applicationId = "io.github.lilaccamera"
         minSdk = 30
         targetSdk = 36
-        versionCode = 164
-        versionName = "1.28.5"
+        // Lilac's own numbering. A release is tagged v<versionName>; a beta's name has a suffix (0.2.0-beta.1).
+        // Raise versionCode for every release, betas included, or the update will not install.
+        versionCode = 165
+        versionName = "0.1.0"
+        manifestPlaceholders["appLabel"] = "@string/app_name"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
@@ -84,6 +87,11 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
+            // -Pbeta builds the GitHub beta: "Lilac Beta" under <id>.beta, installable beside a ROM's Lilac
+            if (project.hasProperty("beta")) {
+                applicationIdSuffix = ".beta"
+                manifestPlaceholders["appLabel"] = "Lilac Beta"
+            }
         }
     }
 
