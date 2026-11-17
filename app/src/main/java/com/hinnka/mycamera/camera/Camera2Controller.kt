@@ -3186,7 +3186,8 @@ class Camera2Controller(private val context: Context) {
                             !isPhysicalOutputProfileFailed(it, ImageFormat.YCBCR_P010)
                         } ?: true)
                 val resolvedVideoPreviewSize = refreshVideoCapabilities(openCharacteristics)
-                if (captureMode == CaptureMode.VIDEO) checkSlowMotionAvailable()
+                // In every mode: connecting also tells the bridge Lilac is here, so it offers Lilac to other apps.
+                checkSlowMotionAvailable()
                 previewSize = when (captureMode) {
                     CaptureMode.VIDEO -> resolvedVideoPreviewSize
                     CaptureMode.PHOTO -> CameraUtils.getFixedPreviewSize(openCharacteristics, _state.value.aspectRatio)

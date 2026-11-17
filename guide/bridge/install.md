@@ -46,7 +46,7 @@ From the [GitHub release](https://github.com/lilaccamera/lilaccamera/releases/la
 
     The script checks the phone again, copies the APK into place and reboots.
 
-3. **Check again** after the reboot. The package line should show `/system/priv-app/LilacSonyBridge/`, and the flags `PRIVILEGED`. The request forwarder line says `on` and names the Lilac it serves once Lilac is installed; if Lilac was installed after the reboot, open it in Video mode once first (that is when Lilac connects to the bridge).
+3. **Check again** after the reboot. The package line should show `/system/priv-app/LilacSonyBridge/`, and the flags `PRIVILEGED`. The request forwarder line says `on` and names the Lilac it serves once Lilac is installed; if Lilac was installed after the reboot, open it once first (that is when Lilac connects to the bridge).
 
 4. In Lilac, switch to Video and swipe down on the picture: a **Slow-mo** switch appears. See [slow motion](../user/video.md#slow-motion).
 

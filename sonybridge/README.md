@@ -64,8 +64,8 @@ handles no result.
 - **When it is on:** the activity is disabled in the manifest. `CaptureForwardActivity.refresh` enables it only while a
   trusted Lilac is installed **and** that Lilac is not a system app (a system Lilac answers the requests itself; both
   would be listed). It runs at `BOOT_COMPLETED` and `PACKAGE_FULLY_REMOVED` (`ForwarderReceiver`) and whenever Lilac
-  binds (Lilac binds when it opens in Video mode). A Lilac installed after boot is therefore offered from its first
-  Video mode start. A request that arrives with Lilac gone is answered "cancelled" and the forwarder switches off.
+  binds (Lilac binds once per start, when its camera first opens, in any mode). A Lilac installed after boot is therefore offered
+  from its first start. A request that arrives with Lilac gone is answered "cancelled" and the forwarder switches off.
 - Each check logs `forwarder on|off, serves <package>, interface <n>`; `tools/bridge.sh check` shows that line and the
   activity's state.
 

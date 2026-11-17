@@ -96,7 +96,7 @@ case "${1:-check}" in
     echo "-- request forwarder: ${fw:-off (never switched on since install)}"
     echo "-- interface version and the Lilac it serves (logged at boot and when Lilac connects):"
     adb logcat -d -s LilacSonyBridge:I | grep "forwarder " | tail -1 | sed 's/.*: forwarder/forwarder/' | grep . ||
-      echo "no report in the log since it was last cleared; switch Lilac to Video once, then check again"
+      echo "no report in the log since it was last cleared; open Lilac once, then check again"
     rc=0; check_cacao || rc=1; check_shim || rc=1
     echo "-- last capability report from the bridge (written when Lilac asks):"
     adb logcat -d -s LilacSonyBridge:I | grep "capabilities:" | tail -1 || true
