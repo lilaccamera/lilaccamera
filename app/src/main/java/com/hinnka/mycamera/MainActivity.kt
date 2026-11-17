@@ -780,6 +780,7 @@ fun NavigationHost(
     navController.addOnDestinationChangedListener { _, destination, _ ->
         BuglyHelper.setUserScene(context, destination.route.hashCode())
     }
+    cameraViewModel.cameraScreenShown = currentRoute == null || currentRoute == Routes.CAMERA
     val containerSize = LocalWindowInfo.current.containerSize
     cameraViewModel.isExpanded =
         (containerSize.width * 1f / containerSize.height) > AspectRatio.RATIO_4_3.getValue(false)

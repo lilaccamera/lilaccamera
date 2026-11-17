@@ -1425,6 +1425,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     var isExpanded by mutableStateOf(false)
 
+    /** The camera screen is the one showing (not the gallery, settings or an editor); hardware keys act only then. */
+    @Volatile var cameraScreenShown = true
+
     private var startupPrewarmJob: Job? = null
     private var startupPrewarmAttempted = false
 
@@ -5491,7 +5494,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun handleVolumeKey(isUp: Boolean): Boolean {
         val action = userPreferencesRepository.current.volumeKeyAction
-        if (action == VolumeKeyAction.NONE) return false
+        // elsewhere (a video playing in the gallery, say) the keys keep their ordinary volume role
+        if (action == VolumeKeyAction.NONE || !cameraScreenShown) return false
 
         val currentTime = System.currentTimeMillis()
         if (currentTime - lastVolumeKeyEventTime < VOLUME_KEY_DEBOUNCE_TIME) {
