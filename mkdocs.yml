@@ -1,5 +1,7 @@
 site_name: Lilac Camera
 site_description: How to use Lilac Camera on the Xperia XZ1 Compact
+site_url: https://lilaccamera.github.io/
+repo_url: https://github.com/lilaccamera/lilaccamera
 docs_dir: guide
 strict: true
 
