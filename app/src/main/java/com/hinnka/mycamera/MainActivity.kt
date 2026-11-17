@@ -82,6 +82,7 @@ import com.hinnka.mycamera.ui.camera.CameraScreen
 import com.hinnka.mycamera.ui.camera.CaptureForCaller
 import com.hinnka.mycamera.ui.camera.CaptureForCallerFlow
 import com.hinnka.mycamera.ui.camera.LocalCaptureForCaller
+import com.hinnka.mycamera.ui.camera.LocalPhoneLocked
 import android.provider.MediaStore
 import com.hinnka.mycamera.data.FilmData
 import com.hinnka.mycamera.ui.camera.ColorWalkScreen
@@ -227,6 +228,27 @@ open class MainActivity : AppCompatActivity() {
         }
 
     private var hasPermissions by mutableStateOf(false)
+
+    private val keyguard by lazy { getSystemService(android.app.KeyguardManager::class.java) }
+    // The camera is showing over the lock screen. Everything but the camera screen asks for the unlock.
+    private var phoneLocked by mutableStateOf(false)
+
+    /** A launch while the phone is locked (camera key, power button) shows the camera without the unlock. */
+    private fun showOverLockScreen() {
+        phoneLocked = keyguard.isKeyguardLocked
+        if (phoneLocked) setShowWhenLocked(true)
+    }
+
+    private fun unlockPhone(onResult: (Boolean) -> Unit) {
+        keyguard.requestDismissKeyguard(this, object : android.app.KeyguardManager.KeyguardDismissCallback() {
+            override fun onDismissSucceeded() {
+                phoneLocked = false
+                onResult(true)
+            }
+            override fun onDismissCancelled() = onResult(false)
+            override fun onDismissError() = onResult(false)
+        })
+    }
     private var pendingRoute by mutableStateOf<String?>(null)
     private var pendingLutImportUris by mutableStateOf<List<Uri>>(emptyList())
     private var externalGalleryReviewReturnToCaller by mutableStateOf(false)
@@ -266,6 +288,7 @@ open class MainActivity : AppCompatActivity() {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         StartupTrace.mark("MainActivity.onCreate start")
+        showOverLockScreen()
         val asked = intent?.action
         if (asked == MediaStore.ACTION_IMAGE_CAPTURE || asked == MediaStore.ACTION_VIDEO_CAPTURE) {
             cameraViewModel.captureForCaller =
@@ -370,8 +393,12 @@ open class MainActivity : AppCompatActivity() {
                         }
 
                         val captureForCaller = cameraViewModel.captureForCaller
-                        if (hasPermissions) CompositionLocalProvider(LocalCaptureForCaller provides captureForCaller) {
+                        if (hasPermissions) CompositionLocalProvider(
+                            LocalCaptureForCaller provides captureForCaller,
+                            LocalPhoneLocked provides phoneLocked,
+                        ) {
                             NavigationHost(
+                                unlockPhone = ::unlockPhone,
                                 cameraViewModel = cameraViewModel,
                                 galleryViewModel = galleryViewModel,
                                 pendingRoute = pendingRoute,
@@ -415,6 +442,13 @@ open class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        phoneLocked = keyguard.isKeyguardLocked
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Only a launch while locked shows over the lock screen; a camera left open does not come back over it.
+        setShowWhenLocked(false)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
@@ -447,6 +481,7 @@ open class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        showOverLockScreen()
         handleIntent(intent)
     }
 
@@ -686,7 +721,8 @@ fun NavigationHost(
     pendingLutImportUris: List<Uri> = emptyList(),
     onLutImportHandled: () -> Unit = {},
     externalGalleryReviewReturnToCaller: Boolean = false,
-    onExternalGalleryReviewBack: () -> Unit = {}
+    onExternalGalleryReviewBack: () -> Unit = {},
+    unlockPhone: ((Boolean) -> Unit) -> Unit = {}
 ) {
     val context = LocalContext.current
     val navController = rememberNavController()
@@ -727,6 +763,14 @@ fun NavigationHost(
     cameraViewModel.isExpanded =
         (containerSize.width * 1f / containerSize.height) > AspectRatio.RATIO_4_3.getValue(false)
 
+    // Over the lock screen only the camera is open: any other screen asks for the unlock first, stays
+    // covered until it is given, and goes back to the camera if it is not.
+    val coveredForLock = LocalPhoneLocked.current && currentRoute != null && currentRoute != Routes.CAMERA
+    LaunchedEffect(coveredForLock) {
+        if (coveredForLock) unlockPhone { unlocked ->
+            if (!unlocked) navController.popBackStack(Routes.CAMERA, inclusive = false)
+        }
+    }
     Box(modifier = Modifier.fillMaxSize()) {
         NavHost(
             navController = navController,
@@ -1190,6 +1234,7 @@ fun NavigationHost(
                 )
             }
         }
+        if (coveredForLock) Box(Modifier.fillMaxSize().background(Color.Black))
     }
 }
 

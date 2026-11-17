@@ -116,16 +116,6 @@
             </intent-filter>
 
             <intent-filter>
-                <action android:name="android.media.action.STILL_IMAGE_CAMERA" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-
-            <intent-filter>
-                <action android:name="android.media.action.STILL_IMAGE_CAMERA_SECURE" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-
-            <intent-filter>
                 <action android:name="android.intent.action.PICK" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="image/*" />
@@ -184,22 +174,13 @@
             </intent-filter>
         </activity>
 
-        <!-- Android offers this request only to cameras installed as system apps. -->
+        <!-- Other apps' photo and video requests; its intent filters are in the release manifest. -->
         <activity
                 android:name=".CaptureActivity"
                 android:exported="true"
                 android:screenOrientation="portrait"
                 android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
-                android:theme="@style/Theme.MyCamera.Splash">
-            <intent-filter>
-                <action android:name="android.media.action.IMAGE_CAPTURE" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.media.action.VIDEO_CAPTURE" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </activity>
+                android:theme="@style/Theme.MyCamera.Splash" />
 
         <activity
                 android:name=".mgc.MgcFilterSelectionActivity"

@@ -36,6 +36,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -241,6 +242,9 @@ private fun PanelDismissPreviewOverlay(
     )
 }
 
+/** The camera is showing over the lock screen: only the camera itself is open until the phone is unlocked. */
+val LocalPhoneLocked = compositionLocalOf { false }
+
 @Composable
 fun CameraScreen(
     viewModel: CameraViewModel,
@@ -267,7 +271,10 @@ fun CameraScreen(
         controlsArrivalPlayed = true
         controlsArrival.animateTo(1f, tween(ControlsArrivalDurationMillis, easing = ControlsArrivalEasing))
     }
-    val latestPhoto by galleryViewModel.latestPhoto.collectAsState()
+    val newestPhoto by galleryViewModel.latestPhoto.collectAsState()
+    // Over the lock screen the thumbnail shows only what was taken since; older photos need the unlock.
+    var shotSinceLaunch by remember { mutableStateOf(false) }
+    val latestPhoto = newestPhoto.takeIf { !LocalPhoneLocked.current || shotSinceLaunch }
     val showLevelIndicator by preferenceValue { it.showLevelIndicator }
     val focusPeakingEnabled by preferenceValue { it.focusPeakingEnabled }
     val portraitQuickBlur by preferenceValue { it.portraitQuickBlur }
@@ -580,6 +587,7 @@ fun CameraScreen(
         viewModel.imageSavedEvent.collect {
             // While recording, the only photos saved are Snapshot's.
             if (currentRecordingForNotes) noteLine.say(R.string.video_snapshot_saved)
+            shotSinceLaunch = true
             galleryViewModel.refreshLatestPhoto()
             MyCameraApplication.updateWidgets(context)
         }
