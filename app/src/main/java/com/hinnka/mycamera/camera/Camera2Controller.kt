@@ -3017,9 +3017,9 @@ class Camera2Controller(private val context: Context) {
 
         PLog.i(
             TAG,
-            "打开相机: selected=$cameraId, open=$openCameraId, targetZoom=$targetZoomRatioByMain, " +
+            "Opening camera: selected=$cameraId, open=$openCameraId, targetZoom=$targetZoomRatioByMain, " +
                     "physicalOutput=$outputPhysicalCameraId, " +
-                    "模式: ${captureMode.name}"
+                    "mode: ${captureMode.name}"
         )
 
         var previewSize = _state.value.currentPreviewSize
