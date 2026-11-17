@@ -1194,6 +1194,8 @@ fun GalleryDetailScreen(
         )
     }
 
+    HighFrameRateChoiceDialog(viewModel)
+
     // 照片信息对话框
     if (showInfoDialog && currentPhoto != null && !isCurrentPhotoProcessing) {
         val infoPhoto = currentPhoto.relatedPhoto ?: currentPhoto

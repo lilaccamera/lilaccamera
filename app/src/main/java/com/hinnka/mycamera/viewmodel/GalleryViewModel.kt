@@ -2503,15 +2503,45 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     private fun videoUri(photo: MediaData): Uri = photo.sourceUri ?: photo.metadata?.sourceUri?.toUri() ?: photo.uri
 
+    /** A pending "Slowed or Full speed" question for high-frame-rate videos being shared or exported. */
+    class HighFrameRateChoice(
+        val forExport: Boolean,
+        val captureFps: Int,
+        /** Length at full speed when one clip is asked about, otherwise null. */
+        val durationMs: Long?,
+        val onPick: (slowed: Boolean) -> Unit,
+    )
+
+    var highFrameRateChoice by mutableStateOf<HighFrameRateChoice?>(null)
+
+    /** Asks Slowed or Full speed when any of [photos] is a high-frame-rate video; false when there is nothing to ask. */
+    private suspend fun askHighFrameRate(
+        photos: List<MediaData>,
+        forExport: Boolean,
+        onPick: (slowed: Boolean) -> Unit,
+    ): Boolean {
+        val rates = photos.filter { it.isVideo }.map { videoRate(it) }.filter { it.isHighFrameRate }
+        if (rates.isEmpty()) return false
+        highFrameRateChoice = HighFrameRateChoice(
+            forExport = forExport,
+            captureFps = rates.maxOf { it.captureFps }.roundToInt(),
+            durationMs = rates.singleOrNull()?.durationMs?.takeIf { photos.size == 1 && it > 0 },
+            onPick = onPick,
+        )
+        return true
+    }
+
     /**
      * 分享照片
+     * [slowed]: for a high-frame-rate video, true sends a 4x slower copy without sound; null asks first.
      */
-    fun sharePhoto(photo: MediaData) {
+    fun sharePhoto(photo: MediaData, slowed: Boolean? = null) {
         viewModelScope.launch {
+            if (slowed == null && askHighFrameRate(listOf(photo), forExport = false) { sharePhoto(photo, it) }) return@launch
             _isSharing.value = true
             try {
                 val context = getApplication<Application>()
-                val shareRequest = prepareShareRequest(photo)
+                val shareRequest = prepareShareRequest(photo, slowed == true)
                 if (shareRequest != null) {
                     val shareIntent = Intent(Intent.ACTION_SEND).apply {
                         type = shareRequest.mimeType
@@ -2536,12 +2566,18 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun shareSelectedPhotos() {
         val photosToShare = selectedPhotos.toList()
         if (photosToShare.isEmpty()) return
+        shareMany(photosToShare, null)
+    }
 
+    private fun shareMany(photosToShare: List<MediaData>, slowed: Boolean?) {
         viewModelScope.launch {
+            if (slowed == null && askHighFrameRate(photosToShare, forExport = false) { shareMany(photosToShare, it) }) {
+                return@launch
+            }
             _isSharing.value = true
             try {
                 val context = getApplication<Application>()
-                val requests = photosToShare.mapNotNull { prepareShareRequest(it) }
+                val requests = photosToShare.mapNotNull { prepareShareRequest(it, slowed == true) }
                 if (requests.isNotEmpty()) {
                     val uris = ArrayList(requests.map { it.uri })
                     val mimeType = if (requests.any { it.mimeType.startsWith("video/") }) {
@@ -4912,6 +4948,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun exportVideo(
         photo: MediaData,
         exportOption: VideoExportOption,
+        /** For a high-frame-rate video: true exports it 4x slower without sound; null asks first. */
+        slowed: Boolean? = null,
         onComplete: (success: Boolean, exportedUri: android.net.Uri?) -> Unit = { _, _ -> }
     ) {
         if (!photo.isVideo) {
@@ -4931,6 +4969,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         if (isVideoExporting) return
 
         viewModelScope.launch {
+            if (slowed == null && askHighFrameRate(listOf(photo), forExport = true) {
+                    exportVideo(photo, exportOption, it, onComplete)
+                }
+            ) return@launch
             isVideoExporting = true
             videoExportProgress = 0
             try {
@@ -4958,7 +5000,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 val lutSuffix = lutId?.let {
                     contentRepository.lutManager.getLutInfo(it)?.getName() ?: ""
                 }?.let { if (it.isNotEmpty()) ".$it" else "" } ?: ""
-                val outputName = "${baseName}${lutSuffix}_edit"
+                val slowedNow = slowed == true && videoRate(photo).isHighFrameRate
+                val outputName = "${baseName}${lutSuffix}_edit" + if (slowedNow) "_slowed" else ""
 
                 val resultUri = exportVideoWithEffects(
                     context = context,
@@ -4967,6 +5010,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     recipeParams = recipeParams,
                     exportOption = exportOption,
                     outputDisplayName = outputName,
+                    slowed = slowedNow,
                     sourceLogProfileOverride = VideoColorMetadata.manualProfile(metadata?.customProperties),
                     onProgress = { progress ->
                         videoExportProgress = progress
@@ -5417,11 +5461,20 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     private data class ShareRequest(val uri: Uri, val mimeType: String)
 
-    private suspend fun prepareShareRequest(photo: MediaData): ShareRequest? = withContext(Dispatchers.IO) {
+    private suspend fun prepareShareRequest(photo: MediaData, slowed: Boolean = false): ShareRequest? = withContext(Dispatchers.IO) {
         try {
             val context = getApplication<Application>()
             if (photo.isVideo) {
-                val shareUri = photo.sourceUri ?: photo.metadata?.sourceUri?.toUri() ?: photo.uri
+                val shareUri = videoUri(photo)
+                if (slowed && videoRate(photo).isHighFrameRate) {
+                    // Overwritten by the next share of this video, like the photo copies below
+                    val slowedFile = File(File(context.cacheDir, "shared").apply { mkdirs() }, "share_${photo.id}_slowed.mp4")
+                    if (!SlowedCopy.write(context, shareUri, slowedFile)) return@withContext null
+                    return@withContext ShareRequest(
+                        uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", slowedFile),
+                        mimeType = "video/mp4"
+                    )
+                }
                 return@withContext ShareRequest(
                     uri = shareUri,
                     mimeType = photo.mimeType ?: photo.metadata?.mimeType ?: "video/*"

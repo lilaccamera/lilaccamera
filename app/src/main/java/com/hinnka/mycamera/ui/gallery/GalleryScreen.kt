@@ -693,6 +693,8 @@ fun GalleryScreen(
     var deleteExportedPref by rememberPreference(UserPreferences::deleteExported)
 
     // 删除确认对话框
+    HighFrameRateChoiceDialog(viewModel)
+
     if (showDeleteDialog) {
         val exportedPhotosCount = remember(selectedPhotos) {
             selectedPhotos.sumOf { photo ->
