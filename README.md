@@ -19,9 +19,8 @@
   <a href="https://lilaccamera.github.io/rom/integration/">For ROM maintainers</a>
 </p>
 
-Lilac is a camera app for one phone. It does three things a default camera app cannot:
 
-1. **The best of both worlds.** GCam's photo processing on Sony's camera hardware.
+1. **GCam's photo processing on Sony's camera hardware**, with all of the sony camera hardware features.
 2. **Built for a small screen.** The camera and the editor are rebuilt for one thumb on 4.6 inches.
 3. **960 fps slow motion.** Sony's super slow motion, working again on a custom ROM.
 
