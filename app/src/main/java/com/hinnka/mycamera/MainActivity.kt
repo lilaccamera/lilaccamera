@@ -290,7 +290,9 @@ open class MainActivity : AppCompatActivity() {
         StartupTrace.mark("MainActivity.onCreate start")
         showOverLockScreen()
         val asked = intent?.action
-        if (asked == MediaStore.ACTION_IMAGE_CAPTURE || asked == MediaStore.ACTION_VIDEO_CAPTURE) {
+        // The secure request comes from the lock screen; it is answered like a photo request, still locked.
+        if (asked == MediaStore.ACTION_IMAGE_CAPTURE || asked == MediaStore.ACTION_IMAGE_CAPTURE_SECURE ||
+            asked == MediaStore.ACTION_VIDEO_CAPTURE) {
             cameraViewModel.captureForCaller =
                 CaptureForCaller(close = ::finish, video = asked == MediaStore.ACTION_VIDEO_CAPTURE)
         }
