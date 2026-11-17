@@ -8,7 +8,7 @@ import android.content.pm.PackageManager
 import android.os.IBinder
 import com.hinnka.mycamera.camera.DeviceQuirks
 import com.hinnka.mycamera.utils.PLog
-import com.mdomokos.lilaccamera.sonybridge.ISonyBridge
+import io.github.lilaccamera.sonybridge.ISonyBridge
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -67,7 +67,7 @@ class SonyBridgeClient(private val context: Context, private val onDied: () -> U
 
     companion object {
         private const val TAG = "SonyBridgeClient"
-        const val PACKAGE = "com.mdomokos.lilaccamera.sonybridge"
+        const val PACKAGE = "io.github.lilaccamera.sonybridge"
 
         /** Whether the slow-motion feature could exist at all here; cheap, no binding. */
         fun isCompanionInstalled(context: Context): Boolean =

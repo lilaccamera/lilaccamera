@@ -14,7 +14,7 @@ import java.io.File
 
 /**
  * One slow-motion recording: ordinary video, a 960 fps burst, ordinary video, with sound. Runs Sony's call sequence
- * through the companion's [com.mdomokos.lilaccamera.sonybridge.ISonyBridge] in the exact order the service needs,
+ * through the companion's [io.github.lilaccamera.sonybridge.ISonyBridge] in the exact order the service needs,
  * with a timeout on every step. The caller owns the Camera2 session ([SlowMotionSpec] says what shape); this class
  * tells it when to open it ([Listener.onEntered]) and wants to hear when its viewfinder has settled ([startRecording]).
  *

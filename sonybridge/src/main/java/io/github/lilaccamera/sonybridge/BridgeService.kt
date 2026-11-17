@@ -1,4 +1,4 @@
-package com.mdomokos.lilaccamera.sonybridge
+package io.github.lilaccamera.sonybridge
 
 import android.app.Service
 import android.content.Intent
@@ -154,6 +154,6 @@ class BridgeService : Service() {
 
     private companion object {
         const val TAG = "LilacSonyBridge"
-        const val LILAC = "com.mdomokos.lilaccamera"
+        const val LILAC = "io.github.lilaccamera"
     }
 }

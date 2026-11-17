@@ -4,9 +4,9 @@
 # TRIGGERS=n fires n bursts, 10 s apart. Needs the camera open in video mode in the foreground. Usage: slowmo-test.sh [package] [width] [height] [frames] [out dir]
 # Only metadata and statistics are read; the video is never looked at.
 set -euo pipefail
-PKG=${1:-com.mdomokos.lilaccamera.debug.slowmo}; W=${2:-1280}; H=${3:-720}; N=${4:-91}
+PKG=${1:-io.github.lilaccamera.debug.slowmo}; W=${2:-1280}; H=${3:-720}; N=${4:-91}
 OUT=${5:-${TMPDIR:-/tmp}/slowmo-test}; mkdir -p "$OUT"
-cmd() { adb shell am broadcast -a com.mdomokos.lilaccamera.SLOWMO -p "$PKG" --es cmd "$1" --ei width "$W" --ei height "$H" --ei frames "$N" >/dev/null; }
+cmd() { adb shell am broadcast -a io.github.lilaccamera.SLOWMO -p "$PKG" --es cmd "$1" --ei width "$W" --ei height "$H" --ei frames "$N" >/dev/null; }
 pids() { adb shell 'pidof cacaoserver cameraserver camerahalserver 2>/dev/null; pidof android.hardware.camera.provider@2.4-service_64 2>/dev/null' | tr '\r\n' '  '; }
 newest() { adb shell 'ls -t /sdcard/DCIM/LilacCamera/*_960fps.mp4 2>/dev/null | head -1' | tr -d '\r'; }
 

@@ -29,7 +29,7 @@
 
     <!-- 960 fps slow motion on the lilac phone: the privileged companion app that owns Sony's native calls. -->
     <queries>
-        <package android:name="com.mdomokos.lilaccamera.sonybridge" />
+        <package android:name="io.github.lilaccamera.sonybridge" />
     </queries>
 
     <application
