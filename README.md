@@ -46,8 +46,8 @@ Compared with a default camera app such as Aperture:
 
 Lilac's interface is not PhotonCamera's. The camera and the editor were rebuilt around one rule: a 4.6-inch phone held in one hand.
 
-- **Everything you press is in thumb reach.** Every button sits in the lower part of the screen; the top is only picture.
-- **The picture takes the gestures:** swipe down for everyday settings, up for manual controls, sideways for looks.
+- **Everything you press is in thumb reach.** Every button sits in the lower part of the screen; the top is only viewfinder.
+- **The viewfinder takes gestures:** swipe down for everyday settings, up for manual controls, sideways for looks.
 - **The shutter is the mode dial**, with the zoom ring curved round its top like a compact camera's zoom lever.
 - **The side keys are camera controls:** half-press the camera key to focus, press fully to shoot; the volume keys shoot or zoom.
 
