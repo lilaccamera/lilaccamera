@@ -56,7 +56,3 @@ android {
     lint { checkReleaseBuilds = false }
     buildFeatures { aidl = true }
 }
-
-dependencies {
-    testImplementation(libs.junit)
-}
