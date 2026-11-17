@@ -35,6 +35,7 @@ import com.hinnka.mycamera.lut.LutInfo
 import com.hinnka.mycamera.lut.PhotoTransformation
 import com.hinnka.mycamera.lut.VideoExportOption
 import com.hinnka.mycamera.lut.exportVideoWithEffects
+import com.hinnka.mycamera.video.SlowedCopy
 import com.hinnka.mycamera.video.VideoColorMetadata
 import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.lut.getVideoExportOptions as resolveVideoExportOptions
@@ -2492,6 +2493,15 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         val videoFile = GalleryManager.getVideoFile(context, photo.id)
         return if (videoFile.exists()) videoFile else null
     }
+
+    private val videoRates = java.util.concurrent.ConcurrentHashMap<String, SlowedCopy.Rate>()
+
+    /** The video's capture rate and length, read once per item. */
+    suspend fun videoRate(photo: MediaData): SlowedCopy.Rate = withContext(Dispatchers.IO) {
+        videoRates.getOrPut(photo.id) { SlowedCopy.readRate(getApplication(), videoUri(photo)) }
+    }
+
+    private fun videoUri(photo: MediaData): Uri = photo.sourceUri ?: photo.metadata?.sourceUri?.toUri() ?: photo.uri
 
     /**
      * 分享照片
