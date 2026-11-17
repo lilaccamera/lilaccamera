@@ -3278,10 +3278,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var modeBeforeCaller: List<Any>? = null
     private val callerPhotoIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    /** Called before the camera is switched to Photo mode for another app: the mode is put back afterwards. */
-    fun keepModeForAfterCaller() {
+    /** Called before the mode is switched for another app ([prefs]: the settings before it): put back afterwards. */
+    fun keepModeForAfterCaller(prefs: UserPreferences = userPreferencesRepository.current) {
         if (modeBeforeCaller != null) return
-        val prefs = userPreferencesRepository.current
         modeBeforeCaller = listOf(prefs.captureMode, prefs.useRaw, prefs.useJpgMax, prefs.useRawMax)
     }
 
