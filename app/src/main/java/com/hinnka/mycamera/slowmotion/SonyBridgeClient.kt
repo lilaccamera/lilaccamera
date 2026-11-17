@@ -133,8 +133,10 @@ class SonyBridgeClient(private val context: Context, private val onDied: () -> U
                 val videoModes = if (client.version < VIDEO_MODES_SINCE) emptyList() else
                     SonyVideoMode.parse(SonyVideoMode.NORMAL, bundle.getStringArrayList("highFps")) +
                         SonyVideoMode.parse(SonyVideoMode.STEADYSHOT, bundle.getStringArrayList("steadyShot")) +
-                        SonyVideoMode.parse(SonyVideoMode.INTELLIGENT_ACTIVE, bundle.getStringArrayList("intelligentActive"))
-                return SlowMotionCapabilities(sizes, bundle.getIntegerArrayList("frameNums").orEmpty().distinct(), videoModes)
+                        SonyVideoMode.parse(SonyVideoMode.INTELLIGENT_ACTIVE, bundle.getStringArrayList("intelligentActive")) +
+                        // missing from Sony's report, but SteadyShot records at 1080p 30 on the phone
+                        SonyVideoMode(SonyVideoMode.STEADYSHOT, 1920, 1080, 30)
+                return SlowMotionCapabilities(sizes, bundle.getIntegerArrayList("frameNums").orEmpty().distinct(), videoModes.distinct())
             } catch (e: Exception) {
                 PLog.w(TAG, "Sony bridge capability query failed: ${e.message}")
                 return null

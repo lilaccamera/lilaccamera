@@ -31,6 +31,7 @@ import com.hinnka.mycamera.video.VideoConfig
 import com.hinnka.mycamera.video.VideoRecordingPath
 import android.os.StatFs
 import androidx.compose.ui.platform.LocalContext
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -38,19 +39,19 @@ import com.hinnka.mycamera.video.VideoStabilizationMode
 import com.hinnka.mycamera.ui.icons.AppIcons
 import com.hinnka.mycamera.camera.CameraHeat
 
-@Composable
-internal fun videoStabilizationModeLabel(mode: VideoStabilizationMode): String {
+/** Short names for the everyday Stabilise item and its notes. */
+internal fun videoStabilizationModeLabel(context: Context, mode: VideoStabilizationMode): String {
     return when (mode) {
-        VideoStabilizationMode.OFF ->
-            stringResource(R.string.settings_video_stabilization_mode_off)
-        VideoStabilizationMode.EIS ->
-            stringResource(R.string.settings_video_stabilization_mode_eis)
-        VideoStabilizationMode.OIS ->
-            stringResource(R.string.settings_video_stabilization_mode_ois)
-        VideoStabilizationMode.ENHANCED ->
-            stringResource(R.string.settings_video_stabilization_mode_enhanced)
+        VideoStabilizationMode.OFF -> context.getString(R.string.settings_video_stabilization_mode_off)
+        VideoStabilizationMode.SONY_STEADYSHOT -> context.getString(R.string.video_stabilise_steady)
+        VideoStabilizationMode.SONY_ACTIVE -> context.getString(R.string.video_stabilise_active)
+        VideoStabilizationMode.EIS, VideoStabilizationMode.OIS, VideoStabilizationMode.ENHANCED -> mode.displayName
     }
 }
+
+@Composable
+internal fun videoStabilizationModeLabel(mode: VideoStabilizationMode): String =
+    videoStabilizationModeLabel(LocalContext.current, mode)
 
 private val HeatWarningColor = Color(0xFFFF8A3D)
 private val HeatStopColor = Color(0xFFFF5449)

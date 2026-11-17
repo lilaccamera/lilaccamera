@@ -80,6 +80,12 @@
     <string name="slow_motion_trigger">Slow-mo burst</string>
     <string name="slow_motion_720_only">960 fps is only possible at 720p</string>
     <string name="video_rate_back_to_30">Frame rate back to 30 fps</string>
+    <string name="video_stabilise_steady">Steady</string>
+    <string name="video_stabilise_active">Active</string>
+    <!-- e.g. "EIS+ not at 1080p 60 · now Steady" -->
+    <string name="video_stabilise_not_here">%1$s not at %2$s %3$d · now %4$s</string>
+    <!-- e.g. "Steady did not start · now Off" -->
+    <string name="video_stabilise_failed">%1$s did not start · now %2$s</string>
     <string name="slow_motion_dark_pill">Too dark for slow-mo</string>
     <string name="video_aspect_chip">Aspect</string>
     <string name="video_log_chip">Log</string>

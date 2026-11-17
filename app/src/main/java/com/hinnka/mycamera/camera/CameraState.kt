@@ -433,6 +433,8 @@ data class CameraState(
     val videoCapabilities: VideoCapabilities = VideoCapabilities(),
     val videoRecordingState: VideoRecordingState = VideoRecordingState(),
     val slowMotion: com.hinnka.mycamera.slowmotion.SlowMotionUiState = com.hinnka.mycamera.slowmotion.SlowMotionUiState(),
+    /** The last time the video stabiliser fell back to another one; the note line says it. */
+    val stabiliseNotice: com.hinnka.mycamera.video.StabiliseNotice? = null,
 ) {
     val effectiveMeteringMode: MeteringMode
         get() = if (meteringPoint != null) MeteringMode.SPOT else meteringMode

@@ -1653,8 +1653,8 @@ fun SettingsScreen(
                         .availableStabilizationModes
                         .ifEmpty {
                             VideoStabilizationMode.entries.filter { mode ->
-                                mode != VideoStabilizationMode.ENHANCED ||
-                                    viewModel.isAlgorithmicStabilizationSupported
+                                mode.sonyMode == null && (mode != VideoStabilizationMode.ENHANCED ||
+                                    viewModel.isAlgorithmicStabilizationSupported)
                             }
                         }
                     val stabilizationModeLabels = stabilizationModes.map { mode ->
@@ -1667,6 +1667,8 @@ fun SettingsScreen(
                                 stringResource(R.string.settings_video_stabilization_mode_ois)
                             VideoStabilizationMode.ENHANCED ->
                                 stringResource(R.string.settings_video_stabilization_mode_enhanced)
+                            VideoStabilizationMode.SONY_STEADYSHOT -> stringResource(R.string.video_stabilise_steady)
+                            VideoStabilizationMode.SONY_ACTIVE -> stringResource(R.string.video_stabilise_active)
                         }
                     }
                     val selectedStabilizationModeLabel = stabilizationModeLabels

@@ -4219,7 +4219,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val resolvedConfig = state.value.videoConfig
         if (state.value.captureMode == CaptureMode.VIDEO &&
             (previousConfig.resolution != resolvedConfig.resolution ||
-                previousConfig.fps != resolvedConfig.fps)
+                previousConfig.fps != resolvedConfig.fps ||
+                cameraController.sonyRouteChanges(previousConfig, resolvedConfig))
         ) {
             reopenCamera()
         }
