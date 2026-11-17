@@ -1619,7 +1619,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // 用于处理音量键连续按下的时间戳，防止抖动和过快响应
     private var lastVolumeKeyEventTime = 0L
     private val VOLUME_KEY_DEBOUNCE_TIME = 200L // 毫秒
-    private val VOLUME_ZOOM_HOLD_MS = 300L // shorter is a tap (one zoom stop), longer a smooth zoom
+    private val VOLUME_ZOOM_HOLD_MS = 150L // shorter is a tap (one zoom stop), longer a smooth zoom
 
     private var hasAppliedDefaultFocalLength = false
     private var earlyCameraStart: Deferred<Boolean?>? = null
@@ -5529,9 +5529,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 volumeZoomHold = viewModelScope.launch {
                     delay(VOLUME_ZOOM_HOLD_MS)
                     volumeZoomHold = null
-                    volumeZoomDirection = if (isUp) 1 else -1
+                    volumeZoomDirection = if (isUp) -1 else 1
                 }
-                volumeZoomTapUp = isUp
+                volumeZoomTapUp = !isUp // volume up zooms out, down zooms in
             }
             return true
         }
