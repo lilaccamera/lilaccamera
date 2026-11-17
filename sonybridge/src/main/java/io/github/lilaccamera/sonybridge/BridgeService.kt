@@ -42,7 +42,8 @@ class BridgeService : Service() {
         if (uid == Process.myUid()) return
         val names = packageManager.getPackagesForUid(uid)
         val ok = names != null && names.any { it == LILAC || it.startsWith("$LILAC.") } &&
-            packageManager.checkSignatures(uid, Process.myUid()) == PackageManager.SIGNATURE_MATCH
+            (packageManager.checkSignatures(uid, Process.myUid()) == PackageManager.SIGNATURE_MATCH ||
+                packageManager.hasSigningCertificate(uid, RELEASE_CERT, PackageManager.CERT_INPUT_SHA256))
         if (!ok) throw SecurityException("uid $uid is not allowed to use the Sony bridge")
     }
 
@@ -155,5 +156,12 @@ class BridgeService : Service() {
     private companion object {
         const val TAG = "LilacSonyBridge"
         const val LILAC = "io.github.lilaccamera"
+
+        // SHA-256 of the certificate that signs the project's GitHub releases. A ROM re-signs its own
+        // Lilac and bridge with its key; this also lets the ROM's bridge serve a release-signed Lilac
+        // (the beta installed beside the ROM's copy).
+        val RELEASE_CERT: ByteArray =
+            "CA67BBFA7DB7174346664DB24FAA924509A9523E95D0B19B8E193B8538108CAD".chunked(2)
+                .map { it.toInt(16).toByte() }.toByteArray()
     }
 }

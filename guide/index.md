@@ -140,8 +140,8 @@ The XZ1 Compact's sensor records at 960 frames a second, but on custom ROMs that
 
 Other phones are not tested. Testers can add the bridge themselves: [install the bridge](bridge/install.md). ROM maintainers: [ROM integration](rom/integration.md).
 
-- **Stable:** inside lilac ROMs that include it; it updates with the ROM.
-- **Beta:** [GitHub releases](https://github.com/lilaccamera/lilaccamera/releases) of this project. It installs beside the ROM's copy under its own name.
+- **Stable:** `LilacCamera.apk` from the [latest release](https://github.com/lilaccamera/lilaccamera/releases/latest). Lilac ROMs ship this same APK, so a ROM's copy also updates from new releases.
+- **Beta:** `LilacBeta.apk` from a [pre-release](https://github.com/lilaccamera/lilaccamera/releases). It installs beside the stable copy as **Lilac Beta**.
 
 ## The guide
 

@@ -8,7 +8,7 @@ This page is for maintainers of ROMs for the Xperia XZ1 Compact (lilac) who want
 
 ## What you ship
 
-Two prebuilt APKs from a Lilac release, imported as they are:
+Two prebuilt APKs from a stable Lilac release (the one marked **Latest**; pre-releases are betas), imported as they are:
 
 | App | Package | Installed to | Why |
 |---|---|---|---|
@@ -19,14 +19,14 @@ Lilac cannot be built in the ROM tree (it is a Gradle build with Compose and its
 
 ## Importing them
 
-Let the build re-sign both APKs with the same ROM key, so the pair always matches. The bridge serves only a Lilac signed with the same key as itself.
+Keep the release signature (`presigned`). Both APKs are then signed with the same key, so the pair always matches, and users can update the ROM's copies from later releases like any app, without waiting for a new ROM build.
 
 ```text title="Android.bp"
 android_app_import {
     name: "LilacCamera",
     apk: "LilacCamera.apk",
-    // re-signed with the ROM's key
-    default_dev_cert: true,
+    // keeps the release signature, so later releases install over it
+    presigned: true,
     dex_preopt: {
         enabled: true,
     },
@@ -35,8 +35,8 @@ android_app_import {
 android_app_import {
     name: "LilacSonyBridge",
     apk: "LilacSonyBridge.apk",
-    // the same key as LilacCamera
-    default_dev_cert: true,
+    // signed with the same key as LilacCamera
+    presigned: true,
     // installs to /system/priv-app
     privileged: true,
 }
@@ -50,9 +50,10 @@ PRODUCT_PACKAGES += \
 
 - **No privapp-permissions XML is needed.** The bridge asks for no privileged permission; it only uses the signature permission it declares itself.
 - **Do not sign either app with the platform key.** Lilac does not need platform rights, and the bridge must not trust platform-signed apps.
+- **If your ROM must re-sign** prebuilts, use `default_dev_cert: true` for both instead. The pair still matches, and the bridge also serves Lilac Beta (it trusts the release key's certificate). Users can then update the ROM's copies only through the ROM.
 
 !!! warning "Release keys"
-    A ROM signed with AOSP's public test keys makes the bridge reachable by any app signed with those keys, as long as it uses Lilac's package name. Sign release builds with your own private keys.
+    When re-signing, a ROM signed with AOSP's public test keys makes the bridge reachable by any app signed with those keys, as long as it uses Lilac's package name. Re-sign only with your own private keys.
 
 ## What the ROM must already have
 

@@ -1,0 +1,72 @@
+name: Release APKs
+
+# Builds Lilac and the slow-motion bridge for every published release and attaches them,
+# signed with the project's release key. A full release carries LilacCamera.apk
+# (io.github.lilaccamera, the one ROMs ship as it is); a pre-release carries LilacBeta.apk
+# (io.github.lilaccamera.beta, which installs beside it). Both carry the bridge and bridge.sh.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and attach the files to
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  attach:
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+
+      - id: kind
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts)
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::Tag $TAG does not match versionName $version in app/build.gradle.kts"; exit 1
+          fi
+          prerelease=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)
+          case "$version" in *-*) beta=true ;; *) beta=false ;; esac
+          if [ "$beta" != "$prerelease" ]; then
+            echo "::error::A version with a suffix ($version) must be a pre-release, and one without must not"; exit 1
+          fi
+          echo "beta=$beta" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v5.0.0
+        with:
+          java-version: '21'
+          distribution: 'corretto'
+
+      - env:
+          RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}
+          ORG_GRADLE_PROJECT_RELEASE_STORE_FILE: release.keystore
+          ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          BETA: ${{ steps.kind.outputs.beta }}
+        run: |
+          if [ -z "$RELEASE_KEYSTORE" ]; then echo "::error::The RELEASE_KEYSTORE secret is missing"; exit 1; fi
+          # RELEASE_STORE_FILE resolves against :app's folder in :app and against the root in :sonybridge
+          printf '%s' "$RELEASE_KEYSTORE" | base64 --decode > release.keystore
+          cp release.keystore app/release.keystore
+          beta_flag=""; name=LilacCamera.apk
+          if [ "$BETA" = true ]; then beta_flag=-Pbeta; name=LilacBeta.apk; fi
+          ./gradlew :app:assembleDefaultRelease :sonybridge:assembleRelease $beta_flag --console=plain
+          rm release.keystore app/release.keystore
+          mkdir out
+          cp app/build/outputs/apk/default/release/app-default-release.apk "out/$name"
+          cp sonybridge/build/outputs/apk/release/sonybridge-release.apk out/LilacSonyBridge.apk
+          cp sonybridge/tools/bridge.sh out/bridge.sh
+
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" out/* --clobber --repo "$GITHUB_REPOSITORY"

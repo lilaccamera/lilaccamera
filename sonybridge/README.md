@@ -33,8 +33,10 @@ SlowMotionRemux: video file + sound + frame times -> the final MP4 in the normal
 - **Interface:** `src/main/aidl/.../ISonyBridge.aidl` (compiled into both apps; the app adds that folder as an AIDL source
   directory). The two apps must be installed together: the transaction codes follow the method order.
 - **Access control:** every call checks that the caller's package is `io.github.lilaccamera` or starts with
-  `io.github.lilaccamera.` **and** that its signature equals the bridge's own. A debug-signed bridge therefore
-  serves debug-signed Lilac builds only, and a bridge signed with the release key serves the release app only.
+  `io.github.lilaccamera.` **and** that it is signed either with the bridge's own key or with the certificate of
+  the project's GitHub releases (SHA-256 pinned in `BridgeService.RELEASE_CERT`). A bridge re-signed with a ROM's key
+  therefore serves the ROM's Lilac and the release-signed beta installed beside it; a debug-signed bridge serves
+  debug-signed builds and release-signed ones.
 - **Cleanup:** the bridge releases Sony's session when the client unbinds or dies. The client always calls `release`.
 - **Visibility:** Lilac declares a `<queries>` entry for the bridge package. The feature is offered only when the device
   is `lilac`, the bridge is installed and `getCapabilities()` reports 960 fps at 1280x720.

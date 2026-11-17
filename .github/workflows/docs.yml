@@ -14,6 +14,8 @@ concurrency:
 
 jobs:
   build:
+    # Pre-releases (betas) leave the site alone, so it never describes features only a beta has.
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1

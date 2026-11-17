@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://lilaccamera.github.io/user/how-pictures-are-made/">How a picture is made</a> ·
   <a href="https://lilaccamera.github.io/#get-lilac">Get started</a> ·
-  <a href="https://github.com/lilaccamera/lilaccamera/releases">Beta releases</a> ·
+  <a href="https://github.com/lilaccamera/lilaccamera/releases">Releases</a> ·
   <a href="https://lilaccamera.github.io/rom/integration/">For ROM maintainers</a>
 </p>
 
@@ -67,8 +67,8 @@ The XZ1 Compact's sensor records at 960 frames a second, but on custom ROMs that
 
 Other phones are not tested. Testers can add the bridge themselves: [install the bridge](https://lilaccamera.github.io/bridge/install/). ROM maintainers: [ROM integration](https://lilaccamera.github.io/rom/integration/).
 
-- **Stable:** inside lilac ROMs that include it; it updates with the ROM.
-- **Beta:** [GitHub releases](https://github.com/lilaccamera/lilaccamera/releases) of this project. It installs beside the ROM's copy under its own name.
+- **Stable:** `LilacCamera.apk` from the [latest release](https://github.com/lilaccamera/lilaccamera/releases/latest). Lilac ROMs ship this same APK, so a ROM's copy also updates from new releases.
+- **Beta:** `LilacBeta.apk` from a [pre-release](https://github.com/lilaccamera/lilaccamera/releases). It installs beside the stable copy as **Lilac Beta**.
 
 ## The guide
 
@@ -93,8 +93,8 @@ The bridge must sit in `/system/priv-app/`, which is on the read-only system par
 - **With adb and `bridge.sh`** (steps 1 to 6). This needs a computer with adb and **rooted adb**: USB debugging and **Rooted debugging** on (Settings › System › Developer options), which exists only on debug-capable (userdebug) builds such as sunplex07's. The script runs `adb root` and remounts the system partition itself. `bridge.sh check` and the checks in step 5 work without root.
 - **With a root file browser** (below the steps), if you have root on the phone but not rooted adb.
 
-1. **Install Lilac** from the [GitHub releases](https://github.com/lilaccamera/lilaccamera/releases) like any APK.
-2. **Download `LilacSonyBridge.apk` and `bridge.sh` from the same release.** The bridge serves only a Lilac of the same release and signed with the same key, so install it again whenever Lilac updates.
+1. **Install Lilac** (`LilacCamera.apk`) from the [latest release](https://github.com/lilaccamera/lilaccamera/releases/latest) like any APK.
+2. **Download `LilacSonyBridge.apk` and `bridge.sh` from the same release.** The two apps talk through an interface that can change between releases, so install the bridge again whenever Lilac updates.
 3. **Check the phone.** Nothing is changed:
 
     ```bash
@@ -192,8 +192,26 @@ Then build Lilac and the [slow-motion bridge](https://lilaccamera.github.io/brid
 ```
 
 - **Lilac:** `app/build/outputs/apk/default/debug/app-default-debug.apk`. It installs as `io.github.lilaccamera.debug`, beside a ROM's copy.
-- **Bridge:** `sonybridge/build/outputs/apk/debug/sonybridge-debug.apk`. It needs a system install; follow the [bridge page](https://lilaccamera.github.io/bridge/install/). The bridge serves only a Lilac signed with the same key, and both debug builds use the repository's public debug key.
-- **Release builds:** `assembleDefaultRelease` signs with your own key, passed as `-PRELEASE_STORE_FILE`, `-PRELEASE_STORE_PASSWORD`, `-PRELEASE_KEY_ALIAS` and `-PRELEASE_KEY_PASSWORD`. Never share a debug build: its key is public.
+- **Bridge:** `sonybridge/build/outputs/apk/debug/sonybridge-debug.apk`. It needs a system install; follow the [bridge page](https://lilaccamera.github.io/bridge/install/). The bridge serves a Lilac signed with its own key or with the key of this project's releases; both debug builds use the repository's public debug key.
+- **Release builds:** `assembleDefaultRelease` signs with your own key, passed as `-PRELEASE_STORE_FILE`, `-PRELEASE_STORE_PASSWORD`, `-PRELEASE_KEY_ALIAS` and `-PRELEASE_KEY_PASSWORD`. Add `-Pbeta` for the beta (`io.github.lilaccamera.beta`, named Lilac Beta). Never share a debug build: its key is public.
+
+</details>
+
+<details>
+<summary><b>Make a release (maintainers)</b></summary>
+
+GitHub Actions builds and signs every release; nothing is uploaded by hand.
+
+1. **Set the version** in `app/build.gradle.kts`: raise `versionCode` by one (betas too, or the update will not install) and set `versionName`, for example `0.2.0` for a stable release or `0.2.0-beta.1` for a beta. Commit and push to `main`.
+2. **Draft a release** on GitHub with the tag `v` plus the version name (`v0.2.0`, `v0.2.0-beta.1`), targeting `main`. Tick **Set as a pre-release** for a beta, and only for a beta.
+3. **Publish it.** The *Release APKs* workflow attaches the files after about 15 minutes:
+    - a stable release: `LilacCamera.apk`, `LilacSonyBridge.apk` and `bridge.sh`;
+    - a pre-release: `LilacBeta.apk`, `LilacSonyBridge.apk` and `bridge.sh`.
+
+    It stops with an error if the tag does not match the version name, or if the pre-release tick does not match the version (a suffix means beta).
+4. **The guide** at lilaccamera.github.io is rebuilt for stable releases only, so it never describes features only a beta has. To rebuild it by hand, run the *Docs site* workflow.
+
+The workflows need these repository secrets: `RELEASE_KEYSTORE` (the keystore, base64), `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`, and `DOCS_DEPLOY_KEY` (a deploy key with write access to `lilaccamera.github.io`). The bridge trusts the release key's certificate by its SHA-256 (`RELEASE_CERT` in `sonybridge/.../BridgeService.kt`); a new release key needs a new value there and a new bridge everywhere.
 
 </details>
 
