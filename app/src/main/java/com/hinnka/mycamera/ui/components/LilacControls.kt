@@ -289,6 +289,7 @@ internal fun LilacRuler(
             val trackPx = constraints.maxWidth.toFloat()
             val needleX = trackPx * 151f / 304f
             val labelStyle = LilacTextStyle.copy(color = LilacText, fontSize = 10.5.sp)
+            val accent = ModeAmber
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val dp = density.density
                 val origin = needleX + shift.value
@@ -324,7 +325,7 @@ internal fun LilacRuler(
                     blendMode = BlendMode.DstIn
                 )
                 drawRoundRect(
-                    color = ModeAmber,
+                    color = accent,
                     topLeft = Offset(needleX - 1.25f * dp, 3f * dp),
                     size = Size(2.5f * dp, 24f * dp),
                     cornerRadius = CornerRadius(1.25f * dp)

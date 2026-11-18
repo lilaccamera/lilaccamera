@@ -2812,13 +2812,13 @@ private fun HighFrameRateControls(player: ExoPlayer, playerView: PlayerView, onS
     }
 }
 
-/** The ¼×/1× switch: amber while slowed, styled like the viewfinder's info pill. */
+/** The ¼×/1× switch: orange while slowed, styled like the viewfinder's info pill. */
 @Composable
 private fun SpeedPill(slowed: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val description = stringResource(R.string.hfr_speed_button_desc)
     Text(
         text = if (slowed) "¼×" else "1×",
-        color = if (slowed) Color(0xFFEF9F27) else Color.White,
+        color = if (slowed) com.hinnka.mycamera.ui.camera.ModeAmber else Color.White,
         fontSize = 13.sp,
         fontWeight = FontWeight.Medium,
         textAlign = TextAlign.Center,

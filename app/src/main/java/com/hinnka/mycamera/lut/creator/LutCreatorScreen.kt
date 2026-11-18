@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.ui.components.PaymentDialog
+import com.hinnka.mycamera.ui.camera.ModeAmber
 import com.hinnka.mycamera.ui.icons.AppIcons
 
 private data class LocalImagePairDraft(
@@ -125,7 +126,7 @@ fun LutCreatorScreen(
                         PrimaryTabRow(
                             selectedTabIndex = selectedMode.ordinal,
                             containerColor = Color.Transparent,
-                            contentColor = Color(0xFFE5A324)
+                            contentColor = ModeAmber
                         ) {
                             Tab(
                                 selected = selectedMode == LutCreatorMode.AI,
@@ -170,7 +171,7 @@ fun LutCreatorScreen(
                                             shape = RoundedCornerShape(12.dp),
                                             colors = OutlinedTextFieldDefaults.colors(
                                                 unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
-                                                focusedBorderColor = Color(0xFFE5A324)
+                                                focusedBorderColor = ModeAmber
                                             )
                                         )
                                         Spacer(modifier = Modifier.height(12.dp))
@@ -278,7 +279,7 @@ fun LutCreatorScreen(
                                                 Icon(
                                                     imageVector = Icons.Default.CheckCircle,
                                                     contentDescription = null,
-                                                    tint = Color(0xFFE5A324),
+                                                    tint = ModeAmber,
                                                     modifier = Modifier.size(20.dp)
                                                 )
                                                 Spacer(modifier = Modifier.width(10.dp))
@@ -328,7 +329,7 @@ fun LutCreatorScreen(
                                 .height(60.dp),
                             shape = RoundedCornerShape(16.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFFE5A324),
+                                containerColor = ModeAmber,
                                 contentColor = Color.White
                             )
                         ) {
@@ -352,7 +353,7 @@ fun LutCreatorScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        CircularProgressIndicator(color = Color(0xFFE5A324))
+                        CircularProgressIndicator(color = ModeAmber)
                         Spacer(modifier = Modifier.height(24.dp))
                         Text(
                             stringResource(R.string.lut_creator_analyzing),
@@ -376,7 +377,7 @@ fun LutCreatorScreen(
                             imageVector = AppIcons.AutoAwesome,
                             contentDescription = null,
                             modifier = Modifier.size(48.dp),
-                            tint = Color(0xFFE5A324)
+                            tint = ModeAmber
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
@@ -416,7 +417,7 @@ fun LutCreatorScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFFE5A324)
+                                focusedBorderColor = ModeAmber
                             )
                         )
                         Spacer(modifier = Modifier.height(24.dp))
@@ -429,7 +430,7 @@ fun LutCreatorScreen(
                             .height(60.dp),
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFE5A324),
+                            containerColor = ModeAmber,
                             contentColor = Color.White
                         )
                     ) {
@@ -446,7 +447,7 @@ fun LutCreatorScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        CircularProgressIndicator(color = Color(0xFFE5A324))
+                        CircularProgressIndicator(color = ModeAmber)
                         Spacer(modifier = Modifier.height(24.dp))
                         Text(
                             stringResource(R.string.lut_creator_generating),
@@ -465,7 +466,7 @@ fun LutCreatorScreen(
                         Text(
                             stringResource(R.string.lut_creator_success),
                             style = MaterialTheme.typography.headlineMedium,
-                            color = Color(0xFFE5A324)
+                            color = ModeAmber
                         )
                     }
                     Button(
@@ -476,7 +477,7 @@ fun LutCreatorScreen(
                             .height(60.dp),
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFE5A324),
+                            containerColor = ModeAmber,
                             contentColor = Color.White
                         )
                     ) {
@@ -559,7 +560,7 @@ private fun LutCreatorPremiumRequiredCard(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFE5A324),
+                    containerColor = ModeAmber,
                     contentColor = Color.White
                 )
             ) {

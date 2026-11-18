@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -84,7 +85,9 @@ private const val RIDGE_FADE = 185f      // dp from the centre where the ridges 
 private const val TAP_GRACE_MS = 250L  // wait after a neighbour tap's roll for a further tap
 private const val RESISTANCE = 0.3f      // past Night and Video
 
-internal val ModeAmber = Color(0xFFEF9F27)
+// "On, and changes the shot": the app's accent (Sony orange unless changed in the appearance settings).
+internal val ModeAmber: Color
+    @Composable @ReadOnlyComposable get() = com.hinnka.mycamera.ui.theme.AccentColor
 private val AutoGreen = Color(0xFF5DCAA5)
 private val VideoRed = Color(0xFFE24B4A)
 private val RidgeColor = Color(0xFF6B6A65)
