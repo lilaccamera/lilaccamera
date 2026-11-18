@@ -545,6 +545,7 @@ internal fun CameraTopSheet(
                             explanation = stringResource(R.string.quick_explain_bracketing)
                         ) {
                             when {
+                                isFrontCamera -> QuickFixed(stringResource(R.string.quick_bracketing_back_only))
                                 !useJpgMax -> QuickFixed(stringResource(R.string.quick_bracketing_needs_multi_frame))
                                 bracketBlockedBySize -> QuickFixed(stringResource(R.string.quick_bracketing_needs_12mp))
                                 else -> QuickSwitch(bracketing) { onBracketingChange(!bracketing) }

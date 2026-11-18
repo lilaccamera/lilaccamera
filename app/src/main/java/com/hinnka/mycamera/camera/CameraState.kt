@@ -496,7 +496,8 @@ data class CameraState(
         get() = isMultiFrameEnabled && !useRaw
 
     val isJpgMaxHdrEnabled: Boolean
-        get() = isJpgMaxEnabled && useJpgMaxHdrComposition && !nightStacks && !bracketBlockedBySize  // Night's frames are planned, not bracketed
+        get() = isJpgMaxEnabled && useJpgMaxHdrComposition && !nightStacks && !bracketBlockedBySize &&
+            getCurrentCameraInfo()?.lensType != LensType.FRONT  // Night's frames are planned; the front camera has no manual exposure, so its brackets come out identical
 
     /** Bracketed stacks at full size run out of memory on 4 GB phones (19 MP back camera), so they need the 12 or 8 MP cap. */
     val bracketBlockedBySize: Boolean
