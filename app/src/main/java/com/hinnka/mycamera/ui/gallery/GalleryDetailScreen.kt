@@ -1330,10 +1330,8 @@ fun GalleryDetailScreen(
                             InfoRow(stringResource(R.string.photo_info_aperture), it.aperture ?: "N/A")
                             InfoRow(stringResource(R.string.photo_info_iso), it.iso?.toString() ?: "N/A")
                             InfoRow(stringResource(R.string.photo_info_shutter_speed), it.shutterSpeed ?: "N/A")
-                            if (DeviceUtil.canShowPhantom) {
-                                InfoRow("LV", "%.2f".format(it.lv))
-                                InfoRow(stringResource(R.string.photo_info_brightness), "%.2f".format(viewModel.currentBrightness[currentPhoto.id]))
-                            }
+                            InfoRow("LV", "%.2f".format(it.lv))
+                            InfoRow(stringResource(R.string.photo_info_brightness), "%.2f".format(viewModel.currentBrightness[currentPhoto.id]))
                         }
                     }
                     currentColorSpace.value?.let {

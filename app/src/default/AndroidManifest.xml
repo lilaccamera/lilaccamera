@@ -5,8 +5,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <application>
+        <!-- Phantom mode is hidden in this fork; android:enabled="true" brings its quick-settings tile back. -->
         <service
                 android:name="com.hinnka.mycamera.phantom.PhantomTileService"
+                android:enabled="false"
                 android:label="@string/ghost_mode"
                 android:icon="@drawable/ghost_solid"
                 android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"

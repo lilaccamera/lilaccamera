@@ -76,15 +76,13 @@ class MyCameraApplication : Application() {
             userPreferencesRepository.userPreferences.map { it.phantomMode }.distinctUntilChanged()
                 .collect { phantomMode ->
                     StartupTrace.mark("Application.phantomMode collected", "phantomMode=$phantomMode")
-                    if (phantomMode) {
+                    if (phantomMode && DeviceUtil.canShowPhantom) {
                         phantomService.start()
                     } else {
                         PhantomPipPreviewCoordinator.requestStop(this@MyCameraApplication)
                         phantomService.stop()
                     }
-                    if (DeviceUtil.canShowPhantom) {
-                        updateShortcuts(phantomMode)
-                    }
+                    updateShortcuts(phantomMode)
                     updateWidgets(this@MyCameraApplication)
                 }
         }
@@ -125,7 +123,9 @@ class MyCameraApplication : Application() {
                 putExtra("route", Routes.filterManagement())
             })
             .build()
-        shortcutManager.dynamicShortcuts = listOf(phantomShortcut, lutShortcut)
+        // Dynamic shortcuts outlive app updates, so a hidden phantom shortcut must be replaced too.
+        shortcutManager.dynamicShortcuts =
+            if (DeviceUtil.canShowPhantom) listOf(phantomShortcut, lutShortcut) else listOf(lutShortcut)
     }
 
     companion object {
