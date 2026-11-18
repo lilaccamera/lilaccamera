@@ -3754,6 +3754,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun processCapturedPhoto(photo: CapturedPhoto, settings: CaptureSettingsSnapshot) {
+        val backStack = photo.frames.size > 1 && photo.state.getCurrentCameraInfo()?.lensType != LensType.FRONT
+        if (backStack) backStacksInFlight.update { it + 1 }
+        try {
+            processCapturedFrames(photo, settings)
+        } finally {
+            if (backStack) backStacksInFlight.update { it - 1 }
+        }
+    }
+
+    private suspend fun processCapturedFrames(photo: CapturedPhoto, settings: CaptureSettingsSnapshot) {
         val first = photo.frames.first()
         val captureInfo = first.captureInfo
         val characteristics = first.characteristics
@@ -3854,22 +3864,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 ?: captureInfo
             val referenceCaptureResult = orderedNormalFrames.firstOrNull()?.captureResult
                 ?: captureResult
-            val backStack = settings.state.getCurrentCameraInfo()?.lensType != LensType.FRONT
-            if (backStack) backStacksInFlight.update { it + 1 }
-            try {
-                processStacking(
-                    frames = framesToProcess,
-                    captureInfo = referenceCaptureInfo,
-                    characteristics = characteristics,
-                    captureResult = referenceCaptureResult,
-                    rawMaxHdrFusionEnabled = rawMaxHdrFusionEnabled,
-                    rawMaxMode = rawMaxMode,
-                    capturePortraitMask = settings.portraitMask,
-                    settings = settings,
-                )
-            } finally {
-                if (backStack) backStacksInFlight.update { it - 1 }
-            }
+            processStacking(
+                frames = framesToProcess,
+                captureInfo = referenceCaptureInfo,
+                characteristics = characteristics,
+                captureResult = referenceCaptureResult,
+                rawMaxHdrFusionEnabled = rawMaxHdrFusionEnabled,
+                rawMaxMode = rawMaxMode,
+                capturePortraitMask = settings.portraitMask,
+                settings = settings,
+            )
         } else {
             saveImage(first.image, captureInfo, characteristics, captureResult, settings.portraitMask, settings)
         }
