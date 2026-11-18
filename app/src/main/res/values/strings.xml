@@ -228,6 +228,32 @@
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
+    <string name="settings_tab_shooting">Shooting</string>
+    <string name="settings_tab_video">Video</string>
+    <string name="settings_tab_photo">Photo</string>
+    <string name="settings_tab_pro">Pro</string>
+    <string name="settings_tab_lens">Lens</string>
+    <string name="settings_tab_setup">Setup</string>
+    <string name="settings_tab_search">Search</string>
+    <string name="settings_page_photo">Photo mode</string>
+    <string name="settings_page_pro">Pro mode</string>
+    <string name="settings_group_storage">Storage</string>
+    <string name="settings_group_image">Image</string>
+    <string name="settings_group_stabilisation">Stabilisation</string>
+    <string name="settings_group_recording">Recording</string>
+    <string name="settings_group_lenses">Lenses</string>
+    <string name="settings_group_interface">Interface</string>
+    <string name="settings_group_controls">Controls</string>
+    <string name="settings_group_content">Content</string>
+    <string name="settings_group_backup">Backup</string>
+    <string name="settings_animation_style">Animation style</string>
+    <string name="settings_zoom_control">Zoom control</string>
+    <string name="settings_zoom_control_thumbwheel">Thumbwheel</string>
+    <string name="settings_zoom_control_pill">Simple pill</string>
+    <string name="settings_zoom_control_collar">Collar</string>
+    <string name="settings_search_placeholder">Search settings</string>
+    <string name="settings_search_hint">Search every setting by name, value or group</string>
+    <string name="settings_search_none">Nothing matches</string>
     <string name="settings_section_capture">Capture</string>
 
     <!-- Settings Restructuring Tabs -->

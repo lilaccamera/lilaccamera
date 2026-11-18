@@ -11,7 +11,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
@@ -25,6 +24,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import kotlinx.coroutines.launch
@@ -78,8 +81,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RippleConfiguration
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -178,7 +179,6 @@ import com.hinnka.mycamera.ui.components.RawEditPanelContentMode
 import com.hinnka.mycamera.ui.components.RawNoiseProfileSelector
 import com.hinnka.mycamera.ui.components.RawDngMetadataCorrectionSettings
 import com.hinnka.mycamera.ui.components.rawDcpLensOptions
-import com.hinnka.mycamera.ui.components.rememberBackgroundPainter
 import com.hinnka.mycamera.update.AppUpdateManager
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.viewmodel.CameraViewModel
@@ -227,20 +227,118 @@ private fun SettingsAnchor(
     ) { content() }
 }
 
-private enum class SettingsPage {
+internal enum class SettingsPage {
     ASSIST,
     FOCUS_LENS,
     CAPTURE_STORAGE,
     VIDEO,
     PHOTO_MODE,
     PROFESSIONAL_MODE,
-    PHANTOM,
     INTERFACE,
     CONTENT_MANAGEMENT,
     AI_SERVICE,
     SYSTEM_CONTROL,
     DATA_MAINTENANCE,
     HELP_ABOUT
+}
+
+/** The tabs of Settings: six colour-coded groups, each showing some of the old pages as sections. */
+internal enum class SettingsGroup(
+    val label: Int,
+    val title: Int,
+    val color: Color,
+    val pages: List<SettingsPage>,
+) {
+    SHOOTING(R.string.settings_tab_shooting, R.string.settings_tab_shooting, Color(0xFFEA2546),
+        listOf(SettingsPage.ASSIST, SettingsPage.CAPTURE_STORAGE)),
+    VIDEO(R.string.settings_tab_video, R.string.settings_tab_video, Color(0xFFEA2546), listOf(SettingsPage.VIDEO)),
+    PHOTO(R.string.settings_tab_photo, R.string.settings_page_photo, Color(0xFFF54FBA), listOf(SettingsPage.PHOTO_MODE)),
+    PRO(R.string.settings_tab_pro, R.string.settings_page_pro, Color(0xFFF54FBA), listOf(SettingsPage.PROFESSIONAL_MODE)),
+    LENS(R.string.settings_tab_lens, R.string.settings_section_focus_lens, Color(0xFFB442FF), listOf(SettingsPage.FOCUS_LENS)),
+    SETUP(R.string.settings_tab_setup, R.string.settings_tab_setup, Color(0xFFB28E02), listOf(
+        SettingsPage.INTERFACE, SettingsPage.SYSTEM_CONTROL, SettingsPage.CONTENT_MANAGEMENT,
+        SettingsPage.AI_SERVICE, SettingsPage.DATA_MAINTENANCE, SettingsPage.HELP_ABOUT,
+    ));
+
+    val icon: ImageVector
+        get() = when (this) {
+            SHOOTING -> AppIcons.CameraLine
+            VIDEO -> AppIcons.VideoLine
+            PHOTO -> AppIcons.PhotoLine
+            PRO -> AppIcons.ApertureLine
+            LENS -> AppIcons.FocusLine
+            SETUP -> AppIcons.SettingsLine
+        }
+}
+
+@Composable
+private fun SettingsPageTitle(group: SettingsGroup) {
+    Row(
+        modifier = Modifier.padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(width = 3.dp, height = 20.dp)
+                .background(group.color)
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(stringResource(group.title), color = SettingsText, fontSize = 24.sp)
+    }
+}
+
+/** Seven equal tabs: the six groups, then Search (null). The chosen tab gets a bar in its group's colour. */
+@Composable
+private fun SettingsTabBar(selected: SettingsGroup?, onSelect: (SettingsGroup?) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        HorizontalDivider(thickness = 1.dp, color = SettingsLine)
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+        ) {
+            (SettingsGroup.entries + null).forEach { group ->
+                val chosen = group == selected
+                val tint = if (chosen) SettingsText else SettingsQuiet
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable { if (!chosen) onSelect(group) }
+                ) {
+                    if (chosen) {
+                        Box(
+                            Modifier
+                                .align(Alignment.TopCenter)
+                                .fillMaxWidth(0.5f)
+                                .height(3.dp)
+                                .background(group?.color ?: SettingsText)
+                        )
+                    }
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 11.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) {
+                            Icon(group?.icon ?: AppIcons.SearchLine, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                        }
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            stringResource(group?.label ?: R.string.settings_tab_search),
+                            color = tint,
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.height(14.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 private enum class BackupOperation {
@@ -267,8 +365,6 @@ private val APP_LANGUAGE_OPTIONS = listOf(
     AppLanguageOption("zh-TW", R.string.settings_language_chinese_traditional),
 )
 
-private val SettingsBackgroundColor = Color(0xFF151515)
-private val SettingsBackgroundScrim = Color.Black.copy(alpha = 0.62f)
 private val SettingsRippleAlpha = RippleAlpha(
     pressedAlpha = 0.04f,
     focusedAlpha = 0.06f,
@@ -425,7 +521,6 @@ fun SettingsScreen(
     val useP3ColorSpace by preferenceValue { it.useP3ColorSpace }
     val ultraHdrGainMapEnabled by preferenceValue { it.ultraHdrGainMapEnabled }
     var useHdrScreenMode by rememberPreference(UserPreferences::useHdrScreenMode)
-    val isPurchased by viewModel.isPurchased.collectAsState()
     val phantomMode by preferenceValue { it.phantomMode }
     var phantomButtonHidden by rememberPreference(UserPreferences::phantomButtonHidden)
     var launchCameraOnPhantomMode by rememberPreference(UserPreferences::launchCameraOnPhantomMode)
@@ -490,7 +585,9 @@ fun SettingsScreen(
     val availableFrames = viewModel.availableFrameList
     val previewThumbnail = viewModel.previewThumbnail
 
-    var selectedPage by rememberSaveable { mutableStateOf(openedAt?.page) }
+    var selectedGroup by rememberSaveable {
+        mutableStateOf<SettingsGroup?>(openedAt?.page?.let { page -> SettingsGroup.entries.first { page in it.pages } } ?: SettingsGroup.SHOOTING)
+    }
     var pendingTarget by rememberSaveable { mutableStateOf(openedAt) }
     var isRawSliderAdjusting by remember { mutableStateOf(false) }
     var mainCameraIdOptions by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -1048,41 +1145,17 @@ fun SettingsScreen(
         }
     }
 
-    val backgroundPainter = rememberBackgroundPainter(viewModel)
     val settingsRippleConfiguration = remember {
         RippleConfiguration(
             color = Color.White,
             rippleAlpha = SettingsRippleAlpha
         )
     }
-    val screenTitle = when (selectedPage) {
-        null -> stringResource(R.string.settings_title)
-        SettingsPage.ASSIST -> stringResource(R.string.settings_section_assist)
-        SettingsPage.FOCUS_LENS -> stringResource(R.string.settings_section_focus_lens)
-        SettingsPage.CAPTURE_STORAGE -> stringResource(R.string.settings_section_capture_storage)
-        SettingsPage.VIDEO -> stringResource(R.string.settings_section_video)
-        SettingsPage.PHOTO_MODE -> stringResource(R.string.settings_section_photo_mode)
-        SettingsPage.PROFESSIONAL_MODE -> stringResource(R.string.settings_section_professional_mode)
-        SettingsPage.PHANTOM -> stringResource(R.string.phantom)
-        SettingsPage.INTERFACE -> stringResource(R.string.settings_section_interface)
-        SettingsPage.CONTENT_MANAGEMENT -> stringResource(R.string.settings_section_management)
-        SettingsPage.AI_SERVICE -> stringResource(R.string.ai_service)
-        SettingsPage.SYSTEM_CONTROL -> stringResource(R.string.settings_section_system_control)
-        SettingsPage.DATA_MAINTENANCE -> stringResource(R.string.settings_section_data_maintenance)
-        SettingsPage.HELP_ABOUT -> stringResource(R.string.settings_section_help_about)
+    val tick = rememberSettingsTick()
+    val pageScrollState = rememberScrollState()
+    LaunchedEffect(selectedGroup) {
+        pageScrollState.scrollTo(0)
     }
-
-    BackHandler(enabled = selectedPage != null) {
-        selectedPage = null
-    }
-    val overviewScrollState = rememberScrollState()
-    val detailScrollState = rememberScrollState()
-    LaunchedEffect(selectedPage) {
-        if (selectedPage != null) {
-            detailScrollState.scrollTo(0)
-        }
-    }
-    val settingsScrollState = if (selectedPage == null) overviewScrollState else detailScrollState
 
     CompositionLocalProvider(
         LocalRippleConfiguration provides settingsRippleConfiguration,
@@ -1091,69 +1164,52 @@ fun SettingsScreen(
         Column(
             modifier = modifier
                 .fillMaxSize()
-                .background(SettingsBackgroundColor)
-                .paint(backgroundPainter, contentScale = ContentScale.Crop)
-                .background(SettingsBackgroundScrim)
+                .background(Color.Black)
                 .navigationBarsPadding()
         ) {
-            // 顶部标题栏
-            TopAppBar(
-                title = {
-                    Text(
-                        text = screenTitle,
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = {
-                            if (selectedPage == null) {
-                                onBack()
-                            } else {
-                                selectedPage = null
-                            }
-                        },
-                        modifier = Modifier.autoRotate()
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.back),
-                            tint = Color.White
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent
-                )
-            )
-
-            // 设置项列表
-            Column(
+            IconButton(
+                onClick = onBack,
                 modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(settingsScrollState)
-                    .padding(horizontal = 16.dp)
+                    .statusBarsPadding()
+                    .padding(start = 4.dp)
+                    .autoRotate()
             ) {
-                Spacer(modifier = Modifier.height(16.dp))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.back),
+                    tint = SettingsText
+                )
+            }
 
-            when (selectedPage) {
-                null -> {
-                    SettingsCategoryOverview(
-                        showPremium = !isPurchased,
-                        onPremiumClick = {
-                            context.findActivity()?.let { viewModel.purchase(it) }
-                        },
-                        onPageSelected = { selectedPage = it }
-                    )
-                }
+            val group = selectedGroup
+            if (group == null) {
+                Box(Modifier.weight(1f).fillMaxWidth())
+            } else BoxWithConstraints(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                val viewportHeight = maxHeight
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(pageScrollState)
+                        .padding(horizontal = 16.dp)
+                ) {
+                // A page shorter than the screen sits at the bottom, under the thumb.
+                Column(
+                    modifier = Modifier.heightIn(min = viewportHeight),
+                    verticalArrangement = Arrangement.Bottom
+                ) {
+                SettingsPageTitle(group)
 
+            group.pages.forEachIndexed { pageIndex, page ->
+                if (pageIndex > 0) Spacer(modifier = Modifier.height(24.dp))
+            when (page) {
                 SettingsPage.ASSIST -> {
                     // 辅助工具
                     SettingsSection(
-                        title = stringResource(R.string.settings_section_assist),
-                        showTitle = false
+                        title = stringResource(R.string.settings_section_assist)
                     ) {
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_grid_lines),
@@ -1237,7 +1293,7 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(24.dp))
 
                     SettingsSection(
-                        title = stringResource(R.string.settings_focus_lens_group_lens_selection)
+                        title = stringResource(R.string.settings_group_lenses)
                     ) {
                         DefaultFocalLengthSetting(
                             viewModel = viewModel,
@@ -1307,13 +1363,9 @@ fun SettingsScreen(
                                 }
                             )
                         }
-                    }
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                        SettingsRowDivider()
 
-                    SettingsSection(
-                        title = stringResource(R.string.settings_section_calibration)
-                    ) {
                         CameraOrientationSetting(
                             cameras = state.availableCameras,
                             orientationOffsets = userPreferences.cameraOrientationOffsets,
@@ -1416,13 +1468,9 @@ fun SettingsScreen(
                             value = lensIdBlacklist.joinToString(","),
                             onValueChange = { viewModel.setLensIdBlacklist(it) }
                         )
-                    }
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                        SettingsRowDivider()
 
-                    SettingsSection(
-                        title = stringResource(R.string.settings_focus_lens_group_camera2_extensions)
-                    ) {
                         NavigationSettingItem(
                             title = stringResource(R.string.settings_custom_vendor_keys),
                             description = stringResource(
@@ -1437,8 +1485,7 @@ fun SettingsScreen(
                 SettingsPage.CAPTURE_STORAGE -> {
                     // 拍摄行为
                     SettingsSection(
-                        title = stringResource(R.string.settings_section_capture_storage),
-                        showTitle = false
+                        title = stringResource(R.string.settings_section_capture)
                     ) {
                         NavigationSettingItem(
                             title = stringResource(R.string.settings_top_sheet_aspect_ratios),
@@ -1490,8 +1537,11 @@ fun SettingsScreen(
                             )
                         }
 
-                        SettingsRowDivider()
+                    }
 
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    SettingsSection(title = stringResource(R.string.settings_group_storage)) {
                         QualityLevelSetting(
                             title = stringResource(R.string.settings_photo_quality),
                             description = stringResource(R.string.settings_photo_quality_description),
@@ -1627,8 +1677,7 @@ fun SettingsScreen(
                         ?.second
                         ?: state.videoConfig.stabilizationMode.displayName
                     SettingsSection(
-                        title = stringResource(R.string.settings_section_video),
-                        showTitle = false
+                        title = stringResource(R.string.settings_group_image)
                     ) {
                         QualityLevelSetting(
                             title = stringResource(R.string.settings_nr_level),
@@ -1659,8 +1708,11 @@ fun SettingsScreen(
                             onLevelSelected = { videoEdgeLevel = it }
                         )
 
-                        SettingsRowDivider()
+                    }
 
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    SettingsSection(title = stringResource(R.string.settings_group_stabilisation)) {
                         DropdownSettingItem(
                             title = stringResource(R.string.settings_video_stabilization_default),
                             description = stringResource(
@@ -1802,8 +1854,11 @@ fun SettingsScreen(
                             onClick = { showExternalLensStabilizationDialog = true },
                         )
 
-                        SettingsRowDivider()
+                    }
 
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    SettingsSection(title = stringResource(R.string.settings_group_recording)) {
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_separate_video_lut),
                             description = stringResource(R.string.settings_separate_video_lut_description),
@@ -2397,89 +2452,10 @@ fun SettingsScreen(
                     }
                 }
 
-                SettingsPage.PHANTOM -> {
-                    if (DeviceUtil.canShowPhantom) {
-                        // 幻影模式设置
-                        SettingsSection(
-                            title = stringResource(R.string.ghost_mode),
-                            showTitle = false
-                        ) {
-                            SwitchSettingItem(
-                                title = stringResource(R.string.ghost_mode),
-                                description = stringResource(R.string.ghost_mode_dialog_description),
-                                checked = phantomMode,
-                                onCheckedChange = { enabled ->
-                                    if (enabled && (!Settings.canDrawOverlays(context) || !Environment.isExternalStorageManager())) {
-                                        showGhostPermissionDialog = true
-                                    } else if (enabled != phantomMode) {
-                                        viewModel.togglePhantomMode()
-                                    }
-                                }
-                            )
-
-                            SettingsRowDivider()
-
-                            SwitchSettingItem(
-                                title = stringResource(R.string.settings_phantom_button_hidden),
-                                description = stringResource(R.string.settings_phantom_button_hidden_description),
-                                checked = phantomButtonHidden,
-                                onCheckedChange = { phantomButtonHidden = it }
-                            )
-
-                            SettingsRowDivider()
-
-                            SwitchSettingItem(
-                                title = stringResource(R.string.settings_launch_camera_on_phantom_mode),
-                                description = stringResource(R.string.settings_launch_camera_on_phantom_mode_description),
-                                checked = launchCameraOnPhantomMode,
-                                onCheckedChange = { launchCameraOnPhantomMode = it }
-                            )
-
-                            SettingsRowDivider()
-
-                            SwitchSettingItem(
-                                title = stringResource(R.string.settings_phantom_pip_preview),
-                                description = stringResource(R.string.settings_phantom_pip_preview_description),
-                                checked = phantomPipPreview,
-                                onCheckedChange = { phantomPipPreview = it }
-                            )
-
-                            SettingsRowDivider()
-
-                            NavigationSettingItem(
-                                title = stringResource(R.string.settings_phantom_pip_crop),
-                                description = stringResource(R.string.settings_phantom_pip_crop_description),
-                                onClick = onPhantomPipCropClick
-                            )
-
-                            SettingsRowDivider()
-
-                            SwitchSettingItem(
-                                title = stringResource(R.string.settings_phantom_save_as_new),
-                                description = stringResource(R.string.settings_phantom_save_as_new_description),
-                                checked = phantomSaveAsNew,
-                                onCheckedChange = { phantomSaveAsNew = it }
-                            )
-
-                            SettingsRowDivider()
-
-                            FrameWatermarkSetting(
-                                title = stringResource(R.string.settings_phantom_frame_title),
-                                description = stringResource(R.string.settings_phantom_frame_description),
-                                availableFrames = availableFrames,
-                                currentFrameId = phantomFrameId,
-                                onFrameSelected = { preferencesRepository.updateAsync { this.phantomFrameId = it } }
-                            )
-
-                        }
-                    }
-                }
-
                 SettingsPage.INTERFACE -> {
                     // 界面样式
                     SettingsSection(
-                        title = stringResource(R.string.settings_section_interface),
-                        showTitle = false
+                        title = stringResource(R.string.settings_group_interface)
                     ) {
                         AppLanguageSetting()
 
@@ -2543,7 +2519,7 @@ fun SettingsScreen(
                         )
                         if (enableDevelopAnimation) {
                             QualityLevelSetting(
-                                title = null,
+                                title = stringResource(R.string.settings_animation_style),
                                 description = null,
                                 levels = listOf(
                                     com.hinnka.mycamera.data.DevelopAnimationStyle.FILM to
@@ -2562,8 +2538,7 @@ fun SettingsScreen(
                 SettingsPage.CONTENT_MANAGEMENT -> {
                     // 内容管理
                     SettingsSection(
-                        title = stringResource(R.string.settings_section_management),
-                        showTitle = false
+                        title = stringResource(R.string.settings_group_content)
                     ) {
                         NavigationSettingItem(
                             title = stringResource(R.string.settings_filter_management),
@@ -2592,8 +2567,7 @@ fun SettingsScreen(
                 SettingsPage.AI_SERVICE -> {
                     // AI 服务设置
                     SettingsSection(
-                        title = stringResource(R.string.ai_service),
-                        showTitle = false
+                        title = stringResource(R.string.ai_service)
                     ) {
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_show_lut_creator),
@@ -2647,8 +2621,7 @@ fun SettingsScreen(
                 SettingsPage.SYSTEM_CONTROL -> {
                     // 系统与控制
                     SettingsSection(
-                        title = stringResource(R.string.settings_section_system_control),
-                        showTitle = false
+                        title = stringResource(R.string.settings_group_controls)
                     ) {
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_retain_capture_settings),
@@ -2733,8 +2706,7 @@ fun SettingsScreen(
                 SettingsPage.DATA_MAINTENANCE -> {
                     // 数据维护
                     SettingsSection(
-                        title = stringResource(R.string.settings_section_data_maintenance),
-                        showTitle = false
+                        title = stringResource(R.string.settings_group_backup)
                     ) {
                         NavigationSettingItem(
                             title = stringResource(R.string.settings_backup_settings),
@@ -2775,8 +2747,7 @@ fun SettingsScreen(
                     // 帮助与关于
 
                     SettingsSection(
-                        title = stringResource(R.string.settings_section_help_about),
-                        showTitle = false
+                        title = stringResource(R.string.settings_section_help_about)
                     ) {
                         Row(
                             modifier = Modifier
@@ -2884,8 +2855,16 @@ fun SettingsScreen(
                     }
                 }
             }
+            }
 
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+                }
+                }
+            }
+
+            SettingsTabBar(selectedGroup) { picked ->
+                tick()
+                selectedGroup = picked
             }
         }
     }
@@ -3014,200 +2993,6 @@ fun SettingsScreen(
             )
         }
     }
-}
-
-@Composable
-private fun SettingsCategoryOverview(
-    showPremium: Boolean,
-    onPremiumClick: () -> Unit,
-    onPageSelected: (SettingsPage) -> Unit
-) {
-    if (showPremium) {
-        PremiumCard(onClick = onPremiumClick)
-        Spacer(modifier = Modifier.height(24.dp))
-    }
-
-    SettingsSection(title = stringResource(R.string.settings_tab_camera)) {
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_assist),
-            description = listOf(
-                stringResource(R.string.settings_grid_lines),
-                stringResource(R.string.settings_level_indicator),
-                stringResource(R.string.settings_focus_peaking)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.ASSIST) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_focus_lens),
-            description = listOf(
-                stringResource(R.string.settings_eye_focus),
-                stringResource(R.string.settings_default_focal_length),
-                stringResource(R.string.settings_camera_orientation),
-                stringResource(R.string.settings_add_isz_lens)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.FOCUS_LENS) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_capture_storage),
-            description = listOf(
-                stringResource(R.string.settings_top_sheet_aspect_ratios),
-                stringResource(R.string.settings_multiple_exposure_count),
-                stringResource(R.string.settings_photo_quality),
-                stringResource(R.string.settings_auto_save),
-                stringResource(R.string.settings_save_location)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.CAPTURE_STORAGE) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_video),
-            description = listOf(
-                stringResource(R.string.settings_nr_level),
-                stringResource(R.string.settings_edge_level),
-                stringResource(R.string.settings_separate_video_lut),
-                stringResource(R.string.settings_video_lock_lens),
-                stringResource(R.string.settings_video_lock_white_balance),
-                stringResource(
-                    R.string.settings_storage_path_title,
-                    stringResource(R.string.settings_storage_path_video_title_arg)
-                )
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.VIDEO) }
-        )
-
-    }
-
-    Spacer(modifier = Modifier.height(24.dp))
-
-    SettingsSection(title = stringResource(R.string.imaging)) {
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_photo_mode),
-            description = listOf(
-                stringResource(R.string.settings_multi_frame_denoise_frame_count),
-                stringResource(R.string.settings_jpg_multi_frame_denoise_output_scale),
-                stringResource(R.string.settings_nr_level),
-                stringResource(R.string.settings_edge_level)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.PHOTO_MODE) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_professional_mode),
-            description = listOf(
-                stringResource(R.string.settings_professional_group_max_hdr),
-                stringResource(R.string.settings_professional_group_image_quality),
-                stringResource(R.string.settings_raw_group_development),
-                stringResource(R.string.settings_raw_group_capture_output),
-                stringResource(R.string.settings_raw_group_sensor_correction),
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.PROFESSIONAL_MODE) }
-        )
-
-        if (DeviceUtil.canShowPhantom) {
-            SettingsCategoryDivider()
-
-            NavigationSettingItem(
-                title = stringResource(R.string.phantom),
-                description = listOf(
-                    stringResource(R.string.settings_phantom_pip_preview),
-                    stringResource(R.string.settings_phantom_save_as_new),
-                    stringResource(R.string.settings_phantom_frame_title)
-                ).joinToString(" · "),
-                onClick = { onPageSelected(SettingsPage.PHANTOM) }
-            )
-        }
-    }
-
-    Spacer(modifier = Modifier.height(24.dp))
-
-    SettingsSection(title = stringResource(R.string.settings_tab_system)) {
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_interface),
-            description = listOf(
-                stringResource(R.string.settings_background),
-                stringResource(R.string.settings_widget_theme),
-                stringResource(R.string.settings_develop_animation)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.INTERFACE) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_management),
-            description = listOf(
-                stringResource(R.string.settings_filter_management),
-                stringResource(R.string.settings_frame_management),
-                stringResource(R.string.settings_preset_management)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.CONTENT_MANAGEMENT) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.ai_service),
-            description = listOf(
-                stringResource(R.string.settings_openai_api_key),
-                stringResource(R.string.settings_openai_base_url),
-                stringResource(R.string.settings_ai_model)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.AI_SERVICE) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_system_control),
-            description = listOf(
-                stringResource(R.string.settings_shutter_sound),
-                stringResource(R.string.settings_keep_screen_on),
-                stringResource(R.string.settings_screen_hdr),
-                stringResource(R.string.settings_volume_key_action)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.SYSTEM_CONTROL) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_data_maintenance),
-            description = listOf(
-                stringResource(R.string.settings_backup_settings),
-                stringResource(R.string.settings_restore_settings)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.DATA_MAINTENANCE) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_help_about),
-            description = listOf(
-                stringResource(R.string.settings_log_viewer),
-                stringResource(R.string.settings_report_problem)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.HELP_ABOUT) }
-        )
-    }
-}
-
-@Composable
-private fun SettingsCategoryDivider() {
-    HorizontalDivider(
-        color = Color.White.copy(alpha = 0.1f),
-        modifier = Modifier.padding(vertical = 8.dp)
-    )
 }
 
 /**
@@ -4182,62 +3967,6 @@ private fun FrameItem(
         )
     }
 }
-
-@Composable
-private fun PremiumCard(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    androidx.compose.ui.graphics.Brush.linearGradient(
-                        listOf(PremiumGold, PremiumAmber)
-                    )
-                )
-                .padding(20.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(R.string.settings_premium_title),
-                        color = Color.Black,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = stringResource(R.string.settings_premium_description),
-                        color = Color.Black.copy(alpha = 0.7f),
-                        fontSize = 13.sp
-                    )
-                }
-
-                Icon(
-                    imageVector = Icons.Default.Check, // Reuse an icon or add Star
-                    contentDescription = null,
-                    tint = Color.Black,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(Color.Black.copy(alpha = 0.1f), CircleShape)
-                        .padding(8.dp)
-                )
-            }
-        }
-    }
-}
-
 
 @Composable
 private fun CustomVendorKeysDialog(
