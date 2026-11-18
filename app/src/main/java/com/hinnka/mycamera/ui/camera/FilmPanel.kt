@@ -141,12 +141,12 @@ internal fun FilmPanel(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // shortcut: plain 72 % black like quick settings, no blur (Compose can't blur the GL preview behind it).
-                    .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                    // shortcut: plain black like quick settings, no blur (Compose can't blur the GL preview behind it).
+                    .background(SheetPanel, SheetShape)
                     .navigationBarsPadding()
                     .padding(start = 10.dp, end = 10.dp, bottom = 6.dp)
             ) {
-                Box(Modifier.fillMaxWidth().height(34.dp)) {
+                Box(Modifier.fillMaxWidth().height(56.dp)) {
                     Box(
                         Modifier
                             .align(Alignment.TopCenter)
@@ -184,7 +184,6 @@ internal fun FilmPanel(
                         ) {
                             QuickSlider(
                                 text = "$percent%",
-                                active = percent < 100,
                                 fraction = percent / 100f,
                                 onFraction = { onIntensityChange((it * 100).roundToInt() / 100f) },
                                 onDoubleTap = { onIntensityChange(1f) }

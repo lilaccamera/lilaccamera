@@ -80,9 +80,19 @@ internal val LilacDim = Color(0xFF888780)
 internal val LilacIconTint = Color(0xFFC9C7BF)
 internal val LilacTextStyle = TextStyle(shadow = ViewfinderTextShadow)
 
+// Sony's panel greys: never pure white, and grey only for quiet text, tracks and dividers.
+internal val SonyText = Color(0xFFE0E0E0)
+internal val SonySecondary = Color(0xFF9E9E9E)
+internal val SonyDim = Color(0xFF999999)
+internal val SonyTrack = Color(0xFF393939)
+internal val SonyDivider = Color(0xFF222222)
+// What is chosen in a menu: a light fill with black text.
+internal val ChosenFill = SonyText
+
 /**
- * A choice in a row of choices: amber text and a thin amber outline when selected. [fill] gives it a
- * see-through backing for use over a picture; an [action] chip (one that opens something) is grey.
+ * A choice in a row of choices: a light fill with black text when selected. [fill] gives it a see-through
+ * backing for use over a picture; an [action] chip (one that opens something) is grey. [touchHeight] makes the
+ * tap area taller than the drawn chip.
  */
 @Composable
 internal fun LilacChip(
@@ -92,27 +102,29 @@ internal fun LilacChip(
     modifier: Modifier = Modifier,
     minWidth: Dp = 0.dp,
     height: Dp = 26.dp,
+    touchHeight: Dp = height,
     fill: Color = Color.Transparent,
     fontSize: TextUnit = 12.5.sp,
     horizontalPadding: Dp = 6.dp,
     icon: ImageVector? = null,
     action: Boolean = false,
+    textColor: Color = LilacText,
     onLongClick: (() -> Unit)? = null,
 ) {
     val shape = RoundedCornerShape(height / 2)
     val color = when {
-        selected -> ModeAmber
+        selected -> Color.Black
         action -> LilacSecondary
-        else -> LilacText
+        else -> textColor
     }
     Row(
         modifier = modifier
             .widthIn(min = minWidth)
-            .height(height)
-            .clip(shape)
-            .background(fill, shape)
-            .then(if (selected) Modifier.border(1.25.dp, ModeAmber.copy(alpha = 0.8f), shape) else Modifier)
+            .height(touchHeight)
+            .clip(RoundedCornerShape(touchHeight / 2))
             .combinedClickable(role = Role.Button, onLongClick = onLongClick, onClick = onClick)
+            .padding(vertical = (touchHeight - height) / 2)
+            .background(if (selected) ChosenFill else fill, shape)
             .padding(horizontal = horizontalPadding),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally)

@@ -80,12 +80,18 @@ import com.hinnka.mycamera.ui.components.rawRenderingEngineName
 import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.hinnka.mycamera.ui.components.ChosenFill
 import com.hinnka.mycamera.ui.components.LilacChip
 import com.hinnka.mycamera.ui.components.LilacDim
 import com.hinnka.mycamera.ui.components.LilacLabel
 import com.hinnka.mycamera.ui.components.LilacSecondary
 import com.hinnka.mycamera.ui.components.LilacText
 import com.hinnka.mycamera.ui.components.LilacTextStyle
+import com.hinnka.mycamera.ui.components.SonyDim
+import com.hinnka.mycamera.ui.components.SonyDivider
+import com.hinnka.mycamera.ui.components.SonySecondary
+import com.hinnka.mycamera.ui.components.SonyText
+import com.hinnka.mycamera.ui.components.SonyTrack
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import java.util.Locale
@@ -97,6 +103,9 @@ internal val SheetText = LilacText
 internal val SheetLabel = LilacLabel
 internal val SheetDim = LilacSecondary
 internal val SheetGrey = LilacDim
+// The quick settings and Looks panels: black over the picture, so they meet the phone's black bezel without an edge.
+internal val SheetPanel = Color.Black.copy(alpha = 0.82f)
+internal val SheetShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
 private val SheetTextStyle = LilacTextStyle
 
 /** One camera the Lens row can switch to: a second camera at the same zoom, or a macro camera. */
@@ -391,8 +400,8 @@ internal fun CameraTopSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // shortcut: plain 72 % black, no blur (Compose can't blur a GL preview surface behind it); add a GL blur pass if the plain sheet hides too much.
-                    .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                    // shortcut: plain black, no blur (Compose can't blur a GL preview surface behind it); add a GL blur pass if the plain sheet hides too much.
+                    .background(SheetPanel, SheetShape)
                     .navigationBarsPadding()
                     .padding(start = 10.dp, end = 10.dp, bottom = 6.dp)
             ) {
@@ -409,6 +418,8 @@ internal fun CameraTopSheet(
                 )
                 if (showContentManagementOptions) Spacer(Modifier.height(8.dp))
 
+                // 56 dp rows make the full list taller than the screen: it scrolls past 300 dp.
+                Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
                 val rows = QuickRows(
                     explained = explained,
                     onExplain = { key -> explained = if (explained == key) null else key },
@@ -467,6 +478,7 @@ internal fun CameraTopSheet(
                         }
                         rows.Setting(
                             key = "codec",
+                            quiet = true,
                             label = stringResource(R.string.quick_codec),
                             explanation = stringResource(R.string.quick_explain_codec),
                             last = true
@@ -484,6 +496,7 @@ internal fun CameraTopSheet(
                     QuickGroup {
                         rows.Setting(
                             key = "mic",
+                            quiet = true,
                             label = stringResource(R.string.video_microphone_title),
                             explanation = stringResource(R.string.quick_explain_microphone),
                             last = openPicker != "mic"
@@ -695,11 +708,12 @@ internal fun CameraTopSheet(
                         }
                         rows.Setting(
                             key = "hist",
+                            quiet = true,
                             label = stringResource(R.string.histogram),
                             explanation = stringResource(R.string.quick_explain_histogram),
                             last = true
                         ) {
-                            QuickSwitch(showHistogram) { onHistogramChange(!showHistogram) }
+                            QuickSwitch(showHistogram, quiet = true) { onHistogramChange(!showHistogram) }
                         }
                     }
                     QuickGroup {
@@ -745,7 +759,7 @@ internal fun CameraTopSheet(
                                 explanation = stringResource(R.string.quick_explain_colour_front)
                             ) {
                                 listOf(false, true).forEach { accurate ->
-                                    LilacChip(
+                                    QuickChoice(
                                         text = stringResource(
                                             if (accurate) R.string.quick_colour_accurate else R.string.quick_colour_fast
                                         ),
@@ -759,19 +773,21 @@ internal fun CameraTopSheet(
                         }
                         rows.Setting(
                             key = "jpeg",
+                            quiet = true,
                             label = stringResource(R.string.camera_jpeg),
                             explanation = stringResource(R.string.quick_explain_camera_jpeg)
                         ) {
-                            QuickSwitch(saveCameraJpeg) { onSaveCameraJpegChange(!saveCameraJpeg) }
+                            QuickSwitch(saveCameraJpeg, quiet = true) { onSaveCameraJpegChange(!saveCameraJpeg) }
                         }
                         rows.Setting(
                             key = "uhdr",
+                            quiet = true,
                             label = stringResource(R.string.settings_ultra_hdr_gain_map),
                             explanation = stringResource(R.string.quick_explain_ultra_hdr),
                             settingsTarget = SettingsTarget.ULTRA_HDR,
                             last = true
                         ) {
-                            QuickSwitch(ultraHdrEnabled) { onUltraHdrToggle(!ultraHdrEnabled) }
+                            QuickSwitch(ultraHdrEnabled, quiet = true) { onUltraHdrToggle(!ultraHdrEnabled) }
                         }
                     }
                 }
@@ -794,6 +810,7 @@ internal fun CameraTopSheet(
                             }
                         }
                     }
+                }
                 }
             }
         }
@@ -1061,7 +1078,7 @@ private fun SheetHeader(
     onContentManagementClick: () -> Unit,
     onSettingsClick: () -> Unit
 ) {
-    Box(Modifier.fillMaxWidth().height(34.dp)) {
+    Box(Modifier.fillMaxWidth().height(56.dp)) {
         Box(
             Modifier
                 .align(Alignment.TopCenter)
@@ -1069,7 +1086,7 @@ private fun SheetHeader(
                 .size(width = 36.dp, height = 3.dp)
                 .background(SheetGrey, RoundedCornerShape(2.dp))
         )
-        Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.align(Alignment.CenterEnd)) {
             HeaderIcon(AppIcons.ToolboxLine, stringResource(R.string.toolbox_title), onToolboxClick)
             HeaderIcon(AppIcons.FoldersLine, stringResource(R.string.settings_section_management), onContentManagementClick)
             HeaderIcon(AppIcons.SettingsLine, stringResource(R.string.settings_title), onSettingsClick)
@@ -1081,36 +1098,32 @@ private fun SheetHeader(
 internal fun HeaderIcon(icon: ImageVector, description: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(width = 40.dp, height = 34.dp)
+            .size(width = 48.dp, height = 56.dp)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = description, tint = SheetDim, modifier = Modifier.size(19.dp))
+        Icon(icon, contentDescription = description, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(24.dp))
     }
 }
 
 @Composable
 internal fun QuickGroup(content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 8.dp)
-            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(14.dp))
-            .padding(start = 12.dp, end = 6.dp),
-        content = content
-    )
+    GroupDivider()
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp), content = content)
 }
 
-/** Like [QuickGroup], for the current mode's own settings: an amber outline and the mode's name on top. */
+/** Groups are parted by a 1 dp line and a 6 dp gap, with no boxes around them. */
+@Composable
+private fun GroupDivider() {
+    Box(Modifier.fillMaxWidth().height(1.dp).background(SonyDivider))
+    Spacer(Modifier.height(6.dp))
+}
+
+/** Like [QuickGroup], for the current mode's own settings: the mode's name on top, in orange. */
 @Composable
 private fun ModeGroup(title: String, onGuide: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 8.dp)
-            .border(1.dp, ModeAmber.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
-            .padding(start = 12.dp, end = 6.dp)
-    ) {
+    GroupDivider()
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
         // A mode with a guide shows a small info mark after its name; a tap on either opens the guide.
         val guideDescription = stringResource(R.string.mode_guide_open, title)
         Row(
@@ -1153,18 +1166,21 @@ internal class QuickRows(
         last: Boolean = false,
         // A long press that does something else than opening Settings.
         onLongClick: (() -> Unit)? = null,
-        // A small amber dot after the name: something here differs from what was saved.
+        // A small orange dot after the name: something here differs from what was saved.
         marked: Boolean = false,
+        // A set-and-forget row: shorter and grey, still a 48 dp target.
+        quiet: Boolean = false,
         content: @Composable RowScope.() -> Unit
     ) {
         val open = explained == key
+        val rowHeight = if (quiet) 48.dp else 56.dp
         // The choices drop to a second line, still right-aligned, when they don't fit beside the name.
         FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             LongerLongPress {
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .height(36.dp)
+                        .height(rowHeight)
                         .combinedClickable(
                             onClick = { onExplain(key) },
                             onLongClick = onLongClick ?: settingsTarget?.let { target -> { onOpenSettingsAt(target) } }
@@ -1173,8 +1189,8 @@ internal class QuickRows(
                 ) {
                     Text(
                         text = label,
-                        color = if (open) Color.White else SheetLabel,
-                        fontSize = 12.5.sp,
+                        color = if (open) Color.White else if (quiet) SonySecondary else SonyText,
+                        fontSize = if (quiet) 14.sp else 16.sp,
                         maxLines = 1,
                         softWrap = false
                     )
@@ -1184,7 +1200,7 @@ internal class QuickRows(
                 }
             }
             Row(
-                modifier = Modifier.height(36.dp),
+                modifier = Modifier.height(rowHeight),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 content = content
@@ -1193,37 +1209,53 @@ internal class QuickRows(
         if (open) {
             Text(
                 text = explanation,
-                color = SheetDim,
-                fontSize = 11.5.sp,
+                color = SonySecondary,
+                fontSize = 14.sp,
                 lineHeight = 1.4.em,
-                modifier = Modifier.padding(top = 2.dp, end = 8.dp, bottom = if (last) 11.dp else 4.dp)
+                modifier = Modifier.padding(end = 8.dp, bottom = if (last) 11.dp else 8.dp)
             )
         }
+        if (!last) Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
     }
 }
 
 @Composable
-internal fun QuickChoice(text: String, selected: Boolean, minWidth: Dp, onClick: () -> Unit) =
-    LilacChip(text = text, selected = selected, onClick = onClick, minWidth = minWidth)
+internal fun QuickChoice(text: String, selected: Boolean, minWidth: Dp, icon: ImageVector? = null, onClick: () -> Unit) =
+    LilacChip(
+        text = text,
+        selected = selected,
+        onClick = onClick,
+        minWidth = maxOf(minWidth, 48.dp),
+        height = 40.dp,
+        touchHeight = 48.dp,
+        fontSize = 15.sp,
+        horizontalPadding = 10.dp,
+        icon = icon,
+        textColor = SonySecondary
+    )
 
+/** Grey track and thumb when off; a light track with a black thumb on the right when on. [quiet] is smaller. */
 @Composable
-private fun QuickSwitch(checked: Boolean, onClick: () -> Unit) {
-    val knob by androidx.compose.animation.core.animateDpAsState(if (checked) 25.dp else 5.dp, tween(150), label = "quickSwitch")
-    val color = if (checked) ModeAmber else SheetGrey
+private fun QuickSwitch(checked: Boolean, quiet: Boolean = false, onClick: () -> Unit) {
+    val width = if (quiet) 46.dp else 52.dp
+    val height = if (quiet) 28.dp else 32.dp
+    val thumb = if (quiet) 16.dp else 20.dp
+    val inset = 6.dp
+    val knob by androidx.compose.animation.core.animateDpAsState(if (checked) width - inset - thumb else inset, tween(150), label = "quickSwitch")
     Box(
         modifier = Modifier
-            .height(36.dp)
+            .height(48.dp)
             .clickable(onClick = onClick)
             .padding(start = 8.dp, end = 4.dp),
         contentAlignment = Alignment.Center
     ) {
-        Box(Modifier.size(width = 42.dp, height = 22.dp).border(1.25.dp, color, RoundedCornerShape(11.dp))) {
+        Box(Modifier.size(width = width, height = height).background(if (checked) SonyText else SonyTrack, RoundedCornerShape(height / 2))) {
             Box(
                 Modifier
                     .align(Alignment.CenterStart)
                     .offset(x = knob)
-                    .size(12.dp)
-                    .background(color, CircleShape)
+                    .size(thumb)
+                    .background(if (checked) Color.Black else SonyDim, CircleShape)
             )
         }
     }
@@ -1234,13 +1266,13 @@ private fun QuickSwitch(checked: Boolean, onClick: () -> Unit) {
 internal fun QuickLink(value: String, open: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
-            .height(36.dp)
+            .height(48.dp)
             .clickable(onClick = onClick)
             .padding(start = 8.dp, end = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Text(value, color = SheetText, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        Text(value, color = SonySecondary, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
         Icon(
             imageVector = if (open) AppIcons.ChevronUpLine else AppIcons.ChevronRightLine,
             contentDescription = null,
@@ -1254,8 +1286,8 @@ internal fun QuickLink(value: String, open: Boolean, onClick: () -> Unit) {
 private fun QuickFixed(text: String) {
     Text(
         text = text,
-        color = SheetGrey,
-        fontSize = 12.5.sp,
+        color = SonySecondary,
+        fontSize = 15.sp,
         fontWeight = FontWeight.Medium,
         modifier = Modifier.padding(end = 6.dp)
     )
@@ -1311,8 +1343,6 @@ private fun FrameCountSlider(
     QuickSlider(
         text = if (shown == 0) stringResource(R.string.quick_frames_off)
         else countLabel?.let { pluralStringResource(it, shown, shown) } ?: shown.toString(),
-        valueWidth = if (countLabel != null) 52.dp else 40.dp,
-        active = if (withOff) shown > 0 else shown > 1,
         fraction = position.value,
         onFraction = { f ->
             val position = (start + f * (max - start)).roundToInt()
@@ -1342,7 +1372,6 @@ private fun HdrRatioSlider(limit: Float, onLimitChange: (Float) -> Unit) {
     val shown = dragged ?: limit
     QuickSlider(
         text = String.format(Locale.getDefault(), "%.1f×", shown),
-        active = shown != default,
         fraction = (shown - min) / (max - min),
         onFraction = { f ->
             val value = ((min + f * (max - min)) * 2f).roundToInt() / 2f
@@ -1356,42 +1385,39 @@ private fun HdrRatioSlider(limit: Float, onLimitChange: (Float) -> Unit) {
 }
 
 /**
- * The sheet's slider: the value on the left (amber when [active]), a 150 dp track; reports 0..1 while dragging.
- * The track is as long as fits beside the longest slider name (Multi-exposure) on a 360 dp wide screen.
+ * The sheet's slider: the value on the left, a 112 dp track with 10 dp to touch on each side; reports 0..1
+ * while dragging.
  */
 @Composable
 internal fun QuickSlider(
     text: String,
-    active: Boolean,
     fraction: Float,
     onFraction: (Float) -> Unit,
-    onDoubleTap: (() -> Unit)? = null,
-    valueWidth: Dp = 40.dp
+    onDoubleTap: (() -> Unit)? = null
 ) {
-    val trackWidth = 150.dp
+    val trackWidth = 112.dp
     val currentOnFraction by rememberUpdatedState(onFraction)
     val currentOnDoubleTap by rememberUpdatedState(onDoubleTap)
     Row(
-        modifier = Modifier.height(36.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        modifier = Modifier.height(48.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = text,
-            color = if (active) ModeAmber else SheetText,
-            fontSize = 12.5.sp,
+            color = SonySecondary,
+            fontSize = 15.sp,
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.End,
             maxLines = 1,
-            modifier = Modifier.width(valueWidth)
+            modifier = Modifier.width(66.dp)
         )
         Box(
             modifier = Modifier
-                .padding(end = 8.dp)
-                .width(trackWidth)
+                .width(trackWidth + 20.dp)
                 .fillMaxHeight()
                 .pointerInput(Unit) {
-                    fun select(x: Float) = currentOnFraction((x / size.width).coerceIn(0f, 1f))
+                    val edge = 10.dp.toPx()
+                    fun select(x: Float) = currentOnFraction(((x - edge) / (size.width - 2 * edge)).coerceIn(0f, 1f))
                     var lastDown = 0L
                     awaitEachGesture {
                         val down = awaitFirstDown()
@@ -1416,24 +1442,25 @@ internal fun QuickSlider(
             Box(
                 Modifier
                     .align(Alignment.CenterStart)
+                    .padding(horizontal = 10.dp)
                     .fillMaxWidth()
-                    .height(2.dp)
-                    .background(Color.White.copy(alpha = 0.3f), RoundedCornerShape(1.dp))
+                    .height(4.dp)
+                    .background(SonyTrack, RoundedCornerShape(2.dp))
             )
             Box(
                 Modifier
                     .align(Alignment.CenterStart)
-                    .fillMaxWidth(fraction)
-                    .height(2.dp)
-                    .background(ModeAmber, RoundedCornerShape(1.dp))
+                    .padding(start = 10.dp)
+                    .width(trackWidth * fraction)
+                    .height(4.dp)
+                    .background(SonyText, RoundedCornerShape(2.dp))
             )
             Box(
                 Modifier
                     .align(Alignment.CenterStart)
-                    .offset(x = trackWidth * fraction - 8.dp)
-                    .size(16.dp)
-                    .background(Color.Black, CircleShape)
-                    .border(1.5.dp, ModeAmber, CircleShape)
+                    .offset(x = trackWidth * fraction)
+                    .size(20.dp)
+                    .background(SonyText, CircleShape)
             )
         }
     }
@@ -1454,7 +1481,7 @@ private fun VideoOptionChip(
             .heightIn(min = 36.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (selected) AccentColor else Color.White.copy(alpha = 0.12f)
+                if (selected) ChosenFill else Color.White.copy(alpha = 0.12f)
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -1462,7 +1489,7 @@ private fun VideoOptionChip(
     ) {
         Text(
             text = title,
-            color = if (selected) OnAccentColor else Color.White,
+            color = if (selected) Color.Black else Color.White,
             fontSize = 12.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
         )
