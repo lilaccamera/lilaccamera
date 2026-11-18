@@ -2,9 +2,29 @@
 icon: lucide/cpu
 ---
 
-# Sony hardware
+# Sony camera features
 
-The XZ1 Compact's camera does more than Android's standard camera interface shows. Sony's camera software publishes extra controls, and Lilac uses the ones that help.
+Lilac aims to bring everything Sony's own camera app does to custom ROMs, and to add GCam's multi-frame processing on top. Sony's camera software publishes more than Android's standard camera interface shows, and Lilac uses the parts it can reach. This page lists what is done and what is not.
+
+## Sony's camera app and Lilac
+
+| Sony's camera | In Lilac |
+|---|---|
+| Face detection | **Done.** Light face frames on both cameras; focus and exposure follow the main face |
+| Subject tracking | **Done.** Tap an object and it is followed (back camera) |
+| Focus and exposure marks, the half-press | **Done.** Sony-style focus frame, metering circle, AE-L |
+| Laser distance sensor | **Partly.** A far-focus fallback in the dark |
+| Two-stage camera key | **Done.** Half-press holds focus, full press shoots |
+| Smile shutter | **Done** |
+| Scene and condition recognition | **Partly.** Icons on the top line; nothing changes because of them |
+| Sony's photo processing | **Done on the front camera**, as Accurate colour; **Camera JPEG** keeps Sony's photo in Pro |
+| Super slow motion, 960 fps | **Done**, at 720p. Needs Sony's cacao service and the Lilac Sony Bridge on the ROM |
+| 60 fps at 1080p and 120 fps at 720p video | **Done.** Needs Sony's cacao service and the Lilac Sony Bridge |
+| Still HDR | **By hand.** Only as a [custom vendor key](#custom-vendor-keys) |
+| Multi-frame noise reduction | **Not used.** Lilac merges the frames itself |
+| Video stabilisation (SteadyShot, Intelligent Active) | **Done**, as Steady and Active. Needs the Lilac Sony Bridge; Lilac's own EIS+ works without it |
+
+What each ROM provides, and which ROM was tested: [Get Lilac](../index.md#get-lilac).
 
 ## The phone's cameras
 
@@ -21,7 +41,7 @@ Above ISO 320 the back sensor's gain is digital rather than analog.
 
 ## What Lilac uses
 
-The camera's own features that Lilac uses. Open ![](../icons/CameraLine.svg){ .icon } on a card to see what each one does in the app.
+The camera's own features that Lilac uses, in detail. Open ![](../icons/CameraLine.svg){ .icon } on a card to see what each one does in the app.
 
 <div class="lilac-features" markdown="0">
 <div class="lilac-feature"><img src="../icons/User.svg" alt="" class="lilac-feature__icon"><div><strong>Face detection</strong><span>On the camera chip, up to five faces, at no cost to the phone.</span><details class="lilac-feature__enables"><summary><img src="../icons/CameraLine.svg" alt=""><span class="lilac-sr">What it does in Lilac</span></summary><p>Lilac draws the face frames and points focus and exposure at faces. Portrait keeps a sharp area round each face in the viewfinder, and the self-timer lamp blinks while a face is in view. See <a href="focus.md#faces">Faces</a>.</p></details></div></div>

@@ -61,4 +61,4 @@ If "Scene wanted" is above "Ratio limit", the slider made a difference.
 **Ultra HDR** in quick settings (off by default) adds a gain map, so photos look brighter on HDR screens. The gain map is built from the RAW, so it works for Pro photos. Each photo in the gallery has its own HDR switch and strength.
 
 !!! note "Not in this version"
-    Photo mode has no HDR bracketing: its bracket fusion works at 12 MP but runs out of memory at full size on this phone, so it is switched off. Sony's own still HDR can only be turned on by hand as a vendor key; see [Sony hardware](hardware.md#vendor-keys).
+    Photo mode has no HDR bracketing: its bracket fusion works at 12 MP but runs out of memory at full size on this phone, so it is switched off. Sony's own still HDR can only be turned on by hand as a vendor key; see [Sony camera features](hardware.md#vendor-keys).
