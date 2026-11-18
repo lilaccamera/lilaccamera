@@ -1084,7 +1084,10 @@ fun SettingsScreen(
     }
     val settingsScrollState = if (selectedPage == null) overviewScrollState else detailScrollState
 
-    CompositionLocalProvider(LocalRippleConfiguration provides settingsRippleConfiguration) {
+    CompositionLocalProvider(
+        LocalRippleConfiguration provides settingsRippleConfiguration,
+        LocalSettingsLook provides true,
+    ) {
         Column(
             modifier = modifier
                 .fillMaxSize()
@@ -1181,10 +1184,7 @@ fun SettingsScreen(
                             }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_level_indicator),
@@ -1193,10 +1193,7 @@ fun SettingsScreen(
                             onCheckedChange = { showLevelIndicator = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_focus_peaking),
@@ -1205,10 +1202,7 @@ fun SettingsScreen(
                             onCheckedChange = { focusPeakingEnabled = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         if (!com.hinnka.mycamera.camera.DeviceQuirks.isLilac) SettingsAnchor(SettingsTarget.PREVIEW_STABILIZATION, pendingTarget, onShown = { pendingTarget = null }) {
     SwitchSettingItem(
@@ -1252,10 +1246,7 @@ fun SettingsScreen(
                         )
 
                         if (mainCameraIdOptions.size > 1) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
+                            SettingsRowDivider()
 
                             val currentMainCameraId = state.availableCameras.firstOrNull {
                                 it.lensType == LensType.BACK_MAIN && abs(it.intrinsicZoomRatio - 1f) <= 0.01f
@@ -1288,10 +1279,7 @@ fun SettingsScreen(
                         }
 
                         if (macroCameraIdOptions.size > 1) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
+                            SettingsRowDivider()
 
                             val macroCameraAutoLabel = stringResource(R.string.settings_macro_camera_id_auto)
                             val selectedMacroCameraId = preferredMacroCameraId
@@ -1353,10 +1341,7 @@ fun SettingsScreen(
                             }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         NavigationSettingItem(
                             title = stringResource(R.string.settings_add_isz_lens),
@@ -1367,10 +1352,7 @@ fun SettingsScreen(
                             onClick = { showAddIszLensDialog = true }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         QualityLevelSetting(
                             title = stringResource(R.string.settings_default_virtual_aperture),
@@ -1408,10 +1390,7 @@ fun SettingsScreen(
                             onCheckedChange = { enableLogicalMultiCameraDiscovery = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         TextInputSettingItem(
                             title = stringResource(R.string.settings_logical_camera_binding_whitelist),
@@ -1420,10 +1399,7 @@ fun SettingsScreen(
                             onValueChange = { viewModel.setLogicalCameraBindingWhitelist(it) }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         TextInputSettingItem(
                             title = stringResource(R.string.settings_custom_lens_ids),
@@ -1432,10 +1408,7 @@ fun SettingsScreen(
                             onValueChange = { viewModel.setCustomLensIds(it) }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         TextInputSettingItem(
                             title = stringResource(R.string.settings_lens_id_blacklist),
@@ -1490,10 +1463,7 @@ fun SettingsScreen(
                             )
                         }
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_mirror_front_camera),
@@ -1502,10 +1472,7 @@ fun SettingsScreen(
                             onCheckedChange = { mirrorFrontCamera = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SettingsAnchor(SettingsTarget.MULTIPLE_EXPOSURE, pendingTarget, onShown = { pendingTarget = null }) {
     QualityLevelSetting(
@@ -1523,10 +1490,7 @@ fun SettingsScreen(
                             )
                         }
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         QualityLevelSetting(
                             title = stringResource(R.string.settings_photo_quality),
@@ -1541,10 +1505,7 @@ fun SettingsScreen(
                         )
 
                         if (isHeicExportSupported) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
+                            SettingsRowDivider()
 
                             SwitchSettingItem(
                                 title = stringResource(R.string.settings_use_heic_export),
@@ -1555,10 +1516,7 @@ fun SettingsScreen(
                         }
 
                         if (isJpeg444ExportSupported) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
+                            SettingsRowDivider()
 
                             SwitchSettingItem(
                                 title = stringResource(R.string.settings_use_jpeg_444_export),
@@ -1568,10 +1526,7 @@ fun SettingsScreen(
                             )
                         }
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         DropdownSettingItem(
                             title = stringResource(
@@ -1600,10 +1555,7 @@ fun SettingsScreen(
                             }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_auto_save),
@@ -1612,10 +1564,7 @@ fun SettingsScreen(
                             onCheckedChange = { autoSaveAfterCapture = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_save_location),
@@ -1695,10 +1644,7 @@ fun SettingsScreen(
                             onLevelSelected = { videoNrLevel = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         QualityLevelSetting(
                             title = stringResource(R.string.settings_edge_level),
@@ -1713,10 +1659,7 @@ fun SettingsScreen(
                             onLevelSelected = { videoEdgeLevel = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         DropdownSettingItem(
                             title = stringResource(R.string.settings_video_stabilization_default),
@@ -1735,10 +1678,7 @@ fun SettingsScreen(
                         )
 
                         if (DeviceUtil.isOppo) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
+                            SettingsRowDivider()
 
                             SwitchSettingItem(
                                 title = stringResource(
@@ -1753,10 +1693,7 @@ fun SettingsScreen(
                             )
                         }
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         val stabilizationStrengthValueFormat = stringResource(
                             R.string.settings_video_stabilization_strength_value
@@ -1793,10 +1730,7 @@ fun SettingsScreen(
                             enabled = viewModel.isAlgorithmicStabilizationSupported,
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         val stabilizationLookaheadValueFormat = stringResource(
                             R.string.settings_video_stabilization_lookahead_value
@@ -1834,10 +1768,7 @@ fun SettingsScreen(
                             enabled = viewModel.isAlgorithmicStabilizationSupported,
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         val externalLensConfig =
                             userPreferences.externalLensStabilizationConfig
@@ -1871,10 +1802,7 @@ fun SettingsScreen(
                             onClick = { showExternalLensStabilizationDialog = true },
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_separate_video_lut),
@@ -1884,10 +1812,7 @@ fun SettingsScreen(
                         )
 
                         if (separateVideoLutEnabled) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
+                            SettingsRowDivider()
 
                             val effectiveVideoLutId = videoLutId
                                 ?: userPreferences.lutId
@@ -1906,10 +1831,7 @@ fun SettingsScreen(
                             )
                         }
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_video_lock_lens),
@@ -1918,10 +1840,7 @@ fun SettingsScreen(
                             onCheckedChange = { videoLensLockEnabled = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_video_lock_white_balance),
@@ -1930,10 +1849,7 @@ fun SettingsScreen(
                             onCheckedChange = { videoWhiteBalanceLockEnabled = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         DropdownSettingItem(
                             title = stringResource(
@@ -2014,10 +1930,7 @@ fun SettingsScreen(
                             valueTextFormatter = { scale -> String.format(jpgOutputScaleValueFormat, scale) }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         QualityLevelSetting(
                             title = stringResource(R.string.settings_nr_level),
@@ -2033,10 +1946,7 @@ fun SettingsScreen(
                             onLevelSelected = { nrLevel = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         QualityLevelSetting(
                             title = stringResource(R.string.settings_edge_level),
@@ -2051,10 +1961,7 @@ fun SettingsScreen(
                             onLevelSelected = { edgeLevel = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
                         SwitchSettingItem(
                             title = stringResource(R.string.quick_bracketing),
                             description = stringResource(R.string.quick_explain_bracketing),
@@ -2063,10 +1970,7 @@ fun SettingsScreen(
                         )
 
                         if (state.isP010Supported) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 12.dp)
-                            )
+                            SettingsRowDivider()
 
                             SwitchSettingItem(
                                 title = stringResource(R.string.settings_use_p010),
@@ -2077,10 +1981,7 @@ fun SettingsScreen(
                         }
 
                         if (state.isP3Supported) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 12.dp)
-                            )
+                            SettingsRowDivider()
 
                             SwitchSettingItem(
                                 title = stringResource(R.string.settings_use_p3_color_space),
@@ -2109,10 +2010,7 @@ fun SettingsScreen(
                             onLevelSelected = viewModel::setHdrPlusMergeMode,
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         SettingsAnchor(SettingsTarget.HDR_PLUS, pendingTarget, onShown = { pendingTarget = null }) {
     SliderSettingItem(
@@ -2140,10 +2038,7 @@ fun SettingsScreen(
                             )
                         }
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_hdr_plus_bracket_exposure),
@@ -2160,10 +2055,7 @@ fun SettingsScreen(
                         )
 
                         if (effectiveHdrPlusBracketExposure) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 12.dp)
-                            )
+                            SettingsRowDivider()
                             SliderSettingItem(
                                 title = stringResource(R.string.settings_hdr_plus_long_frame_ev),
                                 description = stringResource(R.string.settings_hdr_plus_long_frame_ev_description),
@@ -2177,10 +2069,7 @@ fun SettingsScreen(
                                 resetValue = MultiFrameConfig.LONG_FRAME_EXPOSURE_EV.toFloat(),
                                 valueTextFormatter = { String.format(Locale.getDefault(), "+%.1f EV", it) },
                             )
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 12.dp)
-                            )
+                            SettingsRowDivider()
                             SliderSettingItem(
                                 title = stringResource(R.string.settings_hdr_plus_short_frame_ev),
                                 description = stringResource(R.string.settings_hdr_plus_short_frame_ev_description),
@@ -2196,10 +2085,7 @@ fun SettingsScreen(
                             )
                         }
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
                         SliderSettingItem(
                             title = stringResource(R.string.settings_ml_ae_max_hdr_ratio),
                             description = stringResource(R.string.settings_ml_ae_max_hdr_ratio_description),
@@ -2212,10 +2098,7 @@ fun SettingsScreen(
                             valueTextFormatter = { String.format(Locale.getDefault(), "%.1f×", it) },
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         QualityLevelSetting(
                             title = stringResource(R.string.settings_raw_min_shutter_speed),
@@ -2258,10 +2141,7 @@ fun SettingsScreen(
                             currentLevel = rawColorCalibrationMode,
                             onLevelSelected = { preferencesRepository.updateAsync { this.rawColorCalibrationMode = it } },
                         )
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_raw_digital_zoom_resampling),
@@ -2269,10 +2149,7 @@ fun SettingsScreen(
                             checked = rawDigitalZoomResamplingEnabled,
                             onCheckedChange = { preferencesRepository.updateAsync { this.rawDigitalZoomResamplingEnabled = it } },
                         )
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         QualityLevelSetting(
                             title = stringResource(R.string.settings_raw_output_upscale_mode),
@@ -2291,10 +2168,7 @@ fun SettingsScreen(
                             onLevelSelected = viewModel::setRawOutputUpscaleMode,
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         val valueFormat = stringResource(R.string.settings_raw_max_output_scale_value)
                         val raisrUpscaleActive = rawOutputUpscaleMode.isMgcRaisr
@@ -2324,10 +2198,7 @@ fun SettingsScreen(
                             enabled = !raisrUpscaleActive,
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         SliderSettingItem(
                             title = stringResource(R.string.settings_raw_max_default_sharpening),
@@ -2344,10 +2215,7 @@ fun SettingsScreen(
                             onValueChangeFinished = ::commitRawSliderValues,
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         if (availableRawNoiseProfiles.isNotEmpty()) {
                             RawNoiseProfileSelector(
@@ -2374,10 +2242,7 @@ fun SettingsScreen(
                                     }
                                 },
                             )
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 12.dp)
-                            )
+                            SettingsRowDivider()
                         }
 
                         SliderSettingItem(
@@ -2395,10 +2260,7 @@ fun SettingsScreen(
                             onValueChangeFinished = ::commitRawSliderValues,
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         SliderSettingItem(
                             title = stringResource(R.string.settings_raw_max_default_chroma_denoise),
@@ -2494,10 +2356,7 @@ fun SettingsScreen(
                                 )
                             }
 
-                            HorizontalDivider(
-                                modifier = Modifier.padding(vertical = 8.dp),
-                                color = Color.White.copy(alpha = 0.1f)
-                            )
+                            SettingsRowDivider()
                         }
 
                         QualityLevelSetting(
@@ -2524,10 +2383,7 @@ fun SettingsScreen(
                             onCheckedChange = { rawLensShadingCorrectionEnabled = it }
                         )
 
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 8.dp),
-                            color = Color.White.copy(alpha = 0.1f)
-                        )
+                        SettingsRowDivider()
 
                         RawDngMetadataCorrectionSetting(
                             cameras = state.availableCameras,
@@ -2561,10 +2417,7 @@ fun SettingsScreen(
                                 }
                             )
 
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
+                            SettingsRowDivider()
 
                             SwitchSettingItem(
                                 title = stringResource(R.string.settings_phantom_button_hidden),
@@ -2573,10 +2426,7 @@ fun SettingsScreen(
                                 onCheckedChange = { phantomButtonHidden = it }
                             )
 
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
+                            SettingsRowDivider()
 
                             SwitchSettingItem(
                                 title = stringResource(R.string.settings_launch_camera_on_phantom_mode),
@@ -2585,10 +2435,7 @@ fun SettingsScreen(
                                 onCheckedChange = { launchCameraOnPhantomMode = it }
                             )
 
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
+                            SettingsRowDivider()
 
                             SwitchSettingItem(
                                 title = stringResource(R.string.settings_phantom_pip_preview),
@@ -2597,10 +2444,7 @@ fun SettingsScreen(
                                 onCheckedChange = { phantomPipPreview = it }
                             )
 
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
+                            SettingsRowDivider()
 
                             NavigationSettingItem(
                                 title = stringResource(R.string.settings_phantom_pip_crop),
@@ -2608,10 +2452,7 @@ fun SettingsScreen(
                                 onClick = onPhantomPipCropClick
                             )
 
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
+                            SettingsRowDivider()
 
                             SwitchSettingItem(
                                 title = stringResource(R.string.settings_phantom_save_as_new),
@@ -2620,10 +2461,7 @@ fun SettingsScreen(
                                 onCheckedChange = { phantomSaveAsNew = it }
                             )
 
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 12.dp)
-                            )
+                            SettingsRowDivider()
 
                             FrameWatermarkSetting(
                                 title = stringResource(R.string.settings_phantom_frame_title),
@@ -2645,37 +2483,25 @@ fun SettingsScreen(
                     ) {
                         AppLanguageSetting()
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         BackgroundSetting(
                             viewModel = viewModel,
                             modifier = Modifier.padding(bottom = 16.dp)
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         AccentColorSetting(
                             color = userPreferences.accentColor,
                             onColorSelected = { preferencesRepository.updateAsync { this.accentColor = it } }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         CaptureButtonAppearanceSetting(viewModel = viewModel)
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
+                        SettingsRowDivider()
 
                         QualityLevelSetting(
                             title = stringResource(R.string.settings_widget_theme),
@@ -2689,10 +2515,7 @@ fun SettingsScreen(
                             onLevelSelected = { viewModel.setWidgetTheme(it) }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_auto_rotate),
@@ -2701,10 +2524,7 @@ fun SettingsScreen(
                             onCheckedChange = { autoRotateEnabled = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_color_palette),
@@ -2713,10 +2533,7 @@ fun SettingsScreen(
                             onCheckedChange = { colorPaletteEnabled = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_develop_animation),
@@ -2754,10 +2571,7 @@ fun SettingsScreen(
                             onClick = onFilterManagementClick
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         NavigationSettingItem(
                             title = stringResource(R.string.settings_frame_management),
@@ -2765,10 +2579,7 @@ fun SettingsScreen(
                             onClick = onFrameManagementClick
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         NavigationSettingItem(
                             title = stringResource(R.string.settings_preset_management),
@@ -2791,10 +2602,7 @@ fun SettingsScreen(
                             onCheckedChange = { showLutCreator = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         TextInputSettingItem(
                             title = stringResource(R.string.settings_openai_api_key),
@@ -2804,10 +2612,7 @@ fun SettingsScreen(
                             isSecret = true,
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         TextInputSettingItem(
                             title = stringResource(R.string.settings_openai_base_url),
@@ -2816,10 +2621,7 @@ fun SettingsScreen(
                             onValueChange = { preferencesRepository.updateAsync { this.openAIBaseUrl = it } }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         val customModelLabel = stringResource(R.string.settings_ai_model_custom)
                         DropdownSettingItem(
@@ -2855,10 +2657,7 @@ fun SettingsScreen(
                             onCheckedChange = viewModel::setRetainCaptureSettings
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_shutter_sound),
@@ -2869,10 +2668,7 @@ fun SettingsScreen(
 
                         CaptureSoundSetting(viewModel)
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_vibration),
@@ -2881,10 +2677,7 @@ fun SettingsScreen(
                             onCheckedChange = { vibrationEnabled = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_keep_screen_on),
@@ -2893,10 +2686,7 @@ fun SettingsScreen(
                             onCheckedChange = { keepScreenOn = it }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         SliderSettingItem(
                             title = stringResource(R.string.settings_window_screen_brightness),
@@ -2921,10 +2711,7 @@ fun SettingsScreen(
                         )
 
                         if (isHdrSettingsSupported) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
+                            SettingsRowDivider()
 
                             SwitchSettingItem(
                                 title = stringResource(R.string.settings_screen_hdr),
@@ -2934,10 +2721,7 @@ fun SettingsScreen(
                             )
                         }
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         VolumeKeyActionSetting(
                             action = volumeKeyAction,
@@ -2971,10 +2755,7 @@ fun SettingsScreen(
                             }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         NavigationSettingItem(
                             title = stringResource(R.string.settings_restore_settings),
@@ -3031,10 +2812,7 @@ fun SettingsScreen(
                         }
 
                         if (AppUpdateManager.updatesEnabled) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
+                            SettingsRowDivider()
 
                             NavigationSettingItem(
                                 title = stringResource(R.string.settings_check_update),
@@ -3088,10 +2866,7 @@ fun SettingsScreen(
                             )
                         }
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         NavigationSettingItem(
                             title = stringResource(R.string.settings_report_problem),
@@ -3099,10 +2874,7 @@ fun SettingsScreen(
                             onClick = { openExternalUrl(context, ISSUES_URL) }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        SettingsRowDivider()
 
                         NavigationSettingItem(
                             title = stringResource(R.string.settings_credit),
@@ -3452,6 +3224,23 @@ fun SettingsSection(
     onToggleExpand: () -> Unit = {},
     content: @Composable ColumnScope.() -> Unit
 ) {
+    if (LocalSettingsLook.current) {
+        Column(modifier = modifier) {
+            if (showTitle) {
+                Box(Modifier.height(40.dp), contentAlignment = Alignment.CenterStart) {
+                    Text(
+                        text = title.uppercase(),
+                        color = SettingsDim,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 1.2.sp,
+                    )
+                }
+            }
+            content()
+        }
+        return
+    }
     Column(modifier = modifier) {
         if (showTitle && !isExpandable) {
             Text(
@@ -3842,6 +3631,12 @@ fun SwitchSettingItem(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
+    if (LocalSettingsLook.current) {
+        SettingsRowFrame(title, description, enabled, onClick = { onCheckedChange(!checked) }, modifier) {
+            SettingsSwitch(checked, onCheckedChange, enabled)
+        }
+        return
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -3898,7 +3693,15 @@ fun TextInputSettingItem(
 ) {
     var showDialog by remember { mutableStateOf(false) }
 
-    Row(
+    if (LocalSettingsLook.current) {
+        SettingsValueRow(
+            title = title,
+            secondLine = description,
+            value = if (isSecret && value.isNotEmpty()) "•".repeat(8) else value,
+            enabled = true,
+            onClick = { showDialog = true },
+        )
+    } else Row(
         modifier = modifier
             .fillMaxWidth()
             .clickable { showDialog = true }
@@ -4004,6 +3807,35 @@ fun DropdownSettingItem(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val alpha = if (enabled) 1f else 0.4f
+
+    if (LocalSettingsLook.current) {
+        SettingsValueRow(
+            title = title,
+            secondLine = description,
+            value = if (isLoading && options.isEmpty()) stringResource(R.string.settings_ai_model_loading)
+            else value.ifEmpty { stringResource(R.string.settings_ai_model_select) },
+            enabled = enabled,
+            onClick = {
+                onExpanded()
+                expanded = true
+            },
+        )
+        if (expanded) {
+            SettingsChoiceSheet(
+                title = title,
+                options = if (isLoading) emptyList() else options,
+                chosen = options.indexOf(value),
+                onPick = { onOptionSelected(options[it]) },
+                onDismiss = { expanded = false },
+                note = when {
+                    isLoading -> stringResource(R.string.settings_ai_model_fetching)
+                    options.isEmpty() -> stringResource(R.string.settings_ai_model_empty)
+                    else -> null
+                },
+            )
+        }
+        return
+    }
 
     Row(
         modifier = modifier
@@ -4114,6 +3946,16 @@ fun NavigationSettingItem(
     showProgress: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    if (LocalSettingsLook.current) {
+        SettingsRowFrame(title, description.ifEmpty { null }, enabled || showProgress, onClick.takeIf { enabled }, modifier) {
+            if (showProgress) {
+                CircularProgressIndicator(Modifier.size(22.dp), color = SettingsText, strokeWidth = 2.dp)
+            } else {
+                SettingsChevron(enabled)
+            }
+        }
+        return
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -5611,6 +5453,28 @@ fun <T> QualityLevelSetting(
     onLevelSelected: (T) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    if (LocalSettingsLook.current) {
+        var open by remember { mutableStateOf(false) }
+        val chosen = levels.indexOfFirst { it.first == currentLevel }
+        val name = title ?: description.orEmpty()
+        SettingsValueRow(
+            title = name,
+            secondLine = description.takeIf { title != null },
+            value = levels.getOrNull(chosen)?.second.orEmpty(),
+            enabled = true,
+            onClick = { open = true },
+        )
+        if (open) {
+            SettingsChoiceSheet(
+                title = name,
+                options = levels.map { it.second },
+                chosen = chosen,
+                onPick = { onLevelSelected(levels[it].first) },
+                onDismiss = { open = false },
+            )
+        }
+        return
+    }
 
     Column(modifier = modifier.fillMaxWidth()) {
         if (title != null) {
