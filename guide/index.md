@@ -31,6 +31,8 @@ Lilac is a camera app for one phone. It rebuilds Sony's camera app, with all of 
 
 Sony's camera app uses the phone's hardware fully but does not run on custom ROMs. Lilac brings its features back: face frames, subject tracking, the laser distance sensor, the two-stage camera key, smile shutter, Sony's own photo processing, Sony's video stabilisers, and 960 fps slow motion with 60 and 120 fps video. The aim is the whole of Sony's camera app; the [Sony camera features](user/hardware.md) page lists what is done and what is not yet.
 
+No code from Sony's camera app is in Lilac. Its Sony features were rebuilt by studying how Sony's app talks to the phone's camera system, which settings it sends and which system services it calls, and making the same requests from Lilac's own code. Where a feature needs Sony's own services, such as cacao for slow motion, Lilac calls the ones already on the phone's ROM; it does not ship them.
+
 The XZ1 Compact's sensor records at 960 frames a second, but on custom ROMs that went away with Sony's camera app. sunplex07's LineageOS 23.2 keeps Sony's slow-motion service, cacao, and Lilac reaches it through its companion app, the Lilac Sony Bridge. So 960 fps works again.
 
 <a class="lilac-next" href="user/hardware/">Next: Sony's camera features, done and not yet</a>
