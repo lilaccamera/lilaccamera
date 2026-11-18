@@ -308,6 +308,7 @@ fun CameraScreen(
     val enableDevelopAnimation by preferenceValue { it.enableDevelopAnimation }
     var showHistogram by rememberPreference(UserPreferences::showHistogram)
     var saveCameraJpeg by rememberPreference(UserPreferences::saveCameraJpeg)
+    var useJpgMaxHdrComposition by rememberPreference(UserPreferences::useJpgMaxHdrComposition)
     var videoTorchEnabled by rememberPreference(UserPreferences::videoTorchEnabled)
     var videoAudioInputId by rememberPreference(UserPreferences::videoAudioInputId)
     val developAnimationStyle by preferenceValue { it.developAnimationStyle }
@@ -2559,6 +2560,9 @@ fun CameraScreen(
             onFrontAccurateColourChange = viewModel::setFrontAccurateColour,
             saveCameraJpeg = saveCameraJpeg,
             onSaveCameraJpegChange = { saveCameraJpeg = it },
+            bracketing = useJpgMaxHdrComposition,
+            onBracketingChange = { useJpgMaxHdrComposition = it },
+            bracketBlockedBySize = state.bracketBlockedBySize,
             isPortraitMode = state.isPortraitMode,
             isNightMode = state.isNightMode,
             portraitQuickBlur = portraitQuickBlur,

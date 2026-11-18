@@ -199,6 +199,9 @@ internal fun CameraTopSheet(
     onFrontAccurateColourChange: (Boolean) -> Unit,
     saveCameraJpeg: Boolean,
     onSaveCameraJpegChange: (Boolean) -> Unit,
+    bracketing: Boolean,
+    onBracketingChange: (Boolean) -> Unit,
+    bracketBlockedBySize: Boolean,
     isPortraitMode: Boolean = false,
     isNightMode: Boolean = false,
     portraitQuickBlur: Boolean = true,
@@ -535,6 +538,17 @@ internal fun CameraTopSheet(
                                     }
                                 }
                             )
+                        }
+                        rows.Setting(
+                            key = "bracket",
+                            label = stringResource(R.string.quick_bracketing),
+                            explanation = stringResource(R.string.quick_explain_bracketing)
+                        ) {
+                            when {
+                                !useJpgMax -> QuickFixed(stringResource(R.string.quick_bracketing_needs_multi_frame))
+                                bracketBlockedBySize -> QuickFixed(stringResource(R.string.quick_bracketing_needs_12mp))
+                                else -> QuickSwitch(bracketing) { onBracketingChange(!bracketing) }
+                            }
                         }
                         rows.Setting(
                             key = "mexp",

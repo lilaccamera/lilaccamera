@@ -459,8 +459,8 @@ class UserPreferences internal constructor(
         set(value) {
             mutablePreferences()[K.USE_RAW] = value
         }
-    /** 多帧降噪固定不启用包围曝光。 */
-    val useJpgMaxHdrComposition: Boolean get() = false
+    // Photo mode bracketing: one brighter and one darker frame join the multi-frame stack and are fused.
+    var useJpgMaxHdrComposition by bool("photo_bracketing", false)
     var jpgMultiFrameDenoiseFrameCount: Int by stored({ p ->
         p[K.JPG_MULTI_FRAME_DENOISE_FRAME_COUNT]?.let(MultiFrameConfig::normalizeDenoiseFrameCount)
             ?: MultiFrameConfig.DEFAULT_DENOISE_FRAME_COUNT

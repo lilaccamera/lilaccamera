@@ -496,7 +496,11 @@ data class CameraState(
         get() = isMultiFrameEnabled && !useRaw
 
     val isJpgMaxHdrEnabled: Boolean
-        get() = isJpgMaxEnabled && useJpgMaxHdrComposition && !nightStacks  // Night's frames are planned, not bracketed
+        get() = isJpgMaxEnabled && useJpgMaxHdrComposition && !nightStacks && !bracketBlockedBySize  // Night's frames are planned, not bracketed
+
+    /** Bracketed stacks at full size run out of memory on 4 GB phones (19 MP back camera), so they need the 12 or 8 MP cap. */
+    val bracketBlockedBySize: Boolean
+        get() = photoResolutionCapMp == 0 && photoResolutionAdjustable && getCurrentCameraInfo()?.lensType != LensType.FRONT
 
     val isRawMaxEnabled: Boolean
         get() = isMultiFrameEnabled && useRaw
