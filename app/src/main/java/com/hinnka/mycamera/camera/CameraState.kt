@@ -422,7 +422,7 @@ data class CameraState(
     val captureMode: CaptureMode = CaptureMode.PHOTO,
     val photoPreviewStabilizationEnabled: Boolean = false,
     /** Photo-mode capture size cap in megapixels for the back cameras; 0 = full sensor size. */
-    val photoResolutionCapMp: Int = 0,
+    val photoResolutionCapMp: Int = 12,
     /** The same cap for the front camera, kept apart because its useful sizes differ. */
     val frontPhotoResolutionCapMp: Int = 2,
     /** Front camera Photo mode on lilac: every still request also targets a small JPEG (see frontStillJpegReader). */
@@ -496,7 +496,12 @@ data class CameraState(
         get() = isMultiFrameEnabled && !useRaw
 
     val isJpgMaxHdrEnabled: Boolean
-        get() = isJpgMaxEnabled && useJpgMaxHdrComposition && !nightStacks  // Night's frames are planned, not bracketed
+        get() = isJpgMaxEnabled && useJpgMaxHdrComposition && !nightStacks && !bracketBlockedBySize &&
+            getCurrentCameraInfo()?.lensType != LensType.FRONT  // Night's frames are planned; the front camera has no manual exposure, so its brackets come out identical
+
+    /** Bracketed stacks at full size run out of memory on 4 GB phones (19 MP back camera), so they need the 12 or 8 MP cap. */
+    val bracketBlockedBySize: Boolean
+        get() = photoResolutionCapMp == 0 && photoResolutionAdjustable && getCurrentCameraInfo()?.lensType != LensType.FRONT
 
     val isRawMaxEnabled: Boolean
         get() = isMultiFrameEnabled && useRaw

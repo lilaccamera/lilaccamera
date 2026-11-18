@@ -544,6 +544,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     companion object {
         private const val TAG = "CameraViewModel"
 
+        /** Back camera stacks still being merged and saved; reopening the camera during one can run a 4 GB phone out of memory. */
+        val backStacksInFlight = MutableStateFlow(0)
+
         /** YUV stacks pick their reference among the first frames only: later ones see more scene motion. */
         private const val GYRO_REFERENCE_CANDIDATES = 4
         private const val GYRO_REFERENCE_MIN_COVERAGE = 0.8f
@@ -3751,6 +3754,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun processCapturedPhoto(photo: CapturedPhoto, settings: CaptureSettingsSnapshot) {
+        val backStack = photo.frames.size > 1 && photo.state.getCurrentCameraInfo()?.lensType != LensType.FRONT
+        if (backStack) backStacksInFlight.update { it + 1 }
+        try {
+            processCapturedFrames(photo, settings)
+        } finally {
+            if (backStack) backStacksInFlight.update { it - 1 }
+        }
+    }
+
+    private suspend fun processCapturedFrames(photo: CapturedPhoto, settings: CaptureSettingsSnapshot) {
         val first = photo.frames.first()
         val captureInfo = first.captureInfo
         val characteristics = first.characteristics

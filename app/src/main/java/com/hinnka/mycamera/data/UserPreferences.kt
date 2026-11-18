@@ -189,7 +189,8 @@ class UserPreferences internal constructor(
     var videoBitrate by enum("video_bitrate", VideoBitratePreset.P1)
     var oppoSuperStabilizationEnabled by bool("oppo_super_stabilization_enabled", false)
     var photoPreviewStabilizationEnabled by bool("photo_preview_stabilization_enabled", false)
-    var photoResolutionCapMp by int("photo_resolution_cap_mp", 0)
+    // Back camera starts at 12 MP: full-size bracketed stacks run out of memory on 4 GB phones.
+    var photoResolutionCapMp by int("photo_resolution_cap_mp", 12)
     // The front camera starts at 2 MP: lilac's binned mode, cleaner in dim light than full size.
     var frontPhotoResolutionCapMp by int("front_photo_resolution_cap_mp", 2)
     // Front camera Photo mode: Fast (YUV only) or Accurate (Sony's still processing via a small JPEG, slower bursts).
@@ -440,8 +441,12 @@ class UserPreferences internal constructor(
     var useJpgMax: Boolean by stored({ p ->
         if (hasCurrentMaxPreferences) {
             p[K.USE_JPG_MAX] ?: false
-        } else {
+        } else if (p.contains(K.LEGACY_USE_MULTI_FRAME) || p.contains(K.LEGACY_USE_SUPER_RESOLUTION) ||
+            p.contains(K.LEGACY_USE_HDR_COMPOSITION)
+        ) {
             !storedUseRaw && (legacyMultiFrameEnabled || p[K.LEGACY_USE_HDR_COMPOSITION] == true)
+        } else {
+            !storedUseRaw  // Never set: multi-frame starts on.
         }
     }) { p, v -> p[K.USE_JPG_MAX] = v }
     /** HDR+：RAW 多帧融合。 */
@@ -459,8 +464,8 @@ class UserPreferences internal constructor(
         set(value) {
             mutablePreferences()[K.USE_RAW] = value
         }
-    /** 多帧降噪固定不启用包围曝光。 */
-    val useJpgMaxHdrComposition: Boolean get() = false
+    // Photo mode bracketing: one brighter and one darker frame join the multi-frame stack and are fused.
+    var useJpgMaxHdrComposition by bool("photo_bracketing", true)
     var jpgMultiFrameDenoiseFrameCount: Int by stored({ p ->
         p[K.JPG_MULTI_FRAME_DENOISE_FRAME_COUNT]?.let(MultiFrameConfig::normalizeDenoiseFrameCount)
             ?: MultiFrameConfig.DEFAULT_DENOISE_FRAME_COUNT

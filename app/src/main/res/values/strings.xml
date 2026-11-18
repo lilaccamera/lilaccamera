@@ -1811,6 +1811,16 @@
         <item quantity="one">%1$d shot</item>
         <item quantity="other">%1$d shots</item>
     </plurals>
+    <string name="quick_bracketing">Bracketing</string>
+    <string name="quick_explain_bracketing">Adds a brighter and a darker shot to the multi-frame stack, so bright skies and dark shadows both keep detail.</string>
+    <string name="quick_bracketing_needs_multi_frame">Needs multi-frame</string>
+    <string name="quick_bracketing_needs_12mp">12 MP or less</string>
+    <string name="quick_bracketing_back_only">Back camera only</string>
+    <string name="stack_memory_warning_title">Photo still processing</string>
+    <string name="stack_memory_warning_body">Opening the camera now may run the phone out of memory. Android would then close other apps, and Lilac may stutter. The photo is safe either way.</string>
+    <string name="stack_memory_warning_stay">Stay in gallery</string>
+    <string name="stack_memory_warning_home">Go to home screen</string>
+    <string name="stack_memory_warning_camera">Open camera anyway</string>
     <string name="quick_explain_camera_jpeg">Pro and stacked shots also keep the camera’s own JPEG, as a version of the photo.</string>
     <string name="quick_explain_resolution">Photo size in Photo mode. Pro is always full size.</string>
     <string name="quick_explain_metering">Which part of the frame sets the exposure. Auto: the camera decides. Centre: mostly the middle. Spot: a small spot. Avg: the whole frame evenly. High: keeps bright areas from blowing out.</string>

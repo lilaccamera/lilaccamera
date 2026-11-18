@@ -421,6 +421,7 @@ fun SettingsScreen(
     val useHeicExport by preferenceValue { it.useHeicExport }
     val useJpeg444Export by preferenceValue { it.useJpeg444Export }
     var useP010 by rememberPreference(UserPreferences::useP010)
+    var useJpgMaxHdrComposition by rememberPreference(UserPreferences::useJpgMaxHdrComposition)
     val useP3ColorSpace by preferenceValue { it.useP3ColorSpace }
     val ultraHdrGainMapEnabled by preferenceValue { it.ultraHdrGainMapEnabled }
     var useHdrScreenMode by rememberPreference(UserPreferences::useHdrScreenMode)
@@ -2048,6 +2049,17 @@ fun SettingsScreen(
                             ),
                             currentLevel = edgeLevel,
                             onLevelSelected = { edgeLevel = it }
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+                        SwitchSettingItem(
+                            title = stringResource(R.string.quick_bracketing),
+                            description = stringResource(R.string.quick_explain_bracketing),
+                            checked = useJpgMaxHdrComposition,
+                            onCheckedChange = { useJpgMaxHdrComposition = it }
                         )
 
                         if (state.isP010Supported) {
