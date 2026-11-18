@@ -20,6 +20,17 @@ The camera key, or the volume buttons when set to Shutter, start and stop the re
 
 While recording, the top line shows the time, and the space left once under 20 minutes remain. The footer gives **Pause** and **Snapshot** (a photo from the video).
 
+## Frame rates
+
+The frame-rate item lists only the rates the camera really offers (30 fps by default). With the [Sony bridge](../bridge/install.md) two more appear, both for the **rear camera at 16:9** and only in good light:
+
+- **60 fps at 1080p**
+- **120 fps at 720p**
+
+Lilac draws these frames itself, so looks, sound and Pause work as in normal video. Starting from 30 fps takes a moment longer while the camera switches mode.
+
+A 120 fps video is an ordinary real-time file with sound: other apps play it at full speed. Lilac's gallery opens it **four times slower, without sound**; the pill at the bottom switches between ¼× and 1×. **Share** and **Export** ask **Slowed** (four times slower, no sound) or **Full speed** (the file as recorded).
+
 ## Stabilisation
 
 The XZ1 Compact has no stabiliser in the lens, and its camera offers no electronic stabilisation of its own. Video stabilisation is the app's:
@@ -27,9 +38,16 @@ The XZ1 Compact has no stabiliser in the lens, and its camera offers no electron
 - **Enhanced (EIS+)** reads the gyroscope and corrects shake and the rolling-shutter wobble on the graphics chip, between the camera and the video encoder. It looks a few frames ahead, so the picture runs slightly behind.
 - **Off** records the plain picture.
 
+With the [Sony bridge](../bridge/install.md), two of Sony's own stabilisers join, so **Stabilise** steps through **Off**, **EIS+**, **Steady** and **Active**:
+
+- **Steady** (SteadyShot) at 4K 30, 1080p 60, 1080p 30 and 720p 30.
+- **Active** (Intelligent Active) at 1080p 30 and 720p 30. It steadies the saved clip, **not the viewfinder**, which stays as shaky as the phone.
+- At 720p 120 only **Off** is offered, and EIS+ is not offered at 60 or 120 fps.
+
+Each is offered only where it works. If you change size or rate and the current choice no longer fits, Lilac falls back to Steady, else EIS+, else Off, and says so in a short note.
+
 Pick it under **Stabilise** in the everyday row, or set the default in Settings › Video, where **EIS+ Strength** and **EIS+ Lookahead Frames** tune it.
 
-Use 30 or 60 fps with EIS+: at 24 fps the camera refuses the frame rate and closes.
 
 ## Slow motion
 

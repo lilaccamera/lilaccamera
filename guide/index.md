@@ -162,7 +162,7 @@ Other phones are not tested. Testers can add the bridge themselves: [install the
 <li><a href="user/troubleshooting/">Troubleshooting</a></li>
 </ul></div>
 <div><h3>Testers and ROMs</h3><ul>
-<li><a href="bridge/install/">Slow-motion bridge</a></li>
+<li><a href="bridge/install/">Sony bridge</a></li>
 <li><a href="rom/integration/">ROM integration</a></li>
 </ul></div>
 </div>
