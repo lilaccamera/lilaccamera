@@ -24,6 +24,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -201,30 +205,21 @@ private val SettingsTarget.page: SettingsPage
         SettingsTarget.PREVIEW_STABILIZATION -> SettingsPage.ASSIST
     }
 
-/** Wraps a setting a tile can open at: when opened that way, scrolls it into view and flashes it once. */
-@Composable
-private fun SettingsAnchor(
-    target: SettingsTarget,
-    pending: SettingsTarget?,
-    onShown: () -> Unit,
-    content: @Composable () -> Unit,
-) {
-    val requester = remember { BringIntoViewRequester() }
-    val flash = remember { Animatable(0f) }
-    if (pending == target) {
-        LaunchedEffect(Unit) {
-            delay(300) // after the page's own scroll-to-top
-            requester.bringIntoView()
-            flash.snapTo(0.35f)
-            flash.animateTo(0f, tween(1500))
-            onShown()
-        }
+/** The name of the row a tile opens Settings at. */
+private val SettingsTarget.title: Int
+    get() = when (this) {
+        SettingsTarget.MULTI_FRAME -> R.string.settings_multi_frame_denoise_frame_count
+        SettingsTarget.HDR_PLUS -> R.string.settings_hdr_plus_frame_count
+        SettingsTarget.RAW_DEVELOPMENT -> R.string.settings_raw_group_development
+        SettingsTarget.ULTRA_HDR -> R.string.settings_ultra_hdr_gain_map
+        SettingsTarget.MULTIPLE_EXPOSURE -> R.string.settings_multiple_exposure_count
+        SettingsTarget.PREVIEW_STABILIZATION -> R.string.settings_photo_preview_stabilization
     }
-    Box(
-        Modifier
-            .bringIntoViewRequester(requester)
-            .background(AccentColor.copy(alpha = flash.value), RoundedCornerShape(8.dp))
-    ) { content() }
+
+/** Lets a row that isn't one of the shared setting rows be scrolled to and flashed by its name. */
+@Composable
+private fun SettingsAnchor(title: String, content: @Composable () -> Unit) {
+    Box(Modifier.settingsFlash(title)) { content() }
 }
 
 internal enum class SettingsPage {
@@ -588,7 +583,8 @@ fun SettingsScreen(
     var selectedGroup by rememberSaveable {
         mutableStateOf<SettingsGroup?>(openedAt?.page?.let { page -> SettingsGroup.entries.first { page in it.pages } } ?: SettingsGroup.SHOOTING)
     }
-    var pendingTarget by rememberSaveable { mutableStateOf(openedAt) }
+    val openedAtTitle = openedAt?.let { stringResource(it.title) }
+    var flashTitle by rememberSaveable { mutableStateOf(openedAtTitle) }
     var isRawSliderAdjusting by remember { mutableStateOf(false) }
     var mainCameraIdOptions by remember { mutableStateOf<List<String>>(emptyList()) }
     var macroCameraIdOptions by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -1156,10 +1152,24 @@ fun SettingsScreen(
     LaunchedEffect(selectedGroup) {
         pageScrollState.scrollTo(0)
     }
+    var pageViewport by remember { mutableStateOf(Rect.Zero) }
+    val flashRequest = remember(flashTitle) {
+        flashTitle?.let { title ->
+            SettingsFlashRequest(
+                title = title,
+                center = { row ->
+                    // Scroll so the row's middle meets the page's middle.
+                    pageScrollState.animateScrollBy(row.center.y - pageViewport.center.y)
+                },
+                done = { flashTitle = null },
+            )
+        }
+    }
 
     CompositionLocalProvider(
         LocalRippleConfiguration provides settingsRippleConfiguration,
         LocalSettingsLook provides true,
+        LocalSettingsFlash provides flashRequest,
     ) {
         Column(
             modifier = modifier
@@ -1188,6 +1198,7 @@ fun SettingsScreen(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    .onGloballyPositioned { pageViewport = it.boundsInRoot() }
             ) {
                 val viewportHeight = maxHeight
                 Column(
@@ -1260,7 +1271,7 @@ fun SettingsScreen(
 
                         SettingsRowDivider()
 
-                        if (!com.hinnka.mycamera.camera.DeviceQuirks.isLilac) SettingsAnchor(SettingsTarget.PREVIEW_STABILIZATION, pendingTarget, onShown = { pendingTarget = null }) {
+                        if (!com.hinnka.mycamera.camera.DeviceQuirks.isLilac) run {
     SwitchSettingItem(
                                 title = stringResource(
                                     R.string.settings_photo_preview_stabilization
@@ -1295,11 +1306,13 @@ fun SettingsScreen(
                     SettingsSection(
                         title = stringResource(R.string.settings_group_lenses)
                     ) {
-                        DefaultFocalLengthSetting(
-                            viewModel = viewModel,
-                            currentFocalLength = defaultFocalLength,
-                            onFocalLengthSelected = { defaultFocalLength = it }
-                        )
+                        SettingsAnchor(stringResource(R.string.settings_default_focal_length)) {
+                            DefaultFocalLengthSetting(
+                                viewModel = viewModel,
+                                currentFocalLength = defaultFocalLength,
+                                onFocalLengthSelected = { defaultFocalLength = it }
+                            )
+                        }
 
                         if (mainCameraIdOptions.size > 1) {
                             SettingsRowDivider()
@@ -1366,11 +1379,13 @@ fun SettingsScreen(
 
                         SettingsRowDivider()
 
-                        CameraOrientationSetting(
-                            cameras = state.availableCameras,
-                            orientationOffsets = userPreferences.cameraOrientationOffsets,
-                            onOrientationSelected = viewModel::setCameraOrientationOffset
-                        )
+                        SettingsAnchor(stringResource(R.string.settings_camera_orientation)) {
+                            CameraOrientationSetting(
+                                cameras = state.availableCameras,
+                                orientationOffsets = userPreferences.cameraOrientationOffsets,
+                                onOrientationSelected = viewModel::setCameraOrientationOffset
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(24.dp))
@@ -1521,7 +1536,7 @@ fun SettingsScreen(
 
                         SettingsRowDivider()
 
-                        SettingsAnchor(SettingsTarget.MULTIPLE_EXPOSURE, pendingTarget, onShown = { pendingTarget = null }) {
+                        run {
     QualityLevelSetting(
                                 title = stringResource(R.string.settings_multiple_exposure_count),
                                 description = stringResource(R.string.settings_multiple_exposure_count_description),
@@ -1941,7 +1956,7 @@ fun SettingsScreen(
                         title = stringResource(R.string.settings_section_photo_mode),
                         showTitle = false
                     ) {
-                        SettingsAnchor(SettingsTarget.MULTI_FRAME, pendingTarget, onShown = { pendingTarget = null }) {
+                        run {
     SliderSettingItem(
                                 title = stringResource(R.string.settings_multi_frame_denoise_frame_count),
                                 description = stringResource(
@@ -2067,7 +2082,7 @@ fun SettingsScreen(
 
                         SettingsRowDivider()
 
-                        SettingsAnchor(SettingsTarget.HDR_PLUS, pendingTarget, onShown = { pendingTarget = null }) {
+                        run {
     SliderSettingItem(
                                 title = stringResource(R.string.settings_hdr_plus_frame_count),
                                 description = stringResource(
@@ -2273,30 +2288,32 @@ fun SettingsScreen(
                         SettingsRowDivider()
 
                         if (availableRawNoiseProfiles.isNotEmpty()) {
-                            RawNoiseProfileSelector(
-                                lensOptions = rawDcpLensOptions(state.availableCameras),
-                                selectedProfileId = rawNoiseProfileId,
-                                profileIdsByLens = rawNoiseProfileIdsByLens,
-                                availableProfiles = availableRawNoiseProfiles,
-                                onSelectProfile = { preferencesRepository.updateAsync { this.rawNoiseProfileId = it } },
-                                onProfileIdsByLensChange = { preferencesRepository.updateAsync { this.rawNoiseProfileIdsByLens = it } },
-                                onImportProfile = {
-                                    importRawNoiseProfileLauncher.launch(arrayOf("*/*"))
-                                },
-                                onDeleteProfile = { profile ->
-                                    viewModel.deleteRawNoiseProfile(profile.id) { success ->
-                                        android.widget.Toast.makeText(
-                                            context,
-                                            if (success) {
-                                                R.string.raw_noise_profile_delete_success
-                                            } else {
-                                                R.string.raw_noise_profile_delete_failed
-                                            },
-                                            android.widget.Toast.LENGTH_SHORT,
-                                        ).show()
-                                    }
-                                },
-                            )
+                            SettingsAnchor(stringResource(R.string.raw_noise_profile_title)) {
+                                RawNoiseProfileSelector(
+                                    lensOptions = rawDcpLensOptions(state.availableCameras),
+                                    selectedProfileId = rawNoiseProfileId,
+                                    profileIdsByLens = rawNoiseProfileIdsByLens,
+                                    availableProfiles = availableRawNoiseProfiles,
+                                    onSelectProfile = { preferencesRepository.updateAsync { this.rawNoiseProfileId = it } },
+                                    onProfileIdsByLensChange = { preferencesRepository.updateAsync { this.rawNoiseProfileIdsByLens = it } },
+                                    onImportProfile = {
+                                        importRawNoiseProfileLauncher.launch(arrayOf("*/*"))
+                                    },
+                                    onDeleteProfile = { profile ->
+                                        viewModel.deleteRawNoiseProfile(profile.id) { success ->
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                if (success) {
+                                                    R.string.raw_noise_profile_delete_success
+                                                } else {
+                                                    R.string.raw_noise_profile_delete_failed
+                                                },
+                                                android.widget.Toast.LENGTH_SHORT,
+                                            ).show()
+                                        }
+                                    },
+                                )
+                            }
                             SettingsRowDivider()
                         }
 
@@ -2335,7 +2352,7 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    SettingsAnchor(SettingsTarget.RAW_DEVELOPMENT, pendingTarget, onShown = { pendingTarget = null }) {
+                    SettingsAnchor(stringResource(R.string.settings_raw_group_development)) {
     SettingsSection(
                             title = stringResource(R.string.settings_raw_group_development)
                         ) {
@@ -2400,7 +2417,7 @@ fun SettingsScreen(
                         title = stringResource(R.string.settings_raw_group_capture_output)
                     ) {
                         if (isHdrSettingsSupported) {
-                            SettingsAnchor(SettingsTarget.ULTRA_HDR, pendingTarget, onShown = { pendingTarget = null }) {
+                            run {
     SwitchSettingItem(
                                     title = stringResource(R.string.settings_ultra_hdr_gain_map),
                                     description = stringResource(
@@ -2440,15 +2457,17 @@ fun SettingsScreen(
 
                         SettingsRowDivider()
 
-                        RawDngMetadataCorrectionSetting(
-                            cameras = state.availableCameras,
-                            blackLevelModes = rawBlackLevelModes,
-                            customBlackLevels = rawCustomBlackLevels,
-                            whiteLevelModes = rawWhiteLevelModes,
-                            customWhiteLevels = rawCustomWhiteLevels,
-                            cfaCorrectionModes = rawCfaCorrectionModes,
-                            onCorrectionsChange = viewModel::setRawDngMetadataCorrections
-                        )
+                        SettingsAnchor(stringResource(R.string.settings_raw_dng_metadata_corrections)) {
+                            RawDngMetadataCorrectionSetting(
+                                cameras = state.availableCameras,
+                                blackLevelModes = rawBlackLevelModes,
+                                customBlackLevels = rawCustomBlackLevels,
+                                whiteLevelModes = rawWhiteLevelModes,
+                                customWhiteLevels = rawCustomWhiteLevels,
+                                cfaCorrectionModes = rawCfaCorrectionModes,
+                                onCorrectionsChange = viewModel::setRawDngMetadataCorrections
+                            )
+                        }
                     }
                 }
 
@@ -2461,21 +2480,27 @@ fun SettingsScreen(
 
                         SettingsRowDivider()
 
-                        BackgroundSetting(
-                            viewModel = viewModel,
-                            modifier = Modifier.padding(bottom = 16.dp)
-                        )
+                        SettingsAnchor(stringResource(R.string.settings_background)) {
+                            BackgroundSetting(
+                                viewModel = viewModel,
+                                modifier = Modifier.padding(bottom = 16.dp)
+                            )
+                        }
 
                         SettingsRowDivider()
 
-                        AccentColorSetting(
-                            color = userPreferences.accentColor,
-                            onColorSelected = { preferencesRepository.updateAsync { this.accentColor = it } }
-                        )
+                        SettingsAnchor(stringResource(R.string.settings_accent_color)) {
+                            AccentColorSetting(
+                                color = userPreferences.accentColor,
+                                onColorSelected = { preferencesRepository.updateAsync { this.accentColor = it } }
+                            )
+                        }
 
                         SettingsRowDivider()
 
-                        CaptureButtonAppearanceSetting(viewModel = viewModel)
+                        SettingsAnchor(stringResource(R.string.settings_capture_button)) {
+                            CaptureButtonAppearanceSetting(viewModel = viewModel)
+                        }
 
                         SettingsRowDivider()
 
@@ -2639,7 +2664,9 @@ fun SettingsScreen(
                             onCheckedChange = { shutterSoundEnabled = it }
                         )
 
-                        CaptureSoundSetting(viewModel)
+                        SettingsAnchor(stringResource(R.string.settings_shutter_sound_single)) {
+                            CaptureSoundSetting(viewModel)
+                        }
 
                         SettingsRowDivider()
 
@@ -2696,10 +2723,12 @@ fun SettingsScreen(
 
                         SettingsRowDivider()
 
-                        VolumeKeyActionSetting(
-                            action = volumeKeyAction,
-                            onActionSelected = { volumeKeyAction = it }
-                        )
+                        SettingsAnchor(stringResource(R.string.settings_volume_key_action)) {
+                            VolumeKeyActionSetting(
+                                action = volumeKeyAction,
+                                onActionSelected = { volumeKeyAction = it }
+                            )
+                        }
                     }
                 }
 
@@ -2749,38 +2778,11 @@ fun SettingsScreen(
                     SettingsSection(
                         title = stringResource(R.string.settings_section_help_about)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { showLogViewerDialog = true }
-                                .padding(vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = stringResource(R.string.settings_log_viewer),
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Normal
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = stringResource(R.string.settings_log_viewer_description),
-                                    color = Color.White.copy(alpha = 0.6f),
-                                    fontSize = 13.sp,
-                                    lineHeight = 18.sp
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(16.dp))
-
-                            Icon(
-                                imageVector = AppIcons.Article,
-                                contentDescription = stringResource(R.string.logs),
-                                tint = Color.White.copy(alpha = 0.6f)
-                            )
-                        }
+                        NavigationSettingItem(
+                            title = stringResource(R.string.settings_log_viewer),
+                            description = stringResource(R.string.settings_log_viewer_description),
+                            onClick = { showLogViewerDialog = true }
+                        )
 
                         if (AppUpdateManager.updatesEnabled) {
                             SettingsRowDivider()

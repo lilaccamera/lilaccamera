@@ -33,6 +33,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,6 +58,33 @@ import com.hinnka.mycamera.utils.VibrationHelper
 
 /** True inside the Settings screen: the shared rows take Settings' black look and open choices in sheets. */
 val LocalSettingsLook = staticCompositionLocalOf { false }
+
+/** The row Settings was opened at: [center] scrolls the row (bounds in root) to the middle, [done] clears the request. */
+internal class SettingsFlashRequest(
+    val title: String,
+    val center: suspend (Rect) -> Unit,
+    val done: () -> Unit,
+)
+
+internal val LocalSettingsFlash = compositionLocalOf<SettingsFlashRequest?> { null }
+
+/** When this row is the one asked for, scrolls it to the middle and flashes it #393939, fading over 1.6 s. */
+@Composable
+internal fun Modifier.settingsFlash(title: String): Modifier {
+    val request = LocalSettingsFlash.current?.takeIf { it.title == title } ?: return this
+    val flash = remember { Animatable(0f) }
+    var coordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    LaunchedEffect(request) {
+        delay(300) // after the tab switch and the page's scroll to the top
+        coordinates?.takeIf { it.isAttached }?.let { request.center(it.boundsInRoot()) }
+        flash.snapTo(1f)
+        flash.animateTo(0f, tween(1600))
+        request.done()
+    }
+    return this
+        .onGloballyPositioned { coordinates = it }
+        .drawBehind { drawRect(SettingsRaised.copy(alpha = flash.value)) }
+}
 
 internal val SettingsText = Color(0xFFE0E0E0)
 internal val SettingsDim = Color(0xFF9E9E9E)
@@ -98,6 +135,7 @@ internal fun SettingsRowFrame(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .settingsFlash(title)
             .heightIn(min = if (secondLine == null) 56.dp else 64.dp)
             .then(if (onClick != null) Modifier.clickable(enabled = enabled, onClick = onClick) else Modifier)
             .padding(vertical = 8.dp),
