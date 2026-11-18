@@ -23,6 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -284,6 +285,15 @@ internal fun SettingsSearchPage(
     LaunchedEffect(Unit) {
         focus.requestFocus()
         keyboard?.show()
+    }
+    // The app's window pans for the keyboard, which would shift this page up on top of its own
+    // keyboard padding; while Search is open the window resizes instead.
+    val window = (context as? android.app.Activity)?.window
+    DisposableEffect(window) {
+        val before = window?.attributes?.softInputMode
+        @Suppress("DEPRECATION")
+        window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        onDispose { if (before != null) window.setSoftInputMode(before) }
     }
     class Hit(val entry: SettingsEntry, val name: String, val place: String, val text: String)
     val all = remember(context, hidden) {
