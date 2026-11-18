@@ -24,6 +24,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -447,7 +449,7 @@ private fun AppLanguageSetting() {
 /**
  * 设置页面
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     viewModel: CameraViewModel,
@@ -1193,7 +1195,37 @@ fun SettingsScreen(
 
             val group = selectedGroup
             if (group == null) {
-                Box(Modifier.weight(1f).fillMaxWidth())
+                SettingsSearchPage(
+                    hidden = buildSet {
+                        if (!isHeicExportSupported) add(R.string.settings_use_heic_export)
+                        if (!isJpeg444ExportSupported) add(R.string.settings_use_jpeg_444_export)
+                        if (!DeviceUtil.isOppo) add(R.string.settings_oppo_super_stabilization)
+                        if (!state.isP010Supported) add(R.string.settings_use_p010)
+                        if (!state.isP3Supported) add(R.string.settings_use_p3_color_space)
+                        if (availableRawNoiseProfiles.isEmpty()) add(R.string.raw_noise_profile_title)
+                        if (!isHdrSettingsSupported) {
+                            add(R.string.settings_ultra_hdr_gain_map)
+                            add(R.string.settings_screen_hdr)
+                        }
+                        if (mainCameraIdOptions.size <= 1) add(R.string.settings_main_camera_id)
+                        if (macroCameraIdOptions.size <= 1) add(R.string.settings_macro_camera_id)
+                        if (!AppUpdateManager.updatesEnabled) add(R.string.settings_check_update)
+                    },
+                    offParents = buildSet {
+                        if (!showGrid) add(R.string.settings_grid_lines)
+                        if (!separateVideoLutEnabled) add(R.string.settings_separate_video_lut)
+                        if (!effectiveHdrPlusBracketExposure) add(R.string.settings_hdr_plus_bracket_exposure)
+                        if (!enableDevelopAnimation) add(R.string.settings_develop_animation)
+                        if (!shutterSoundEnabled) add(R.string.settings_shutter_sound)
+                    },
+                    onOpen = { openGroup, title ->
+                        selectedGroup = openGroup
+                        flashTitle = title
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                )
             } else BoxWithConstraints(
                 Modifier
                     .weight(1f)
@@ -2356,6 +2388,7 @@ fun SettingsScreen(
     SettingsSection(
                             title = stringResource(R.string.settings_raw_group_development)
                         ) {
+                            CompositionLocalProvider(LocalSettingsLook provides false) {
                             RawEditPanel(
                             selectedDcpId = rawDcpId,
                             rawDcpIdsByLens = rawDcpIdsByLens,
@@ -2410,6 +2443,7 @@ fun SettingsScreen(
                             onHncsFilmCurveModeChange = viewModel::setRawHncsFilmCurveMode,
                                 contentMode = RawEditPanelContentMode.FULL
                             )
+                            }
                         }
                     }
 
@@ -2864,7 +2898,8 @@ fun SettingsScreen(
                 }
             }
 
-            SettingsTabBar(selectedGroup) { picked ->
+            // While the keyboard is up, the search results get the tab bar's room.
+            if (!WindowInsets.isImeVisible) SettingsTabBar(selectedGroup) { picked ->
                 tick()
                 selectedGroup = picked
             }
