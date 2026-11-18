@@ -117,7 +117,7 @@
     <!-- Zoom -->
 
     <!-- Gallery -->
-    <string name="gallery_photon">Photon</string>
+    <string name="gallery_photon">Lilac</string>
     <string name="gallery_system">System</string>
     <string name="gallery_prepare_edit_failed">Unable to prepare this photo for editing</string>
     <string name="gallery_group_today">Today</string>
@@ -685,6 +685,10 @@
 
     <!-- Developer Options -->
     <string name="settings_log_viewer">Log Viewer</string>
+    <string name="settings_report_problem">Report a problem</string>
+    <string name="settings_report_problem_description">Open an issue on Lilac Camera\'s GitHub</string>
+    <string name="settings_credit">Based on PhotonCamera</string>
+    <string name="settings_credit_description">By bjzhou, open source on GitHub</string>
     <string name="settings_log_viewer_description">View and export app logs for diagnostics</string>
     <string name="logs">Logs</string>
     <string name="log_download">Download logs</string>
@@ -929,11 +933,6 @@
     <string name="current_camera">Current Camera</string>
 
     <!-- About & Donation -->
-    <string name="settings_community_group">Community Group</string>
-    <string name="settings_community_group_telegram_description">Telegram: https://t.me/photoncameraapp</string>
-    <string name="settings_community_group_qq_description">QQ Group: 569605452</string>
-    <string name="settings_donation">Donation</string>
-    <string name="settings_donation_description">Support the development of Photon Camera</string>
     <string name="settings_check_update">Check for Updates</string>
     <string name="settings_check_update_description">Current version: %1$s</string>
     <string name="settings_check_update_running">Checking and downloading updates...</string>

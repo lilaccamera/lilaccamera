@@ -128,7 +128,9 @@ object DeviceUtil {
                     || Build.BRAND.equals("oppo", ignoreCase = true)
         }
 
+    // Phantom mode stays in the code but is hidden in this fork; true brings back its settings,
+    // launcher shortcut and widget button.
     val canShowPhantom: Boolean
-        get() = BuildConfig.FLAVOR != "google"
+        get() = false
 
 }
