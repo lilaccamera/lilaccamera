@@ -254,6 +254,8 @@ class UserPreferences internal constructor(
     var saveLocation by bool("save_location", false)
     var useBuiltInAiService by bool("use_built_in_ai_service", false)
     var phantomSaveAsNew by bool("phantom_save_as_new", false)
+    // Off in this fork: the creator's AI mode sends photos to upstream's server by default.
+    var showLutCreator by bool("show_lut_creator", false)
     var portraitQuickBlur by bool("portrait_quick_blur", true)
     // Photo editor: preview everything at full size (slower, exactly what Save gives) instead of small copies.
     var editorHdPreview by bool("editor_hd_preview", false)  // 背景虚化：快速（无深度模型）或深度

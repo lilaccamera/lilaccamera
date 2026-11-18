@@ -446,6 +446,7 @@ fun SettingsScreen(
     val availableOpenAIModels by viewModel.availableOpenAIModels.collectAsState()
     val isFetchingAIModels by viewModel.isFetchingAIModels.collectAsState()
     var phantomSaveAsNew by rememberPreference(UserPreferences::phantomSaveAsNew)
+    var showLutCreator by rememberPreference(UserPreferences::showLutCreator)
     val phantomFrameId by preferenceValue { it.phantomFrameId }
     val defaultVirtualAperture by preferenceValue { it.defaultVirtualAperture }
     val rawBaselineLutId by preferenceValue { it.rawBaselineLutId }
@@ -2771,6 +2772,18 @@ fun SettingsScreen(
                         title = stringResource(R.string.ai_service),
                         showTitle = false
                     ) {
+                        SwitchSettingItem(
+                            title = stringResource(R.string.settings_show_lut_creator),
+                            description = stringResource(R.string.settings_show_lut_creator_description),
+                            checked = showLutCreator,
+                            onCheckedChange = { showLutCreator = it }
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+
                         TextInputSettingItem(
                             title = stringResource(R.string.settings_openai_api_key),
                             description = stringResource(R.string.settings_openai_api_key_desc),

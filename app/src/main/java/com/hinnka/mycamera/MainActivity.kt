@@ -1167,13 +1167,15 @@ fun NavigationHost(
             }
 
             composable(Routes.TOOLBOX) {
+                val showLutCreator by preferenceValue { it.showLutCreator }
                 ToolboxScreen(
                     onBack = { navController.popBackStack() },
                     onLutCreatorClick = { navController.navigate(Routes.LUT_CREATOR) },
                     onLutSynthesisClick = { navController.navigate(Routes.LUT_SYNTHESIS) },
                     onColorWalkClick = { navController.navigate(Routes.COLOR_WALK) },
                     onFilmLibraryClick = { navController.navigate(Routes.FILM_LIBRARY) },
-                    onPuzzleClick = { navController.navigate(Routes.PUZZLE) }
+                    onPuzzleClick = { navController.navigate(Routes.PUZZLE) },
+                    showLutCreator = showLutCreator
                 )
             }
 
