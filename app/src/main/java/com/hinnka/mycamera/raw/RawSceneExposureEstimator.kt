@@ -183,7 +183,7 @@ internal object RawSceneExposureMath {
     const val MAX_OVERALL_GAIN = 102f
     // MGC 9.7 CaptureTuning::max_hdr_ratio(kHdrPlusOn, autoNight=false, factor=-1).
     // This limits the AE final long/short TET pair before the highlight-preservation step.
-    const val FAST_MOMENTS_MAX_HDR_RATIO = 9.8f
+    const val FAST_MOMENTS_MAX_HDR_RATIO = 8f  // Default HDR ratio; Fast Moments used 9.8
     const val MIN_CONFIGURED_MAX_HDR_RATIO = 1f
     const val MAX_CONFIGURED_MAX_HDR_RATIO = 20f
 
