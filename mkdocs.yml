@@ -47,8 +47,8 @@ markdown_extensions:
 nav:
   - Home: index.md
   - How it works:
+      - Sony camera features: user/hardware.md
       - How a picture is made: user/how-pictures-are-made.md
-      - Sony hardware: user/hardware.md
       - Built for a small screen: user/small-screen.md
       - Focus and faces: user/focus.md
       - Optimizations and tweaks: user/optimizations.md

@@ -8,7 +8,7 @@ hide:
 <img class="lilac-hero__icon" src="images/lilac-icon.svg" alt="" width="96" height="96">
 <div class="lilac-hero__text">
 <h1>Lilac Camera</h1>
-<p class="lilac-hero__tagline">Stacked photos, RAW and 960 fps slow motion for the Xperia XZ1 Compact</p>
+<p class="lilac-hero__tagline">Sony's camera app for the Xperia XZ1 Compact, rebuilt for custom ROMs, with GCam multi-frame processing</p>
 <div class="lilac-hero__buttons">
 <a class="lilac-btn lilac-btn--primary" href="user/getting-started/">Get started</a>
 <a class="lilac-btn lilac-btn--outline" href="rom/integration/">For ROM maintainers</a>
@@ -16,17 +16,28 @@ hide:
 </div>
 </div>
 
-Lilac is a camera app for one phone. It does three things a default camera app cannot:
+Lilac is a camera app for one phone. It rebuilds Sony's camera app, with all of the camera's hardware features, for custom ROMs, and adds GCam's multi-frame processing on top.
+
+!!! note "Fully works on sunplex07's LineageOS 23.2 only"
+    Other lilac ROMs get basic multi-frame stacking in Photo, Night, Portrait and Video, because they lack the raw19 camera shim and Sony's cacao service. [What each feature needs](#get-lilac)
 
 <div class="lilac-cards lilac-cards--steps" markdown="0">
-<a class="lilac-card" href="#the-best-of-both-worlds"><span class="lilac-card__num">1</span><strong>The best of both worlds</strong><span>GCam's photo processing on Sony's camera hardware</span></a>
-<a class="lilac-card" href="#rebuilt-for-a-46-inch-screen"><span class="lilac-card__num">2</span><strong>Built for a small screen</strong><span>Camera and editor rebuilt for one thumb on 4.6 inches</span></a>
-<a class="lilac-card" href="#960-fps-slow-motion-is-back"><span class="lilac-card__num">3</span><strong>960 fps slow motion</strong><span>Sony's super slow motion, working again on a custom ROM</span></a>
+<a class="lilac-card" href="#sonys-camera-features"><span class="lilac-card__num">1</span><strong>Sony's camera features</strong><span>Faces, tracking, laser focus, the camera key and 960 fps slow motion</span></a>
+<a class="lilac-card" href="#gcams-multi-frame-processing"><span class="lilac-card__num">2</span><strong>GCam's processing</strong><span>HDR+ and merged frames, on Sony's camera hardware</span></a>
+<a class="lilac-card" href="#get-lilac"><span class="lilac-card__num">3</span><strong>What works on your ROM</strong><span>Full on sunplex07's LineageOS, basic elsewhere</span></a>
 </div>
 
-## The best of both worlds { .lilac-step data-step="1" }
+## Sony's camera features { .lilac-step data-step="1" }
 
-GCam processes photos well but knows nothing about Sony's camera. Sony's camera app uses the hardware fully but does not run on custom ROMs. Lilac brings the two together: GCam's HDR+ processing, and the Sony camera features that only Sony's own app used, such as subject tracking, the laser distance sensor and 960 fps slow motion.
+Sony's camera app uses the phone's hardware fully but does not run on custom ROMs. Lilac brings its features back: face frames, subject tracking, the laser distance sensor, the two-stage camera key, smile shutter, Sony's own photo processing, and 960 fps slow motion. The aim is the whole of Sony's camera app; the [Sony camera features](user/hardware.md) page lists what is done and what is not yet.
+
+The XZ1 Compact's sensor records at 960 frames a second, but on custom ROMs that went away with Sony's camera app. sunplex07's LineageOS 23.2 keeps Sony's slow-motion service, cacao, and Lilac reaches it through its companion app, the Lilac Sony Bridge. So 960 fps works again.
+
+<a class="lilac-next" href="user/hardware/">Next: Sony's camera features, done and not yet</a>
+
+## GCam's multi-frame processing { .lilac-step data-step="2" }
+
+GCam processes photos well but knows nothing about Sony's camera. Lilac runs GCam's HDR+ processing on Sony's camera hardware, next to the Sony features above.
 
 Compared with a default camera app:
 
@@ -57,7 +68,16 @@ Compared with a default camera app:
 
 <a class="lilac-next" href="user/how-pictures-are-made/">Next: how a picture is made, from sensor to stacked photo</a>
 
-## Rebuilt for a 4.6-inch screen { .lilac-step data-step="2" }
+## Get Lilac { .lilac-step data-step="3" }
+
+--8<-- "rom-requirements.md"
+
+Other phones are not tested. Testers can add the bridge themselves: [install the bridge](bridge/install.md). ROM maintainers: [ROM integration](rom/integration.md).
+
+- **Stable:** `LilacCamera.apk` from the [latest release](https://github.com/lilaccamera/lilaccamera/releases/latest). Lilac ROMs ship this same APK, so a ROM's copy also updates from new releases.
+- **Beta:** `LilacBeta.apk` from a [pre-release](https://github.com/lilaccamera/lilaccamera/releases). It installs beside the stable copy as **Lilac Beta**.
+
+## Rebuilt for a 4.6-inch screen
 
 Lilac's interface is not PhotonCamera's. The camera and the editor were rebuilt around one rule: a 4.6-inch phone held in one hand.
 
@@ -125,30 +145,12 @@ Lilac's interface is not PhotonCamera's. The camera and the editor were rebuilt 
 
 <a class="lilac-next" href="user/small-screen/">Next: how the camera screen and the editor are laid out</a>
 
-## 960 fps slow motion is back { .lilac-step data-step="3" }
-
-The XZ1 Compact's sensor records at 960 frames a second, but on custom ROMs that went away with Sony's camera app. sunplex07's LineageOS 23.2 keeps Sony's slow-motion service, cacao, and Lilac reaches it through its companion app, the Lilac Sony Bridge. So 960 fps works again.
-
-!!! note "Only tested on sunplex07's LineageOS 23.2"
-    Other ROMs may not ship Sony's cacao service.
-
-<a class="lilac-next" href="user/video/#slow-motion">Next: slow motion in Video mode, and its limits</a>
-
-## Get Lilac
-
---8<-- "rom-requirements.md"
-
-Other phones are not tested. Testers can add the bridge themselves: [install the bridge](bridge/install.md). ROM maintainers: [ROM integration](rom/integration.md).
-
-- **Stable:** `LilacCamera.apk` from the [latest release](https://github.com/lilaccamera/lilaccamera/releases/latest). Lilac ROMs ship this same APK, so a ROM's copy also updates from new releases.
-- **Beta:** `LilacBeta.apk` from a [pre-release](https://github.com/lilaccamera/lilaccamera/releases). It installs beside the stable copy as **Lilac Beta**.
-
 ## The guide
 
 <div class="lilac-map" markdown="0">
 <div><h3>How Lilac works</h3><ul>
+<li><a href="user/hardware/">Sony camera features</a></li>
 <li><a href="user/how-pictures-are-made/">How a picture is made</a></li>
-<li><a href="user/hardware/">Sony hardware</a></li>
 <li><a href="user/small-screen/">Built for a small screen</a></li>
 <li><a href="user/focus/">Focus and faces</a></li>
 <li><a href="user/optimizations/">Optimizations and tweaks</a></li>

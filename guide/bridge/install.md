@@ -79,6 +79,18 @@ From the [GitHub release](https://github.com/lilaccamera/lilaccamera/releases/la
 
 4. In Lilac, switch to Video and swipe down on the picture: a **Slow-mo** switch appears. See [slow motion](../user/video.md#slow-motion). The new frame rates and stabilisers appear in the everyday row.
 
+## Without adb: a root file browser
+
+If you have root on the phone but not rooted adb, you can do by hand what `bridge.sh install` does. This has not been tried on the phone.
+
+- **Prepare:** download `LilacSonyBridge.apk` as above. A copy of the bridge installed as a normal app hides the system copy, so uninstall it first if you have one (Settings › Apps).
+- **Check the ROM:** these files must exist, `/system/lib64/libcacao_client.so` and `/system/lib64/libimageprocessorjni.so` (Sony's slow-motion service) and `/vendor/lib/hw/camera.lilac-real.so` (the RAW shim, only for Pro).
+- **Unlock:** in the file browser, give it root and mount `/system` read-write (most have a switch for this).
+- **Place:** create the folder `/system/priv-app/LilacSonyBridge` and copy the APK into it under exactly the name `LilacSonyBridge.apk`.
+- **Permissions:** set the file's permissions to `rw-r--r--` (644), owned by root. The script also sets the SELinux label `u:object_r:system_file:s0`, which a file browser cannot; a file made inside that folder normally gets it anyway. If the bridge does not work after the reboot, check the label first (`ls -Z`).
+- **Reboot:** mount `/system` read-only again if the browser asks, then **reboot**. Android picks up system apps only at boot.
+- **Check:** run the checks in step 3 above with normal adb, or look for **Lilac Sony Bridge** in Settings › Apps with system apps shown. Then do step 4.
+
 ## What the warnings mean
 
 **`cacao: missing … Slow motion will not work without it.`**
@@ -97,3 +109,5 @@ bash bridge.sh uninstall
 ```
 
 This deletes the bridge's folder and reboots. Lilac keeps working; the Slow-mo switch, the extra frame rates, Steady and Active, and the Lilac Camera entry for other apps disappear.
+
+If you built from source, use `sonybridge/tools/bridge.sh` and your own `sonybridge-debug.apk` with a debug-signed Lilac.

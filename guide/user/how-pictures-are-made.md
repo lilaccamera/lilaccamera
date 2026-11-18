@@ -127,7 +127,7 @@ Pro stacks RAW frames before anything has touched them:
 
 - **Linear data.** RAW values are proportional to the light, so frames add up exactly, like photon counts.
 - **A noise model of this sensor.** Lilac uses a noise profile measured on the XZ1 Compact, so it knows how much of each pixel is noise at each brightness. The profile the shim reports is about twice too high and would make the merge throw away good detail.
-- **Processing once, at the end.** GCam's denoising, exposure and tone mapping, then Lilac's colour and look, run on one clean frame instead of many noisy ones; see [what comes from GCam](../index.md#the-best-of-both-worlds).
+- **Processing once, at the end.** GCam's denoising, exposure and tone mapping, then Lilac's colour and look, run on one clean frame instead of many noisy ones; see [what comes from GCam](../index.md#gcams-multi-frame-processing).
 
 The cost is speed: each RAW frame is a full-size still, so a burst needs a steadier hand or a support; see [HDR+ frames](pro-mode.md#hdr-frames).
 
