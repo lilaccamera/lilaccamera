@@ -563,6 +563,14 @@ object AppIcons {
                 "M12 3v2M3 12h2M12 19v2M19 12h2"
         )
     }
+    val VideoLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.VideoLine",
+            "M15 10l4.553 -2.276a1 1 0 0 1 1.447 .894v6.764a1 1 0 0 1 -1.447 .894l-4.553 -2.276v-4z" +
+                "M3 8a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2z"
+        )
+    }
+    val SearchLine: ImageVector by lazy { lineIcon("AppIcons.SearchLine", "M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0M21 21l-6 -6") }
     val CropLine: ImageVector by lazy { lineIcon("AppIcons.CropLine", "M8 5v10a1 1 0 0 0 1 1h10M5 8h10a1 1 0 0 1 1 1v10") }
     val FiltersLine: ImageVector by lazy {
         lineIcon(
