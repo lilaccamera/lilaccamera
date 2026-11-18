@@ -22,6 +22,9 @@ import kotlinx.coroutines.delay
 internal class NoteLineState {
     var text by mutableIntStateOf(0)
         private set
+    /** A note put together at run time, shown in place of [text]. */
+    var line by mutableStateOf<String?>(null)
+        private set
     var shown by mutableStateOf(false)
         private set
     // Counts every note, so the same note said again holds the line for its full time.
@@ -30,6 +33,14 @@ internal class NoteLineState {
 
     fun say(@StringRes text: Int) {
         this.text = text
+        line = null
+        shown = true
+        serial++
+    }
+
+    fun say(line: String) {
+        text = -1
+        this.line = line
         shown = true
         serial++
     }
@@ -53,6 +64,6 @@ internal fun NoteLine(state: NoteLineState, modifier: Modifier = Modifier) {
         modifier = modifier
     ) {
         // The same pill as the mode guides' offers, since it is information too; a tap puts it away.
-        ModeGuidePill(icon = AppIcons.InfoLine, text = stringResource(state.text), onClick = state::hide)
+        ModeGuidePill(icon = AppIcons.InfoLine, text = state.line ?: stringResource(state.text), onClick = state::hide)
     }
 }

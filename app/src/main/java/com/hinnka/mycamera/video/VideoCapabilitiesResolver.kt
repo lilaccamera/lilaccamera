@@ -26,7 +26,8 @@ object VideoCapabilitiesResolver {
         characteristics: CameraCharacteristics,
         requestedConfig: VideoConfig,
         algorithmicStabilizationSupported: Boolean = false,
-        sonyHighFrameRates: List<SonyVideoMode> = emptyList(),
+        /** Sony's video modes the bridge offers here (lilac, rear camera, slow motion off); empty elsewhere. */
+        sonyVideoModes: List<SonyVideoMode> = emptyList(),
     ): VideoCapabilitySnapshot {
         // Resolve from one metadata snapshot. Session caches are cleared while reopening,
         // which must not turn a supported user selection into an unsupported capability.
@@ -100,7 +101,7 @@ object VideoCapabilitiesResolver {
             previewSize = previewSize
         )
         val sonyRouteFps = sonyRouteFps(
-            resolvedResolution, requestedConfig.aspectRatio, sonyHighFrameRates, cameraFps,
+            resolvedResolution, requestedConfig.aspectRatio, sonyVideoModes.filter { it.mode == SonyVideoMode.NORMAL }, cameraFps,
         )
         val availableFps = (cameraFps + sonyRouteFps).sortedBy { it.fps }
         val resolvedFps = requestedConfig.fps.takeIf { availableFps.contains(it) }
@@ -136,9 +137,20 @@ object VideoCapabilitiesResolver {
         if (enhancedStabilizationAvailable) {
             availableStabilizationModes.add(VideoStabilizationMode.ENHANCED)
         }
-        
+        if (requestedConfig.aspectRatio == VideoAspectRatio.RATIO_16_9) {
+            availableStabilizationModes += VideoStabilizationMode.entries.filter { stabiliser ->
+                sonyVideoModes.any {
+                    it.mode == stabiliser.sonyMode && it.fps == resolvedFps.fps && it.isSize(resolvedResolution)
+                }
+            }
+        }
+
         val resolvedStabilizationMode = if (availableStabilizationModes.contains(requestedConfig.stabilizationMode)) {
             requestedConfig.stabilizationMode
+        } else if (sonyVideoModes.isNotEmpty()) {
+            // With Sony's stabilisers on offer: SteadyShot if this size and rate have it, else EIS+, else off.
+            listOf(VideoStabilizationMode.SONY_STEADYSHOT, VideoStabilizationMode.ENHANCED)
+                .firstOrNull { it in availableStabilizationModes } ?: VideoStabilizationMode.OFF
         } else {
             if (availableStabilizationModes.contains(VideoStabilizationMode.OIS)) VideoStabilizationMode.OIS
             else if (availableStabilizationModes.contains(VideoStabilizationMode.EIS)) VideoStabilizationMode.EIS
@@ -349,11 +361,14 @@ object VideoCapabilitiesResolver {
     ): List<VideoFpsPreset> {
         if (aspectRatio != VideoAspectRatio.RATIO_16_9) return emptyList()
         return sonyHighFrameRates
-            .filter { maxOf(it.width, it.height) == resolution.longEdge && minOf(it.width, it.height) == resolution.shortEdge }
+            .filter { it.isSize(resolution) }
             .mapNotNull { mode -> VideoFpsPreset.entries.firstOrNull { it.fps == mode.fps } }
             .filter { it !in cameraFps }
             .distinct()
     }
+
+    private fun SonyVideoMode.isSize(resolution: VideoResolutionPreset) =
+        maxOf(width, height) == resolution.longEdge && minOf(width, height) == resolution.shortEdge
 
     private fun resolveRecordingOutputSizes(characteristics: CameraCharacteristics): List<Size> {
         val streamConfigMap = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)

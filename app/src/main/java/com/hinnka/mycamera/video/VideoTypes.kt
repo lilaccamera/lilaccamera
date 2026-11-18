@@ -5,6 +5,7 @@ import android.graphics.Rect
 import android.os.Environment
 import android.util.Size
 import com.hinnka.mycamera.raw.ColorSpace
+import com.hinnka.mycamera.slowmotion.SonyVideoMode
 import com.hinnka.mycamera.color.TransferCurve
 import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_STRENGTH
 import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
@@ -16,8 +17,31 @@ enum class VideoStabilizationMode(val displayName: String) {
     OFF("OFF"),
     EIS("EIS"),
     OIS("OIS"),
-    ENHANCED("EIS+")
+    ENHANCED("EIS+"),
+    /** Sony's SteadyShot, through Sony's video route (lilac). */
+    SONY_STEADYSHOT("Steady"),
+    /** Sony's Intelligent Active, through Sony's video route (lilac); its frames arrive about 1.5 s late. */
+    SONY_ACTIVE("Active");
+
+    /** Sony's video mode for this choice, or null when the camera's own route runs it. */
+    val sonyMode: Int?
+        get() = when (this) {
+            SONY_STEADYSHOT -> SonyVideoMode.STEADYSHOT
+            SONY_ACTIVE -> SonyVideoMode.INTELLIGENT_ACTIVE
+            else -> null
+        }
 }
+
+/** A size or rate change ruled out the stabiliser [was] (or Sony's route failed), so [now] runs instead. */
+data class StabiliseNotice(
+    val was: VideoStabilizationMode,
+    val now: VideoStabilizationMode,
+    val resolution: VideoResolutionPreset,
+    val fps: Int,
+    val failed: Boolean,
+    /** Tells two equal notices apart, so each one is shown. */
+    val serial: Int,
+)
 
 enum class CaptureMode {
     PHOTO,

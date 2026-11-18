@@ -73,6 +73,8 @@ import com.hinnka.mycamera.video.VideoEncoderColorRequest
 import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.video.VideoLogLutMode
 import com.hinnka.mycamera.video.VideoRecorder
+import com.hinnka.mycamera.video.StabiliseNotice
+import com.hinnka.mycamera.video.VideoConfig
 import com.hinnka.mycamera.video.VideoRecordingPath
 import com.hinnka.mycamera.video.VideoResolutionPreset
 import com.hinnka.mycamera.video.VideoRecordingState
@@ -2792,17 +2794,16 @@ class Camera2Controller(private val context: Context) {
         }
 
         val requestedConfig = _state.value.videoConfig
+        val sonyVideoModesHere =
+            if (DeviceQuirks.isLilac && !isCurrentCameraFrontFacing() && !_state.value.slowMotion.enabled) sonyVideoModes
+            else emptyList()
         val snapshot = VideoCapabilitiesResolver.resolve(
             characteristics = resolvedCharacteristics,
             requestedConfig = requestedConfig,
             algorithmicStabilizationSupported =
                 realtimeStabilizationCoordinator.isCameraSupported(resolvedCharacteristics) &&
                     !isEnhancedStabilizationUnavailableForCurrentCamera(),
-            sonyHighFrameRates = if (DeviceQuirks.isLilac && !isCurrentCameraFrontFacing() && !_state.value.slowMotion.enabled) {
-                sonyVideoModes.filter { it.mode == SonyVideoMode.NORMAL }
-            } else {
-                emptyList()
-            },
+            sonyVideoModes = sonyVideoModesHere,
         )
         if (snapshot.config.logProfile != requestedConfig.logProfile) {
             PLog.w(
@@ -2833,7 +2834,9 @@ class Camera2Controller(private val context: Context) {
             }
         }
 
+        // With Sony's stabilisers on offer the resolver already picked the fallback; the note line says which.
         val enhancedFallbackMode = if (
+            sonyVideoModesHere.isEmpty() &&
             _state.value.videoConfig.stabilizationMode == VideoStabilizationMode.ENHANCED &&
             snapshot.config.stabilizationMode != VideoStabilizationMode.ENHANCED
         ) {
@@ -2846,9 +2849,20 @@ class Camera2Controller(private val context: Context) {
         val resolvedConfig = enhancedFallbackMode?.let { fallbackMode ->
             snapshot.config.copy(stabilizationMode = fallbackMode)
         } ?: snapshot.config
+        val stabiliseNotice = if (
+            sonyVideoModesHere.isNotEmpty() && resolvedConfig.stabilizationMode != requestedConfig.stabilizationMode
+        ) {
+            StabiliseNotice(
+                requestedConfig.stabilizationMode, resolvedConfig.stabilizationMode,
+                resolvedConfig.resolution, resolvedConfig.fps.fps, failed = false, serial = ++stabiliseNoticeSerial,
+            )
+        } else {
+            null
+        }
         _state.update { s -> s.copy(
             videoConfig = resolvedConfig,
             videoCapabilities = snapshot.capabilities,
+            stabiliseNotice = stabiliseNotice ?: s.stabiliseNotice,
             currentPreviewSize = if (_state.value.captureMode == CaptureMode.VIDEO) {
                 snapshot.previewSize
             } else {
@@ -5824,6 +5838,8 @@ class Camera2Controller(private val context: Context) {
 
             VideoStabilizationMode.ENHANCED,
             VideoStabilizationMode.OIS,
+            VideoStabilizationMode.SONY_STEADYSHOT, // Sony's service stabilises, not the camera request
+            VideoStabilizationMode.SONY_ACTIVE,
             VideoStabilizationMode.OFF -> {
                 CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
                     .takeIf { availableVideoStabilizationModes.contains(it) }
@@ -8795,6 +8811,8 @@ class Camera2Controller(private val context: Context) {
         }
         val outputGeometryChanged = previousConfig.resolution != resolvedConfig.resolution ||
             previousConfig.fps != resolvedConfig.fps
+        // Sony's mode changes only with the camera closed: the caller reopens it.
+        if (sonyRouteChanges(previousConfig, resolvedConfig)) return
         if (_state.value.captureMode == CaptureMode.VIDEO &&
             !_state.value.videoRecordingState.isRecording &&
             previousConfig.stabilizationMode != resolvedConfig.stabilizationMode &&
@@ -9086,7 +9104,7 @@ class Camera2Controller(private val context: Context) {
             ),
             colorLayers = colorLayers,
             cameraTimestampSource = if (sonyMode != null) {
-                CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME // Sony's frames carry elapsedRealtimeNanos
+                CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME // the frame sink moves Sony's frames to BOOTTIME
             } else {
                 getActiveOpenCameraCharacteristics()
                     ?.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE)
@@ -9410,6 +9428,8 @@ class Camera2Controller(private val context: Context) {
 
     // ==================== Sony's video route (lilac: 60 and 120 fps through the Sony bridge) ====================
 
+    private var stabiliseNoticeSerial = 0
+
     /** Sony's video modes the bridge reported (version 3 and later). */
     @Volatile private var sonyVideoModes: List<SonyVideoMode> = emptyList()
     private var sonyVideoBridge: SonyBridgeClient? = null
@@ -9419,6 +9439,11 @@ class Camera2Controller(private val context: Context) {
     /** The Sony mode of the last camera session, null when it was an ordinary one: decides one mode change or two. */
     private var lastSonySessionMode: SonyVideoMode? = null
 
+    /** True when going from [before] to [after] enters, leaves or changes Sony's video mode. */
+    fun sonyRouteChanges(before: VideoConfig, after: VideoConfig): Boolean =
+        before.stabilizationMode != after.stabilizationMode &&
+            (before.stabilizationMode.sonyMode != null || after.stabilizationMode.sonyMode != null)
+
     /** The mode the current video settings need, or null for the camera's own route. */
     private fun wantedSonyVideoMode(): SonyVideoMode? {
         val state = _state.value
@@ -9426,10 +9451,12 @@ class Camera2Controller(private val context: Context) {
             state.slowMotion.enabled || isCurrentCameraFrontFacing()
         ) return null
         val fps = state.videoConfig.fps
-        if (fps !in state.videoCapabilities.sonyRouteFps) return null
+        val mode = state.videoConfig.stabilizationMode.sonyMode
+            ?: SonyVideoMode.NORMAL.takeIf { fps in state.videoCapabilities.sonyRouteFps }
+            ?: return null
         val resolution = state.videoConfig.resolution
         return sonyVideoModes.firstOrNull {
-            it.mode == SonyVideoMode.NORMAL && it.fps == fps.fps &&
+            it.mode == mode && it.fps == fps.fps &&
                 maxOf(it.width, it.height) == resolution.longEdge && minOf(it.width, it.height) == resolution.shortEdge
         }
     }
@@ -9477,7 +9504,10 @@ class Camera2Controller(private val context: Context) {
     @Volatile private var sonyRecording = false
 
     private val sonyFrameSink = object : IFrameSink.Stub() {
-        override fun onFrame(buffer: HardwareBuffer, timestampNs: Long, frameId: Int) {
+        override fun onFrame(buffer: HardwareBuffer, sonyTimestampNs: Long, frameId: Int) {
+            // Sony stamps frames on the monotonic clock, which stops in deep sleep; audio and the recorder use BOOTTIME.
+            val timestampNs = sonyTimestampNs + SystemClock.elapsedRealtimeNanos() - System.nanoTime()
+            lastSonyFrameNs = timestampNs
             val bridge = sonyVideoBridge?.bridge
             videoRecorder.submitExternalFrame(buffer, timestampNs) {
                 buffer.close()
@@ -9510,14 +9540,25 @@ class Camera2Controller(private val context: Context) {
         }, "sony-frames-start").start()
     }
 
-    /** Sony's stop first, so the frames still in flight (1.5 s with Intelligent Active) reach the file; then the file. */
+    /** Sensor time of the newest frame from Sony's route (same clock as elapsedRealtimeNanos). */
+    @Volatile private var lastSonyFrameNs = 0L
+
+    /**
+     * The file ends at the press. Intelligent Active hands each frame over about 1.5 s after it was taken, so Sony's
+     * stop waits until a frame from the press time has arrived (or 2.5 s); then Sony's stop, then the file.
+     */
     private fun stopSonyRecording() {
+        val pressNs = SystemClock.elapsedRealtimeNanos()
+        videoRecorder.endAt(pressNs)
         stopVideoRecordingTicker()
         _state.update { s -> s.copy(
             videoRecordingState = s.videoRecordingState.copy(isRecording = false, isPaused = false, isProcessing = true)
         ) }
         val bridge = sonyVideoBridge?.bridge
         Thread({
+            val waitUntil = SystemClock.elapsedRealtime() + 2_500
+            while (lastSonyFrameNs < pressNs && SystemClock.elapsedRealtime() < waitUntil) Thread.sleep(10)
+            PLog.i(TAG, "Sony tail waited: newest frame ${(lastSonyFrameNs - pressNs) / 1_000_000} ms after the press")
             val result = runCatching { bridge?.stopFrames() }.getOrElse { PLog.e(TAG, "Sony frames stop failed", it); -99 }
             PLog.i(TAG, "Sony frames stopped: result=$result")
             videoRecorder.stopRecording()
@@ -9534,12 +9575,26 @@ class Camera2Controller(private val context: Context) {
         sonyVideoReader = null
     }
 
-    /** The settings ask for a Sony rate that cannot run now: back to 30 fps, with a notice. */
+    /**
+     * The settings ask for a Sony mode that cannot run now: a Sony stabiliser goes off, a Sony rate goes back to
+     * 30 fps, with a notice.
+     */
     private fun fallBackFromSonyRate() {
-        _state.update { s -> s.copy(
-            videoConfig = s.videoConfig.copy(fps = VideoFpsPreset.FPS_30),
-            slowMotion = s.slowMotion.copy(rateNotice = s.slowMotion.rateNotice + 1),
-        ) }
+        val config = _state.value.videoConfig
+        if (config.stabilizationMode.sonyMode != null) {
+            _state.update { s -> s.copy(
+                videoConfig = config.copy(stabilizationMode = VideoStabilizationMode.OFF),
+                stabiliseNotice = StabiliseNotice(
+                    config.stabilizationMode, VideoStabilizationMode.OFF, config.resolution, config.fps.fps,
+                    failed = true, serial = ++stabiliseNoticeSerial,
+                ),
+            ) }
+        } else {
+            _state.update { s -> s.copy(
+                videoConfig = config.copy(fps = VideoFpsPreset.FPS_30),
+                slowMotion = s.slowMotion.copy(rateNotice = s.slowMotion.rateNotice + 1),
+            ) }
+        }
         refreshVideoCapabilities()
     }
 

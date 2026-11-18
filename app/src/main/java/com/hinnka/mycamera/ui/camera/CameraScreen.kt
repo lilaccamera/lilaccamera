@@ -341,6 +341,19 @@ fun CameraScreen(
     val noteLine = remember { NoteLineState() }
     LaunchedEffect(state.slowMotion.resolutionNotice) { if (state.slowMotion.resolutionNotice > 0) noteLine.say(R.string.slow_motion_720_only) }
     LaunchedEffect(state.slowMotion.rateNotice) { if (state.slowMotion.rateNotice > 0) noteLine.say(R.string.video_rate_back_to_30) }
+    val noteContext = LocalContext.current
+    LaunchedEffect(state.stabiliseNotice) {
+        val n = state.stabiliseNotice ?: return@LaunchedEffect
+        val was = videoStabilizationModeLabel(noteContext, n.was)
+        val now = videoStabilizationModeLabel(noteContext, n.now)
+        noteLine.say(
+            if (n.failed) noteContext.getString(R.string.video_stabilise_failed, was, now)
+            else noteContext.getString(
+                R.string.video_stabilise_not_here, was,
+                if (n.resolution == VideoResolutionPreset.UHD_2160P) "4K" else n.resolution.displayName, n.fps, now,
+            )
+        )
+    }
     // The shutter shows a cross while it waits for smiles; the note says why.
     LaunchedEffect(viewModel.smileWaiting) { if (viewModel.smileWaiting) noteLine.say(R.string.smile_waiting) }
     // Multiple exposure shots counted from the shutter press, so the actions, the count and the shutter ring answer
