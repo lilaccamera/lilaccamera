@@ -14,7 +14,7 @@ object MultiFrameConfig {
     const val DEFAULT_DENOISE_FRAME_COUNT = 5
     const val MIN_HDR_PLUS_FRAME_COUNT = 1
     const val MIN_HDR_PLUS_BRACKET_FRAME_COUNT = 2
-    const val DEFAULT_HDR_PLUS_FRAME_COUNT = 3
+    const val DEFAULT_HDR_PLUS_FRAME_COUNT = 8  // Pro stacks 8 RAW frames out of the box
     const val MAX_FRAME_COUNT = 20
     const val DEFAULT_HDR_PLUS_BRACKET_EXPOSURE = false
     const val MIN_OUTPUT_SCALE = 1f
