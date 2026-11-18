@@ -9104,7 +9104,7 @@ class Camera2Controller(private val context: Context) {
             ),
             colorLayers = colorLayers,
             cameraTimestampSource = if (sonyMode != null) {
-                CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME // Sony's frames carry elapsedRealtimeNanos
+                CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME // the frame sink moves Sony's frames to BOOTTIME
             } else {
                 getActiveOpenCameraCharacteristics()
                     ?.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE)
@@ -9504,7 +9504,9 @@ class Camera2Controller(private val context: Context) {
     @Volatile private var sonyRecording = false
 
     private val sonyFrameSink = object : IFrameSink.Stub() {
-        override fun onFrame(buffer: HardwareBuffer, timestampNs: Long, frameId: Int) {
+        override fun onFrame(buffer: HardwareBuffer, sonyTimestampNs: Long, frameId: Int) {
+            // Sony stamps frames on the monotonic clock, which stops in deep sleep; audio and the recorder use BOOTTIME.
+            val timestampNs = sonyTimestampNs + SystemClock.elapsedRealtimeNanos() - System.nanoTime()
             lastSonyFrameNs = timestampNs
             val bridge = sonyVideoBridge?.bridge
             videoRecorder.submitExternalFrame(buffer, timestampNs) {
