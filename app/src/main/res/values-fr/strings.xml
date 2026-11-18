@@ -268,8 +268,6 @@
     <string name="current_camera">Caméra actuelle</string>
     
     <!-- About & Donation -->
-    <string name="settings_donation">Don</string>
-    <string name="settings_donation_description">Soutenir le développement de Photon Camera</string>
     <string name="settings_default_focal_length">Distance focale par défaut</string>
     <string name="settings_default_focal_length_description">Définir la distance focale à basculer automatiquement au démarrage de l\'application.</string>
     <string name="refresh">Actualiser</string>
@@ -1059,9 +1057,6 @@
     <string name="frame_editor_summary_logo">%1$s • %2$s • %3$.3f px</string>
     <string name="frame_editor_summary_divider">%1$s • %2$s • %3$.3f px</string>
     <string name="frame_editor_summary_spacer">ligne=%1$d • %2$.3f px</string>
-    <string name="settings_community_group">Groupe communautaire</string>
-    <string name="settings_community_group_telegram_description">Telegram : https://t.me/photoncameraapp</string>
-    <string name="settings_community_group_qq_description">Groupe QQ : 569605452</string>
     <string name="settings_check_update">Rechercher des mises à jour</string>
     <string name="settings_check_update_description">Version actuelle : %1$s</string>
     <string name="settings_check_update_running">Recherche et téléchargement des mises à jour…</string>

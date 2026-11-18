@@ -276,8 +276,8 @@ private val SettingsRippleAlpha = RippleAlpha(
     hoveredAlpha = 0.03f
 )
 
-private const val TELEGRAM_GROUP_URL = "https://t.me/photoncameraapp"
-private const val QQ_GROUP_URL = "https://qun.qq.com/universal-share/share?ac=1&authKey=SFezWP1Ub5Egb5yMc7dbc1W4BVKGzzs1Ld9RD%2BKYn%2FlXiuqD4XZCGse48v%2FNcvrq&busi_data=eyJncm91cENvZGUiOiI1Njk2MDU0NTIiLCJ0b2tlbiI6IjNTM0Z4MkN1NUpDQVU1OXJDZ0xFVlJOb0xHZHFCQ0xWc1pKQWpSVzNVT0FwaHFRcEFYR0lFTU9mNUxuNFl5TDEiLCJ1aW4iOiI0MTk3NzQ2OTYifQ%3D%3D&data=WwMa6V5hKvkhzfvOaOKz8MKqNOvSSjTxTRj6Dn-1bHP68fZuRJ66cyD5xOhydrUkF8yIA70R_yXqlFRwJGoaCQ&svctype=4&tempid=h5_group_info"
+private const val ISSUES_URL = "https://github.com/lilaccamera/lilaccamera/issues"
+private const val UPSTREAM_URL = "https://github.com/bjzhou/PhotonCamera"
 
 private val RAW_MIN_SHUTTER_SPEED_OPTIONS = listOf(
     0L,
@@ -2967,7 +2967,6 @@ fun SettingsScreen(
 
                 SettingsPage.HELP_ABOUT -> {
                     // 帮助与关于
-                    val isGoogleFlavor = BuildConfig.FLAVOR == "google"
 
                     SettingsSection(
                         title = stringResource(R.string.settings_section_help_about),
@@ -3070,11 +3069,9 @@ fun SettingsScreen(
                         )
 
                         NavigationSettingItem(
-                            title = stringResource(R.string.settings_community_group),
-                            description = stringResource(
-                                R.string.settings_community_group_telegram_description
-                            ),
-                            onClick = { openExternalUrl(context, TELEGRAM_GROUP_URL) }
+                            title = stringResource(R.string.settings_report_problem),
+                            description = stringResource(R.string.settings_report_problem_description),
+                            onClick = { openExternalUrl(context, ISSUES_URL) }
                         )
 
                         HorizontalDivider(
@@ -3083,46 +3080,10 @@ fun SettingsScreen(
                         )
 
                         NavigationSettingItem(
-                            title = stringResource(R.string.settings_community_group),
-                            description = stringResource(
-                                R.string.settings_community_group_qq_description
-                            ),
-                            onClick = { openExternalUrl(context, QQ_GROUP_URL) }
+                            title = stringResource(R.string.settings_credit),
+                            description = stringResource(R.string.settings_credit_description),
+                            onClick = { openExternalUrl(context, UPSTREAM_URL) }
                         )
-
-                        if (!isGoogleFlavor) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
-
-                            NavigationSettingItem(
-                                title = stringResource(R.string.settings_donation),
-                                description = stringResource(R.string.settings_donation_description),
-                                onClick = {
-                                    val qrCodeUrl = "https://qr.alipay.com/fkx103287mz2sqvs1esdh30"
-                                    val alipayUrl =
-                                        "alipays://platformapi/startapp?saId=10000007&clientVersion=3.7.0.0718&qrcode=${
-                                            java.net.URLEncoder.encode(
-                                                qrCodeUrl,
-                                                "UTF-8"
-                                            )
-                                        }"
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(alipayUrl))
-                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    try {
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {
-                                        val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse(qrCodeUrl))
-                                        webIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        try {
-                                            context.startActivity(webIntent)
-                                        } catch (e2: Exception) {
-                                        }
-                                    }
-                                }
-                            )
-                        }
                     }
                 }
             }
@@ -3437,7 +3398,7 @@ private fun SettingsCategoryOverview(
             title = stringResource(R.string.settings_section_help_about),
             description = listOf(
                 stringResource(R.string.settings_log_viewer),
-                stringResource(R.string.settings_community_group)
+                stringResource(R.string.settings_report_problem)
             ).joinToString(" · "),
             onClick = { onPageSelected(SettingsPage.HELP_ABOUT) }
         )
