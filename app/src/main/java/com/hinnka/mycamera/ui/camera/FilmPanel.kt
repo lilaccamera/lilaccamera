@@ -144,7 +144,7 @@ internal fun FilmPanel(
                     // shortcut: plain black like quick settings, no blur (Compose can't blur the GL preview behind it).
                     .background(SheetPanel, SheetShape)
                     .navigationBarsPadding()
-                    .padding(start = 10.dp, end = 10.dp, bottom = 6.dp)
+                    .padding(bottom = 8.dp)
             ) {
                 Box(Modifier.fillMaxWidth().height(56.dp)) {
                     Box(
@@ -160,12 +160,14 @@ internal fun FilmPanel(
                         }
                     }
                 }
-                ContentManagementOptionsPanel(
-                    visible = showContentManagement,
-                    onFilterManageClick = { onLutManageClick(null) },
-                    onFrameManageClick = onFrameManageClick,
-                    onPresetManageClick = onPresetManageClick
-                )
+                Box(Modifier.padding(horizontal = 10.dp)) {
+                    ContentManagementOptionsPanel(
+                        visible = showContentManagement,
+                        onFilterManageClick = { onLutManageClick(null) },
+                        onFrameManageClick = onFrameManageClick,
+                        onPresetManageClick = onPresetManageClick
+                    )
+                }
                 if (showContentManagement) Spacer(Modifier.height(8.dp))
 
                 val rows = QuickRows(

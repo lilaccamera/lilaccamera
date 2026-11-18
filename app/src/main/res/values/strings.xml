@@ -1834,7 +1834,7 @@
     <string name="quick_explain_multiple_exposure">Combines several shots into one picture.</string>
     <string name="quick_explain_video_aspect">Shape of the video frame. Open gate records the whole sensor.</string>
     <string name="quick_explain_log">Records a flat Log picture to colour-grade later.</string>
-    <string name="quick_explain_bitrate">Data per second. Higher keeps more detail and makes bigger files.</string>
+    <string name="quick_explain_bitrate">Megabits per second of video. Higher keeps more detail and makes bigger files.</string>
     <string name="quick_explain_codec">H.265 makes smaller files; H.264 plays on more devices.</string>
     <string name="quick_explain_microphone">Which microphone records the sound.</string>
     <string name="quick_explain_lens">Another camera at the same zoom, or the macro camera.</string>
@@ -1856,7 +1856,15 @@
     <string name="quick_rendering">Rendering</string>
     <string name="quick_hdr_plus_frames">HDR+ frames</string>
     <string name="quick_hdr_ratio">HDR ratio</string>
-    <string name="quick_bitrate">Bitrate, Mbps</string>
+    <string name="quick_bitrate">Bitrate</string>
+    <string name="quick_tab_shooting">Shooting</string>
+    <string name="quick_tab_output">Output</string>
+    <string name="quick_group_stacking">Stacking</string>
+    <string name="quick_group_hdr_plus">HDR+</string>
+    <string name="quick_group_exposure">Exposure</string>
+    <string name="quick_group_output">Output</string>
+    <string name="quick_group_picture">Picture</string>
+    <string name="quick_group_sound">Sound</string>
     <string name="quick_codec">Codec</string>
     <string name="quick_lens">Lens</string>
     <string name="quick_lens_macro">Macro</string>

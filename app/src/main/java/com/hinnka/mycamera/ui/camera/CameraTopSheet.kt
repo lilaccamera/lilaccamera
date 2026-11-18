@@ -38,6 +38,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -269,6 +274,8 @@ internal fun CameraTopSheet(
     // One explanation and one inline picker (Log, Microphone) open at a time.
     var explained by remember { mutableStateOf<String?>(null) }
     var openPicker by remember { mutableStateOf<String?>(null) }
+    // Shooting (0) or Output (1); opens on Shooting and keeps the last pick while the camera screen lives.
+    var qTab by remember { mutableIntStateOf(0) }
     fun handleContentManagementAction(action: () -> Unit) {
         showContentManagementOptions = false
         action()
@@ -403,135 +410,66 @@ internal fun CameraTopSheet(
                     // shortcut: plain black, no blur (Compose can't blur a GL preview surface behind it); add a GL blur pass if the plain sheet hides too much.
                     .background(SheetPanel, SheetShape)
                     .navigationBarsPadding()
-                    .padding(start = 10.dp, end = 10.dp, bottom = 6.dp)
+                    .padding(bottom = 8.dp)
             ) {
-                SheetHeader(
+                // The front camera has few rows that apply: one page, no tabs.
+                val tabbed = isVideo || !isFrontCamera
+                SheetTabRow(
+                    tabbed = tabbed,
+                    tab = qTab,
+                    onTab = { qTab = it },
                     onToolboxClick = onToolboxClick,
                     onContentManagementClick = { showContentManagementOptions = !showContentManagementOptions },
                     onSettingsClick = onMoreSettingsClick
                 )
-                ContentManagementOptionsPanel(
-                    visible = showContentManagementOptions,
-                    onFilterManageClick = { handleContentManagementAction(onFilterManageClick) },
-                    onFrameManageClick = { handleContentManagementAction(onFrameManageClick) },
-                    onPresetManageClick = { handleContentManagementAction(onPresetManageClick) }
-                )
+                Box(Modifier.padding(horizontal = 10.dp)) {
+                    ContentManagementOptionsPanel(
+                        visible = showContentManagementOptions,
+                        onFilterManageClick = { handleContentManagementAction(onFilterManageClick) },
+                        onFrameManageClick = { handleContentManagementAction(onFrameManageClick) },
+                        onPresetManageClick = { handleContentManagementAction(onPresetManageClick) }
+                    )
+                }
                 if (showContentManagementOptions) Spacer(Modifier.height(8.dp))
 
-                // 56 dp rows make the full list taller than the screen: it scrolls past 300 dp.
-                Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
                 val rows = QuickRows(
                     explained = explained,
                     onExplain = { key -> explained = if (explained == key) null else key },
                     onOpenSettingsAt = onOpenSettingsAt
                 )
-                if (isVideo) {
-                    QuickGroup {
-                        rows.Setting(
-                            key = "vasp",
-                            label = stringResource(R.string.video_aspect_chip),
-                            explanation = stringResource(R.string.quick_explain_video_aspect)
-                        ) {
-                            VideoAspectRatio.entries.forEach { ratio ->
-                                QuickChoice(
-                                    text = videoAspectRatioLabel(ratio),
-                                    selected = videoAspectRatio == ratio,
-                                    minWidth = 56.dp,
-                                    onClick = { onVideoAspectRatioChange(ratio) }
-                                )
-                            }
-                        }
-                        rows.Setting(
-                            key = "log",
-                            label = stringResource(R.string.video_log_chip),
-                            explanation = stringResource(R.string.quick_explain_log),
-                            last = openPicker != "log"
-                        ) {
-                            QuickLink(videoLogProfileLabel(videoLogProfile), open = openPicker == "log") {
-                                openPicker = if (openPicker == "log") null else "log"
-                            }
-                        }
-                        InlinePicker(visible = openPicker == "log") {
-                            availableVideoLogProfiles.forEach { profile ->
-                                VideoOptionChip(
-                                    title = videoLogProfileLabel(profile),
-                                    selected = videoLogProfile == profile,
-                                    onClick = { onVideoLogProfileChange(profile) }
-                                )
-                            }
-                        }
-                    }
-                    QuickGroup {
-                        rows.Setting(
-                            key = "bitrate",
-                            label = stringResource(R.string.quick_bitrate),
-                            explanation = stringResource(R.string.quick_explain_bitrate)
-                        ) {
-                            VideoBitratePreset.entries.forEach { bitrate ->
-                                QuickChoice(
-                                    text = bitrate.bitrateMbps.toString(),
-                                    selected = videoBitrate == bitrate,
-                                    minWidth = 42.dp,
-                                    onClick = { onVideoBitrateChange(bitrate) }
-                                )
-                            }
-                        }
-                        rows.Setting(
-                            key = "codec",
-                            quiet = true,
-                            label = stringResource(R.string.quick_codec),
-                            explanation = stringResource(R.string.quick_explain_codec),
-                            last = true
-                        ) {
-                            VideoCodec.entries.forEach { codec ->
-                                QuickChoice(
-                                    text = codec.displayName,
-                                    selected = videoCodec == codec,
-                                    minWidth = 56.dp,
-                                    onClick = { onVideoCodecChange(codec) }
-                                )
-                            }
-                        }
-                    }
-                    QuickGroup {
-                        rows.Setting(
-                            key = "mic",
-                            quiet = true,
-                            label = stringResource(R.string.video_microphone_title),
-                            explanation = stringResource(R.string.quick_explain_microphone),
-                            last = openPicker != "mic"
-                        ) {
-                            QuickLink(
-                                selectedVideoAudioInputLabel(videoAudioInputId, videoAudioInputOptions),
-                                open = openPicker == "mic"
+
+                // Group bodies; each page decides the titles, since a page with one group shows none.
+                val lensGroup: @Composable (first: Boolean) -> Unit = { first ->
+                    if (lensChoices.isNotEmpty()) {
+                        QuickGroup(stringResource(R.string.quick_lens), GroupRed, divider = !first) {
+                            rows.Setting(
+                                key = "lens",
+                                label = stringResource(R.string.quick_lens),
+                                explanation = stringResource(R.string.quick_explain_lens),
+                                last = true
                             ) {
-                                openPicker = if (openPicker == "mic") null else "mic"
-                            }
-                        }
-                        InlinePicker(visible = openPicker == "mic") {
-                            VideoOptionChip(
-                                title = stringResource(R.string.video_microphone_auto),
-                                selected = videoAudioInputId == VIDEO_AUDIO_INPUT_AUTO,
-                                onClick = { onVideoAudioInputChange(VIDEO_AUDIO_INPUT_AUTO) }
-                            )
-                            videoAudioInputOptions.forEach { option ->
-                                VideoOptionChip(
-                                    title = videoAudioInputLabel(option),
-                                    selected = videoAudioInputId == option.id,
-                                    onClick = { onVideoAudioInputChange(option.id) }
-                                )
+                                // shortcut: one line of choices, so about six lenses fit; wrap them if a phone offers more.
+                                lensChoices.forEach { choice ->
+                                    QuickChoice(
+                                        text = choice.label.ifEmpty { stringResource(R.string.quick_lens_macro) },
+                                        selected = choice.cameraId == currentCameraId,
+                                        minWidth = 42.dp,
+                                        onClick = { onLensSelect(choice.cameraId) }
+                                    )
+                                }
                             }
                         }
                     }
-                } else {
-                    // Multi-frame and multi-exposure, shown in Photo's own section or in a plain group in Portrait.
-                    // They exclude each other: the one given way slides to Off as soon as the other is moved,
-                    // not only once the camera has switched.
-                    var stackPick by remember { mutableStateOf<String?>(null) }
-                    LaunchedEffect(useJpgMax, useMultipleExposure) {
-                        if (stackPick == "mf" && !useMultipleExposure || stackPick == "mexp" && !useJpgMax) stackPick = null
-                    }
-                    val photoStackRows: @Composable ColumnScope.() -> Unit = {
+                }
+
+                // Multi-frame and multi-exposure exclude each other: the one given way slides to Off as soon as
+                // the other is moved, not only once the camera has switched.
+                var stackPick by remember { mutableStateOf<String?>(null) }
+                LaunchedEffect(useJpgMax, useMultipleExposure) {
+                    if (stackPick == "mf" && !useMultipleExposure || stackPick == "mexp" && !useJpgMax) stackPick = null
+                }
+                val stackGroup: @Composable (first: Boolean, onGuide: (() -> Unit)?) -> Unit = { first, onGuide ->
+                    QuickGroup(stringResource(R.string.quick_group_stacking), GroupRed, onGuide = onGuide, divider = !first) {
                         rows.Setting(
                             key = "mf",
                             label = stringResource(R.string.quick_multi_frame),
@@ -552,16 +490,18 @@ internal fun CameraTopSheet(
                                 }
                             )
                         }
-                        rows.Setting(
-                            key = "bracket",
-                            label = stringResource(R.string.quick_bracketing),
-                            explanation = stringResource(R.string.quick_explain_bracketing)
-                        ) {
-                            when {
-                                isFrontCamera -> QuickFixed(stringResource(R.string.quick_bracketing_back_only))
-                                !useJpgMax -> QuickFixed(stringResource(R.string.quick_bracketing_needs_multi_frame))
-                                bracketBlockedBySize -> QuickFixed(stringResource(R.string.quick_bracketing_needs_12mp))
-                                else -> QuickSwitch(bracketing) { onBracketingChange(!bracketing) }
+                        // The front camera cannot bracket: it has no manual exposure.
+                        if (!isFrontCamera) {
+                            rows.Setting(
+                                key = "bracket",
+                                label = stringResource(R.string.quick_bracketing),
+                                explanation = stringResource(R.string.quick_explain_bracketing)
+                            ) {
+                                when {
+                                    !useJpgMax -> QuickFixed(stringResource(R.string.quick_bracketing_needs_multi_frame))
+                                    bracketBlockedBySize -> QuickFixed(stringResource(R.string.quick_bracketing_needs_12mp))
+                                    else -> QuickSwitch(bracketing) { onBracketingChange(!bracketing) }
+                                }
                             }
                         }
                         rows.Setting(
@@ -590,102 +530,80 @@ internal fun CameraTopSheet(
                             )
                         }
                     }
-                    // The current mode's own settings, always first and marked, so the shared groups
-                    // below keep their place at the bottom of the sheet from mode to mode.
-                    ModeGroup(
-                        title = stringResource(
-                            when {
-                                isPortraitMode -> R.string.capture_mode_portrait
-                                isNightMode -> R.string.capture_mode_night
-                                isProfessionalMode -> R.string.capture_mode_professional
-                                else -> R.string.capture_mode_photo
-                            }
-                        ),
-                        onGuide = when {
-                            isPortraitMode -> onPortraitHelp
-                            isProfessionalMode -> onProHelp
-                            else -> onBasicsHelp
+                }
+
+                val portraitGroup: @Composable (first: Boolean) -> Unit = { first ->
+                    QuickGroup(stringResource(R.string.capture_mode_portrait), GroupRed, onGuide = onPortraitHelp, divider = !first) {
+                        rows.Setting(
+                            key = "pblur",
+                            label = stringResource(R.string.portrait_blur),
+                            explanation = stringResource(R.string.quick_explain_portrait_blur),
+                            onLongClick = onPortraitHelp
+                        ) {
+                            QuickChoice(
+                                text = stringResource(R.string.portrait_blur_quick),
+                                selected = portraitQuickBlur,
+                                minWidth = 56.dp,
+                                onClick = { onPortraitQuickBlurChange(true) }
+                            )
+                            QuickChoice(
+                                text = stringResource(R.string.portrait_blur_depth),
+                                selected = !portraitQuickBlur,
+                                minWidth = 56.dp,
+                                onClick = { onPortraitQuickBlurChange(false) }
+                            )
                         }
-                    ) {
-                        if (isPortraitMode) {
-                            rows.Setting(
-                                key = "pblur",
-                                label = stringResource(R.string.portrait_blur),
-                                explanation = stringResource(R.string.quick_explain_portrait_blur),
-                                onLongClick = onPortraitHelp
-                            ) {
+                        rows.Setting(
+                            key = "pbokeh",
+                            label = stringResource(R.string.gallery_bokeh_style_title),
+                            explanation = stringResource(R.string.quick_explain_portrait_bokeh),
+                            last = true
+                        ) {
+                            listOf(
+                                BokehStyle.NATURAL to R.string.gallery_bokeh_style_natural,
+                                BokehStyle.DEFAULT to R.string.gallery_bokeh_style_default,
+                                BokehStyle.BUBBLE to R.string.gallery_bokeh_style_bubble,
+                            ).forEach { (style, label) ->
                                 QuickChoice(
-                                    text = stringResource(R.string.portrait_blur_quick),
-                                    selected = portraitQuickBlur,
-                                    minWidth = 56.dp,
-                                    onClick = { onPortraitQuickBlurChange(true) }
-                                )
-                                QuickChoice(
-                                    text = stringResource(R.string.portrait_blur_depth),
-                                    selected = !portraitQuickBlur,
-                                    minWidth = 56.dp,
-                                    onClick = { onPortraitQuickBlurChange(false) }
+                                    text = stringResource(label),
+                                    selected = portraitBokehStyle == style,
+                                    minWidth = 48.dp,
+                                    onClick = { onPortraitBokehStyleChange(style) }
                                 )
                             }
-                            rows.Setting(
-                                key = "pbokeh",
-                                label = stringResource(R.string.gallery_bokeh_style_title),
-                                explanation = stringResource(R.string.quick_explain_portrait_bokeh),
-                                last = true
-                            ) {
-                                listOf(
-                                    BokehStyle.NATURAL to R.string.gallery_bokeh_style_natural,
-                                    BokehStyle.DEFAULT to R.string.gallery_bokeh_style_default,
-                                    BokehStyle.BUBBLE to R.string.gallery_bokeh_style_bubble,
-                                ).forEach { (style, label) ->
-                                    QuickChoice(
-                                        text = stringResource(label),
-                                        selected = portraitBokehStyle == style,
-                                        minWidth = 48.dp,
-                                        onClick = { onPortraitBokehStyleChange(style) }
-                                    )
-                                }
-                            }
-                        } else if (isProfessionalMode) {
-                            rows.Setting(
-                                key = "engine",
-                                label = stringResource(R.string.quick_rendering),
-                                explanation = rawColorEngineDescription(rawRenderingEngine),
-                                settingsTarget = SettingsTarget.RAW_DEVELOPMENT
-                            ) {
-                                QuickLink(rawRenderingEngineName(rawRenderingEngine), open = false) {
-                                    showRenderingEngineSheet = true
-                                }
-                            }
-                            rows.Setting(
-                                key = "hdrp",
-                                label = stringResource(R.string.quick_hdr_plus_frames),
-                                explanation = stringResource(R.string.settings_hdr_plus_frame_count_description),
-                                settingsTarget = SettingsTarget.HDR_PLUS
-                            ) {
-                                FrameCountSlider(
-                                    frames = hdrPlusFrameCount,
-                                    min = hdrPlusMinFrames,
-                                    withOff = false,
-                                    onFramesChange = onHdrPlusFrameCountChange
-                                )
-                            }
-                            rows.Setting(
-                                key = "hdrr",
-                                label = stringResource(R.string.quick_hdr_ratio),
-                                explanation = stringResource(R.string.settings_ml_ae_max_hdr_ratio_description),
-                                settingsTarget = SettingsTarget.HDR_PLUS,
-                                last = true
-                            ) {
-                                HdrRatioSlider(hdrRatioLimit, onHdrRatioLimitChange)
-                            }
-                        } else {
-                            photoStackRows()
                         }
                     }
-                    // In Portrait, Photo's own multi-frame and multi-exposure keep their plain group after Portrait's.
-                    if (isPortraitMode) QuickGroup { photoStackRows() }
-                    QuickGroup {
+                }
+
+                val hdrGroup: @Composable (first: Boolean) -> Unit = { first ->
+                    QuickGroup(stringResource(R.string.quick_group_hdr_plus), GroupMagenta, onGuide = onProHelp, divider = !first) {
+                        rows.Setting(
+                            key = "hdrp",
+                            label = stringResource(R.string.quick_hdr_plus_frames),
+                            explanation = stringResource(R.string.settings_hdr_plus_frame_count_description),
+                            settingsTarget = SettingsTarget.HDR_PLUS
+                        ) {
+                            FrameCountSlider(
+                                frames = hdrPlusFrameCount,
+                                min = hdrPlusMinFrames,
+                                withOff = false,
+                                onFramesChange = onHdrPlusFrameCountChange
+                            )
+                        }
+                        rows.Setting(
+                            key = "hdrr",
+                            label = stringResource(R.string.quick_hdr_ratio),
+                            explanation = stringResource(R.string.settings_ml_ae_max_hdr_ratio_description),
+                            settingsTarget = SettingsTarget.HDR_PLUS,
+                            last = true
+                        ) {
+                            HdrRatioSlider(hdrRatioLimit, onHdrRatioLimitChange)
+                        }
+                    }
+                }
+
+                val exposureGroup: @Composable () -> Unit = {
+                    QuickGroup(stringResource(R.string.quick_group_exposure), GroupMagenta) {
                         rows.Setting(
                             key = "meter",
                             label = stringResource(R.string.metering_mode),
@@ -716,9 +634,27 @@ internal fun CameraTopSheet(
                             QuickSwitch(showHistogram, quiet = true) { onHistogramChange(!showHistogram) }
                         }
                     }
-                    QuickGroup {
+                }
+
+                // The file: Rendering (Pro), Resolution, Colour (front), Camera JPEG, Ultra HDR (back).
+                val outputGroup: @Composable (title: Boolean) -> Unit = { title ->
+                    QuickGroup(if (title) stringResource(R.string.quick_group_output) else null, GroupGold, divider = title) {
+                        if (isProfessionalMode) {
+                            rows.Setting(
+                                key = "engine",
+                                label = stringResource(R.string.quick_rendering),
+                                explanation = rawColorEngineDescription(rawRenderingEngine),
+                                settingsTarget = SettingsTarget.RAW_DEVELOPMENT
+                            ) {
+                                QuickLink(rawRenderingEngineName(rawRenderingEngine), open = false) {
+                                    showRenderingEngineSheet = true
+                                }
+                            }
+                        }
                         rows.Setting(
                             key = "res",
+                            // Pro is always full size, so its row only reports that.
+                            quiet = isProfessionalMode,
                             label = stringResource(R.string.photo_resolution),
                             explanation = stringResource(
                                 if (isFrontCamera && !isProfessionalMode) R.string.quick_explain_resolution_front
@@ -775,42 +711,166 @@ internal fun CameraTopSheet(
                             key = "jpeg",
                             quiet = true,
                             label = stringResource(R.string.camera_jpeg),
-                            explanation = stringResource(R.string.quick_explain_camera_jpeg)
+                            explanation = stringResource(R.string.quick_explain_camera_jpeg),
+                            last = isFrontCamera
                         ) {
                             QuickSwitch(saveCameraJpeg, quiet = true) { onSaveCameraJpegChange(!saveCameraJpeg) }
                         }
-                        rows.Setting(
-                            key = "uhdr",
-                            quiet = true,
-                            label = stringResource(R.string.settings_ultra_hdr_gain_map),
-                            explanation = stringResource(R.string.quick_explain_ultra_hdr),
-                            settingsTarget = SettingsTarget.ULTRA_HDR,
-                            last = true
-                        ) {
-                            QuickSwitch(ultraHdrEnabled, quiet = true) { onUltraHdrToggle(!ultraHdrEnabled) }
+                        // The front camera makes no gain map.
+                        if (!isFrontCamera) {
+                            rows.Setting(
+                                key = "uhdr",
+                                quiet = true,
+                                label = stringResource(R.string.settings_ultra_hdr_gain_map),
+                                explanation = stringResource(R.string.quick_explain_ultra_hdr),
+                                settingsTarget = SettingsTarget.ULTRA_HDR,
+                                last = true
+                            ) {
+                                QuickSwitch(ultraHdrEnabled, quiet = true) { onUltraHdrToggle(!ultraHdrEnabled) }
+                            }
                         }
                     }
                 }
-                if (lensChoices.isNotEmpty()) {
-                    QuickGroup {
+
+                val videoPictureGroup: @Composable () -> Unit = {
+                    QuickGroup(stringResource(R.string.quick_group_picture), GroupRed, divider = false) {
                         rows.Setting(
-                            key = "lens",
-                            label = stringResource(R.string.quick_lens),
-                            explanation = stringResource(R.string.quick_explain_lens),
-                            last = true
+                            key = "vasp",
+                            label = stringResource(R.string.video_aspect_chip),
+                            explanation = stringResource(R.string.quick_explain_video_aspect)
                         ) {
-                            // shortcut: one line of choices, so about six lenses fit; wrap them if a phone offers more.
-                            lensChoices.forEach { choice ->
+                            VideoAspectRatio.entries.forEach { ratio ->
                                 QuickChoice(
-                                    text = choice.label.ifEmpty { stringResource(R.string.quick_lens_macro) },
-                                    selected = choice.cameraId == currentCameraId,
-                                    minWidth = 42.dp,
-                                    onClick = { onLensSelect(choice.cameraId) }
+                                    text = videoAspectRatioLabel(ratio),
+                                    selected = videoAspectRatio == ratio,
+                                    minWidth = 56.dp,
+                                    onClick = { onVideoAspectRatioChange(ratio) }
+                                )
+                            }
+                        }
+                        rows.Setting(
+                            key = "log",
+                            label = stringResource(R.string.video_log_chip),
+                            explanation = stringResource(R.string.quick_explain_log),
+                            last = openPicker != "log"
+                        ) {
+                            QuickLink(videoLogProfileLabel(videoLogProfile), open = openPicker == "log") {
+                                openPicker = if (openPicker == "log") null else "log"
+                            }
+                        }
+                        InlinePicker(visible = openPicker == "log") {
+                            availableVideoLogProfiles.forEach { profile ->
+                                VideoOptionChip(
+                                    title = videoLogProfileLabel(profile),
+                                    selected = videoLogProfile == profile,
+                                    onClick = { onVideoLogProfileChange(profile) }
                                 )
                             }
                         }
                     }
                 }
+
+                val videoSoundGroup: @Composable () -> Unit = {
+                    QuickGroup(stringResource(R.string.quick_group_sound), GroupGold) {
+                        rows.Setting(
+                            key = "mic",
+                            quiet = true,
+                            label = stringResource(R.string.video_microphone_title),
+                            explanation = stringResource(R.string.quick_explain_microphone),
+                            last = openPicker != "mic"
+                        ) {
+                            QuickLink(
+                                selectedVideoAudioInputLabel(videoAudioInputId, videoAudioInputOptions),
+                                open = openPicker == "mic"
+                            ) {
+                                openPicker = if (openPicker == "mic") null else "mic"
+                            }
+                        }
+                        InlinePicker(visible = openPicker == "mic") {
+                            VideoOptionChip(
+                                title = stringResource(R.string.video_microphone_auto),
+                                selected = videoAudioInputId == VIDEO_AUDIO_INPUT_AUTO,
+                                onClick = { onVideoAudioInputChange(VIDEO_AUDIO_INPUT_AUTO) }
+                            )
+                            videoAudioInputOptions.forEach { option ->
+                                VideoOptionChip(
+                                    title = videoAudioInputLabel(option),
+                                    selected = videoAudioInputId == option.id,
+                                    onClick = { onVideoAudioInputChange(option.id) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // One tab, so no title: Recording.
+                val videoRecordingGroup: @Composable () -> Unit = {
+                    QuickGroup(divider = false) {
+                        rows.Setting(
+                            key = "bitrate",
+                            label = stringResource(R.string.quick_bitrate),
+                            explanation = stringResource(R.string.quick_explain_bitrate)
+                        ) {
+                            VideoBitratePreset.entries.forEach { bitrate ->
+                                QuickChoice(
+                                    text = bitrate.bitrateMbps.toString(),
+                                    selected = videoBitrate == bitrate,
+                                    minWidth = 42.dp,
+                                    onClick = { onVideoBitrateChange(bitrate) }
+                                )
+                            }
+                        }
+                        rows.Setting(
+                            key = "codec",
+                            quiet = true,
+                            label = stringResource(R.string.quick_codec),
+                            explanation = stringResource(R.string.quick_explain_codec),
+                            last = true
+                        ) {
+                            VideoCodec.entries.forEach { codec ->
+                                QuickChoice(
+                                    text = codec.displayName,
+                                    selected = videoCodec == codec,
+                                    minWidth = 56.dp,
+                                    onClick = { onVideoCodecChange(codec) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Shooting: what changes the shot. The mode's own group carries its guide.
+                val shooting: @Composable () -> Unit = {
+                    if (isVideo) {
+                        videoPictureGroup()
+                        videoSoundGroup()
+                    } else {
+                        lensGroup(true)
+                        val afterLens = lensChoices.isEmpty()
+                        when {
+                            isPortraitMode -> {
+                                portraitGroup(afterLens)
+                                stackGroup(false, null)
+                            }
+                            isProfessionalMode -> hdrGroup(afterLens)
+                            else -> stackGroup(afterLens, onBasicsHelp)
+                        }
+                        exposureGroup()
+                    }
+                }
+                // Output: what changes the file.
+                val output: @Composable () -> Unit = {
+                    if (isVideo) videoRecordingGroup() else outputGroup(false)
+                }
+
+                if (tabbed) {
+                    QuickTabPages(tab = qTab, onTab = { qTab = it }, pages = listOf(shooting, output))
+                } else {
+                    QuickScroll {
+                        stackGroup(true, onBasicsHelp)
+                        exposureGroup()
+                        outputGroup(true)
+                    }
                 }
             }
         }
@@ -1073,28 +1133,6 @@ private fun AspectIcon(ratio: AspectRatio, color: Color) {
 }
 
 @Composable
-private fun SheetHeader(
-    onToolboxClick: () -> Unit,
-    onContentManagementClick: () -> Unit,
-    onSettingsClick: () -> Unit
-) {
-    Box(Modifier.fillMaxWidth().height(56.dp)) {
-        Box(
-            Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 8.dp)
-                .size(width = 36.dp, height = 3.dp)
-                .background(SheetGrey, RoundedCornerShape(2.dp))
-        )
-        Row(Modifier.align(Alignment.CenterEnd)) {
-            HeaderIcon(AppIcons.ToolboxLine, stringResource(R.string.toolbox_title), onToolboxClick)
-            HeaderIcon(AppIcons.FoldersLine, stringResource(R.string.settings_section_management), onContentManagementClick)
-            HeaderIcon(AppIcons.SettingsLine, stringResource(R.string.settings_title), onSettingsClick)
-        }
-    }
-}
-
-@Composable
 internal fun HeaderIcon(icon: ImageVector, description: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
@@ -1106,10 +1144,162 @@ internal fun HeaderIcon(icon: ImageVector, description: String, onClick: () -> U
     }
 }
 
+// Group title colours, as Sony's camera tabs: Shooting red, Exposure magenta, Setup gold.
+internal val GroupRed = Color(0xFFEA2546)
+internal val GroupMagenta = Color(0xFFF54FBA)
+internal val GroupGold = Color(0xFFB28E02)
+
+/**
+ * A group of rows: [title] with a bar in [color] on top (a tap on it opens [onGuide] when given, shown by an
+ * info mark), parted from the group above by a line unless [divider] is false.
+ */
 @Composable
-internal fun QuickGroup(content: @Composable ColumnScope.() -> Unit) {
-    GroupDivider()
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp), content = content)
+internal fun QuickGroup(
+    title: String? = null,
+    color: Color = GroupRed,
+    onGuide: (() -> Unit)? = null,
+    divider: Boolean = true,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    if (divider) GroupDivider() else Spacer(Modifier.height(6.dp))
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        if (title != null) {
+            val guideDescription = stringResource(R.string.mode_guide_open, title)
+            Row(
+                modifier = Modifier
+                    .height(28.dp)
+                    .then(
+                        if (onGuide != null) {
+                            Modifier.clickable(onClick = onGuide).semantics { contentDescription = guideDescription }
+                        } else {
+                            Modifier
+                        }
+                    ),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(Modifier.size(width = 3.dp, height = 11.dp).background(color))
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    text = title.uppercase(),
+                    color = SonyText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 1.2.sp,
+                    maxLines = 1
+                )
+                if (onGuide != null) {
+                    Icon(AppIcons.InfoLine, contentDescription = null, tint = SonySecondary, modifier = Modifier.padding(start = 5.dp).size(12.dp))
+                }
+            }
+        }
+        content()
+    }
+}
+
+/** The sheet's top row: the Shooting / Output tabs on the left, then Toolbox, Content management and Settings. */
+@Composable
+private fun SheetTabRow(
+    tabbed: Boolean,
+    tab: Int,
+    onTab: (Int) -> Unit,
+    onToolboxClick: () -> Unit,
+    onContentManagementClick: () -> Unit,
+    onSettingsClick: () -> Unit
+) {
+    Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (tabbed) {
+            SheetTab(stringResource(R.string.quick_tab_shooting), tab == 0, GroupRed) { onTab(0) }
+            SheetTab(stringResource(R.string.quick_tab_output), tab == 1, GroupGold) { onTab(1) }
+        }
+        Spacer(Modifier.weight(1f))
+        if (tabbed) Box(Modifier.width(1.dp).height(24.dp).background(SonyTrack))
+        Spacer(Modifier.width(6.dp))
+        HeaderIcon(AppIcons.ToolboxLine, stringResource(R.string.toolbox_title), onToolboxClick)
+        HeaderIcon(AppIcons.FoldersLine, stringResource(R.string.settings_section_management), onContentManagementClick)
+        HeaderIcon(AppIcons.SettingsLine, stringResource(R.string.settings_title), onSettingsClick)
+    }
+    Box(Modifier.fillMaxWidth().height(1.dp).background(SonyDivider))
+}
+
+@Composable
+private fun SheetTab(text: String, selected: Boolean, color: Color, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .width(100.dp)
+            .fillMaxHeight()
+            .clickable(onClick = onClick)
+            .semantics { this.selected = selected },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, color = if (selected) SonyText else SonySecondary, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        if (selected) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth(0.44f).height(3.dp).background(color))
+    }
+}
+
+/**
+ * The tabs' pages side by side in one track, so the sheet keeps the taller page's height whichever tab shows.
+ * A tap on a tab or a sideways swipe over 50 dp slides to the other page over 250 ms.
+ */
+@Composable
+private fun QuickTabPages(tab: Int, onTab: (Int) -> Unit, pages: List<@Composable () -> Unit>) {
+    val position by animateFloatAsState(tab.toFloat(), tween(250, easing = FastOutSlowInEasing), label = "qTab")
+    val currentTab by rememberUpdatedState(tab)
+    val currentOnTab by rememberUpdatedState(onTab)
+    QuickScroll(
+        Modifier.pointerInput(pages.size) {
+            val swipe = 50.dp.toPx()
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                var dx = 0f
+                var dy = 0f
+                while (true) {
+                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                    // A slider or the list's own scroll took the drag.
+                    if (!change.pressed || change.isConsumed) break
+                    val moved = change.positionChange()
+                    dx += moved.x
+                    dy += moved.y
+                    if (abs(dx) > swipe && abs(dx) > 1.5f * abs(dy)) {
+                        val next = (currentTab + if (dx < 0) 1 else -1).coerceIn(0, pages.size - 1)
+                        if (next != currentTab) currentOnTab(next)
+                        change.consume()
+                        break
+                    }
+                }
+            }
+        }
+    ) {
+        Box(Modifier.fillMaxWidth().clipToBounds()) {
+            pages.forEachIndexed { i, page ->
+                Column(Modifier.fillMaxWidth().graphicsLayer { translationX = (i - position) * size.width }) { page() }
+            }
+        }
+    }
+}
+
+/** The list under the tab row: scrolls past 300 dp, fading out over its last 28 dp while more lies below. */
+@Composable
+private fun QuickScroll(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val state = rememberScrollState()
+    Column(
+        modifier = modifier
+            .heightIn(max = 300.dp)
+            .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+            .drawWithContent {
+                drawContent()
+                if (state.canScrollForward) {
+                    val fade = 28.dp.toPx()
+                    drawRect(
+                        brush = Brush.verticalGradient(listOf(Color.Black, Color.Transparent), size.height - fade, size.height),
+                        topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - fade),
+                        size = androidx.compose.ui.geometry.Size(size.width, fade),
+                        blendMode = BlendMode.DstIn
+                    )
+                }
+            }
+            .verticalScroll(state),
+        content = content
+    )
 }
 
 /** Groups are parted by a 1 dp line and a 6 dp gap, with no boxes around them. */
@@ -1117,37 +1307,6 @@ internal fun QuickGroup(content: @Composable ColumnScope.() -> Unit) {
 private fun GroupDivider() {
     Box(Modifier.fillMaxWidth().height(1.dp).background(SonyDivider))
     Spacer(Modifier.height(6.dp))
-}
-
-/** Like [QuickGroup], for the current mode's own settings: the mode's name on top, in orange. */
-@Composable
-private fun ModeGroup(title: String, onGuide: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
-    GroupDivider()
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
-        // A mode with a guide shows a small info mark after its name; a tap on either opens the guide.
-        val guideDescription = stringResource(R.string.mode_guide_open, title)
-        Row(
-            modifier = Modifier
-                .padding(top = 7.dp)
-                .then(
-                    if (onGuide != null) {
-                        Modifier
-                            .clickable(onClick = onGuide)
-                            .semantics { contentDescription = guideDescription }
-                    } else {
-                        Modifier
-                    }
-                ),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(text = title, color = ModeAmber, fontSize = 10.5.sp, fontWeight = FontWeight.Medium)
-            if (onGuide != null) {
-                Icon(AppIcons.InfoLine, contentDescription = null, tint = ModeAmber.copy(alpha = 0.8f), modifier = Modifier.size(12.dp))
-            }
-        }
-        content()
-    }
 }
 
 /** List rows: the name on the left (tap: explanation, long press: Settings), the choices on the right. */
@@ -1411,6 +1570,8 @@ internal fun QuickSlider(
             maxLines = 1,
             modifier = Modifier.width(66.dp)
         )
+        // At the left end the knob reaches 10 dp past the track; keep it clear of the value.
+        Spacer(Modifier.width(8.dp))
         Box(
             modifier = Modifier
                 .width(trackWidth + 20.dp)
