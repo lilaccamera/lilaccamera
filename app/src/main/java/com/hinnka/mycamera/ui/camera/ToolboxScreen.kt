@@ -41,15 +41,16 @@ fun ToolboxScreen(
     onColorWalkClick: () -> Unit,
     onFilmLibraryClick: () -> Unit,
     onPuzzleClick: () -> Unit,
+    showLutCreator: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val items = listOf(
+    val items = listOfNotNull(
         ToolboxItem(
             titleRes = R.string.lut_creator_title,
             descriptionRes = R.string.lut_creator_desc,
             icon = AppIcons.Palette,
             onClick = onLutCreatorClick
-        ),
+        ).takeIf { showLutCreator },
         ToolboxItem(
             titleRes = R.string.lut_synthesis_title,
             descriptionRes = R.string.lut_synthesis_desc,

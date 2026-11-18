@@ -703,6 +703,8 @@
     <string name="settings_frame_management_description">Manage frames, set default, reorder</string>
     <string name="settings_preset_management">Preset Manage</string>
     <string name="settings_preset_management_description">Manage custom presets</string>
+    <string name="settings_show_lut_creator">LUT Creator</string>
+    <string name="settings_show_lut_creator_description">Show it in Toolbox. AI mode sends your photos to the AI service</string>
     <string name="settings_openai_api_key">OpenAI API Key</string>
     <string name="settings_openai_api_key_desc">API key required for AI</string>
     <string name="settings_openai_base_url">OpenAI Base URL</string>
