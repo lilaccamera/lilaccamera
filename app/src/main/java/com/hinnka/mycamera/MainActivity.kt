@@ -1,5 +1,6 @@
 package com.hinnka.mycamera
 
+import android.app.Activity
 import com.hinnka.mycamera.ui.prefs.rememberUserPreferencesRepository
 import com.hinnka.mycamera.ui.prefs.preferenceValue
 import com.hinnka.mycamera.data.ContentRepository
@@ -752,12 +753,47 @@ fun NavigationHost(
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val backStacksInFlight by CameraViewModel.backStacksInFlight.collectAsState()
+    var showStackMemoryWarning by remember { mutableStateOf(false) }
+    val warnBeforeCamera = backStacksInFlight > 0 && !externalGalleryReviewReturnToCaller &&
+        navController.previousBackStackEntry?.destination?.route == Routes.CAMERA
     val handleGalleryBack: () -> Unit = {
         if (externalGalleryReviewReturnToCaller) {
             onExternalGalleryReviewBack()
+        } else if (warnBeforeCamera) {
+            showStackMemoryWarning = true
         } else {
             navController.popBackStack()
         }
+    }
+    if (showStackMemoryWarning) {
+        AlertDialog(
+            onDismissRequest = { showStackMemoryWarning = false },
+            title = { Text(stringResource(R.string.stack_memory_warning_title)) },
+            text = { Text(stringResource(R.string.stack_memory_warning_body)) },
+            confirmButton = {
+                Column(horizontalAlignment = Alignment.End) {
+                    TextButton(onClick = { showStackMemoryWarning = false }) {
+                        Text(stringResource(R.string.stack_memory_warning_stay))
+                    }
+                    TextButton(onClick = {
+                        showStackMemoryWarning = false
+                        (context as? Activity)?.moveTaskToBack(true)
+                    }) {
+                        Text(stringResource(R.string.stack_memory_warning_home))
+                    }
+                    TextButton(onClick = {
+                        showStackMemoryWarning = false
+                        navController.popBackStack()
+                    }) {
+                        Text(
+                            stringResource(R.string.stack_memory_warning_camera),
+                            color = Color.White.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+            },
+        )
     }
     val returnToGallery: () -> Unit = {
         if (!navController.popBackStack(Routes.GALLERY, inclusive = false)) {
@@ -933,6 +969,7 @@ fun NavigationHost(
             }
 
             composable(Routes.GALLERY) {
+                BackHandler(enabled = warnBeforeCamera) { showStackMemoryWarning = true }
                 GalleryScreen(
                     viewModel = galleryViewModel,
                     onBack = handleGalleryBack,
@@ -975,6 +1012,7 @@ fun NavigationHost(
                 val index = backStackEntry.arguments?.getInt("index") ?: 0
                 val tab = backStackEntry.arguments?.getString("tab") ?: GalleryTab.PHOTON.name
                 val photoId = backStackEntry.arguments?.getString("photoId")
+                BackHandler(enabled = warnBeforeCamera) { showStackMemoryWarning = true }
                 GalleryDetailScreen(
                     viewModel = galleryViewModel,
                     initialIndex = index,
