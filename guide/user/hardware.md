@@ -19,9 +19,10 @@ Lilac aims to bring everything Sony's own camera app does to custom ROMs, and to
 | Scene and condition recognition | **Partly.** Icons on the top line; nothing changes because of them |
 | Sony's photo processing | **Done on the front camera**, as Accurate colour; **Camera JPEG** keeps Sony's photo in Pro |
 | Super slow motion, 960 fps | **Done**, at 720p. Needs Sony's cacao service and the Lilac Sony Bridge on the ROM |
+| 60 fps at 1080p and 120 fps at 720p video | **Done.** Needs Sony's cacao service and the Lilac Sony Bridge |
 | Still HDR | **By hand.** Only as a [custom vendor key](#custom-vendor-keys) |
 | Multi-frame noise reduction | **Not used.** Lilac merges the frames itself |
-| Video stabilisation (SteadyShot) | **Not yet.** Lilac's own EIS+ replaces it |
+| Video stabilisation (SteadyShot, Intelligent Active) | **Done**, as Steady and Active. Needs the Lilac Sony Bridge; Lilac's own EIS+ works without it |
 
 What each ROM provides, and which ROM was tested: [Get Lilac](../index.md#get-lilac).
 

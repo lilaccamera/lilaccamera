@@ -22,14 +22,14 @@ Lilac is a camera app for one phone. It rebuilds Sony's camera app, with all of 
     Other lilac ROMs get basic multi-frame stacking in Photo, Night, Portrait and Video, because they lack the raw19 camera shim and Sony's cacao service. [What each feature needs](#get-lilac)
 
 <div class="lilac-cards lilac-cards--steps" markdown="0">
-<a class="lilac-card" href="#sonys-camera-features"><span class="lilac-card__num">1</span><strong>Sony's camera features</strong><span>Faces, tracking, laser focus, the camera key and 960 fps slow motion</span></a>
+<a class="lilac-card" href="#sonys-camera-features"><span class="lilac-card__num">1</span><strong>Sony's camera features</strong><span>Faces, tracking, laser focus, the camera key, stabilisers and 960 fps slow motion</span></a>
 <a class="lilac-card" href="#gcams-multi-frame-processing"><span class="lilac-card__num">2</span><strong>GCam's processing</strong><span>HDR+ and merged frames, on Sony's camera hardware</span></a>
 <a class="lilac-card" href="#get-lilac"><span class="lilac-card__num">3</span><strong>What works on your ROM</strong><span>Full on sunplex07's LineageOS, basic elsewhere</span></a>
 </div>
 
 ## Sony's camera features { .lilac-step data-step="1" }
 
-Sony's camera app uses the phone's hardware fully but does not run on custom ROMs. Lilac brings its features back: face frames, subject tracking, the laser distance sensor, the two-stage camera key, smile shutter, Sony's own photo processing, and 960 fps slow motion. The aim is the whole of Sony's camera app; the [Sony camera features](user/hardware.md) page lists what is done and what is not yet.
+Sony's camera app uses the phone's hardware fully but does not run on custom ROMs. Lilac brings its features back: face frames, subject tracking, the laser distance sensor, the two-stage camera key, smile shutter, Sony's own photo processing, Sony's video stabilisers, and 960 fps slow motion with 60 and 120 fps video. The aim is the whole of Sony's camera app; the [Sony camera features](user/hardware.md) page lists what is done and what is not yet.
 
 The XZ1 Compact's sensor records at 960 frames a second, but on custom ROMs that went away with Sony's camera app. sunplex07's LineageOS 23.2 keeps Sony's slow-motion service, cacao, and Lilac reaches it through its companion app, the Lilac Sony Bridge. So 960 fps works again.
 
