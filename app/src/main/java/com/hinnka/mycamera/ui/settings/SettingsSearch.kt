@@ -57,7 +57,12 @@ internal class SettingsEntry(
     val choices: List<Int> = emptyList(),
     val flashAs: Int? = null,
     val parent: Int? = null,
-)
+    val titleArg: Int? = null,
+) {
+    /** The row's name as drawn, filling in [titleArg] for names like "%1$s Save Path". */
+    fun name(context: android.content.Context): String =
+        titleArg?.let { context.getString(title, context.getString(it)) } ?: context.getString(title)
+}
 
 private val NR_LEVELS = listOf(
     R.string.settings_nr_level_off, R.string.settings_nr_level_fast, R.string.settings_nr_level_high_quality,
@@ -75,8 +80,8 @@ private val RENDERING_ENGINES = listOf(
 internal val SETTINGS_INDEX: List<SettingsEntry> = buildList {
     fun row(
         group: SettingsGroup, section: Int?, title: Int, choices: List<Int> = emptyList(),
-        flashAs: Int? = null, parent: Int? = null,
-    ) = add(SettingsEntry(title, group, section, choices, flashAs, parent))
+        flashAs: Int? = null, parent: Int? = null, titleArg: Int? = null,
+    ) = add(SettingsEntry(title, group, section, choices, flashAs, parent, titleArg))
 
     SettingsGroup.SHOOTING.let { g ->
         R.string.settings_section_assist.let { s ->
@@ -97,7 +102,7 @@ internal val SETTINGS_INDEX: List<SettingsEntry> = buildList {
             row(g, s, R.string.settings_photo_quality)
             row(g, s, R.string.settings_use_heic_export)
             row(g, s, R.string.settings_use_jpeg_444_export)
-            row(g, s, R.string.settings_storage_path_title)
+            row(g, s, R.string.settings_storage_path_title, titleArg = R.string.settings_storage_path_photo_title_arg)
             row(g, s, R.string.settings_auto_save)
             row(g, s, R.string.settings_save_location)
         }
@@ -123,7 +128,7 @@ internal val SETTINGS_INDEX: List<SettingsEntry> = buildList {
             row(g, s, R.string.settings_video_lut, parent = R.string.settings_separate_video_lut)
             row(g, s, R.string.settings_video_lock_lens)
             row(g, s, R.string.settings_video_lock_white_balance)
-            row(g, s, R.string.settings_storage_path_title)
+            row(g, s, R.string.settings_storage_path_title, titleArg = R.string.settings_storage_path_video_title_arg)
         }
     }
     SettingsGroup.PHOTO.let { g ->
@@ -283,7 +288,7 @@ internal fun SettingsSearchPage(
     class Hit(val entry: SettingsEntry, val name: String, val place: String, val text: String)
     val all = remember(context, hidden) {
         SETTINGS_INDEX.filter { it.title !in hidden }.map { e ->
-            val name = context.getString(e.title)
+            val name = e.name(context)
             val section = e.section?.let { context.getString(it) }
             val place = listOfNotNull(context.getString(e.group.title), section).joinToString(" › ")
             Hit(e, name, place, (listOfNotNull(name, section) + e.choices.map { context.getString(it) }).joinToString(" ").lowercase())
@@ -317,8 +322,8 @@ internal fun SettingsSearchPage(
                         .clickable {
                             keyboard?.hide()
                             val e = hit.entry
-                            val target = if (e.parent != null && e.parent in offParents) e.parent else e.flashAs ?: e.title
-                            onOpen(e.group, context.getString(target))
+                            val target = if (e.parent != null && e.parent in offParents) e.parent else e.flashAs
+                            onOpen(e.group, target?.let { context.getString(it) } ?: e.name(context))
                         },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

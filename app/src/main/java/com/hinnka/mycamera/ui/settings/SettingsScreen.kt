@@ -2928,6 +2928,7 @@ fun SettingsScreen(
             // While the keyboard is up, the search results get the tab bar's room.
             if (!WindowInsets.isImeVisible) SettingsTabBar(selectedGroup) { picked ->
                 tick()
+                flashTitle = null
                 selectedGroup = picked
             }
         }

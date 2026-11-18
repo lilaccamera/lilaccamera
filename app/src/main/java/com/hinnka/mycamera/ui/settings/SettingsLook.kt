@@ -40,7 +40,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.layout.onGloballyPositioned
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
@@ -75,11 +76,15 @@ internal fun Modifier.settingsFlash(title: String): Modifier {
     val flash = remember { Animatable(0f) }
     var coordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     LaunchedEffect(request) {
-        delay(300) // after the tab switch and the page's scroll to the top
-        coordinates?.takeIf { it.isAttached }?.let { request.center(it.boundsInRoot()) }
-        flash.snapTo(1f)
-        flash.animateTo(0f, tween(1600))
-        request.done()
+        try {
+            delay(300) // after the tab switch and the page's scroll to the top
+            // Unclipped bounds: a row below the visible part of the page must still be found.
+            coordinates?.takeIf { it.isAttached }?.let { request.center(Rect(it.positionInRoot(), it.size.toSize())) }
+            flash.snapTo(1f)
+            flash.animateTo(0f, tween(1600))
+        } finally {
+            request.done()
+        }
     }
     return this
         .onGloballyPositioned { coordinates = it }
