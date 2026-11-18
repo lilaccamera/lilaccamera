@@ -7,13 +7,16 @@ import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
+import com.hinnka.mycamera.video.SlowedCopy
 import com.hinnka.mycamera.video.VideoColorMetadata
 import com.hinnka.mycamera.video.VideoLogProfile
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.audio.SpeedProvider
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.LanczosResample
@@ -172,6 +175,8 @@ suspend fun exportVideoWithEffects(
     outputDisplayName: String? = null,
     onProgress: ((Int) -> Unit)? = null,
     sourceLogProfileOverride: VideoLogProfile? = null,
+    /** Plays [SlowedCopy.FACTOR] times slower, without sound. */
+    slowed: Boolean = false,
 ): Uri? = withContext(Dispatchers.Main) {
     if (!canUseVideoTransformer("exportVideoWithEffects")) {
         return@withContext null
@@ -216,6 +221,15 @@ suspend fun exportVideoWithEffects(
                     /* videoEffects= */ videoEffects
                 )
             )
+            .apply {
+                if (slowed) {
+                    setRemoveAudio(true)
+                    setSpeed(object : SpeedProvider {
+                        override fun getSpeed(timeUs: Long) = 1f / SlowedCopy.FACTOR
+                        override fun getNextSpeedChangeTimeUs(timeUs: Long) = C.TIME_UNSET
+                    })
+                }
+            }
             .build()
 
         // 构建 Transformer

@@ -73,6 +73,12 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
+import com.hinnka.mycamera.video.SlowedCopy
+import androidx.media3.common.util.Util
+import androidx.media3.common.C
+import androidx.media3.common.PlaybackParameters
+import androidx.media3.ui.TimeBar
+import androidx.media3.ui.PlayerControlView
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.isVisible
@@ -1187,6 +1193,8 @@ fun GalleryDetailScreen(
             }
         )
     }
+
+    HighFrameRateChoiceDialog(viewModel)
 
     // 照片信息对话框
     if (showInfoDialog && currentPhoto != null && !isCurrentPhotoProcessing) {
@@ -2644,6 +2652,14 @@ private fun VideoDetailPlayer(
 
     val playerView = rememberVideoPlayerView(exoPlayer)
 
+    // High-frame-rate clips open at a quarter speed without sound; the ¼×/1× button beside the time line switches.
+    val videoRate by produceState<SlowedCopy.Rate?>(null, photo.id) { value = viewModel.videoRate(photo) }
+    val highFrameRate = videoRate?.isHighFrameRate == true
+    var playbackSpeed by remember(exoPlayer) { mutableFloatStateOf(1f) }
+    if (highFrameRate && exoPlayer != null) {
+        HighFrameRateControls(exoPlayer, playerView) { playbackSpeed = it }
+    }
+
     DisposableEffect(exoPlayer, previewHandle) {
         val previewLease = exoPlayer?.let(previewHandle::attach)
         onDispose {
@@ -2659,6 +2675,10 @@ private fun VideoDetailPlayer(
         if (exoPlayer != null && isActive) {
             delay(150) // Wait for transitions to complete and EGL surface to be fully ready
             PLog.d("VideoDetailPlayer", "Preparing and starting ExoPlayer.")
+            if (viewModel.videoRate(photo).isHighFrameRate) {
+                exoPlayer.setPlaybackSpeed(1f / SlowedCopy.FACTOR)
+                exoPlayer.volume = 0f
+            }
             exoPlayer.setMediaItem(MediaItem.fromUri(mediaUri))
             exoPlayer.prepare()
             exoPlayer.playWhenReady = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
@@ -2666,6 +2686,7 @@ private fun VideoDetailPlayer(
     }
 
     if (exoPlayer != null) {
+      Box(modifier = modifier.autoRotate(matchParentSize = true)) {
         AndroidView(
             factory = {
                 PLog.d("VideoDetailPlayer", "Creating PlayerView factory.")
@@ -2686,8 +2707,35 @@ private fun VideoDetailPlayer(
                 it.setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
                 it.isVisible = true
             },
-            modifier = modifier.autoRotate(matchParentSize = true)
+            modifier = Modifier.fillMaxSize()
         )
+        if (highFrameRate) {
+            // On the picture's top-left corner: a box of the picture's shape, centred like the fitted picture
+            val aspect = videoOutputSize?.let { it.width.toFloat() / it.height }
+            Box(
+                Modifier.align(Alignment.Center)
+                    .then(if (aspect != null && aspect > 0f) Modifier.aspectRatio(aspect) else Modifier.fillMaxSize())
+            ) {
+                Text(
+                    text = stringResource(
+                        if (playbackSpeed < 1f) R.string.hfr_badge_slowed else R.string.hfr_badge_full,
+                        videoRate!!.captureFps.roundToInt(),
+                    ),
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(12.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(9.dp))
+                        .padding(horizontal = 7.dp, vertical = 2.dp)
+                )
+            }
+            // Bottom centre, clear of the player's time line so scrubbing stays easy
+            SpeedPill(
+                slowed = playbackSpeed < 1f,
+                onClick = { exoPlayer.setPlaybackSpeed(if (playbackSpeed < 1f) 1f else 1f / SlowedCopy.FACTOR) },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 112.dp)
+            )
+        }
+      }
     } else {
         // Show video thumbnail with a play icon when player is not active
         Box(
@@ -2719,6 +2767,70 @@ private fun VideoDetailPlayer(
             )
         }
     }
+}
+
+/**
+ * Keeps the sound off while slowed and shows position and length in played time. [onSpeed] gets every speed the
+ * player takes, also one picked in the player's own settings.
+ */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun HighFrameRateControls(player: ExoPlayer, playerView: PlayerView, onSpeed: (Float) -> Unit) {
+    DisposableEffect(player, playerView) {
+        val controls = playerView.findViewById<PlayerControlView>(androidx.media3.ui.R.id.exo_controller)
+        val positionView = playerView.findViewById<android.widget.TextView>(androidx.media3.ui.R.id.exo_position)
+        val durationView = playerView.findViewById<android.widget.TextView>(androidx.media3.ui.R.id.exo_duration)
+        val timeBar = playerView.findViewById<android.view.View>(androidx.media3.ui.R.id.exo_progress) as? TimeBar
+        val builder = StringBuilder()
+        val formatter = java.util.Formatter(builder, java.util.Locale.getDefault())
+        fun played(ms: Long) = Util.getStringForTime(builder, formatter, (ms / player.playbackParameters.speed).toLong())
+        fun showTimes(positionMs: Long) {
+            positionView?.text = played(positionMs)
+            durationView?.text = played(player.duration.takeIf { it != C.TIME_UNSET } ?: 0L)
+        }
+        fun showSpeed(speed: Float) {
+            player.volume = if (speed < 1f) 0f else 1f
+            showTimes(player.contentPosition)
+            onSpeed(speed)
+        }
+        val listener = object : Player.Listener {
+            override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) = showSpeed(playbackParameters.speed)
+        }
+        // The controller writes media time first; these run after it and write played time
+        val scrub = object : TimeBar.OnScrubListener {
+            override fun onScrubStart(timeBar: TimeBar, position: Long) = showTimes(position)
+            override fun onScrubMove(timeBar: TimeBar, position: Long) = showTimes(position)
+            override fun onScrubStop(timeBar: TimeBar, position: Long, canceled: Boolean) = Unit
+        }
+        player.addListener(listener)
+        controls?.setProgressUpdateListener { position, _ -> showTimes(position) }
+        timeBar?.addListener(scrub)
+        showSpeed(player.playbackParameters.speed)
+        onDispose {
+            player.removeListener(listener)
+            controls?.setProgressUpdateListener(null)
+            timeBar?.removeListener(scrub)
+        }
+    }
+}
+
+/** The ¼×/1× switch: amber while slowed, styled like the viewfinder's info pill. */
+@Composable
+private fun SpeedPill(slowed: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val description = stringResource(R.string.hfr_speed_button_desc)
+    Text(
+        text = if (slowed) "¼×" else "1×",
+        color = if (slowed) Color(0xFFEF9F27) else Color.White,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        textAlign = TextAlign.Center,
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .clickable(onClickLabel = description, onClick = onClick)
+            .widthIn(min = 56.dp)
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+    )
 }
 
 /**
