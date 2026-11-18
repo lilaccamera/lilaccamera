@@ -732,8 +732,8 @@ internal fun CameraTopSheet(
                     }
                 }
 
-                val videoPictureGroup: @Composable () -> Unit = {
-                    QuickGroup(stringResource(R.string.quick_group_picture), GroupRed, divider = false) {
+                val videoPictureGroup: @Composable (first: Boolean) -> Unit = { first ->
+                    QuickGroup(stringResource(R.string.quick_group_picture), GroupRed, divider = !first) {
                         rows.Setting(
                             key = "vasp",
                             label = stringResource(R.string.video_aspect_chip),
@@ -841,12 +841,12 @@ internal fun CameraTopSheet(
 
                 // Shooting: what changes the shot. The mode's own group carries its guide.
                 val shooting: @Composable () -> Unit = {
+                    lensGroup(true)
+                    val afterLens = lensChoices.isEmpty()
                     if (isVideo) {
-                        videoPictureGroup()
+                        videoPictureGroup(afterLens)
                         videoSoundGroup()
                     } else {
-                        lensGroup(true)
-                        val afterLens = lensChoices.isEmpty()
                         when {
                             isPortraitMode -> {
                                 portraitGroup(afterLens)
@@ -867,7 +867,8 @@ internal fun CameraTopSheet(
                     QuickTabPages(tab = qTab, onTab = { qTab = it }, pages = listOf(shooting, output))
                 } else {
                     QuickScroll {
-                        stackGroup(true, onBasicsHelp)
+                        lensGroup(true)
+                        stackGroup(lensChoices.isEmpty(), onBasicsHelp)
                         exposureGroup()
                         outputGroup(true)
                     }
