@@ -4,9 +4,9 @@ icon: lucide/zap
 
 # Optimizations and tweaks
 
-Lilac started as a fork of [PhotonCamera](https://github.com/bjzhou/PhotonCamera) in early November 2026. This page lists what Lilac has changed on its own since then, in three groups: Sony's camera features, GCam's multi-frame processing and the memory work behind it, and the rest of the app. It does not list PhotonCamera's own features.
+Lilac started as a fork of [PhotonCamera](https://github.com/bjzhou/PhotonCamera). This page lists what Lilac has changed on its own since then, in three groups: Sony's camera features, GCam's multi-frame processing and the memory work behind it, and the rest of the app. It does not list PhotonCamera's own features.
 
-Each entry says what changed and how, and ends with a link to the exact change on GitHub for anyone who wants the technical detail. The measurements were taken on an Xperia XZ1 Compact, a phone with 4 GB of memory and a 4.6-inch screen. Most of the work follows from those two facts, and from the aim of bringing Sony's camera features and GCam's processing to this phone.
+The measurements were taken on an Xperia XZ1 Compact, a phone with 4 GB of memory and a 4.6-inch screen. Most of the work follows from those two facts, and from the aim of bringing Sony's camera features and GCam's processing to this phone.
 
 ??? info "Words used on this page"
 
