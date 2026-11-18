@@ -53,7 +53,7 @@ The **Stabilise** item in Video steps through **Off**, **EIS+**, **Steady** and 
 ## Lilac and the bridge
 
 - **Any newer Lilac works with your bridge:** the interface between them only grows, and Lilac uses only what the installed bridge offers. A feature that needs a newer bridge says so in the release notes.
-- **Signature:** the bridge serves only a Lilac signed with the certificate of this project's releases (Lilac and, once it has its own key, Lilac Beta), whatever key the bridge itself is signed with. A Lilac built and signed by anyone else is refused.
+- **Signature:** the bridge serves only a Lilac signed with the certificate of this project's releases (Lilac and, Lilac Beta), whatever key the bridge itself is signed with. A Lilac built and signed by anyone else is refused.
 
 ## Install
 
