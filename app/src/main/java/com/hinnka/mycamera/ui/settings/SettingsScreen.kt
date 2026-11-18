@@ -363,6 +363,8 @@ private val APP_LANGUAGE_OPTIONS = listOf(
     AppLanguageOption("zh-TW", R.string.settings_language_chinese_traditional),
 )
 
+private val BackArrowRoom = 48.dp
+
 private val SettingsRippleAlpha = RippleAlpha(
     pressedAlpha = 0.04f,
     focusedAlpha = 0.06f,
@@ -1181,20 +1183,13 @@ fun SettingsScreen(
                 .background(Color.Black)
                 .navigationBarsPadding()
         ) {
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier
+            // The page runs under the back arrow; only the status bar stays clear.
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(start = 4.dp)
-                    .autoRotate()
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.back),
-                    tint = SettingsText
-                )
-            }
-
             val group = selectedGroup
             if (group == null) {
                 SettingsSearchPage(
@@ -1224,14 +1219,11 @@ fun SettingsScreen(
                         selectedGroup = openGroup
                         flashTitle = title
                     },
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
+                    modifier = Modifier.fillMaxSize()
                 )
             } else BoxWithConstraints(
                 Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
+                    .fillMaxSize()
                     .onGloballyPositioned { pageViewport = it.boundsInRoot() }
             ) {
                 val viewportHeight = maxHeight
@@ -1241,9 +1233,10 @@ fun SettingsScreen(
                         .verticalScroll(pageScrollState)
                         .padding(horizontal = 16.dp)
                 ) {
+                Spacer(Modifier.height(BackArrowRoom)) // a long page starts below the arrow, then scrolls under it
                 // A page shorter than the screen sits at the bottom, under the thumb.
                 Column(
-                    modifier = Modifier.heightIn(min = viewportHeight),
+                    modifier = Modifier.heightIn(min = viewportHeight - BackArrowRoom),
                     verticalArrangement = Arrangement.Bottom
                 ) {
                 SettingsPageTitle(group)
@@ -2925,6 +2918,21 @@ fun SettingsScreen(
                 }
             }
 
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 4.dp)
+                    .autoRotate()
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.back),
+                    tint = SettingsText
+                )
+            }
+            }
+
             // While the keyboard is up, the search results get the tab bar's room.
             if (!WindowInsets.isImeVisible) SettingsTabBar(selectedGroup) { picked ->
                 tick()
@@ -3482,7 +3490,10 @@ fun SwitchSettingItem(
     enabled: Boolean = true,
 ) {
     if (LocalSettingsLook.current) {
-        SettingsRowFrame(title, description, enabled, onClick = { onCheckedChange(!checked) }, modifier) {
+        SettingsRowFrame(
+            title, description, enabled, onClick = { onCheckedChange(!checked) }, modifier,
+            expandableSecondLine = true,
+        ) {
             SettingsSwitch(checked, onCheckedChange, enabled)
         }
         return
@@ -3677,6 +3688,7 @@ fun DropdownSettingItem(
                 chosen = options.indexOf(value),
                 onPick = { onOptionSelected(options[it]) },
                 onDismiss = { expanded = false },
+                description = description,
                 note = when {
                     isLoading -> stringResource(R.string.settings_ai_model_fetching)
                     options.isEmpty() -> stringResource(R.string.settings_ai_model_empty)
@@ -5265,6 +5277,7 @@ fun <T> QualityLevelSetting(
                 chosen = chosen,
                 onPick = { onLevelSelected(levels[it].first) },
                 onDismiss = { open = false },
+                description = description.takeIf { title != null },
             )
         }
         return

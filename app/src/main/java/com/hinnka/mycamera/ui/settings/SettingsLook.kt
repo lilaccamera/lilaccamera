@@ -3,6 +3,7 @@ package com.hinnka.mycamera.ui.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -22,7 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
+import com.hinnka.mycamera.ui.components.AppModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -50,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -135,8 +137,12 @@ internal fun SettingsRowFrame(
     enabled: Boolean,
     onClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    expandableSecondLine: Boolean = false,
     trailing: @Composable () -> Unit = {},
 ) {
+    // A cut-off second line on a row with no sheet opens in full when tapped, and folds again.
+    var expanded by remember { mutableStateOf(false) }
+    var cutOff by remember { mutableStateOf(false) }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -154,6 +160,15 @@ internal fun SettingsRowFrame(
                     color = SettingsDim.copy(alpha = if (enabled) 1f else 0.5f),
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
+                    maxLines = if (expanded) Int.MAX_VALUE else 2,
+                    overflow = TextOverflow.Ellipsis,
+                    onTextLayout = { if (!expanded) cutOff = it.hasVisualOverflow },
+                    modifier = if (expandableSecondLine && (cutOff || expanded)) {
+                        Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { expanded = !expanded }
+                    } else Modifier,
                 )
             }
         }
@@ -196,23 +211,27 @@ internal fun SettingsChevron(enabled: Boolean = true) = Icon(
 /** Black bottom sheet with a hairline top edge and the setting's name. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SettingsSheet(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    ModalBottomSheet(
+internal fun SettingsSheet(
+    title: String,
+    onDismiss: () -> Unit,
+    description: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val lineFadePx = with(LocalDensity.current) { 24.dp.toPx() }
+    // The app's sheet keeps the status bar hidden when the screen behind it hides it.
+    AppModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = Color.Black,
         shape = SheetShape,
         dragHandle = null,
-        modifier = Modifier.border(
-            1.dp,
-            // The line follows the rounded top edge and fades out down the sides.
-            Brush.verticalGradient(0f to SettingsRaised, 0.04f to SettingsRaised, 0.08f to Color.Transparent),
-            SheetShape,
-        ),
     ) {
         Column(
             Modifier
                 .fillMaxWidth()
+                // On the content, not the sheet: the sheet's modifier reaches a full-screen layer.
+                // The line follows the rounded top edge and fades out down the sides.
+                .border(1.dp, Brush.verticalGradient(listOf(SettingsRaised, Color.Transparent), endY = lineFadePx), SheetShape)
                 .verticalScroll(rememberScrollState())
                 .navigationBarsPadding()
                 .padding(start = 8.dp, end = 8.dp, bottom = 12.dp)
@@ -224,6 +243,15 @@ internal fun SettingsSheet(title: String, onDismiss: () -> Unit, content: @Compo
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 18.dp, bottom = 6.dp),
             )
+            if (description != null) {
+                Text(
+                    description,
+                    color = SettingsDim,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                )
+            }
             content()
         }
     }
@@ -238,9 +266,10 @@ internal fun SettingsChoiceSheet(
     onPick: (Int) -> Unit,
     onDismiss: () -> Unit,
     note: String? = null,
+    description: String? = null,
 ) {
     val tick = rememberSettingsTick()
-    SettingsSheet(title, onDismiss) {
+    SettingsSheet(title, onDismiss, description) {
         if (note != null) {
             Text(note, color = SettingsDim, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp))
         }
@@ -284,7 +313,7 @@ fun SettingsSliderRow(
     var open by remember { mutableStateOf(false) }
     SettingsValueRow(title, description, valueText, rowEnabled) { open = true }
     if (!open) return
-    SettingsSheet(title, onDismiss = { open = false }) {
+    SettingsSheet(title, onDismiss = { open = false }, description = description) {
         Row(
             Modifier
                 .fillMaxWidth()
