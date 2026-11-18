@@ -51,6 +51,11 @@ jobs:
           echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' >> ~/.ssh/known_hosts
           tar -xf artifact/artifact.tar -C site
           touch site/.nojekyll
+          # The site repo's own page on GitHub; written here because each deploy replaces the repo.
+          printf '%s\n' '# Lilac Camera' '' \
+            'The built user guide for Lilac Camera, published by the docs workflow of the app repo. Do not edit here: every deploy replaces this repo.' '' \
+            '- Guide: https://lilaccamera.github.io/' \
+            '- App code: https://github.com/lilaccamera/lilaccamera' > site/README.md
           cd site
           git init -q -b main
           git add -A
