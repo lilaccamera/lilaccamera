@@ -2,6 +2,7 @@ package com.hinnka.mycamera.ui.settings
 
 import com.hinnka.mycamera.ui.prefs.rememberUserPreferencesRepository
 import com.hinnka.mycamera.data.UserPreferences
+import com.hinnka.mycamera.data.ZoomControl
 import com.hinnka.mycamera.ui.prefs.preferenceValue
 import com.hinnka.mycamera.ui.components.AppModalBottomSheet
 
@@ -510,6 +511,7 @@ fun SettingsScreen(
     var colorPaletteEnabled by rememberPreference(UserPreferences::colorPaletteEnabled)
     var autoRotateEnabled by rememberPreference(UserPreferences::autoRotateEnabled)
     val developAnimationStyle by preferenceValue { it.developAnimationStyle }
+    var zoomControl by rememberPreference(UserPreferences::zoomControl)
     var photoQuality by rememberPreference(UserPreferences::photoQuality)
     val useHeicExport by preferenceValue { it.useHeicExport }
     val useJpeg444Export by preferenceValue { it.useJpeg444Export }
@@ -1261,27 +1263,31 @@ fun SettingsScreen(
                             onCheckedChange = { showGrid = it }
                         )
 
-                        val gridStyleLabels = GridStyle.entries.associateWith { style ->
-                            stringResource(
-                                when (style) {
-                                    GridStyle.THIRDS -> R.string.grid_style_thirds
-                                    GridStyle.DIAGONALS -> R.string.grid_style_diagonals
-                                    GridStyle.GOLDEN_RATIO -> R.string.grid_style_golden_ratio
-                                    GridStyle.GOLDEN_TRIANGLE -> R.string.grid_style_golden_triangle
-                                    GridStyle.GOLDEN_SPIRAL -> R.string.grid_style_golden_spiral
+                        if (showGrid) {
+                            SettingsRowDivider()
+
+                            val gridStyleLabels = GridStyle.entries.associateWith { style ->
+                                stringResource(
+                                    when (style) {
+                                        GridStyle.THIRDS -> R.string.grid_style_thirds
+                                        GridStyle.DIAGONALS -> R.string.grid_style_diagonals
+                                        GridStyle.GOLDEN_RATIO -> R.string.grid_style_golden_ratio
+                                        GridStyle.GOLDEN_TRIANGLE -> R.string.grid_style_golden_triangle
+                                        GridStyle.GOLDEN_SPIRAL -> R.string.grid_style_golden_spiral
+                                    }
+                                )
+                            }
+                            DropdownSettingItem(
+                                title = stringResource(R.string.settings_grid_style),
+                                value = gridStyleLabels.getValue(state.gridStyle),
+                                options = gridStyleLabels.values.toList(),
+                                isLoading = false,
+                                onExpanded = {},
+                                onOptionSelected = { label ->
+                                    viewModel.setGridStyle(gridStyleLabels.entries.first { it.value == label }.key)
                                 }
                             )
                         }
-                        DropdownSettingItem(
-                            title = stringResource(R.string.settings_grid_style),
-                            value = gridStyleLabels.getValue(state.gridStyle),
-                            options = gridStyleLabels.values.toList(),
-                            isLoading = false,
-                            onExpanded = {},
-                            onOptionSelected = { label ->
-                                viewModel.setGridStyle(gridStyleLabels.entries.first { it.value == label }.key)
-                            }
-                        )
 
                         SettingsRowDivider()
 
@@ -2510,6 +2516,25 @@ fun SettingsScreen(
                     SettingsSection(
                         title = stringResource(R.string.settings_group_interface)
                     ) {
+                        val zoomControlLabels = ZoomControl.entries.map { control ->
+                            control to stringResource(
+                                when (control) {
+                                    ZoomControl.THUMBWHEEL -> R.string.settings_zoom_control_thumbwheel
+                                    ZoomControl.PILL -> R.string.settings_zoom_control_pill
+                                    ZoomControl.COLLAR -> R.string.settings_zoom_control_collar
+                                }
+                            )
+                        }
+                        QualityLevelSetting(
+                            title = stringResource(R.string.settings_zoom_control),
+                            description = null,
+                            levels = zoomControlLabels,
+                            currentLevel = zoomControl,
+                            onLevelSelected = { zoomControl = it }
+                        )
+
+                        SettingsRowDivider()
+
                         AppLanguageSetting()
 
                         SettingsRowDivider()
@@ -2698,8 +2723,10 @@ fun SettingsScreen(
                             onCheckedChange = { shutterSoundEnabled = it }
                         )
 
-                        SettingsAnchor(stringResource(R.string.settings_shutter_sound_single)) {
-                            CaptureSoundSetting(viewModel)
+                        if (shutterSoundEnabled) {
+                            SettingsAnchor(stringResource(R.string.settings_shutter_sound_single)) {
+                                CaptureSoundSetting(viewModel)
+                            }
                         }
 
                         SettingsRowDivider()

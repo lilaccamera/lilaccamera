@@ -203,6 +203,9 @@ internal val SETTINGS_INDEX: List<SettingsEntry> = buildList {
     }
     SettingsGroup.SETUP.let { g ->
         R.string.settings_group_interface.let { s ->
+            row(g, s, R.string.settings_zoom_control, listOf(
+                R.string.settings_zoom_control_thumbwheel, R.string.settings_zoom_control_pill, R.string.settings_zoom_control_collar,
+            ))
             row(g, s, R.string.settings_language)
             row(g, s, R.string.settings_background)
             row(g, s, R.string.settings_accent_color)
