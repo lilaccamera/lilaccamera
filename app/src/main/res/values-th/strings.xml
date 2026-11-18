@@ -68,7 +68,7 @@
     <!-- Zoom -->
 
     <!-- Gallery -->
-    <string name="gallery_photon">อัลบั้มภาพโฟตอน</string>
+    <string name="gallery_photon">อัลบั้ม Lilac</string>
     <string name="gallery_group_today">วันนี้</string>
     <string name="gallery_group_yesterday">เมื่อวาน</string>
     <string name="permission_required_gallery">จำเป็นต้องเข้าถึงสื่อเพื่อแสดงอัลบั้มของระบบ</string>

@@ -117,7 +117,7 @@
     <!-- Zoom -->
 
     <!-- Gallery -->
-    <string name="gallery_photon">Photon</string>
+    <string name="gallery_photon">Lilac</string>
     <string name="gallery_system">System</string>
     <string name="gallery_prepare_edit_failed">Unable to prepare this photo for editing</string>
     <string name="gallery_group_today">Today</string>

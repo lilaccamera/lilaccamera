@@ -73,7 +73,7 @@
     <!-- Zoom -->
 
     <!-- Gallery -->
-    <string name="gallery_photon">光子相册</string>
+    <string name="gallery_photon">Lilac 相册</string>
     <string name="gallery_system">系统相册</string>
     <string name="gallery_prepare_edit_failed">无法准备这张照片用于编辑</string>
     <string name="gallery_group_today">今天</string>
