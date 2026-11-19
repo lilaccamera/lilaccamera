@@ -209,6 +209,8 @@ internal fun ModeLine(
     modifier: Modifier = Modifier,
     // Drawn under the shutter in the mode zone; presses that start on it are its own.
     collar: (@Composable () -> Unit)? = null,
+    // The collar's ring round the shutter takes its presses; the thumbwheel and pill sit above the mode zone.
+    collarRing: Boolean = true,
     // Off when another app asked for a photo: the shutter and collar stay, the mode marks go.
     marks: Boolean = true,
     shutter: @Composable (Modifier) -> Unit
@@ -228,7 +230,7 @@ internal fun ModeLine(
     val currentLo by rememberUpdatedState(lo)
     val currentLast by rememberUpdatedState(last)
     val currentOnSelect by rememberUpdatedState(onSelect)
-    val hasCollar by rememberUpdatedState(collar != null)
+    val hasCollar by rememberUpdatedState(collar != null && collarRing)
 
     // A mode change from elsewhere (the front camera has no Pro, for example) moves the dial silently.
     val selectedIndex = selected.dialIndex(proAvailable)

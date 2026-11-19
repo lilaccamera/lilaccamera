@@ -5,6 +5,7 @@ import com.hinnka.mycamera.ml.DepthModelManager
 import com.hinnka.mycamera.ml.DepthModelDownloadState
 import com.hinnka.mycamera.ui.prefs.rememberUserPreferencesRepository
 import com.hinnka.mycamera.data.UserPreferences
+import com.hinnka.mycamera.data.ZoomControl
 import com.hinnka.mycamera.ui.prefs.rememberPreference
 import com.hinnka.mycamera.ui.prefs.preferenceValue
 import android.hardware.camera2.CaptureRequest
@@ -280,6 +281,7 @@ fun CameraScreen(
     val showLevelIndicator by preferenceValue { it.showLevelIndicator }
     val focusPeakingEnabled by preferenceValue { it.focusPeakingEnabled }
     val portraitQuickBlur by preferenceValue { it.portraitQuickBlur }
+    val zoomControlChoice by preferenceValue { it.zoomControl }
     val portraitIntroSeen by preferenceValue { it.portraitIntroSeen }
     val portraitDepthReminderSeen by preferenceValue { it.portraitDepthReminderSeen }
     val proGuideSeen by preferenceValue { it.proGuideSeen }
@@ -506,6 +508,8 @@ fun CameraScreen(
         else if (lux > WithdrawAboveLux && state.flashMode != 0) viewModel.setQuickFlash(false)
     }
     val isXpan = state.aspectRatio == AspectRatio.XPAN
+    // XPAN has no zoom control; its footer keeps the collar's spacing.
+    val zoomControl = if (isXpan) ZoomControl.COLLAR else zoomControlChoice
     val burstCapturingCount = viewModel.burstImageCount
 
     var isGhostPermissionFlowActive by remember { mutableStateOf(false) }
@@ -1258,7 +1262,7 @@ fun CameraScreen(
                 // controls first prevents the downward shift from pushing parameters back into the image.
                 topInset + if (balance) {
                     ((contentHeight - topInset - pictureHeight -
-                        CameraControlsLayoutDefaults.CollapsedControlsHeight) / 2).coerceAtLeast(0.dp)
+                        CameraControlsLayoutDefaults.collapsedControlsHeight(zoomControl)) / 2).coerceAtLeast(0.dp)
                 } else {
                     0.dp
                 }
@@ -1954,7 +1958,7 @@ fun CameraScreen(
                 },
                 zoomCollar = if (!isXpan && activePanel == ActivePanel.NONE) {
                     { fold ->
-                        ZoomCollar(
+                        if (zoomControl == ZoomControl.COLLAR) ZoomCollar(
                             viewModel = viewModel,
                             zoomRatio = viewModel.zoomRatioByMain,
                             availableCameras = state.availableCameras,
@@ -1963,11 +1967,22 @@ fun CameraScreen(
                             onZoom = { setZoomWithPreviewTransition(it) },
                             onStop = { animateZoomStopWithPreviewTransition(it) },
                             fold = fold
+                        ) else ZoomDial(
+                            kind = zoomControl,
+                            viewModel = viewModel,
+                            zoomRatio = viewModel.zoomRatioByMain,
+                            availableCameras = state.availableCameras,
+                            currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
+                            enabled = state.getCurrentCameraInfo() != null,
+                            onZoom = { setZoomWithPreviewTransition(it) },
+                            onReading = { noteLine.say(it, icon = AppIcons.ZoomInLine, holdMs = 1000L) },
+                            fold = fold
                         )
                     }
                 } else {
                     null
                 },
+                zoomControl = zoomControl,
                 sideControlInset = if (isXpan) {
                     (xpanSideWidth - CameraControlsLayoutDefaults.SideButtonSize) / 2
                 } else {
@@ -2026,7 +2041,7 @@ fun CameraScreen(
             // It only ever fades: while a held frame moves from or to a picture under the shutter, it stays
             // until that move has finished, and comes up as soon as the new picture will reach there, so it is
             // never added over a picture or taken away from one.
-            val shutterTopAboveBottom = CameraControlsLayoutDefaults.BottomPadding +
+            val shutterTopAboveBottom = CameraControlsLayoutDefaults.bottomPadding(zoomControl) +
                 (CameraControlsLayoutDefaults.ModeZoneHeight + CameraControlsLayoutDefaults.CaptureButtonSize) / 2
             val liveUnderShutter = viewfinderTop + cardHeight > contentHeight - shutterTopAboveBottom
             val heldFrameUnderShutter by remember {
@@ -2049,7 +2064,7 @@ fun CameraScreen(
             )
             if (footerWhite > 0f) {
                 // Everything under the picture; when the picture reaches the shutter, the shutter's zone over it.
-                val whiteHeight = maxOf(contentHeight - (viewfinderTop + cardHeight), CameraControlsLayoutDefaults.CaptureAreaHeight)
+                val whiteHeight = maxOf(contentHeight - (viewfinderTop + cardHeight), CameraControlsLayoutDefaults.captureAreaHeight(zoomControl))
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -2410,7 +2425,7 @@ fun CameraScreen(
             // Notes use the mode guides' pill, 8 dp above the zoom collar (or the manual values when they show),
             // whatever the picture's shape, so a note sits in the same place in every mode and while recording.
             val noteBottom = listOfNotNull(
-                captureButtonBounds?.top?.let { it - with(LocalDensity.current) { CameraControlsLayoutDefaults.CollarClearance.toPx() } },
+                captureButtonBounds?.top?.let { it - with(LocalDensity.current) { CameraControlsLayoutDefaults.zoomClearance(zoomControl).toPx() } },
                 parameterBarTop.takeIf { multipleExposureActionsShown || !isXpan && (manualControlsShown || anyManualValue) },
             ).minOrNull()?.let { it - (cameraScreenBounds?.top ?: 0f) }
             if (noteBottom != null) {
@@ -2867,6 +2882,7 @@ private fun Controls(
     onQuickSettingsClick: () -> Unit,
     modeLine: ModeLineState,
     zoomCollar: (@Composable (fold: () -> Float) -> Unit)?,
+    zoomControl: ZoomControl,
     sideControlInset: Dp?,
     modifier: Modifier = Modifier.fillMaxSize()
 ) {
@@ -2886,7 +2902,7 @@ private fun Controls(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = CameraControlsLayoutDefaults.BottomPadding),
+                .padding(bottom = CameraControlsLayoutDefaults.bottomPadding(zoomControl)),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             val shootingMode = when {
@@ -2897,7 +2913,7 @@ private fun Controls(
                 else -> CameraShootingMode.PHOTO
             }
             val line = modeLine
-            if (!isXpan) Spacer(Modifier.height(CameraControlsLayoutDefaults.CollarRise))
+            if (!isXpan) Spacer(Modifier.height(CameraControlsLayoutDefaults.zoomRise(zoomControl)))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2918,7 +2934,8 @@ private fun Controls(
                     onSelect = onCaptureModeSelected,
                     say = noteLine::say,
                     modifier = Modifier.matchParentSize(),
-                    collar = zoomCollar?.let { collar -> @Composable { collar { line.fold } } }
+                    collar = zoomCollar?.let { collar -> @Composable { collar { line.fold } } },
+                    collarRing = zoomControl == ZoomControl.COLLAR
                 ) { shutterModifier ->
                     // The face follows the mode under the shutter while the dial turns.
                     CaptureButton(
@@ -3119,7 +3136,7 @@ private fun Controls(
                         modifier = Modifier
                             .align(Alignment.CenterStart)
                             .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
-                            .offset(y = -LooksRise)
+                            .offset(y = -CameraControlsLayoutDefaults.looksRise(zoomControl))
                             .size(CameraControlsLayoutDefaults.SideButtonSize)
                             .autoRotate(),
                         shape = RoundedCornerShape(ThumbnailCorner),
@@ -3153,7 +3170,7 @@ private fun Controls(
                         modifier = Modifier
                             .align(Alignment.CenterStart)
                             .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.SideMargin)
-                            .offset(y = -LooksRise)
+                            .offset(y = -CameraControlsLayoutDefaults.looksRise(zoomControl))
                             .size(CameraControlsLayoutDefaults.SideButtonSize)
                             .graphicsLayer {
                                 translationY = -10.dp.toPx() * line.side
@@ -3198,7 +3215,7 @@ private fun Controls(
                             .align(Alignment.CenterEnd)
                             .padding(end = CameraControlsLayoutDefaults.SideMargin)
                             // Level with the zoom collar's knob.
-                            .offset(y = -LooksRise)
+                            .offset(y = -CameraControlsLayoutDefaults.looksRise(zoomControl))
                             .size(CameraControlsLayoutDefaults.SideButtonSize)
                             .graphicsLayer {
                                 translationY = -10.dp.toPx() * line.side
@@ -3242,7 +3259,6 @@ private fun Controls(
 }
 
 // The zoom collar's knob centre above the shutter centre: halfway through the 48 to 74 dp band.
-private val LooksRise = 61.dp
 
 private enum class LooksButtonFace { LOOKS, ACCURATE, FAST }
 

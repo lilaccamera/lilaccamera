@@ -243,7 +243,7 @@ private val TopEdgeTextStyle = TextStyle(shadow = ViewfinderTextShadow, fontSize
 internal data class TopEdgeMark(val badge: Badge, val color: Color? = null)
 
 // Sony's camera writes values in icons with a bold condensed face.
-private val CondensedBold = FontFamily(android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.BOLD))
+internal val CondensedBold = FontFamily(android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.BOLD))
 
 /**
  * A setting as Sony's camera draws it: an [icon] with its value as a small subscript ([sub]), the value alone
