@@ -14,6 +14,8 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,6 +28,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -64,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.ui.camera.CondensedBold
 import com.hinnka.mycamera.ui.camera.ModeAmber
+import com.hinnka.mycamera.ui.camera.ShadowedLineIcon
 import com.hinnka.mycamera.ui.camera.SpacedBuzz
 import com.hinnka.mycamera.ui.camera.ViewfinderTextShadow
 import com.hinnka.mycamera.ui.icons.AppIcons
@@ -396,5 +400,36 @@ internal fun FramedTag(
                 )
             )
         }
+    }
+}
+
+/**
+ * An icon over its one-line label, as the Settings tab bar draws its tabs: a 24 dp icon in a 26 dp box, a 5 dp gap,
+ * an 11 sp label. [shadowed] gives both the viewfinder's shadow, for use over a picture.
+ */
+@Composable
+internal fun LabelledIcon(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    shadowed: Boolean = false,
+) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) {
+            if (shadowed) ShadowedLineIcon(icon, 24.dp, tint)
+            else Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+        }
+        Spacer(Modifier.height(5.dp))
+        Text(
+            label,
+            color = tint,
+            fontSize = 11.sp,
+            lineHeight = 14.sp,
+            maxLines = 1,
+            softWrap = false,
+            style = if (shadowed) LocalTextStyle.current.merge(LilacTextStyle) else LocalTextStyle.current,
+            modifier = Modifier.height(14.dp)
+        )
     }
 }

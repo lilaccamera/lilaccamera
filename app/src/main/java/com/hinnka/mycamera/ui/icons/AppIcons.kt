@@ -585,6 +585,26 @@ object AppIcons {
         )
     }
     val SearchLine: ImageVector by lazy { lineIcon("AppIcons.SearchLine", "M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0M21 21l-6 -6") }
+    // The photo viewer's grid, share, delete and more.
+    val GridLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.GridLine",
+            "M4 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1zM14 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z" +
+                "M4 15a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1zM14 15a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z"
+        )
+    }
+    val ShareLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.ShareLine",
+            "M3 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M15 6a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M15 18a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M8.7 10.7l6.6 -3.4M8.7 13.3l6.6 3.4"
+        )
+    }
+    val TrashLine: ImageVector by lazy {
+        lineIcon("AppIcons.TrashLine", "M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3")
+    }
+    val DotsLine: ImageVector by lazy {
+        lineIcon("AppIcons.DotsLine", "M4 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M18 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0")
+    }
     val CropLine: ImageVector by lazy { lineIcon("AppIcons.CropLine", "M8 5v10a1 1 0 0 0 1 1h10M5 8h10a1 1 0 0 1 1 1v10") }
     val FiltersLine: ImageVector by lazy {
         lineIcon(

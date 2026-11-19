@@ -31,10 +31,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.platform.LocalView
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
+import com.hinnka.mycamera.ui.components.HideNavigationBar
 import kotlinx.coroutines.Job
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -793,13 +790,7 @@ fun GalleryEditScreen(
     }
 
     // The editor runs immersive: the navigation bar hides too, and comes back when the editor closes.
-    val view = LocalView.current
-    DisposableEffect(view) {
-        val controller = context.findActivity()?.window?.let { WindowCompat.getInsetsController(it, view) }
-        controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        controller?.hide(WindowInsetsCompat.Type.navigationBars())
-        onDispose { controller?.show(WindowInsetsCompat.Type.navigationBars()) }
-    }
+    HideNavigationBar()
 
     val previewSourceWidth = previewBitmap?.width?.takeIf { it > 0 }
         ?: currentPhoto.width.takeIf { it > 0 }

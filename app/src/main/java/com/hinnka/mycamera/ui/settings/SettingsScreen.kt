@@ -177,6 +177,7 @@ import com.hinnka.mycamera.stabilization.normalizeStabilizationStrength
 import com.hinnka.mycamera.ui.camera.LutEditBottomSheet
 import com.hinnka.mycamera.ui.camera.LutEditorTarget
 import com.hinnka.mycamera.ui.camera.autoRotate
+import com.hinnka.mycamera.ui.components.LabelledIcon
 import com.hinnka.mycamera.ui.components.LogViewerDialog
 import com.hinnka.mycamera.ui.components.PaymentDialog
 import com.hinnka.mycamera.ui.components.DepthModelDownloadDialog
@@ -313,26 +314,14 @@ private fun SettingsTabBar(selected: SettingsGroup?, onSelect: (SettingsGroup?) 
                                 .background(group?.color ?: SettingsText)
                         )
                     }
-                    Column(
-                        Modifier
+                    LabelledIcon(
+                        icon = group?.icon ?: AppIcons.SearchLine,
+                        label = stringResource(group?.label ?: R.string.settings_tab_search),
+                        tint = tint,
+                        modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 11.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) {
-                            Icon(group?.icon ?: AppIcons.SearchLine, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
-                        }
-                        Spacer(Modifier.height(5.dp))
-                        Text(
-                            stringResource(group?.label ?: R.string.settings_tab_search),
-                            color = tint,
-                            fontSize = 11.sp,
-                            lineHeight = 14.sp,
-                            maxLines = 1,
-                            softWrap = false,
-                            modifier = Modifier.height(14.dp)
-                        )
-                    }
+                            .padding(top = 11.dp)
+                    )
                 }
             }
         }
