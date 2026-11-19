@@ -354,11 +354,14 @@ private fun DrawScope.drawWheel(
     val labels = stops.indices.mapNotNull { i ->
         val ph = (stopPos[i] - p) * WHEEL_DEG
         if (abs(ph) > 84f) return@mapNotNull null
+        // Numbers fade towards the wheel's edges like its lines, so they also read over the picture.
+        val fade = cos(rad(ph)).pow(1.5f)
+        val base = if (abs(ph) < WHEEL_DEG * 0.18f) Color.White else if (seeThrough) Color.White.copy(alpha = 0.75f) else SonySecondary
         val layout = measurer.measure(
             zoomText(stops[i]).removeSuffix("×"),
             style.copy(
-                color = if (abs(ph) < WHEEL_DEG * 0.18f) Color.White else if (seeThrough) Color.White.copy(alpha = 0.75f) else SonySecondary,
-                shadow = if (seeThrough) ViewfinderTextShadow else null
+                color = base.copy(alpha = base.alpha * fade),
+                shadow = if (seeThrough) ViewfinderTextShadow.copy(color = ViewfinderTextShadow.color.copy(alpha = ViewfinderTextShadow.color.alpha * fade)) else null
             )
         )
         Label(cx + r * sin(rad(ph)), layout.size.width / 2f * cos(rad(ph)), ph, layout)
@@ -405,7 +408,7 @@ private fun DrawScope.drawWheel(
     labels.forEach { l ->
         val c = cos(rad(l.ph))
         scale(c, 1f, pivot = Offset(l.x, cy)) {
-            drawText(l.layout, topLeft = Offset(l.x - l.layout.size.width / 2f, cy - l.layout.size.height / 2f), alpha = c.pow(1.5f))
+            drawText(l.layout, topLeft = Offset(l.x - l.layout.size.width / 2f, cy - l.layout.size.height / 2f))
         }
     }
     if (atEnd) drawLine(if (seeThrough) Color.White else SonySecondary, Offset(minusX - 4.5f * dp, cy), Offset(minusX + 4.5f * dp, cy), 1.75f * dp, StrokeCap.Round)
