@@ -136,7 +136,6 @@ import com.hinnka.mycamera.render.RenderJob
 import com.hinnka.mycamera.render.RenderLook
 import androidx.compose.runtime.produceState
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.ScaleFactor
 import androidx.compose.ui.semantics.Role
@@ -2447,19 +2446,15 @@ private fun ZoomableImage(
     var bitmap by remember { mutableStateOf(if (isActive && morph?.active == true) viewModel.takeEditHandoff() else null) }
     val density = LocalDensity.current
     val windowSize = LocalWindowInfo.current.containerSize
-    // Pictures no taller than 3:4 rest between the top row and the item row; taller ones fit the whole screen.
+    // Upright, a photo rests at full width as long as it clears the item row ([RestFit]); taller ones fit the screen.
     // A turned window fits every picture to its full height, centred, partly under the side columns: the bands
     // between the columns would leave a 4:3 photo small and off-centre. Turned UI over an upright window fits.
-    val rests = OrientationObserver.uiRotationDegrees == 0f &&
-        bitmap?.let { windowSize.height > windowSize.width && it.width >= it.height * 0.749f } == true
-    val contentScale = remember(rests, density) {
-        if (rests) {
-            RestScale(top = with(density) { ViewerTopRowHeight.toPx() }, bottom = with(density) { (ViewerItemRowHeight + ViewerActionRowHeight).toPx() })
-        } else {
-            ContentScale.Fit
-        }
+    val rests = OrientationObserver.uiRotationDegrees == 0f && windowSize.height > windowSize.width
+    val restFit = remember(rests, density) {
+        if (rests) RestFit(top = with(density) { ViewerTopRowHeight.toPx() }, bottom = with(density) { (ViewerItemRowHeight + ViewerActionRowHeight).toPx() }) else null
     }
-    val alignment = if (rests) RestAlignment else Alignment.Center
+    val contentScale: ContentScale = restFit ?: ContentScale.Fit
+    val alignment: Alignment = restFit ?: Alignment.Center
     // Enough zoom for the double-tap's pixel-for-pixel view, in either screen orientation.
     val oneToOneZoom = bitmap?.takeIf { it.width > 0 && it.height > 0 && windowSize.width > 0 && windowSize.height > 0 }?.let { shown ->
         val source = Size(shown.width.toFloat(), shown.height.toFloat())
@@ -2807,21 +2802,28 @@ private class BurstFrames(val photoId: String? = null, val files: List<File> = e
 private class ViewerAction(val icon: ImageVector, val label: String, val whyNot: String?, val onClick: () -> Unit)
 
 /**
- * Fits a picture between the top row and the item row ([top] and [bottom] px kept free); with [RestAlignment] it
- * rests in that band rather than in the screen's middle.
+ * Where an upright photo rests, as both its scale and its alignment so every reader agrees. At full width when that
+ * clears the item row ([bottom] px): centred between the rows if it also clears the top row ([top] px), otherwise
+ * from the screen's top under the see-through top row, so a 3:4 photo keeps the full width. Taller ones fit the
+ * screen, centred.
  */
-private class RestScale(
-    private val top: Float = 0f,
-    private val bottom: Float = 0f,
-) : ContentScale {
+private class RestFit(private val top: Float, private val bottom: Float) : ContentScale, Alignment {
     override fun computeScaleFactor(srcSize: Size, dstSize: Size): ScaleFactor {
-        val scale = min(dstSize.width / srcSize.width, (dstSize.height - top - bottom) / srcSize.height)
+        val fullWidth = dstSize.width / srcSize.width
+        val scale = if (srcSize.height * fullWidth <= dstSize.height - bottom) fullWidth else min(fullWidth, dstSize.height / srcSize.height)
         return ScaleFactor(scale, scale)
     }
-}
 
-// The free space above and below the picture split as the rows are: 48 above, 120 below.
-private val RestAlignment = BiasAlignment(0f, 48f / 168f * 2f - 1f)
+    override fun align(size: IntSize, space: IntSize, layoutDirection: LayoutDirection): IntOffset {
+        val free = (space.height - size.height).toFloat()
+        val y = when {
+            free >= top + bottom -> top + (free - top - bottom) / 2f
+            free >= bottom -> 0f
+            else -> free / 2f
+        }
+        return IntOffset(((space.width - size.width) / 2f).roundToInt(), y.roundToInt())
+    }
+}
 
 // Double-tap shows the preview pixel for pixel, never less than a clear step in.
 private const val MinDoubleTapZoom = 1.25f
