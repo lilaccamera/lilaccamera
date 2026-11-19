@@ -250,6 +250,7 @@
     <string name="settings_zoom_control_thumbwheel">Thumbwheel</string>
     <string name="settings_zoom_control_pill">Simple pill</string>
     <string name="settings_zoom_control_collar">Collar</string>
+    <string name="settings_zoom_control_try">Try each one here; it zooms nothing. Tap a name to use it.</string>
     <string name="settings_search_placeholder">Search settings</string>
     <string name="settings_search_hint">Search every setting by name, value or group</string>
     <string name="settings_search_none">Nothing matches</string>
