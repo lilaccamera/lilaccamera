@@ -61,7 +61,7 @@ The app's own detector is called only when it adds something:
 - twice a second while an object is tracked,
 - on a half-press with nothing selected, for up to 0.4 s,
 - for Portrait, to find the line of the eyes,
-- for **Human Eye AF** (Settings › Focus & Lens, off by default), which focuses on a steady eye.
+- for **Human Eye AF** (Settings › Lens, off by default), which focuses on a steady eye.
 
 Turning the phone sideways is fine: the app turns the picture upright before it looks.
 

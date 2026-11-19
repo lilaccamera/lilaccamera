@@ -99,7 +99,7 @@ They are risky: a key the camera does not accept, or a wrong value, makes the ca
 
 ### Custom vendor keys
 
-Settings › Focus & Lens › Camera2 Extensions › **Custom Vendor Keys** lets you add a key yourself: its full name, whether it goes on each request (Capture key) or on the camera session (Session key), its type (int32 or u8), the value and the lens (0 is the back camera, 1 the front).
+Settings › Lens › Camera2 Extensions › **Custom Vendor Keys** lets you add a key yourself: its full name, whether it goes on each request (Capture key) or on the camera session (Session key), its type (int32 or u8), the value and the lens (0 is the back camera, 1 the front).
 
 For example, Sony's still HDR: `com.sonymobile.control.stillHdrMode`, Capture key, u8, value 1, lens 0. In a test it about halved the blown-out area, on automatic exposure only, at the cost of about a third of a stop of light, and did nothing for the shadows.
 

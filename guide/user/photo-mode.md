@@ -10,14 +10,18 @@ Photo mode is for everyday shots. It can merge several frames into one photo to 
 
 Photo mode merges a quick burst of frames into one photo with much less noise, which Lilac calls **stacking**. It stacks the camera's processed YUV frames, so it works on every ROM and with moving people, but it starts from Sony's processing. How it works, and how it differs from Pro's RAW stacking: [How a picture is made](how-pictures-are-made.md#how-stacking-works).
 
-Turn it on with **Multi-frame** in quick settings: Off, or 3 to 20 frames. Picking a count turns it on. **5 to 10 frames** give most of the gain; why more frames help less and less: [How many frames](how-pictures-are-made.md#how-many-frames). A stacked photo shows **Stacked · N frames** in the gallery.
+It is on by default, at 5 frames. Change it with **Multi-frame** in quick settings: Off, or 3 to 20 frames. Picking a count turns it on. **5 to 10 frames** give most of the gain; why more frames help less and less: [How many frames](how-pictures-are-made.md#how-many-frames). A stacked photo shows **Stacked · N frames** in the gallery.
 
 **Camera JPEG** in quick settings keeps an extra version of each stacked or Pro shot to compare against. For a Photo stack it is the reference frame before stacking; for Pro it is Sony's own JPEG of the first frame. In the gallery it shows as **Built-in camera**.
+
+### Bracketing: a brighter and a darker frame
+
+**Bracketing** (quick settings, on by default on the back camera) adds one darker and one brighter frame to the stack, so a bright sky or window keeps its detail and the shadows are not lost. It needs Multi-frame and 12 MP or less. How it works, and how it differs from Pro's darker burst: [Exposure bracketing](hdr.md#exposure-bracketing).
 
 ### Getting the best results
 
 - Hold still until the ring around the shutter closes: it closes when the last frame arrives.
-- Use **12 MP** on the back camera (below).
+- Keep the back camera at **12 MP**, the default (below).
 - In a dim room, use Night rather than a high frame count.
 - Wait for the thumbnail to finish before the next shot.
 
@@ -27,11 +31,12 @@ Turn it on with **Multi-frame** in quick settings: Off, or 3 to 20 frames. Picki
 
 ### Back camera: use 12 MP
 
-The back sensor has 19 MP (5056 × 3792). Full size is the default, but 12 MP (4000 × 3000) works better on this phone:
+The back sensor has 19 MP (5056 × 3792). 12 MP (4000 × 3000) is the default, because it works better on this phone than full size:
 
 - **Faster viewfinder and focus.** A full-size stream puts the sensor in its slowest mode, 10 frames a second. At 12 MP the viewfinder runs about twice as fast, and focus is about 1.7 times faster, because focusing is counted in frames.
 - **Less memory.** A 19 MP frame takes 29 MB, a 12 MP frame 12 MB, so a stack needs less than half the memory; see [memory on a 4 GB phone](how-pictures-are-made.md#memory-on-a-4-gb-phone).
 - **Shorter bursts,** so less shake.
+- **Bracketing fits.** A bracketed stack at full size runs out of memory, so Bracketing needs 12 MP or less.
 - The extra pixels carry little real detail: the lens and Sony's noise reduction limit what reaches them.
 
 ### Front camera: 2 MP is the default, keep it

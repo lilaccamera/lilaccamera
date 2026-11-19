@@ -219,7 +219,7 @@ A merge lowers noise, but cannot bring back light that was never recorded. If a 
 
 When part of the viewfinder is already white, Lilac shoots the whole burst darker. Each frame then keeps the window but has noisier shadows; merging averages that noise away; the tone mapping lifts the room back up. How much darker, when, and the limits: [the darker burst](hdr.md#the-darker-burst).
 
-How far the shadows may be lifted is capped by the [HDR ratio](hdr.md#the-hdr-ratio-slider). Photo mode cannot do this: it shoots every frame at Sony's exposure.
+How far the shadows may be lifted is capped by the [HDR ratio](hdr.md#the-hdr-ratio-slider). Photo mode does it differently: its frames are Sony's finished pictures, so instead of shooting them all darker it adds one darker and one brighter frame and fuses the three. See [Exposure bracketing](hdr.md#exposure-bracketing), which also explains how that differs from the darker burst.
 
 ## Memory on a 4 GB phone
 
@@ -254,7 +254,7 @@ Merging needs every frame in memory at once, and developing a RAW needs about 1 
 
 That shapes the design:
 
-- **12 MP on the back camera** in Photo mode needs less than half the memory of full size. See [resolution](photo-mode.md#resolution-12-mp-on-the-back-2-mp-on-the-front).
+- **12 MP on the back camera** in Photo mode needs less than half the memory of full size, and is the default. Bracketing needs it. See [resolution](photo-mode.md#resolution-12-mp-on-the-back-2-mp-on-the-front).
 - **2 MP on the front camera** uses the sensor's own 2 × 2 pixel binning: less noise, a quarter of the memory.
 - **Pro photos are developed one at a time, in their own process,** which waits for enough free memory and saves its progress. Closing the app frees its graphics memory for the render. See [the render queue](pro-mode.md#the-render-queue).
 

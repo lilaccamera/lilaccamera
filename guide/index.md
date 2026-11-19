@@ -62,7 +62,7 @@ Compared with a default camera app:
     | HDR+: a burst of darker RAW frames | Pro's HDR+ frames and the [darker burst](user/hdr.md#the-darker-burst) |
     | Sabre, the handheld merge | the **Sabre** merge mode (default) |
     | HDR+ spatial merge with brackets | the **Spatial** merge mode |
-    | Learned auto exposure | the same models, capped by the [HDR ratio](user/hdr.md#the-hdr-ratio-slider) (9.8×, GCam's default) |
+    | Learned auto exposure | the same models, capped by the [HDR ratio](user/hdr.md#the-hdr-ratio-slider) (8× by default; GCam's default is 9.8×) |
     | HDRNet tone mapping | the same HDRNet model |
     | Denoise tuning | GCam's luma, chroma and Sabre settings |
 
@@ -87,7 +87,7 @@ Lilac's interface is not PhotonCamera's. The camera and the editor were rebuilt 
 <figure class="lilac-fig lilac-fig--phone">
 <svg viewBox="47 0 248 421" role="img" aria-labelledby="tz-t tz-d" class="phone">
 <title id="tz-t">Lilac in one hand</title>
-<desc id="tz-d">The Xperia XZ1 Compact with Lilac's camera screen. An animation shows how far a right thumb reaches from the lower edge, and a touch point moving between the buttons, all inside that reach. Numbered as in the list: 1 thumb reach, 2 picture gestures, 3 shutter with the zoom ring, 4 camera key and volume keys on the right side.</desc>
+<desc id="tz-d">The Xperia XZ1 Compact with Lilac's camera screen. An animation shows how far a right thumb reaches from the lower edge, and a touch point moving between the buttons, all inside that reach. Numbered as in the list: 1 thumb reach, 2 picture gestures, 3 shutter with the zoom control, 4 camera key and volume keys on the right side.</desc>
 <defs><linearGradient id="xz-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5f7189"/><stop offset=".6" stop-color="#8d8790"/><stop offset="1" stop-color="#4a4450"/></linearGradient>
 <linearGradient id="xz-face" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#D7D7D7"/></linearGradient>
 <marker id="tz-a" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0 0L8 4L0 8z" fill="#fff" fill-opacity=".85"/></marker></defs>
@@ -140,7 +140,7 @@ Lilac's interface is not PhotonCamera's. The camera and the editor were rebuilt 
 <ol class="lilac-key">
 <li><b>Everything you press is in thumb reach.</b> Holding the phone in one hand, your thumb reaches the lower part of the screen, shaded in the animation. Every button sits there; the top of the screen is only picture.</li>
 <li><b>The picture takes the gestures:</b> swipe down for everyday settings, up for manual controls, sideways for looks.</li>
-<li><b>The shutter is the mode dial</b>, with the zoom ring curved round its top like a compact camera's zoom lever.</li>
+<li><b>The shutter is the mode dial</b>, with the zoom control just above it, in reach of the thumb.</li>
 <li><b>The side keys are camera controls:</b> half-press the camera key to focus, press fully to shoot; the volume keys shoot or zoom.</li>
 </ol>
 </div>
