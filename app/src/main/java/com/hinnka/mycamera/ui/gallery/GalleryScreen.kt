@@ -580,6 +580,8 @@ fun GalleryScreen(
                             (selectedTab == GalleryTab.PHOTON && isPhotonLoadingMore),
                     onPhotoClick = onPhotoClick,
                     onLoadMore = { scope.launch { viewModel.loadCurrentTabMore() } },
+                    isRefreshing = isLoading,
+                    onSelectTab = { tab -> scope.launch { viewModel.selectTab(tab) } },
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -901,6 +903,8 @@ private fun GalleryRecyclerGrid(
     isLoadingMore: Boolean,
     onPhotoClick: (GalleryTab, Int) -> Unit,
     onLoadMore: () -> Unit,
+    isRefreshing: Boolean,
+    onSelectTab: (GalleryTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val selectedPhotoIds = selectedPhotos.map { it.id }.toSet()
@@ -916,6 +920,8 @@ private fun GalleryRecyclerGrid(
     val currentScrollState = if (selectedTab == GalleryTab.PHOTON) photonScrollState else systemScrollState
     val configuration = LocalConfiguration.current
     val spanCount = if (configuration.screenWidthDp > configuration.screenHeightDp) 5 else 3
+    // The tab whose grid was last shown, so a tab change slides the new grid in but opening the screen does not.
+    val shownTab = remember { arrayOf(selectedTab) }
 
     key(selectedTab) {
         val currentTab = selectedTab
@@ -934,7 +940,7 @@ private fun GalleryRecyclerGrid(
         AndroidView(
             modifier = modifier,
             factory = { context ->
-                val container = FrameLayout(context)
+                val container = GalleryGridFrame(context).apply { tab = currentTab }
                 val density = context.resources.displayMetrics.density
                 val spacingPx = (4f * density).toInt().coerceAtLeast(1)
                 val recyclerView = RecyclerView(context).apply {
@@ -984,9 +990,13 @@ private fun GalleryRecyclerGrid(
                 }
                 container.addView(fastScroller)
 
+                if (shownTab[0] != currentTab) container.slideIn()
+                shownTab[0] = currentTab
                 container
             },
             update = { container ->
+                container.swipeEnabled = !isSelectionMode && !isRefreshing
+                container.onSwitch = onSelectTab
                 val recyclerView = container.getChildAt(0) as RecyclerView
                 (container.getChildAt(1) as GridFadeView).fadeBottom = isSelectionMode
                 val fastScroller = container.getChildAt(2) as GalleryFastScrollerView
