@@ -143,6 +143,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.media3.exoplayer.SeekParameters
 import com.hinnka.mycamera.ui.components.HideNavigationBar
 import com.hinnka.mycamera.ui.components.LabelledIcon
+import com.hinnka.mycamera.ui.components.UndoBanner
 import com.hinnka.mycamera.ui.components.SonyText
 import com.hinnka.mycamera.ui.components.CurveChannel
 import com.hinnka.mycamera.ui.components.HistogramView
@@ -1165,47 +1166,19 @@ fun GalleryDetailScreen(
         }
 
         // Undo for the last delete, above the action row, while the view model keeps that delete waiting.
-        viewModel.pendingDelete?.let { pending ->
-            Row(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = ViewerActionRowHeight + 12.dp)
-                    .widthIn(max = 340.dp)
-                    .heightIn(min = 36.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Color.Black.copy(alpha = 0.88f))
-                    .border(1.dp, com.hinnka.mycamera.ui.components.SonyTrack, RoundedCornerShape(18.dp))
-                    .padding(start = 14.dp, end = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    pending.message,
-                    color = SonyText,
-                    fontSize = 13.sp,
-                    modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp, top = 9.dp, bottom = 9.dp),
-                )
-                Box(
-                    Modifier
-                        .height(44.dp)
-                        .clickable(role = Role.Button) {
-                            haptics.buzz(VibrationHelper.LIGHT_TICK_MS)
-                            // Back to the restored item: the shown one is listed first.
-                            viewModel.undoPendingDelete()?.photos?.firstOrNull()?.let { restored ->
-                                allPhotos.indexOfFirst { it.id == restored.id }.takeIf { it >= 0 }?.let(viewModel::setCurrentPhoto)
-                            }
-                        }
-                        .padding(horizontal = 10.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        stringResource(R.string.editor_undo),
-                        color = com.hinnka.mycamera.ui.camera.ModeAmber,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
+        UndoBanner(
+            message = viewModel.pendingDelete?.message,
+            restartKey = viewModel.pendingDelete,
+            onUndo = {
+                // Back to the restored item: the shown one is listed first.
+                viewModel.undoPendingDelete()?.photos?.firstOrNull()?.let { restored ->
+                    allPhotos.indexOfFirst { it.id == restored.id }.takeIf { it >= 0 }?.let(viewModel::setCurrentPhoto)
                 }
-            }
-        }
+            },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = ViewerActionRowHeight),
+        )
     }
 
     // Delete, when there is a choice to make.

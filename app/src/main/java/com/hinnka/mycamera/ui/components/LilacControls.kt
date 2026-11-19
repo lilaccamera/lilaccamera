@@ -1,6 +1,10 @@
 package com.hinnka.mycamera.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -43,6 +47,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -56,10 +62,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -70,6 +78,7 @@ import com.hinnka.mycamera.ui.camera.ModeAmber
 import com.hinnka.mycamera.ui.camera.ShadowedLineIcon
 import com.hinnka.mycamera.ui.camera.SpacedBuzz
 import com.hinnka.mycamera.ui.camera.ViewfinderTextShadow
+import com.hinnka.mycamera.R
 import com.hinnka.mycamera.ui.icons.AppIcons
 import com.hinnka.mycamera.utils.VibrationHelper
 import kotlinx.coroutines.delay
@@ -431,5 +440,81 @@ internal fun LabelledIcon(
             style = if (shadowed) LocalTextStyle.current.merge(LilacTextStyle) else LocalTextStyle.current,
             modifier = Modifier.height(14.dp)
         )
+    }
+}
+
+private val UndoBannerEasing = CubicBezierEasing(0.2f, 0.8f, 0.3f, 1f)
+
+/**
+ * A full-width 56 dp bar offering Undo while [message] is not null, for the place directly above a bottom action row.
+ * It slides up from behind that row and back down when [message] goes null; a line along its top counts down
+ * [durationMs], restarting whenever [restartKey] changes.
+ */
+@Composable
+internal fun UndoBanner(
+    message: String?,
+    onUndo: () -> Unit,
+    modifier: Modifier = Modifier,
+    restartKey: Any? = message,
+    durationMs: Int = 5000,
+) {
+    val context = LocalContext.current
+    val haptics = remember(context) { SpacedBuzz(VibrationHelper(context)) }
+    // The exit slide keeps showing the last message.
+    var lastMessage by remember { mutableStateOf(message.orEmpty()) }
+    if (message != null) lastMessage = message
+    val countdown = remember { Animatable(1f) }
+    LaunchedEffect(restartKey) {
+        if (message == null) return@LaunchedEffect
+        countdown.snapTo(1f)
+        countdown.animateTo(0f, tween(durationMs, easing = LinearEasing))
+    }
+    AnimatedVisibility(
+        visible = message != null,
+        modifier = modifier.fillMaxWidth().clipToBounds(),
+        enter = slideInVertically(tween(220, easing = UndoBannerEasing)) { it },
+        exit = slideOutVertically(tween(220, easing = UndoBannerEasing)) { it },
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                // Touches on the bar never reach the picture behind it.
+                .pointerInput(Unit) { awaitEachGesture { awaitFirstDown() } }
+                .background(Color.Black)
+                .drawBehind {
+                    drawRect(SonyTrack, size = Size(size.width, 1.dp.toPx()))
+                    drawRect(SonyText, size = Size(size.width * countdown.value, 2.dp.toPx()))
+                }
+                .padding(start = 16.dp, end = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                lastMessage,
+                color = SonyText,
+                fontSize = 16.sp,
+                lineHeight = 20.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(end = 12.dp),
+            )
+            Row(
+                Modifier
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(role = Role.Button) {
+                        haptics.buzz(VibrationHelper.LIGHT_TICK_MS)
+                        onUndo()
+                    }
+                    .padding(vertical = 4.dp)
+                    .background(ChosenFill, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(AppIcons.UndoLine, contentDescription = null, tint = Color.Black, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(stringResource(R.string.editor_undo), color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            }
+        }
     }
 }
