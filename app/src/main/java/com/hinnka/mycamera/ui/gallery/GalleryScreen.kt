@@ -71,7 +71,8 @@ import com.hinnka.mycamera.gallery.PhotoStacks
 import com.hinnka.mycamera.gallery.ProcessingPhoto
 import com.hinnka.mycamera.render.RenderLook
 import com.hinnka.mycamera.render.RenderQueue
-import com.hinnka.mycamera.ui.components.ProcessingPhotoShimmerView
+import com.hinnka.mycamera.ui.components.EdgeRingStyle
+import com.hinnka.mycamera.ui.components.TileEdgeLineView
 import coil.load
 import coil.dispose
 import com.hinnka.mycamera.ui.theme.AccentColor
@@ -88,6 +89,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import android.graphics.RenderEffect
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
+import android.graphics.Shader
 import androidx.annotation.DrawableRes
 import androidx.core.content.ContextCompat
 import com.hinnka.mycamera.video.SlowedCopy
@@ -116,6 +123,10 @@ fun GalleryScreen(
     val processingPhotos by viewModel.processingPhotos.collectAsState()
     val renderPendingIds by RenderQueue.pendingPhotoIds.collectAsState()
     val renderFailedIds by RenderQueue.failedPhotoIds.collectAsState()
+    // Only the photo being rendered, so the status' progress ticks do not rebind the grid.
+    val renderingId by remember {
+        RenderQueue.status.map { it.currentPhotoId.takeIf { _ -> it.running } }.distinctUntilChanged()
+    }.collectAsState(null)
     var previousProcessingIds by remember { mutableStateOf(processingPhotos.keys.toSet()) }
     LaunchedEffect(processingPhotos.keys) {
         (previousProcessingIds - processingPhotos.keys).forEach(viewModel::invalidatePreviewCache)
@@ -685,6 +696,8 @@ fun GalleryScreen(
                     selectedPhotos = selectedPhotos,
                     processingPhotos = processingPhotos,
                     failedIds = renderFailedIds,
+                    runningIds = processingPhotos.keys + listOfNotNull(renderingId),
+                    pendingIds = renderPendingIds,
                     isSelectionMode = isSelectionMode,
                     isSelectionEnabled = !isBatchOperationRunning,
                     isLoadingMore = (selectedTab == GalleryTab.SYSTEM && isSystemLoadingMore) ||
@@ -867,6 +880,8 @@ private fun GalleryRecyclerGrid(
     selectedPhotos: List<MediaData>,
     processingPhotos: Map<String, ProcessingPhoto>,
     failedIds: Set<String>,
+    runningIds: Set<String>,
+    pendingIds: Set<String>,
     isSelectionMode: Boolean,
     isSelectionEnabled: Boolean,
     isLoadingMore: Boolean,
@@ -875,6 +890,7 @@ private fun GalleryRecyclerGrid(
     modifier: Modifier = Modifier
 ) {
     val selectedPhotoIds = selectedPhotos.map { it.id }.toSet()
+    val accent = AccentColor.toArgb()
     val adapter = remember {
         GalleryRecyclerAdapter()
     }
@@ -976,6 +992,9 @@ private fun GalleryRecyclerGrid(
                     selectedPhotoIds = selectedPhotoIds,
                     processingPhotos = processingPhotos,
                     failedIds = failedIds,
+                    runningIds = runningIds,
+                    waitingIds = pendingIds - runningIds,
+                    accent = accent,
                     isSelectionMode = isSelectionMode,
                     isSelectionEnabled = isSelectionEnabled,
                     isLoadingMore = isLoadingMore,
@@ -1212,6 +1231,9 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
     private var selectedPhotoIds: Set<String> = emptySet()
     private var processingPhotos: Map<String, ProcessingPhoto> = emptyMap()
     private var failedIds: Set<String> = emptySet()
+    private var runningIds: Set<String> = emptySet()
+    private var waitingIds: Set<String> = emptySet()
+    private var accent: Int = 0
     // Tag facts read from disk once per item, so a rebind never reads again.
     private val burstCounts = HashMap<String, Int>()
     private val videoRates = HashMap<String, SlowedCopy.Rate>()
@@ -1236,6 +1258,9 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
         selectedPhotoIds: Set<String>,
         processingPhotos: Map<String, ProcessingPhoto>,
         failedIds: Set<String>,
+        runningIds: Set<String>,
+        waitingIds: Set<String>,
+        accent: Int,
         isSelectionMode: Boolean,
         isSelectionEnabled: Boolean,
         isLoadingMore: Boolean,
@@ -1249,6 +1274,9 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
         val oldSelectedPhotoIds = this.selectedPhotoIds
         val oldProcessingPhotos = this.processingPhotos
         val oldFailedIds = this.failedIds
+        val oldRunningIds = this.runningIds
+        val oldWaitingIds = this.waitingIds
+        val oldAccent = this.accent
         val oldIsSelectionMode = this.isSelectionMode
         val oldIsSelectionEnabled = this.isSelectionEnabled
         val oldIsLandscape = this.isLandscape
@@ -1260,6 +1288,9 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
         this.selectedPhotoIds = selectedPhotoIds
         this.processingPhotos = processingPhotos
         this.failedIds = failedIds
+        this.runningIds = runningIds
+        this.waitingIds = waitingIds
+        this.accent = accent
         this.isSelectionMode = isSelectionMode
         this.isSelectionEnabled = isSelectionEnabled
         this.isLoadingMore = isLoadingMore
@@ -1295,6 +1326,7 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
 
                 // If anything about the UI state changed, we should rebind
                 if (oldIsSelectionMode != isSelectionMode || oldIsLandscape != isLandscape || oldRotationDegrees != rotationDegrees) return false
+                if (oldAccent != accent) return false
 
                 return when {
                     oldEntry is GalleryGridEntry.Header && newEntry is GalleryGridEntry.Header ->
@@ -1308,7 +1340,9 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                         wasSelected == isSelected && oldEntry.photo == newEntry.photo &&
                             oldEntry.versionCount == newEntry.versionCount &&
                             oldProcessingPhotos[id] == processingPhotos[id] &&
-                            (id in oldFailedIds) == (id in failedIds)
+                            (id in oldFailedIds) == (id in failedIds) &&
+                            (id in oldRunningIds) == (id in runningIds) &&
+                            (id in oldWaitingIds) == (id in waitingIds)
                     }
 
                     else -> false
@@ -1408,6 +1442,12 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                             videoRates[photo.id] = rateGate.withPermit { model.videoRate(photo) }
                         }
                     },
+                    edge = when (photo.id) {
+                        in runningIds -> EdgeRingStyle.RUNNING
+                        in waitingIds -> EdgeRingStyle.DOTTED
+                        else -> null
+                    },
+                    accent = accent,
                     viewModel = model,
                     isSelected = photo.id in selectedPhotoIds,
                     isSelectionMode = isSelectionMode,
@@ -1483,6 +1523,8 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
             processingPhoto: ProcessingPhoto?,
             tags: () -> List<GridTag>,
             loadTagFacts: suspend () -> Unit,
+            edge: EdgeRingStyle?,
+            accent: Int,
             viewModel: GalleryViewModel,
             isSelected: Boolean,
             isSelectionMode: Boolean,
@@ -1509,6 +1551,7 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                 onLongClick = onLongClick
             )
             view.bindTags(tags())
+            view.bindQueueState(edge, accent)
             view.bindProcessingPreview(processingPhoto)
             if (processingPhoto == null) {
                 job = scope.launch {
@@ -1551,7 +1594,7 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
     private val tagViews: List<TextView>
     private var aspectRatio: Float = 1f
     private var boundPhotoId: String? = null
-    private val processingShimmer = ProcessingPhotoShimmerView(context)
+    private val edgeLine = TileEdgeLineView(context)
 
     init {
         LayoutInflater.from(context).inflate(R.layout.item_gallery_photo, this, true)
@@ -1566,10 +1609,10 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
         selectionOverlay = findViewById(R.id.gallery_photo_selection_overlay)
         selectionIcon = findViewById(R.id.gallery_photo_selection_icon)
         tagViews = listOf(findViewById(R.id.gallery_photo_tag_1), findViewById(R.id.gallery_photo_tag_2))
-        contentLayer.addView(processingShimmer, FrameLayout.LayoutParams(
+        // In the content layer, so in landscape the line turns with the picture and stays on the tile's edge.
+        contentLayer.addView(edgeLine, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
-        processingShimmer.visibility = GONE
         clipChildren = false
         clipToPadding = false
     }
@@ -1640,10 +1683,21 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
         imageView.setImageBitmap(bitmap)
     }
 
+    /** A rendering or waiting tile carries the edge line, its picture softened and dimmed. */
+    fun bindQueueState(style: EdgeRingStyle?, accent: Int) {
+        edgeLine.style = style
+        edgeLine.accent = accent
+        edgeLine.contentDescription = if (style == null) null else context.getString(R.string.gallery_photo_processing)
+        val busy = style != null
+        imageView.colorFilter = if (busy) PorterDuffColorFilter(0xFFCCCCCC.toInt(), PorterDuff.Mode.MULTIPLY) else null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Android's blur radius is about 1.7 sigma: 3.5 dp gives the 2 dp sigma of the design's blur.
+            val radius = 3.5f * resources.displayMetrics.density
+            imageView.setRenderEffect(if (busy) RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP) else null)
+        }
+    }
+
     fun bindProcessingPreview(processingPhoto: ProcessingPhoto?) {
-        processingShimmer.visibility = if (processingPhoto == null) GONE else VISIBLE
-        processingShimmer.contentDescription = if (processingPhoto == null) null
-            else context.getString(R.string.gallery_photo_processing)
         if (processingPhoto == null) return
         val thumbnail = processingPhoto.thumbnail?.takeUnless { it.isRecycled }
         if (thumbnail != null) {
@@ -1651,12 +1705,11 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
         } else {
             imageView.load(processingPhoto.photo.thumbnailUri)
         }
-        processingShimmer.invalidate()
     }
 
     fun clearThumbnail() {
         boundPhotoId = null
-        processingShimmer.visibility = GONE
+        edgeLine.style = null
         imageView.dispose()
         imageView.setImageDrawable(null)
     }
