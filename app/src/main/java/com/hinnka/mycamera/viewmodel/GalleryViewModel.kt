@@ -4290,6 +4290,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         recipeParamsOverride: ColorRecipeParams? = null,
         maxEdge: Int = FULL_QUALITY_PREVIEW_MAX_EDGE,
         ignoreBokeh: Boolean = false,
+        // Names a passed [bitmap]'s source, so different sources for one photo do not share a cache entry.
+        cacheTag: String? = null,
     ): Bitmap? {
         if (photo.isVideo) return null
         return withContext(Dispatchers.IO) {
@@ -4408,8 +4410,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
 
                 // 使用多级缓存优化性能
+                val tagSuffix = cacheTag?.let { "_$it" }.orEmpty()
                 val previewCacheKey = previewCacheKey(photo, finalMetadata, showOrigin, maxEdge) +
-                    if (ignoreBokeh) "_nobokeh" else ""
+                    (if (ignoreBokeh) "_nobokeh" else "") + tagSuffix
 
                 val cached = previewBitmapCache.get(previewCacheKey)
                 if (cached != null && !cached.isRecycled) {
@@ -4465,7 +4468,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
                 // 只在全分辨率路径下缓存原始底图（避免低分辨率污染 origin 缓存）
                 if (showOrigin && maxEdge >= FULL_QUALITY_PREVIEW_MAX_EDGE) {
-                    previewBitmapCache.put(previewCacheKey(photo, finalMetadata, true), currentBitmap)
+                    previewBitmapCache.put(previewCacheKey(photo, finalMetadata, true) + tagSuffix, currentBitmap)
                 }
 
                 if (showOrigin) {
