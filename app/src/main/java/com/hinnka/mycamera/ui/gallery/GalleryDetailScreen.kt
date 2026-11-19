@@ -208,8 +208,6 @@ fun GalleryDetailScreen(
     isExpanded: Boolean = false,
     onBack: () -> Unit = {},
     onGoToGallery: (() -> Unit)? = null,
-    // Opened from the grid: the first action reads Gallery, and swiping down still goes to the camera.
-    fromGrid: Boolean = false,
     onGoToCamera: (() -> Unit)? = null,
     onEdit: () -> Unit,
     onOpenRenderQueue: () -> Unit = {},
@@ -1100,10 +1098,10 @@ fun GalleryDetailScreen(
             }
             val actions = listOf(
                 if (isExpanded) null else ViewerAction(
-                    icon = if (fromGrid) AppIcons.GridLine else AppIcons.CameraLine,
-                    label = stringResource(if (fromGrid) R.string.gallery else R.string.camera),
+                    icon = AppIcons.CameraLine,
+                    label = stringResource(R.string.camera),
                     whyNot = null,
-                    onClick = { leaveDetail(onBack) }
+                    onClick = { leaveDetail(onGoToCamera ?: onBack) }
                 ),
                 ViewerAction(AppIcons.ShareLine, stringResource(R.string.share), whyNot(isSharing)) {
                     currentPhoto?.let(viewModel::sharePhoto)

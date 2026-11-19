@@ -1021,7 +1021,6 @@ fun NavigationHost(
                         handleGalleryBack()
                     },
                     onGoToGallery = returnToGallery,
-                    fromGrid = navController.previousBackStackEntry?.destination?.route == Routes.GALLERY,
                     onGoToCamera = {
                         galleryViewModel.requestGalleryScrollToPhoto(null)
                         when {
