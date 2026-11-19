@@ -48,6 +48,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
@@ -211,6 +212,8 @@ internal fun ModeLine(
     collar: (@Composable () -> Unit)? = null,
     // The collar's ring round the shutter takes its presses; the thumbwheel and pill sit above the mode zone.
     collarRing: Boolean = true,
+    // The footer's padding under the mode zone, so the ridges sit on the screen's bottom edge.
+    bottomPadding: Dp = CameraControlsLayoutDefaults.BottomPadding,
     // Off when another app asked for a photo: the shutter and collar stay, the mode marks go.
     marks: Boolean = true,
     shutter: @Composable (Modifier) -> Unit
@@ -360,7 +363,7 @@ internal fun ModeLine(
             val cx = size.width / 2
             val cy = size.height / 2
             val unit = SPACING.dp.toPx()
-            val bottom = cy + (CameraControlsLayoutDefaults.ModeZoneHeight / 2 + CameraControlsLayoutDefaults.BottomPadding).toPx()
+            val bottom = cy + (CameraControlsLayoutDefaults.ModeZoneHeight / 2 + bottomPadding).toPx()
             // A soft backdrop instead of a band of its own: it only shows over a picture reaching the footer.
             val backdropTop = cy - 110.dp.toPx()
             drawRect(

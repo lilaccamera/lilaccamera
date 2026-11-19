@@ -2941,7 +2941,8 @@ private fun Controls(
                     say = noteLine::say,
                     modifier = Modifier.matchParentSize(),
                     collar = zoomCollar?.let { collar -> @Composable { collar { line.fold } } },
-                    collarRing = zoomControl == ZoomControl.COLLAR
+                    collarRing = zoomControl == ZoomControl.COLLAR,
+                    bottomPadding = CameraControlsLayoutDefaults.bottomPadding(zoomControl)
                 ) { shutterModifier ->
                     // The face follows the mode under the shutter while the dial turns.
                     CaptureButton(

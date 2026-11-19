@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.IntentCompat
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.data.ContentRepository
+import com.hinnka.mycamera.ui.prefs.preferenceValue
 import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.gallery.MediaMetadata
 import com.hinnka.mycamera.ui.components.PhysicalButton
@@ -231,6 +232,8 @@ private fun decodeSampled(file: File, maxEdge: Int): Bitmap? {
 @Composable
 private fun CaptureReview(file: File, onRetake: () -> Unit, onUse: () -> Unit) {
     val picture = remember(file) { decodeSampled(file, 1280)?.asImageBitmap() }
+    // The footer sits where the camera's did, which depends on its zoom control.
+    val zoomControl by preferenceValue { it.zoomControl }
     BackHandler(onBack = onRetake)
     Box(
         Modifier
@@ -253,7 +256,7 @@ private fun CaptureReview(file: File, onRetake: () -> Unit, onUse: () -> Unit) {
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(bottom = CameraControlsLayoutDefaults.BottomPadding)
+                .padding(bottom = CameraControlsLayoutDefaults.bottomPadding(zoomControl))
                 .height(CameraControlsLayoutDefaults.ModeZoneHeight)
         ) {
             FramedFooterButton(
