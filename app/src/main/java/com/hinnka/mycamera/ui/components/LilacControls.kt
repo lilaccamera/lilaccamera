@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hinnka.mycamera.ui.camera.CondensedBold
 import com.hinnka.mycamera.ui.camera.ModeAmber
 import com.hinnka.mycamera.ui.camera.SpacedBuzz
 import com.hinnka.mycamera.ui.camera.ViewfinderTextShadow
@@ -343,6 +344,57 @@ internal fun LilacRuler(
                     cornerRadius = CornerRadius(1.25f * dp)
                 )
             }
+        }
+    }
+}
+
+/**
+ * A framed tag as Sony's camera draws one: bold condensed text in a thin rounded frame, 22 dp tall in a
+ * 48 dp tap area. [color] is [SonyText] by default, the accent when the tag's state is on, [SonyDim] when quiet.
+ * A tap ticks and runs [onClick], which should explain the tag.
+ */
+@Composable
+internal fun FramedTag(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = SonyText,
+    icon: ImageVector? = null,
+    onClick: (() -> Unit)? = null,
+) {
+    val context = LocalContext.current
+    val haptics = remember(context) { SpacedBuzz(VibrationHelper(context)) }
+    Box(
+        modifier = modifier
+            .height(48.dp)
+            .then(
+                if (onClick == null) Modifier
+                else Modifier.clickable(role = Role.Button) {
+                    haptics.buzz(VibrationHelper.LIGHT_TICK_MS)
+                    onClick()
+                }
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            modifier = Modifier
+                .height(22.dp)
+                .border(1.5.dp, color, RoundedCornerShape(4.dp))
+                .padding(horizontal = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            if (icon != null) Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(13.dp))
+            Text(
+                text = text,
+                color = color,
+                maxLines = 1,
+                style = TextStyle(
+                    fontFamily = CondensedBold,
+                    fontSize = 13.sp,
+                    shadow = ViewfinderTextShadow,
+                    platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+                )
+            )
         }
     }
 }

@@ -47,7 +47,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
+import com.hinnka.mycamera.ui.camera.ModeAmber
 import com.hinnka.mycamera.ui.components.EdgeRingStyle
+import com.hinnka.mycamera.ui.components.SonyText
 import com.hinnka.mycamera.ui.components.ThumbnailEdgeRing
 import com.hinnka.mycamera.ui.components.ThumbnailGloss
 import com.hinnka.mycamera.ui.components.ThumbnailSize
@@ -164,9 +166,9 @@ internal fun PhotoVersionStrip(
                     )
                 }
                 when {
-                    version.id in runningIds -> ThumbnailEdgeRing(EdgeRingStyle.RUNNING, Color.White, Modifier.matchParentSize())
-                    version.id in waitingIds -> ThumbnailEdgeRing(EdgeRingStyle.DOTTED, Color.White, Modifier.matchParentSize())
-                    selected -> ThumbnailEdgeRing(EdgeRingStyle.SOLID, Color.White, Modifier.matchParentSize())
+                    version.id in runningIds -> ThumbnailEdgeRing(EdgeRingStyle.RUNNING, ModeAmber, Modifier.matchParentSize())
+                    version.id in waitingIds -> ThumbnailEdgeRing(EdgeRingStyle.DOTTED, SonyText, Modifier.matchParentSize())
+                    selected -> ThumbnailEdgeRing(EdgeRingStyle.SOLID, SonyText, Modifier.matchParentSize())
                 }
                 }
             }
