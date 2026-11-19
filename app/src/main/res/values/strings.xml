@@ -2282,4 +2282,7 @@
         <item quantity="other">%d moved to the trash</item>
     </plurals>
     <string name="gallery_trash_restore_cancelled">Still in the trash</string>
+    <string name="gallery_launcher_label">Lilac Gallery</string>
+    <string name="settings_gallery_icon">Gallery app icon</string>
+    <string name="settings_gallery_icon_description">Adds a Lilac Gallery icon that opens straight to your photos</string>
 </resources>

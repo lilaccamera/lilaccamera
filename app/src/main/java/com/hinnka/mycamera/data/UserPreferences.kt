@@ -183,6 +183,7 @@ class UserPreferences internal constructor(
     var developAnimationStyle by enum("develop_animation_style", DevelopAnimationStyle.FILM)
     var zoomControl by enum("zoom_control", ZoomControl.THUMBWHEEL)
     var panelGroupTitles by bool("panel_group_titles", false)  // titles on the groups in quick settings and Looks
+    var galleryLauncherIcon by bool("gallery_launcher_icon", false)  // the Lilac Gallery launcher icon; the launcher follows the component state
     var backgroundImage by string("background_image", "camera_bg_black")  // 背景图资源名或文件路径
     var captureButtonColor by int("capture_button_color", 0xFFFFFFFF.toInt())
     var colorSpace by enum("color_space", ColorSpace.SRGB)

@@ -5,6 +5,8 @@ import com.hinnka.mycamera.ui.prefs.rememberUserPreferencesRepository
 import com.hinnka.mycamera.ui.prefs.preferenceValue
 import com.hinnka.mycamera.data.ContentRepository
 import android.Manifest
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
@@ -383,6 +385,8 @@ open class MainActivity : AppCompatActivity() {
         StartupTrace.mark("MainActivity.permissions checked", "hasPermissions=$hasPermissions")
 
         handleIntent(intent)
+        // A restored activity keeps the screen it was on.
+        if (savedInstanceState == null && GalleryLauncher.launched(intent)) pendingRoute = Routes.GALLERY
         StartupTrace.mark("MainActivity.intent handled", "pendingRoute=$pendingRoute")
 
         lifecycleScope.launch {
@@ -520,6 +524,7 @@ open class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         showOverLockScreen()
         handleIntent(intent)
+        if (GalleryLauncher.launched(intent)) pendingRoute = Routes.GALLERY
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -820,7 +825,8 @@ fun NavigationHost(
 
     androidx.compose.runtime.LaunchedEffect(pendingRoute) {
         pendingRoute?.let {
-            navController.navigate(it)
+            // The grid opens once, above the camera, whichever screen was showing.
+            if (it == Routes.GALLERY) returnToGallery() else navController.navigate(it)
             onRouteHandled()
         }
     }
@@ -853,6 +859,14 @@ fun NavigationHost(
         onDispose { navController.removeOnDestinationChangedListener(listener) }
     }
     cameraViewModel.cameraScreenShown = currentRoute == null || currentRoute == Routes.CAMERA
+    // Started on the gallery (its launcher icon or another app's request): the camera under it stays shut until
+    // the user goes back to it, rather than opening for the moment before the grid shows.
+    var holdCamera by remember { mutableStateOf(pendingRoute == Routes.GALLERY) }
+    var leftCamera by remember { mutableStateOf(false) }
+    LaunchedEffect(currentRoute) {
+        if (currentRoute != null && currentRoute != Routes.CAMERA) leftCamera = true
+        else if (currentRoute == Routes.CAMERA && leftCamera) holdCamera = false
+    }
     val containerSize = LocalWindowInfo.current.containerSize
     // Shorter over longer side, so a turned phone window does not count as a wide one.
     cameraViewModel.isExpanded =
@@ -892,7 +906,7 @@ fun NavigationHost(
                 // Back from a turned gallery the window is still landscape for a moment; the camera waits for portrait
                 // rather than opening at the wrong size. Split screen and large screens keep any window shape.
                 val configuration = LocalConfiguration.current
-                if (configuration.orientation != Configuration.ORIENTATION_PORTRAIT &&
+                if (holdCamera || configuration.orientation != Configuration.ORIENTATION_PORTRAIT &&
                     (LocalContext.current as? Activity)?.isInMultiWindowMode != true &&
                     configuration.smallestScreenWidthDp < 600
                 ) {
@@ -1408,4 +1422,24 @@ private fun BoxScope.ThumbnailPhotoMorph(cameraViewModel: CameraViewModel, galle
         (if (entering) galleryViewModel.takeEditHandoff() else null) ?: galleryViewModel.cameraThumbnail?.second
     } ?: return
     PhotoMorphProxy(picture, bounds)
+}
+
+/** The optional "Lilac Gallery" launcher icon: an alias of [MainActivity] that opens on the gallery grid. */
+object GalleryLauncher {
+    // Relative to the manifest's namespace, which is MainActivity's package, not to the (suffixed) application id.
+    private val className = MainActivity::class.java.name.substringBeforeLast('.') + ".GalleryLauncher"
+
+    fun launched(intent: Intent?): Boolean = intent?.component?.className == className
+
+    fun isEnabled(context: Context): Boolean =
+        context.packageManager.getComponentEnabledSetting(ComponentName(context, className)) ==
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+
+    fun setEnabled(context: Context, enabled: Boolean) {
+        context.packageManager.setComponentEnabledSetting(
+            ComponentName(context, className),
+            if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+            PackageManager.DONT_KILL_APP,
+        )
+    }
 }

@@ -504,6 +504,7 @@ fun SettingsScreen(
     val developAnimationStyle by preferenceValue { it.developAnimationStyle }
     var zoomControl by rememberPreference(UserPreferences::zoomControl)
     var panelGroupTitles by rememberPreference(UserPreferences::panelGroupTitles)
+    var galleryLauncherIconPref by rememberPreference(UserPreferences::galleryLauncherIcon)
     var photoQuality by rememberPreference(UserPreferences::photoQuality)
     val useHeicExport by preferenceValue { it.useHeicExport }
     val useJpeg444Export by preferenceValue { it.useJpeg444Export }
@@ -2559,6 +2560,21 @@ fun SettingsScreen(
                             description = stringResource(R.string.settings_auto_rotate_description),
                             checked = autoRotateEnabled,
                             onCheckedChange = { autoRotateEnabled = it }
+                        )
+
+                        SettingsRowDivider()
+
+                        // The switch shows the icon as the system has it, which the stored choice may not match.
+                        var galleryIcon by remember { mutableStateOf(com.hinnka.mycamera.GalleryLauncher.isEnabled(context)) }
+                        SwitchSettingItem(
+                            title = stringResource(R.string.settings_gallery_icon),
+                            description = stringResource(R.string.settings_gallery_icon_description),
+                            checked = galleryIcon,
+                            onCheckedChange = {
+                                com.hinnka.mycamera.GalleryLauncher.setEnabled(context, it)
+                                galleryIcon = it
+                                galleryLauncherIconPref = it
+                            }
                         )
 
                         SettingsRowDivider()

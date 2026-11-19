@@ -221,6 +221,7 @@ internal val SETTINGS_INDEX: List<SettingsEntry> = buildList {
                 R.string.settings_widget_theme_system, R.string.settings_widget_theme_light, R.string.settings_widget_theme_dark,
             ))
             row(g, s, R.string.settings_auto_rotate)
+            row(g, s, R.string.settings_gallery_icon)
             row(g, s, R.string.settings_color_palette)
             row(g, s, R.string.settings_develop_animation)
             row(g, s, R.string.settings_animation_style, listOf(
