@@ -48,6 +48,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -876,6 +877,8 @@ private fun GalleryRecyclerGrid(
     var systemScrollState by rememberSaveable { mutableStateOf<Parcelable?>(null) }
 
     val currentScrollState = if (selectedTab == GalleryTab.PHOTON) photonScrollState else systemScrollState
+    val configuration = LocalConfiguration.current
+    val spanCount = if (configuration.screenWidthDp > configuration.screenHeightDp) 5 else 3
 
     key(selectedTab) {
         val currentTab = selectedTab
@@ -901,7 +904,7 @@ private fun GalleryRecyclerGrid(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT
                     )
-                    layoutManager = StaggeredGridLayoutManager(3, RecyclerView.VERTICAL).apply {
+                    layoutManager = StaggeredGridLayoutManager(spanCount, RecyclerView.VERTICAL).apply {
                         gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_MOVE_ITEMS_BETWEEN_SPANS
                         // Restore state for this specific tab
                         currentScrollState?.let { onRestoreInstanceState(it) }
@@ -945,7 +948,6 @@ private fun GalleryRecyclerGrid(
             update = { container ->
                 val recyclerView = container.getChildAt(0) as RecyclerView
                 val fastScroller = container.getChildAt(1) as GalleryFastScrollerView
-                val spanCount = 3 // Keep 3 columns as requested
                 val layoutManager = recyclerView.layoutManager as? StaggeredGridLayoutManager
                 if (layoutManager != null && layoutManager.spanCount != spanCount) {
                     layoutManager.spanCount = spanCount
