@@ -911,17 +911,18 @@ private class GalleryFastScrollerView(
 ) : View(context) {
     var onScrollEnd: (() -> Unit)? = null
     private val density = context.resources.displayMetrics.density
+    // Only a slim bar, no rail, as Sony's album draws it; it widens while held.
     private val thumbWidth = (4 * density).toInt()
-    private val thumbHeight = (56 * density).toInt()
-    private val trackWidth = (6 * density).toInt()
+    private val heldThumbWidth = (6 * density).toInt()
+    private val thumbHeight = (48 * density).toInt()
+    private val thumbInset = 4 * density
     private val touchAreaWidth = (24 * density).toInt()
     private val bubbleMargin = (48 * density).toInt()
 
     private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFFE0E0E0.toInt()
-    }
-    private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x29FFFFFF.toInt() // White with 0.16 alpha
+        // A soft dark edge keeps the bar visible over bright photos.
+        setShadowLayer(3 * density, 0f, 0f, 0xB3000000.toInt())
     }
     // The date pill is the viewer's filled pill.
     private val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -996,13 +997,9 @@ private class GalleryFastScrollerView(
         val progress = offset.toFloat() / (range - extent).toFloat()
         val thumbTop = (progress * usableHeight).coerceIn(0f, usableHeight.toFloat())
 
-        // Draw track
-        val trackLeft = width - trackWidth.toFloat()
-        canvas.drawRoundRect(trackLeft, 0f, width.toFloat(), height.toFloat(), 999f, 999f, trackPaint)
-
-        // Draw thumb
-        val thumbLeft = width - thumbWidth.toFloat() - (1 * density)
-        canvas.drawRoundRect(thumbLeft, thumbTop, width.toFloat() - (1 * density), thumbTop + thumbHeight, 999f, 999f, thumbPaint)
+        val thumbRight = width - thumbInset
+        val thumbLeft = thumbRight - (if (isDragging) heldThumbWidth else thumbWidth)
+        canvas.drawRoundRect(thumbLeft, thumbTop, thumbRight, thumbTop + thumbHeight, 999f, 999f, thumbPaint)
 
         // Draw bubble
         if (isDragging && dragLabel != null) {
