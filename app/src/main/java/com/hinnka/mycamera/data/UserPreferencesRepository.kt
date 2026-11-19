@@ -71,6 +71,13 @@ enum class DevelopAnimationStyle {
     INSTANT_PRINT
 }
 
+/** The camera screen's zoom control: a thumbwheel, a simple pill, or the collar around the shutter. */
+enum class ZoomControl {
+    THUMBWHEEL,
+    PILL,
+    COLLAR
+}
+
 enum class CaptureButtonStyle {
     DEFAULT,
     COLOR,

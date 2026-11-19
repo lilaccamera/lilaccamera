@@ -21,6 +21,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hinnka.mycamera.ui.settings.LocalSettingsLook
+import com.hinnka.mycamera.ui.settings.SettingsSliderRow
 
 /**
  * 滑块设置项
@@ -44,6 +46,39 @@ fun SliderSettingItem(
     modifier: Modifier = Modifier
 ) {
     val shouldShowSlider = enabled || toggleValue == null
+    if (LocalSettingsLook.current) {
+        SettingsSliderRow(
+            title = title,
+            description = description,
+            value = value,
+            valueText = if (shouldShowSlider) valueTextFormatter(value) else "",
+            rowEnabled = enabled || toggleValue != null,
+            toggleValue = toggleValue,
+            onToggleChange = onToggleChange,
+        ) {
+            CustomSlider(
+                value = value,
+                onValueChange = onValueChange,
+                onValueChangeFinished = onValueChangeFinished,
+                enabled = enabled,
+                valueRange = valueRange,
+                thumbColor = com.hinnka.mycamera.ui.settings.SettingsText,
+                activeTrackColor = com.hinnka.mycamera.ui.settings.SettingsText.copy(alpha = if (enabled) 1f else 0.35f),
+                inactiveTrackColor = com.hinnka.mycamera.ui.settings.SettingsRaised,
+                onDoubleTap = {
+                    if (enabled && resetValue != null) {
+                        if (onResetValue != null) onResetValue(resetValue)
+                        else {
+                            onValueChange(resetValue)
+                            onValueChangeFinished?.invoke()
+                        }
+                    }
+                },
+                modifier = Modifier.height(48.dp),
+            )
+        }
+        return
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
