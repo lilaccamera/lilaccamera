@@ -32,6 +32,9 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.animation.EnterExitState
+import com.hinnka.mycamera.ui.gallery.PhotoMorphProxy
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
@@ -827,13 +830,18 @@ fun NavigationHost(
     ) {
         onExternalGalleryReviewBack()
     }
-    // The latest navigation went between the viewer and the editor: the picture moves from one to the other.
+    // The latest navigation went between the viewer and the editor or the camera: the picture moves from one to the other.
     var photoMorph by remember { mutableStateOf(false) }
+    // The camera opens ahead of its screen on the way back from the viewer, but not while stacks still need the
+    // memory (the camera may then ask first) nor when the viewer returns to another app.
+    val warmUpCamera = { if (backStacksInFlight == 0 && !externalGalleryReviewReturnToCaller) cameraViewModel.warmUpCamera() }
     DisposableEffect(navController) {
         var lastRoute: String? = null
         val listener = NavController.OnDestinationChangedListener { _, destination, _ ->
             BuglyHelper.setUserScene(context, destination.route.hashCode())
-            photoMorph = setOf(lastRoute, destination.route) == setOf(Routes.PHOTO_DETAIL, Routes.PHOTO_EDIT)
+            photoMorph = photoMorphs(lastRoute, destination.route)
+            // A picture handed to the next screen only serves a move; elsewhere it would just hold memory.
+            if (!photoMorph) galleryViewModel.editHandoff = null
             lastRoute = destination.route
             // The gallery and viewer turn with the system rotation (and its lock); every other screen stays portrait.
             val systemRotates = destination.route == Routes.GALLERY || destination.route == Routes.PHOTO_DETAIL
@@ -862,7 +870,7 @@ fun NavigationHost(
     // Between the viewer and the editor the screens only fade: the picture moving between them carries the motion.
     val morphFade = tween<Float>(PHOTO_MORPH_MS, easing = PhotoMorphEasing)
     fun AnimatedContentTransitionScope<NavBackStackEntry>.morphs() =
-        setOf(initialState.destination.route, targetState.destination.route) == setOf(Routes.PHOTO_DETAIL, Routes.PHOTO_EDIT)
+        photoMorphs(initialState.destination.route, targetState.destination.route)
     SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
         NavHost(
             navController = navController,
@@ -905,6 +913,8 @@ fun NavigationHost(
                         ?: galleryViewModel.photos.value.firstOrNull { it.id !in galleryViewModel.hiddenPhotoIds }?.id
                     if (openId != null) {
                         galleryViewModel.setCurrentPhotoById(openId)
+                        // The viewer starts with the thumbnail's picture, so the move has one from its first frame.
+                        galleryViewModel.editHandoff = galleryViewModel.cameraThumbnail?.takeIf { it.first == openId }?.second
                         navController.navigate(Routes.photoDetail(photoId = openId))
                     } else {
                         navController.navigate(Routes.GALLERY)
@@ -957,6 +967,8 @@ fun NavigationHost(
                         )
                     }
                 } else {
+                  val cameraScreen = this
+                  Box(Modifier.fillMaxSize()) {
                     CameraScreen(
                         viewModel = cameraViewModel,
                         galleryViewModel = galleryViewModel,
@@ -988,6 +1000,12 @@ fun NavigationHost(
                             navController.navigate(Routes.PRESET_MANAGEMENT)
                         },
                     )
+                    CompositionLocalProvider(
+                        LocalPhotoMorph provides PhotoMorph(this@SharedTransitionLayout, cameraScreen, photoMorph)
+                    ) {
+                        ThumbnailPhotoMorph(cameraViewModel, galleryViewModel)
+                    }
+                  }
                 }
             }
 
@@ -1048,6 +1066,7 @@ fun NavigationHost(
                             ) {
                                 galleryViewModel.requestGalleryScrollToPhoto(null)
                             }
+                            if (navController.previousBackStackEntry?.destination?.route == Routes.CAMERA) warmUpCamera()
                             handleGalleryBack()
                         },
                         onGoToGallery = returnToGallery,
@@ -1056,9 +1075,14 @@ fun NavigationHost(
                             when {
                                 externalGalleryReviewReturnToCaller -> onExternalGalleryReviewBack()
                                 backStacksInFlight > 0 -> showStackMemoryWarning = true
-                                else -> if (!navController.popBackStack(Routes.CAMERA, inclusive = false)) navController.popBackStack()
+                                else -> {
+                                    warmUpCamera()
+                                    if (!navController.popBackStack(Routes.CAMERA, inclusive = false)) navController.popBackStack()
+                                }
                             }
                         },
+                        cameraFrame = cameraViewModel.heldPreviewFrame,
+                        onCameraWarmUp = { on -> if (!on) cameraViewModel.abandonCameraWarmUp() else warmUpCamera() },
                         onEdit = {
                             navController.navigate(Routes.PHOTO_EDIT)
                         },
@@ -1361,4 +1385,27 @@ fun PermissionScreen(
             }
         }
     }
+}
+
+/** The routes between which the picture moves rather than the screens sliding. */
+private fun photoMorphs(from: String?, to: String?): Boolean = setOf(from, to).let {
+    it == setOf(Routes.PHOTO_DETAIL, Routes.PHOTO_EDIT) || it == setOf(Routes.CAMERA, Routes.PHOTO_DETAIL)
+}
+
+/**
+ * The camera's end of the move to and from the viewer: the picture at the thumbnail's photo. Coming back it is the
+ * viewer's picture, handed over as it was left. Not with the controls turned: the thumbnail is turned too, so the
+ * screens just fade.
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun BoxScope.ThumbnailPhotoMorph(cameraViewModel: CameraViewModel, galleryViewModel: GalleryViewModel) {
+    val morph = LocalPhotoMorph.current ?: return
+    val bounds = cameraViewModel.thumbnailBoundsInRoot
+    if (!morph.running || bounds == null || OrientationObserver.uiRotationDegrees != 0f) return
+    val entering = morph.screen.transition.targetState == EnterExitState.Visible
+    val picture = remember {
+        (if (entering) galleryViewModel.takeEditHandoff() else null) ?: galleryViewModel.cameraThumbnail?.second
+    } ?: return
+    PhotoMorphProxy(picture, bounds)
 }

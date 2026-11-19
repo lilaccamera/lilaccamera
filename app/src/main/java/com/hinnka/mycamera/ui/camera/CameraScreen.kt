@@ -49,6 +49,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import com.hinnka.mycamera.ui.gallery.HeldFrameDim
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -397,8 +398,15 @@ fun CameraScreen(
     var previewTransitionRevealing by remember { mutableStateOf(false) }
     // A switch that only changes the pipeline (Photo <-> Pro) shows no cover; the controls change over the viewfinder.
     var previewTransitionCovered by remember { mutableStateOf(true) }
+    // Back from the viewer: the frame held on the way there shows dimmed until the camera's first frame.
+    val returnFrame = remember {
+        viewModel.heldPreviewFrame.also {
+            com.hinnka.mycamera.utils.PLog.i(com.hinnka.mycamera.viewmodel.THUMB_MOTION, "camera screen composed, held frame=${it != null}")
+        }
+    }
+    val returnFrameImage = remember { returnFrame?.bitmap?.asImageBitmap() }
     // The frame being left, kept (cropped to the new viewfinder) under the cover until the live view lands.
-    var previewTransitionFrame by remember { mutableStateOf<ImageBitmap?>(null) }
+    var previewTransitionFrame by remember { mutableStateOf(returnFrameImage) }
     var previewTransitionToken by remember { mutableIntStateOf(0) }
     var previewTransitionAwaitingResume by remember { mutableStateOf(false) }
     var previewTransitionSawPause by remember { mutableStateOf(false) }
@@ -695,8 +703,8 @@ fun CameraScreen(
     // The held frame moves from the old picture rectangle to the new one while the camera restarts.
     // Drawn in a Compose layer above the preview: the preview surface itself changes size only once.
     val previewMorphProgress = remember { Animatable(1f) }
-    var previewMorphFrom by remember { mutableStateOf<Rect?>(null) }
-    var previewMorphTo by remember { mutableStateOf<Rect?>(null) }
+    var previewMorphFrom by remember { mutableStateOf(returnFrame?.bounds) }
+    var previewMorphTo by remember { mutableStateOf(returnFrame?.bounds) }
     LaunchedEffect(previewBounds) {
         val target = previewBounds ?: return@LaunchedEffect
         val shown = previewMorphTo
@@ -1044,6 +1052,7 @@ fun CameraScreen(
         delay(PreviewTransitionRevealDurationMillis.toLong())
         previewTransitionActive = false
         hasPlayedInitialPreviewTransition = true
+        viewModel.heldPreviewFrame = null
     }
 
     var showGhostPermissionDialog by remember { mutableStateOf(false) }
@@ -1427,6 +1436,7 @@ fun CameraScreen(
                         .background(Color.Black)
                         .onGloballyPositioned { coordinates ->
                             previewBounds = coordinates.boundsInRoot()
+                            viewModel.previewBoundsInRoot = previewBounds
                         }
                         .pointerInput(state.availableCameras) {
                             val switchThreshold = max(size.width * 0.25f, 96.dp.toPx())
@@ -1914,6 +1924,7 @@ fun CameraScreen(
                 exposureCount = exposureCount,
                 onGalleryThumbnailBoundsChanged = { bounds ->
                     galleryThumbnailBounds = bounds
+                    viewModel.thumbnailBoundsInRoot = bounds
                 },
                 onCaptureButtonBoundsChanged = { bounds ->
                     captureButtonBounds = bounds
@@ -1962,6 +1973,8 @@ fun CameraScreen(
                     viewModel.capture()
                 },
                 onGalleryClick = {
+                    // A split screen keeps the camera running beside the viewer, so nothing to hold there.
+                    if (!viewModel.isExpanded) viewModel.holdPreviewFrame()
                     onGalleryClick()
                 },
                 isXpan = isXpan,
@@ -2051,6 +2064,7 @@ fun CameraScreen(
                     val rect = androidx.compose.ui.geometry.lerp(from, to, previewMorphProgress.value).translate(-layerOrigin)
                     // Fades on the new camera's first frame, even while it is still moving.
                     drawCenterCropped(frame, rect, alpha = cover)
+                    if (frame === returnFrameImage) drawRect(Color.Black, rect.topLeft, rect.size, alpha = HeldFrameDim * cover)
                 }
             }
 

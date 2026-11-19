@@ -20,7 +20,16 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.toRect
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -43,6 +52,21 @@ val LocalPhotoMorph = compositionLocalOf<PhotoMorph?> { null }
 const val PHOTO_MORPH_MS = 260
 val PhotoMorphEasing = CubicBezierEasing(.2f, .8f, .3f, 1f)
 
+/** How dark the held viewfinder frame shows while the camera restarts: black at this alpha over it. */
+const val HeldFrameDim = 0.62f
+
+// The camera thumbnail's photo corner at its size; the corner scales with the picture, so it is round as a thumbnail
+// and all but square at full size.
+private val ThumbPhotoSide = 40.dp
+private val ThumbPhotoCorner = 8.dp
+private val PhotoMorphShape = object : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val corner = with(density) { ThumbPhotoCorner.toPx() }
+        val radius = minOf(corner, corner * with(density) { ThumbPhotoSide.toPx() } / size.minDimension.coerceAtLeast(1f))
+        return Outline.Rounded(RoundRect(size.toRect(), CornerRadius(radius)))
+    }
+}
+
 /**
  * The picture that moves: [bitmap] drawn at [bounds] (px, in the parent box). Only one picture moves at a time, so
  * one key serves both ends, also when a save shows a new version.
@@ -56,7 +80,8 @@ fun BoxScope.PhotoMorphProxy(bitmap: Bitmap, bounds: Rect) {
         Image(
             bitmap = remember(bitmap) { bitmap.asImageBitmap() },
             contentDescription = null,
-            contentScale = ContentScale.Fit,
+            // Crop: the same as Fit where the bounds are the drawn picture, and a filled square at the thumbnail.
+            contentScale = ContentScale.Crop,
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .offset { IntOffset(bounds.left.roundToInt(), bounds.top.roundToInt()) }
@@ -66,6 +91,7 @@ fun BoxScope.PhotoMorphProxy(bitmap: Bitmap, bounds: Rect) {
                     morph.screen,
                     boundsTransform = BoundsTransform { _, _ -> tween(PHOTO_MORPH_MS, easing = PhotoMorphEasing) },
                 )
+                .clip(PhotoMorphShape)
         )
     }
 }

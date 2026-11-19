@@ -284,6 +284,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     // once, by reference, while it renders its own, so the move between them has a picture from the first frame.
     var editHandoff: Bitmap? = null
     fun takeEditHandoff(): Bitmap? = editHandoff.also { editHandoff = null }
+    // The camera thumbnail's decoded picture and its photo: the viewer opened from it starts with this.
+    var cameraThumbnail: Pair<String, Bitmap>? = null
 
     // LUT 编辑状态
     var editLutId = MutableStateFlow<String?>(null)

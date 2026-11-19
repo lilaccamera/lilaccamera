@@ -283,7 +283,8 @@ fun GalleryEditScreen(
 
     // 预览 Bitmap 状态. Opened from the viewer, the viewer's picture shows until the first render is ready.
     val photoMorph = LocalPhotoMorph.current
-    var previewBitmap by remember { mutableStateOf(viewModel.takeEditHandoff()?.takeIf { photoMorph?.active == true }) }
+    // A hardware bitmap (the gallery thumbnail, before the viewer's preview arrives) can't be read back by the editor.
+    var previewBitmap by remember { mutableStateOf(viewModel.takeEditHandoff()?.takeIf { photoMorph?.active == true && it.config != android.graphics.Bitmap.Config.HARDWARE }) }
     var cropPreviewBitmap by remember(editSourcePhoto?.id) { mutableStateOf<Bitmap?>(null) }
     var thumbnailBitmap by remember { mutableStateOf<Bitmap?>(null) }
 

@@ -42,6 +42,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.ColorFilter
+import com.hinnka.mycamera.viewmodel.HeldPreviewFrame
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.draw.shadow
@@ -213,6 +218,10 @@ fun GalleryDetailScreen(
     onBack: () -> Unit = {},
     onGoToGallery: (() -> Unit)? = null,
     onGoToCamera: (() -> Unit)? = null,
+    // The viewfinder as the camera was left, shown dimmed behind the picture as a swipe down heads back to it.
+    cameraFrame: HeldPreviewFrame? = null,
+    // true as a swipe down passes the point where it leaves, false if it then goes back short.
+    onCameraWarmUp: (Boolean) -> Unit = {},
     onEdit: () -> Unit,
     onOpenRenderQueue: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -505,6 +514,8 @@ fun GalleryDetailScreen(
 
     fun leaveDetail(onNavigate: () -> Unit) {
         viewModel.requestGalleryScrollToPhoto(photos.getOrNull(pagerState.currentPage)?.id)
+        // The picture shrinking into the camera's thumbnail is this one.
+        viewModel.editHandoff = shownPicture.value?.second
         onNavigate()
     }
 
@@ -665,10 +676,26 @@ fun GalleryDetailScreen(
     val swipeDownEnabled = !isExpanded && !isZoomed && currentPhoto != null
     LaunchedEffect(swipeDownEnabled) { if (!swipeDownEnabled) swipeDown.snapTo(0f) }
 
+    val groundFade = with(LocalDensity.current) { 300.dp.toPx() }
+    val heldImage = remember(cameraFrame) { cameraFrame?.bitmap?.asImageBitmap() }
     BoxWithConstraints(
         modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .drawBehind {
+                drawRect(Color.Black)
+                // The black ground thins as the swipe goes down and the camera's dimmed frame shows through; only
+                // upright, where the frame's place matches the camera's. The full-screen viewer starts at the root.
+                val reveal = (swipeDown.value / groundFade).coerceIn(0f, 1f)
+                val frame = cameraFrame ?: return@drawBehind
+                if (reveal <= 0f || heldImage == null || size.width >= size.height) return@drawBehind
+                drawImage(
+                    heldImage,
+                    dstOffset = IntOffset(frame.bounds.left.roundToInt(), frame.bounds.top.roundToInt()),
+                    dstSize = IntSize(frame.bounds.width.roundToInt(), frame.bounds.height.roundToInt()),
+                    alpha = reveal,
+                    colorFilter = ColorFilter.tint(Color.Black.copy(alpha = HeldFrameDim), BlendMode.SrcAtop),
+                )
+            }
             .then(if (isExpanded) Modifier.systemBarsPadding() else Modifier)
     ) {
         val screenWidth = maxWidth
@@ -704,20 +731,47 @@ fun GalleryDetailScreen(
                         .pointerInput(swipeDownEnabled) {
                             if (!swipeDownEnabled) return@pointerInput
                             val leaveAt = 110.dp.toPx()
-                            fun settle() { scope.launch { swipeDown.animateTo(0f, spring()) } }
+                            // The camera opens once the swipe would leave, not at its start, so a short look does
+                            // not open and close it.
+                            var warmed = false
+                            fun settle() {
+                                if (warmed) onCameraWarmUp(false)
+                                warmed = false
+                                scope.launch { swipeDown.animateTo(0f, spring()) }
+                            }
                             detectVerticalDragGestures(
                                 onDragEnd = {
-                                    if (swipeDown.value > leaveAt) leaveDetail(onGoToCamera ?: onBack)
-                                    // Also when leaving: the camera may first ask about photos still stacking.
-                                    settle()
+                                    if (swipeDown.value > leaveAt) {
+                                        warmed = false
+                                        leaveDetail(onGoToCamera ?: onBack)
+                                        // The picture shrinks from where the finger left it; it springs back only
+                                        // if the camera first asks about photos still stacking (this screen stays).
+                                        scope.launch {
+                                            delay(PHOTO_MORPH_MS.toLong())
+                                            swipeDown.animateTo(0f, spring())
+                                        }
+                                    } else {
+                                        settle()
+                                    }
                                 },
                                 onDragCancel = { settle() },
                             ) { change, dy ->
                                 change.consume()
-                                scope.launch { swipeDown.snapTo((swipeDown.value + dy).coerceAtLeast(0f)) }
+                                val next = (swipeDown.value + dy).coerceAtLeast(0f)
+                                if (!warmed && next > leaveAt) {
+                                    warmed = true
+                                    onCameraWarmUp(true)
+                                }
+                                scope.launch { swipeDown.snapTo(next) }
                             }
                         }
-                        .graphicsLayer { translationY = swipeDown.value },
+                        .graphicsLayer {
+                            translationY = swipeDown.value
+                            // The picture also shrinks as it follows the finger.
+                            val shrink = (1f - swipeDown.value / 600.dp.toPx()).coerceAtLeast(0.35f)
+                            scaleX = shrink
+                            scaleY = shrink
+                        },
                     userScrollEnabled = !isZoomed,
                     // The page, its row and the neighbour's row settle together, or spring back, on one short curve.
                     flingBehavior = PagerDefaults.flingBehavior(

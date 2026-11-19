@@ -77,6 +77,9 @@ fun GalleryThumbnail(
                     .crossfade(capturePreview == null)
                     .build(),
                 onSuccess = {
+                    (it.result.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap?.let { shown ->
+                        viewModel.cameraThumbnail = latestPhoto.id to shown
+                    }
                     if (finalCaptureId != null) {
                         finalThumbnailLoaded = true
                         onCapturedThumbnailLoaded(finalCaptureId)

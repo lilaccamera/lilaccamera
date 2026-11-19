@@ -114,6 +114,8 @@ import com.hinnka.mycamera.raw.fotufilm.FotufilmDocumentStorage
 import com.hinnka.mycamera.screencapture.PhantomPipCrop
 import com.hinnka.mycamera.stabilization.ExternalLensStabilizationConfig
 import com.hinnka.mycamera.ui.camera.CameraGLSurfaceView
+import com.hinnka.mycamera.ui.camera.captureLastFrame
+import androidx.compose.ui.geometry.Rect
 import com.hinnka.mycamera.ui.camera.ZoomDisplayMode
 import com.hinnka.mycamera.utils.*
 import com.hinnka.mycamera.video.CaptureMode
@@ -174,6 +176,10 @@ private data class CaptureSettingsSnapshot(
 )
 
 /** The shutter preview remains visible until the matching final thumbnail has loaded. */
+class HeldPreviewFrame(val bitmap: Bitmap, val bounds: Rect)
+
+const val THUMB_MOTION = "ThumbMotion"
+
 data class CapturedThumbnail(
     val captureId: Long,
     val photoId: String,
@@ -1576,6 +1582,44 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         get() = userPreferencesRepository.current.vibrationEnabled
 
     var glSurfaceView by mutableStateOf<CameraGLSurfaceView?>(null)
+
+    // Where the camera screen last laid out the picture and the thumbnail's photo, in root px: the viewer and the
+    // camera screen's next start use them while the camera screen is not composed.
+    var previewBoundsInRoot: Rect? = null
+    var thumbnailBoundsInRoot: Rect? = null
+    /** The last viewfinder frame, small, kept while the viewer is open; shown dimmed until the camera is live again. */
+    var heldPreviewFrame by mutableStateOf<HeldPreviewFrame?>(null)
+    private var warmUpJob: Job? = null
+
+    fun holdPreviewFrame() {
+        val view = glSurfaceView ?: return
+        val bounds = previewBoundsInRoot ?: return
+        val started = SystemClock.elapsedRealtime()
+        viewModelScope.launch {
+            heldPreviewFrame = view.captureLastFrame(maxLongEdge = 360)?.let { HeldPreviewFrame(it, bounds) }
+            PLog.i(THUMB_MOTION, "frame held=${heldPreviewFrame != null} in ${SystemClock.elapsedRealtime() - started} ms")
+        }
+    }
+
+    // The single place the way back from the viewer opens the camera early, as the move starts. If that stutters
+    // the move, a delay(PHOTO_MORPH_MS) at the top of this launch moves it after the animation.
+    fun warmUpCamera() {
+        if (warmUpJob?.isActive == true) return
+        PLog.i(THUMB_MOTION, "warm-up called")
+        warmUpJob = viewModelScope.launch {
+            val started = SystemClock.elapsedRealtime()
+            val opened = prepareCamera()
+            PLog.i(THUMB_MOTION, "warm-up prepared=$opened in ${SystemClock.elapsedRealtime() - started} ms")
+        }
+    }
+
+    /** The swipe back went short after the warm-up: close the camera again until the viewer is really left. */
+    fun abandonCameraWarmUp() {
+        warmUpJob?.cancel()
+        warmUpJob = null
+        closeCameraWithoutPreview()
+        PLog.i(THUMB_MOTION, "warm-up abandoned")
+    }
     var isEyeFocusBusy by mutableStateOf(false)
         private set
     var isEyeFocusRuntimeAvailable by mutableStateOf(true)
@@ -2819,6 +2863,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun onFirstPreviewFrame() {
+        if (!_previewFrameRendered.value) PLog.i(THUMB_MOTION, "first preview frame")
         _previewFrameRendered.value = true
         if (startupPrewarmAttempted) return
         startupPrewarmAttempted = true
@@ -3939,6 +3984,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 切换摄像头（前后置切换）
      */
     fun switchCamera() {
+        heldPreviewFrame = null
         cameraController.switchCamera()
         reopenCamera(
             preserveVideoRecording = true
@@ -3951,6 +3997,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun switchToLens(cameraId: String) {
         if (isVideoLensLocked()) return
+        heldPreviewFrame = null
         val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
@@ -4116,6 +4163,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 设置画面比例
      */
     fun setAspectRatio(ratio: AspectRatio) {
+        heldPreviewFrame = null
         viewModelScope.launch {
             applyCameraFeatureUpdate(
                 CameraFeatureUpdate(aspectRatio = SettingValue(ratio))
@@ -4177,6 +4225,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val rawNeedsUpdate = useRaw != null &&
             (state.value.useRaw != useRaw || userPreferencesRepository.current.useRaw != useRaw)
         if (state.value.captureMode == mode && !rawNeedsUpdate) return
+        heldPreviewFrame = null
 
         shootingModeSwitchJob = viewModelScope.launch {
             applyCameraFeatureUpdate(
