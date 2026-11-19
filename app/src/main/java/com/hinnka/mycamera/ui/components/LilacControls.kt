@@ -29,6 +29,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -364,7 +366,8 @@ internal fun LilacRuler(
 /**
  * A framed tag as Sony's camera draws one: bold condensed text in a thin rounded frame, 22 dp tall in a
  * 48 dp tap area. [color] is [SonyText] by default, the accent when the tag's state is on, [SonyDim] when quiet.
- * A tap ticks and runs [onClick], which should explain the tag.
+ * A tap ticks and runs [onClick], which should explain the tag. A [wrap] tag (stacked on a 48 dp edge) is at most
+ * 46 dp wide, breaks onto a second line when wider, and its tap area reaches 6 dp above and below.
  */
 @Composable
 internal fun FramedTag(
@@ -373,37 +376,41 @@ internal fun FramedTag(
     color: Color = SonyText,
     icon: ImageVector? = null,
     onClick: (() -> Unit)? = null,
+    wrap: Boolean = false,
 ) {
     val context = LocalContext.current
     val haptics = remember(context) { SpacedBuzz(VibrationHelper(context)) }
     Box(
         modifier = modifier
-            .height(48.dp)
+            .then(if (wrap) Modifier else Modifier.height(48.dp))
             .then(
                 if (onClick == null) Modifier
                 else Modifier.clickable(role = Role.Button) {
                     haptics.buzz(VibrationHelper.LIGHT_TICK_MS)
                     onClick()
                 }
-            ),
+            )
+            .then(if (wrap) Modifier.padding(vertical = 6.dp) else Modifier),
         contentAlignment = Alignment.Center
     ) {
         Row(
             modifier = Modifier
-                .height(22.dp)
+                .then(if (wrap) Modifier.heightIn(min = 22.dp).widthIn(max = 46.dp) else Modifier.height(22.dp))
                 .border(1.5.dp, color, RoundedCornerShape(4.dp))
-                .padding(horizontal = 5.dp),
+                .padding(horizontal = if (wrap) 3.dp else 5.dp, vertical = if (wrap) 3.dp else 0.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
+            horizontalArrangement = if (wrap) Arrangement.spacedBy(1.dp, Alignment.CenterHorizontally) else Arrangement.spacedBy(2.dp)
         ) {
             if (icon != null) Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(13.dp))
             Text(
                 text = text,
                 color = color,
-                maxLines = 1,
+                maxLines = if (wrap) 2 else 1,
                 style = TextStyle(
                     fontFamily = CondensedBold,
                     fontSize = 13.sp,
+                    lineHeight = if (wrap) 14.sp else TextUnit.Unspecified,
+                    textAlign = if (wrap) TextAlign.Center else TextAlign.Unspecified,
                     shadow = ViewfinderTextShadow,
                     platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
                 )

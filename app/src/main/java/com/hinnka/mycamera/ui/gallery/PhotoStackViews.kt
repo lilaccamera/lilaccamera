@@ -14,6 +14,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -184,27 +189,33 @@ internal fun viewerTags(
 
 /**
  * The tags in one row as wide as they are, never wider than the space given: quiet tags go first, from the end,
- * then whatever still does not fit is left off at the end.
+ * then whatever still does not fit is left off at the end. A [vertical] row stacks them, centred, each tag
+ * breaking onto a second line when wider than the space, and leaves them off when too tall.
  */
 @Composable
-internal fun ViewerTagRow(tags: List<ViewerTag>, modifier: Modifier = Modifier) {
+internal fun ViewerTagRow(tags: List<ViewerTag>, modifier: Modifier = Modifier, vertical: Boolean = false) {
     Layout(
-        content = { tags.forEach { FramedTag(it.text, color = it.color, icon = it.icon, onClick = it.onClick) } },
+        content = { tags.forEach { FramedTag(it.text, color = it.color, icon = it.icon, onClick = it.onClick, wrap = vertical) } },
         modifier = modifier
     ) { measurables, constraints ->
-        val gap = 6.dp.roundToPx()
-        val placeables = measurables.map { it.measure(Constraints()) }
+        // Upright tags keep their 48 dp tap height; stacked ones carry their own 6 dp above and below.
+        val gap = if (vertical) 0 else 6.dp.roundToPx()
+        val placeables = measurables.map { it.measure(if (vertical) Constraints(maxWidth = constraints.maxWidth) else Constraints()) }
         val kept = placeables.indices.toMutableList()
-        fun width() = kept.sumOf { placeables[it].width } + gap * (kept.size - 1).coerceAtLeast(0)
-        while (width() > constraints.maxWidth) {
+        fun along(i: Int) = if (vertical) placeables[i].height else placeables[i].width
+        fun across(i: Int) = if (vertical) placeables[i].width else placeables[i].height
+        fun length() = kept.sumOf { along(it) } + gap * (kept.size - 1).coerceAtLeast(0)
+        while (length() > (if (vertical) constraints.maxHeight else constraints.maxWidth)) {
             kept.remove(kept.lastOrNull { tags[it].quiet } ?: kept.last())
         }
-        val height = placeables.maxOfOrNull { it.height } ?: 0
-        layout(width().coerceAtLeast(0), height) {
-            var x = 0
+        val thickness = if (vertical) kept.maxOfOrNull { across(it) } ?: 0 else placeables.maxOfOrNull { it.height } ?: 0
+        val length = length().coerceAtLeast(0)
+        layout(if (vertical) thickness else length, if (vertical) length else thickness) {
+            var at = 0
             kept.forEach { i ->
-                placeables[i].placeRelative(x, (height - placeables[i].height) / 2)
-                x += placeables[i].width + gap
+                if (vertical) placeables[i].placeRelative((thickness - across(i)) / 2, at)
+                else placeables[i].placeRelative(at, (thickness - across(i)) / 2)
+                at += along(i) + gap
             }
         }
     }
@@ -224,6 +235,7 @@ internal fun PhotoVersionStrip(
     onSelect: (MediaData) -> Unit,
     modifier: Modifier = Modifier,
     ghost: Boolean = false,
+    vertical: Boolean = false,
 ) {
     PhotoStrip(
         items = versions,
@@ -232,6 +244,7 @@ internal fun PhotoVersionStrip(
         onSelect = { onSelect(versions[it]) },
         modifier = modifier,
         ghost = ghost,
+        vertical = vertical,
     ) { _, version ->
         val thumbnail by produceState<Bitmap?>(null, version.id, version.thumbnailUri) {
             value = viewModel.getGridThumbnailBitmap(version)
@@ -256,7 +269,8 @@ internal fun PhotoVersionStrip(
 /**
  * A row of small tiles that scrolls under a fixed centre: the centred tile is the shown one. Flicking switches
  * live as each tile reaches the centre; a tap centres that one. [tile] draws a tile's picture, label and edge line.
- * A [ghost] strip (a neighbouring item's, during a swipe) is drawn still, with nothing to touch.
+ * A [ghost] strip (a neighbouring item's, during a swipe) is drawn still, with nothing to touch. A [vertical] strip
+ * is a column of the same tiles, for the turned viewer's right edge.
  */
 @Composable
 internal fun <T> PhotoStrip(
@@ -266,23 +280,32 @@ internal fun <T> PhotoStrip(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
     ghost: Boolean = false,
+    vertical: Boolean = false,
     tile: @Composable BoxScope.(index: Int, item: T) -> Unit,
 ) {
+    val stripSize = if (vertical) Modifier.fillMaxHeight().width(StripHeight) else Modifier.fillMaxWidth().height(StripHeight)
     if (ghost) {
         val centre = selectedIndex.coerceAtLeast(0)
-        Box(modifier.fillMaxWidth().height(StripHeight), contentAlignment = Alignment.Center) {
-            Row(
-                Modifier
-                    .wrapContentWidth(unbounded = true)
-                    .offset(x = (StripTileSize + StripGap) * ((items.size - 1) / 2f - centre)),
-                horizontalArrangement = Arrangement.spacedBy(StripGap),
-            ) {
-                items.forEachIndexed { index, item ->
-                    Box(Modifier.size(StripTileSize).clip(StripTileShape).background(StripTileColor)) {
-                        // Only the tiles that can be on screen load a picture.
-                        if (abs(index - centre) <= 4) tile(index, item)
-                    }
+        val shift = (StripTileSize + StripGap) * ((items.size - 1) / 2f - centre)
+        val tiles = @Composable {
+            items.forEachIndexed { index, item ->
+                Box(Modifier.size(StripTileSize).clip(StripTileShape).background(StripTileColor)) {
+                    // Only the tiles that can be on screen load a picture.
+                    if (abs(index - centre) <= 4) tile(index, item)
                 }
+            }
+        }
+        Box(modifier.then(stripSize), contentAlignment = Alignment.Center) {
+            if (vertical) {
+                Column(
+                    Modifier.wrapContentHeight(unbounded = true).offset(y = shift),
+                    verticalArrangement = Arrangement.spacedBy(StripGap),
+                ) { tiles() }
+            } else {
+                Row(
+                    Modifier.wrapContentWidth(unbounded = true).offset(x = shift),
+                    horizontalArrangement = Arrangement.spacedBy(StripGap),
+                ) { tiles() }
             }
         }
         return
@@ -306,14 +329,8 @@ internal fun <T> PhotoStrip(
     LaunchedEffect(items.getOrNull(selectedIndex)?.let(key), items.size) {
         if (selectedIndex >= 0 && !listState.isScrollInProgress) listState.scrollToItem(selectedIndex)
     }
-    BoxWithConstraints(modifier.fillMaxWidth().height(StripHeight), contentAlignment = Alignment.Center) {
-        LazyRow(
-            state = listState,
-            flingBehavior = rememberSnapFlingBehavior(listState),
-            // Half the row on each side, so the first and last items can reach the centre too.
-            contentPadding = PaddingValues(horizontal = (maxWidth - StripTileSize) / 2),
-            horizontalArrangement = Arrangement.spacedBy(StripGap),
-        ) {
+    BoxWithConstraints(modifier.then(stripSize), contentAlignment = Alignment.Center) {
+        val content: LazyListScope.() -> Unit = {
             itemsIndexed(items, key = { _, item -> key(item) }) { index, item ->
                 val selected = index == selectedIndex
                 Box(
@@ -330,6 +347,25 @@ internal fun <T> PhotoStrip(
                     tile(index, item)
                 }
             }
+        }
+        // Half the row on each side, so the first and last items can reach the centre too.
+        if (vertical) {
+            LazyColumn(
+                state = listState,
+                flingBehavior = rememberSnapFlingBehavior(listState),
+                contentPadding = PaddingValues(vertical = (maxHeight - StripTileSize) / 2),
+                verticalArrangement = Arrangement.spacedBy(StripGap),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                content = content,
+            )
+        } else {
+            LazyRow(
+                state = listState,
+                flingBehavior = rememberSnapFlingBehavior(listState),
+                contentPadding = PaddingValues(horizontal = (maxWidth - StripTileSize) / 2),
+                horizontalArrangement = Arrangement.spacedBy(StripGap),
+                content = content,
+            )
         }
     }
 }

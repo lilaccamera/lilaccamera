@@ -44,6 +44,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.ui.camera.ModeAmber
 import com.hinnka.mycamera.ui.camera.ViewfinderTextShadow
@@ -456,6 +461,7 @@ private fun MemoryInfoRow(icon: ImageVector, title: Int?, text: Int) {
  * The photo viewer's processing line: a queued RAW photo's queue state with the one button that acts on it, and
  * Queue, which opens [RenderQueueScreen]. A photo still finishing in the camera ([processingInCamera]) gets the
  * line without buttons. Draws nothing otherwise. A [ghost] line (a neighbouring item's, during a swipe) takes no touches.
+ * A [vertical] line is the turned viewer's 56 dp column: the state icon, a short state, then round icon buttons.
  */
 @Composable
 fun RenderQueuePhotoChip(
@@ -464,6 +470,7 @@ fun RenderQueuePhotoChip(
     modifier: Modifier = Modifier,
     processingInCamera: Boolean = false,
     ghost: Boolean = false,
+    vertical: Boolean = false,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -482,8 +489,9 @@ fun RenderQueuePhotoChip(
     val job = jobs.firstOrNull { it.photoId == photoId }
     if (!processing && job == null) {
         if (processingInCamera) {
-            ProcessingLine(modifier, { CircularProgressIndicator(Modifier.size(24.dp), color = SonyText, strokeWidth = 2.5.dp) },
-                stringResource(R.string.processing_chip_in_camera))
+            val spinner = @Composable { CircularProgressIndicator(Modifier.size(24.dp), color = SonyText, strokeWidth = 2.5.dp) }
+            if (vertical) ProcessingColumn(modifier, spinner, stringResource(R.string.camera))
+            else ProcessingLine(modifier, spinner, stringResource(R.string.processing_chip_in_camera))
         }
         return
     }
@@ -497,6 +505,9 @@ fun RenderQueuePhotoChip(
     val text: String
     var detail: String? = null
     var button: Pair<String, () -> Unit>? = null
+    // The column form's button icon, and its state when shorter than [text].
+    var buttonIcon = AppIcons.PlayLine
+    var columnText: String? = null
     when {
         // Queue only: the queue screen says how to let it finish.
         status.running && status.memoryKills >= RenderQueue.MEMORY_HINT_KILLS &&
@@ -514,8 +525,10 @@ fun RenderQueuePhotoChip(
                 button = stringResource(R.string.render_queue_resume) to { setPaused(false) }
             } else {
                 text = stringResource(R.string.viewer_proc_rendering, (status.photoProgress * 100).roundToInt())
+                columnText = "${(status.photoProgress * 100).roundToInt()} %"
                 detail = status.stageText.takeIf { it != 0 }?.let { stringResource(it) }
                 button = stringResource(R.string.render_queue_pause) to { setPaused(true) }
+                buttonIcon = AppIcons.PauseLine
             }
         }
         failed -> {
@@ -523,6 +536,7 @@ fun RenderQueuePhotoChip(
             text = stringResource(R.string.viewer_proc_failed)
             detail = stringResource(R.string.viewer_proc_raw_safe)
             button = stringResource(R.string.viewer_proc_retry) to { scope.launch { RenderQueue.retry(context, listOfNotNull(job)) } }
+            buttonIcon = AppIcons.RotateClockwiseLine
         }
         job?.state == RenderJob.State.SKIPPED -> {
             icon = { LineStateIcon(AppIcons.PauseLine, SonySecondary) }
@@ -564,6 +578,13 @@ fun RenderQueuePhotoChip(
         }
     }
     val description = stringResource(R.string.render_chip_description, listOfNotNull(text, detail).joinToString(" · "))
+    if (vertical) {
+        ProcessingColumn(modifier, icon, columnText ?: text, failed) {
+            button?.let { (label, action) -> RoundIconButton(buttonIcon, label, action.takeUnless { ghost }) }
+            RoundIconButton(AppIcons.ClockLine, description, onClick.takeUnless { ghost })
+        }
+        return
+    }
     ProcessingLine(modifier, icon, text, detail, failed) {
         button?.let { (label, action) -> ViewerPill(onClick = action.takeUnless { ghost }, text = label) }
         ViewerPill(
@@ -604,6 +625,44 @@ private fun ProcessingLine(
             }
         }
         buttons()
+    }
+}
+
+/** The processing line stacked in the turned viewer's 56 dp item column: icon, a short state, then [buttons]. */
+@Composable
+private fun ProcessingColumn(
+    modifier: Modifier,
+    icon: @Composable () -> Unit,
+    text: String,
+    error: Boolean = false,
+    buttons: @Composable ColumnScope.() -> Unit = {},
+) {
+    Column(
+        modifier.width(56.dp).padding(top = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(Modifier.size(ProcessingIconSize), contentAlignment = Alignment.Center) { icon() }
+        Text(text, color = if (error) MaterialTheme.colorScheme.error else SonyText, fontSize = 11.5.sp, lineHeight = 14.sp,
+            fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            style = TextStyle(shadow = ViewfinderTextShadow), modifier = Modifier.padding(bottom = 6.dp))
+        buttons()
+    }
+}
+
+/** A 44 dp round button with an [icon] only; [description] names it for TalkBack. Null [onClick] takes no touches. */
+@Composable
+private fun RoundIconButton(icon: ImageVector, description: String, onClick: (() -> Unit)?) {
+    Box(
+        Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(com.hinnka.mycamera.ui.components.SonyDivider)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = SonyText, modifier = Modifier.size(20.dp))
     }
 }
 

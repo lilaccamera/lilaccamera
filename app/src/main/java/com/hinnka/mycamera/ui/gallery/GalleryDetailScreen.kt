@@ -672,6 +672,16 @@ fun GalleryDetailScreen(
             .then(if (isExpanded) Modifier.systemBarsPadding() else Modifier)
     ) {
         val screenWidth = maxWidth
+        val screenHeight = maxHeight
+        // Turned, the top row becomes the left edge and the item and action rows the right edge; the picture rests
+        // in the band between them. The columns keep clear of a navigation bar on either side.
+        val landscape = maxWidth > maxHeight
+        val navBar = WindowInsets.navigationBars.asPaddingValues()
+        val navLeft = if (landscape && !isExpanded) navBar.calculateLeftPadding(LayoutDirection.Ltr) else 0.dp
+        val navRight = if (landscape && !isExpanded) navBar.calculateRightPadding(LayoutDirection.Ltr) else 0.dp
+        val band = if (landscape) {
+            PaddingValues(start = ViewerTopRowHeight + navLeft, end = ViewerItemRowHeight + ViewerActionRowHeight + navRight)
+        } else null
         val fadeDistance = with(LocalDensity.current) { 160.dp.toPx() }
         // The rows fade as the page follows a downward swipe.
         val rowsFade = Modifier.graphicsLayer { alpha = (1f - swipeDown.value / fadeDistance).coerceIn(0f, 1f) }
@@ -798,6 +808,7 @@ fun GalleryDetailScreen(
                                             modifier = Modifier
                                                 .fillMaxSize()
                                                 .pointerInput(Unit) { detectTapGestures(onTap = { overlaysHidden = !overlaysHidden }) }
+                                                .then(if (band != null) Modifier.padding(band) else Modifier)
                                         )
                                     } else {
                                         val forceSystemOrigin = viewModel.selectedTab == GalleryTab.SYSTEM &&
@@ -836,8 +847,14 @@ fun GalleryDetailScreen(
         val currentVersions = photos.getOrNull(pagerState.currentPage)?.let(stacks::versionsOf).orEmpty()
 
         // Top row: the grid, the position beside it, the tags centred on the whole width, and a slot on the right.
+        // Turned, the same controls stack down the left edge: grid, position, tags in the middle, rating at the bottom.
         if (currentPhoto != null && tagPhoto != null && !overlaysHidden) {
-            Box(Modifier.fillMaxWidth().height(ViewerTopRowHeight).then(rowsFade).photoMorphEdge(top = true)) {
+            Box(
+                (if (landscape) Modifier.padding(start = navLeft).width(ViewerTopRowHeight).fillMaxHeight()
+                else Modifier.fillMaxWidth().height(ViewerTopRowHeight))
+                    .then(rowsFade)
+                    .photoMorphEdge(top = true)
+            ) {
                 if (onGoToGallery != null) {
                     Box(
                         Modifier
@@ -854,13 +871,13 @@ fun GalleryDetailScreen(
                 Text(
                     text = "${pagerState.currentPage + 1} / ${photos.size}",
                     color = SonyText,
-                    fontSize = 14.sp,
+                    fontSize = if (landscape) 12.5.sp else 14.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     style = LocalTextStyle.current.copy(shadow = ViewfinderTextShadow),
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .padding(start = ViewerTopRowHeight)
+                    // A long count may run past the 48 dp edge, centred under the grid icon.
+                    modifier = (if (landscape) Modifier.align(Alignment.TopCenter).padding(top = 44.dp).wrapContentWidth(unbounded = true)
+                    else Modifier.align(Alignment.CenterStart).padding(start = ViewerTopRowHeight))
                         .graphicsLayer { alpha = countAlpha }
                 )
                 val tags = viewerTags(
@@ -886,47 +903,68 @@ fun GalleryDetailScreen(
                     val rating = PhotoStacks.ratingOf(tagPhoto.metadata)
                     val tint = if (rating > 0) SonyText else com.hinnka.mycamera.ui.components.SonyDim
                     val ratingLabel = stringResource(R.string.viewer_rating)
-                    Row(
-                        Modifier
-                            .align(Alignment.CenterEnd)
-                            .size(ViewerTopRowHeight)
-                            .clickable(role = Role.Button, onClickLabel = ratingLabel) {
-                                haptics.buzz(VibrationHelper.LIGHT_TICK_MS)
-                                val next = (rating + 1) % 6
-                                viewModel.setStackProperty(currentPhoto, PhotoStacks.RATING_PROPERTY, next.takeIf { it > 0 }?.toString())
-                                explain(
-                                    if (next > 0) context.getString(R.string.viewer_rated, next)
-                                    else context.getString(R.string.viewer_rating_cleared)
-                                )
-                            },
-                        horizontalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterHorizontally),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+                    val ratingModifier = Modifier
+                        .align(if (landscape) Alignment.BottomCenter else Alignment.CenterEnd)
+                        .size(ViewerTopRowHeight)
+                        .clickable(role = Role.Button, onClickLabel = ratingLabel) {
+                            haptics.buzz(VibrationHelper.LIGHT_TICK_MS)
+                            val next = (rating + 1) % 6
+                            viewModel.setStackProperty(currentPhoto, PhotoStacks.RATING_PROPERTY, next.takeIf { it > 0 }?.toString())
+                            explain(
+                                if (next > 0) context.getString(R.string.viewer_rated, next)
+                                else context.getString(R.string.viewer_rating_cleared)
+                            )
+                        }
+                    val ratingContent = @Composable {
                         ShadowedLineIcon(if (rating > 0) AppIcons.StarFilled else AppIcons.StarLine, 22.dp, tint)
                         if (rating > 0) {
                             Text(
                                 "$rating",
                                 color = tint,
-                                fontSize = 13.sp,
+                                fontSize = if (landscape) 12.sp else 13.sp,
                                 fontWeight = FontWeight.Medium,
                                 style = LocalTextStyle.current.copy(shadow = ViewfinderTextShadow),
                             )
                         }
                     }
+                    if (landscape) {
+                        Column(
+                            ratingModifier,
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) { ratingContent() }
+                    } else {
+                        Row(
+                            ratingModifier,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterHorizontally),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) { ratingContent() }
+                    }
                 }
                 ViewerTagRow(
                     tags,
-                    Modifier
-                        .align(Alignment.Center)
-                        .widthIn(max = screenWidth - ViewerTopRowHeight * 2)
+                    if (landscape) {
+                        // Between the position under the grid icon and the rating.
+                        Modifier.align(Alignment.Center).padding(top = 68.dp, bottom = 52.dp)
+                    } else {
+                        Modifier
+                            .align(Alignment.Center)
+                            .widthIn(max = screenWidth - ViewerTopRowHeight * 2)
+                    },
+                    vertical = landscape,
                 )
             }
         }
 
         // Item row, above the actions: the version strip, and the render chip (above the strip when both show).
         // In full view the strip stays, dimmed and lower, so versions can still be switched.
+        // Turned, the item row is a column beside the action column; in full view the strip moves out to the edge.
         val stripBottom by animateDpAsState(
-            if (overlaysHidden) VersionStripRest - FullViewStripDrop else VersionStripRest,
+            when {
+                landscape -> if (overlaysHidden) 0.dp else ViewerActionRowHeight
+                overlaysHidden -> VersionStripRest - FullViewStripDrop
+                else -> VersionStripRest
+            },
             label = "stripBottom"
         )
         val stripAlpha by animateFloatAsState(if (overlaysHidden) 0.6f else 1f, label = "stripAlpha")
@@ -960,44 +998,70 @@ fun GalleryDetailScreen(
                     }
                     .photoMorphEdge(top = false)
             ) {
-                val stripModifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = stripBottom)
-                    .alpha(stripAlpha)
-                    .then(rowsFade)
-                if (versions.size > 1) {
-                    PhotoVersionStrip(
-                        versions = versions,
-                        selectedId = photo.id,
-                        runningIds = runningIds,
-                        waitingIds = renderPendingIds - runningIds,
-                        viewModel = viewModel,
-                        onSelect = ::showVersion,
-                        modifier = stripModifier,
-                        ghost = ghost,
-                    )
-                } else if (ghost && hasStrip) {
-                    val selectedFrame = burstFrame[photo.id]?.takeIf { it in ghostBurst.files.indices } ?: ghostBurst.cover
-                    PhotoStrip(
-                        items = ghostBurst.files,
-                        selectedIndex = selectedFrame,
-                        key = { it.name },
-                        onSelect = {},
-                        modifier = stripModifier,
-                        ghost = true,
-                    ) { index, file -> BurstTile(file, index, ghostBurst.cover, selectedFrame) }
-                } else if (!ghost && burstStrip) {
-                    val burstId = photo.id
-                    val selectedFrame = shownFrameIndex ?: burst.cover
-                    PhotoStrip(
-                        items = burst.files,
-                        selectedIndex = selectedFrame,
-                        key = { it.name },
-                        onSelect = { if (it == burst.cover) burstFrame.remove(burstId) else burstFrame[burstId] = it },
-                        modifier = stripModifier,
-                    ) { index, file -> BurstTile(file, index, burst.cover, selectedFrame) }
+                // The strip goes at the bottom, or turned, below the processing column.
+                val strip = @Composable { stripModifier: Modifier ->
+                    if (versions.size > 1) {
+                        PhotoVersionStrip(
+                            versions = versions,
+                            selectedId = photo.id,
+                            runningIds = runningIds,
+                            waitingIds = renderPendingIds - runningIds,
+                            viewModel = viewModel,
+                            onSelect = ::showVersion,
+                            modifier = stripModifier,
+                            ghost = ghost,
+                            vertical = landscape,
+                        )
+                    } else if (ghost && hasStrip) {
+                        val selectedFrame = burstFrame[photo.id]?.takeIf { it in ghostBurst.files.indices } ?: ghostBurst.cover
+                        PhotoStrip(
+                            items = ghostBurst.files,
+                            selectedIndex = selectedFrame,
+                            key = { it.name },
+                            onSelect = {},
+                            modifier = stripModifier,
+                            ghost = true,
+                            vertical = landscape,
+                        ) { index, file -> BurstTile(file, index, ghostBurst.cover, selectedFrame) }
+                    } else if (!ghost && burstStrip) {
+                        val burstId = photo.id
+                        val selectedFrame = shownFrameIndex ?: burst.cover
+                        PhotoStrip(
+                            items = burst.files,
+                            selectedIndex = selectedFrame,
+                            key = { it.name },
+                            onSelect = { if (it == burst.cover) burstFrame.remove(burstId) else burstFrame[burstId] = it },
+                            modifier = stripModifier,
+                            vertical = landscape,
+                        ) { index, file -> BurstTile(file, index, burst.cover, selectedFrame) }
+                    }
                 }
-                if (!overlaysHidden && viewModel.selectedTab == GalleryTab.PHOTON) {
+                val showsChip = !overlaysHidden && viewModel.selectedTab == GalleryTab.PHOTON
+                if (landscape) {
+                    Column(
+                        Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = stripBottom + navRight)
+                            .width(ViewerItemRowHeight)
+                            .fillMaxHeight(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        if (showsChip) {
+                            RenderQueuePhotoChip(
+                                photoId = photo.id,
+                                onClick = onOpenRenderQueue,
+                                modifier = rowsFade,
+                                processingInCamera = photo.id in processingPhotos,
+                                ghost = ghost,
+                                vertical = true,
+                            )
+                        }
+                        if (hasStrip) strip(Modifier.weight(1f).alpha(stripAlpha).then(rowsFade))
+                    }
+                } else {
+                    strip(Modifier.align(Alignment.BottomCenter).padding(bottom = stripBottom).alpha(stripAlpha).then(rowsFade))
+                }
+                if (!landscape && showsChip) {
                     Box(
                         Modifier
                             .align(Alignment.BottomCenter)
@@ -1018,7 +1082,7 @@ fun GalleryDetailScreen(
 
                 val videoPlayer = videoPreviewHandle.player
                 if (photo.isVideo && ghost) {
-                    if (!overlaysHidden) GhostTimeline(photo.durationMs ?: 0L, rowsFade)
+                    if (!overlaysHidden) GhostTimeline(photo.durationMs ?: 0L, rowsFade, band)
                 } else if (photo.isVideo && videoPlayer != null) {
                     key(photo.id, videoPlayer) {
                         VideoTransport(
@@ -1031,6 +1095,7 @@ fun GalleryDetailScreen(
                             keepsSlowPart = viewModel.selectedTab == GalleryTab.PHOTON,
                             explain = ::explain,
                             fade = rowsFade,
+                            band = band,
                         )
                     }
                 }
@@ -1048,7 +1113,7 @@ fun GalleryDetailScreen(
         val renderFailedIds by RenderQueue.failedPhotoIds.collectAsState()
         val chipAboveStrip = currentVersions.size > 1 &&
             currentPhoto?.id?.let { it in runningIds || it in renderPendingIds || it in renderFailedIds } == true
-        if (showShootingInfo && currentPhoto != null && tagPhoto != null && !overlaysHidden && !isCurrentPhotoProcessing && !chipAboveStrip) {
+        if (showShootingInfo && currentPhoto != null && tagPhoto != null && !overlaysHidden && !isCurrentPhotoProcessing && (landscape || !chipAboveStrip)) {
             val meta = tagPhoto.metadata ?: currentPhoto.metadata
             val settings = if (currentPhoto.isVideo) {
                 val w = meta?.videoWidth?.takeIf { it > 0 } ?: currentPhoto.width
@@ -1070,8 +1135,14 @@ fun GalleryDetailScreen(
             Row(
                 Modifier
                     .align(Alignment.BottomStart)
+                    .then(if (band != null) Modifier.padding(band) else Modifier)
                     .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, bottom = ViewerActionRowHeight + ViewerItemRowHeight)
+                    // Turned: on the band's bottom edge; a video's sits above its frame pills, speed and timeline.
+                    .padding(start = 16.dp, end = 16.dp, bottom = when {
+                        !landscape -> ViewerActionRowHeight + ViewerItemRowHeight
+                        currentPhoto.isVideo -> TurnedPillsBottom + 48.dp
+                        else -> 10.dp
+                    })
                     .height(28.dp)
                     .then(rowsFade)
                     .photoMorphEdge(top = false),
@@ -1137,21 +1208,26 @@ fun GalleryDetailScreen(
                 ViewerAction(AppIcons.DotsLine, stringResource(R.string.viewer_more), whyNot()) { showMoreSheet = true },
             )
             Box(
-                Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .height(ViewerActionRowHeight)
+                (if (landscape) Modifier.align(Alignment.CenterEnd).padding(end = navRight).width(ViewerActionRowHeight).fillMaxHeight()
+                else Modifier.align(Alignment.BottomStart).fillMaxWidth().height(ViewerActionRowHeight))
                     .then(rowsFade)
                     .photoMorphEdge(top = false)
             ) {
                 actions.forEachIndexed { slot, action ->
                     if (action == null) return@forEachIndexed
-                    // Slots centred at x 40, 110, 180, 250, 320 of a 360 dp width.
+                    // Slots centred at x 40, 110, 180, 250, 320 of a 360 dp width; turned, stacked 70 dp apart, centred.
                     Box(
-                        Modifier
-                            .offset(x = screenWidth * ((40f + 70f * slot) / 360f) - ViewerActionSlotWidth / 2)
-                            .width(ViewerActionSlotWidth)
-                            .fillMaxHeight()
+                        (if (landscape) {
+                            Modifier
+                                .offset(y = (screenHeight - ViewerActionSlotWidth * 5) / 2 + ViewerActionSlotWidth * slot)
+                                .height(ViewerActionSlotWidth)
+                                .fillMaxWidth()
+                        } else {
+                            Modifier
+                                .offset(x = screenWidth * ((40f + 70f * slot) / 360f) - ViewerActionSlotWidth / 2)
+                                .width(ViewerActionSlotWidth)
+                                .fillMaxHeight()
+                        })
                             .clickable(role = Role.Button) {
                                 val why = action.whyNot
                                 if (why != null) {
@@ -1167,9 +1243,7 @@ fun GalleryDetailScreen(
                             label = action.label,
                             tint = SonyText,
                             shadowed = true,
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .padding(top = 11.dp)
+                            modifier = (if (landscape) Modifier.align(Alignment.Center) else Modifier.align(Alignment.TopCenter).padding(top = 11.dp))
                                 .alpha(if (action.whyNot == null) 1f else 0.38f)
                                 .autoRotate()
                         )
@@ -1178,7 +1252,8 @@ fun GalleryDetailScreen(
             }
         }
 
-        // Undo for the last delete, above the action row, while the view model keeps that delete waiting.
+        // Undo for the last delete, above the action row (turned: across the picture band's bottom edge), while the
+        // view model keeps that delete waiting.
         UndoBanner(
             message = viewModel.pendingDelete?.message,
             restartKey = viewModel.pendingDelete,
@@ -1188,9 +1263,8 @@ fun GalleryDetailScreen(
                     allPhotos.indexOfFirst { it.id == restored.id }.takeIf { it >= 0 }?.let(viewModel::setCurrentPhoto)
                 }
             },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = ViewerActionRowHeight),
+            modifier = if (band != null) Modifier.align(Alignment.BottomStart).padding(band)
+            else Modifier.align(Alignment.BottomCenter).padding(bottom = ViewerActionRowHeight),
         )
     }
 
@@ -1938,9 +2012,12 @@ private fun BoxScope.VideoTransport(
     keepsSlowPart: Boolean,
     explain: (String) -> Unit,
     fade: Modifier,
+    // Turned: the picture band between the side columns, which the controls keep to; null upright.
+    band: PaddingValues? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val inBand = if (band != null) Modifier.padding(band) else Modifier
     var positionMs by remember { mutableLongStateOf(player.currentPosition) }
     var durationMs by remember { mutableLongStateOf(rate?.durationMs ?: 0L) }
     var paused by remember { mutableStateOf(true) }
@@ -2004,6 +2081,7 @@ private fun BoxScope.VideoTransport(
     Box(
         Modifier
             .align(Alignment.Center)
+            .then(inBand)
             .then(fade)
             .size(64.dp)
             .clip(CircleShape)
@@ -2040,7 +2118,8 @@ private fun BoxScope.VideoTransport(
         Row(
             Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = ViewerActionRowHeight + ViewerItemRowHeight + 48.dp)
+                .then(inBand)
+                .padding(bottom = if (band != null) TurnedPillsBottom else ViewerActionRowHeight + ViewerItemRowHeight + 48.dp)
                 .height(48.dp)
                 .then(fade),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2070,7 +2149,11 @@ private fun BoxScope.VideoTransport(
     Row(
         Modifier
             .align(Alignment.BottomEnd)
-            .padding(bottom = ViewerActionRowHeight + ViewerItemRowHeight)
+            .then(inBand)
+            .padding(
+                end = if (band != null) 16.dp else 0.dp,
+                bottom = if (band != null) TurnedTimelineBottom + 48.dp else ViewerActionRowHeight + ViewerItemRowHeight,
+            )
             .height(40.dp)
             .then(fade),
         verticalAlignment = Alignment.CenterVertically
@@ -2120,12 +2203,13 @@ private fun BoxScope.VideoTransport(
         }
     }
 
-    // The timeline takes the whole width: scrubbing on a small screen needs every millimetre.
+    // The timeline takes the whole width (turned, the band's): scrubbing on a small screen needs every millimetre.
     val slowPartHint = stringResource(R.string.video_slow_part_hint)
     Box(
         Modifier
             .align(Alignment.BottomCenter)
-            .padding(bottom = ViewerActionRowHeight + (ViewerItemRowHeight - 48.dp) / 2)
+            .then(inBand)
+            .padding(bottom = if (band != null) TurnedTimelineBottom else ViewerActionRowHeight + (ViewerItemRowHeight - 48.dp) / 2)
             .fillMaxWidth()
             .height(48.dp)
             .then(fade)
@@ -2191,11 +2275,12 @@ private fun BoxScope.VideoTransport(
 
 /** A neighbouring video's timeline during a swipe: the track and its length, nothing to touch. */
 @Composable
-private fun BoxScope.GhostTimeline(durationMs: Long, fade: Modifier) {
+private fun BoxScope.GhostTimeline(durationMs: Long, fade: Modifier, band: PaddingValues?) {
     Box(
         Modifier
             .align(Alignment.BottomCenter)
-            .padding(bottom = ViewerActionRowHeight + (ViewerItemRowHeight - 48.dp) / 2)
+            .then(if (band != null) Modifier.padding(band) else Modifier)
+            .padding(bottom = if (band != null) TurnedTimelineBottom else ViewerActionRowHeight + (ViewerItemRowHeight - 48.dp) / 2)
             .fillMaxWidth()
             .height(48.dp)
             .then(fade)
@@ -2308,13 +2393,24 @@ private fun ZoomableImage(
     var bitmap by remember { mutableStateOf(if (isActive && morph?.active == true) viewModel.takeEditHandoff() else null) }
     val density = LocalDensity.current
     val windowSize = LocalWindowInfo.current.containerSize
-    // Pictures no taller than 3:4 rest between the top row and the item row; taller ones, or any picture while
-    // the screen or window is turned, fit the whole screen.
-    val rests = OrientationObserver.uiRotationDegrees == 0f && windowSize.height > windowSize.width &&
-        bitmap?.let { it.width >= it.height * 0.749f } == true
-    val contentScale = remember(rests, density) {
-        if (rests) with(density) { RestScale(ViewerTopRowHeight.toPx(), (ViewerItemRowHeight + ViewerActionRowHeight).toPx()) }
-        else ContentScale.Fit
+    // Pictures no taller than 3:4 rest between the top row and the item row; taller ones fit the whole screen.
+    // In a turned window every picture rests between the side columns. Turned UI over an upright window fits.
+    val turned = windowSize.width > windowSize.height
+    val rests = OrientationObserver.uiRotationDegrees == 0f &&
+        bitmap?.let { turned || (windowSize.height > windowSize.width && it.width >= it.height * 0.749f) } == true
+    val contentScale = remember(rests, turned, density) {
+        val side = with(density) { ViewerTopRowHeight.toPx() }
+        val far = with(density) { (ViewerItemRowHeight + ViewerActionRowHeight).toPx() }
+        when {
+            !rests -> ContentScale.Fit
+            turned -> RestScale(left = side, right = far)
+            else -> RestScale(top = side, bottom = far)
+        }
+    }
+    val alignment = when {
+        !rests -> Alignment.Center
+        turned -> SideRestAlignment
+        else -> RestAlignment
     }
     // Enough zoom for the double-tap's pixel-for-pixel view, in either screen orientation.
     val oneToOneZoom = bitmap?.takeIf { it.width > 0 && it.height > 0 && windowSize.width > 0 && windowSize.height > 0 }?.let { shown ->
@@ -2427,7 +2523,7 @@ private fun ZoomableImage(
                 image = remember(it) { BitmapImageSource(it) },
                 contentDescription = displayPhoto.displayName,
                 contentScale = contentScale,
-                alignment = if (rests) RestAlignment else Alignment.Center,
+                alignment = alignment,
                 state = zoomableState,
                 onClick = { onTap() },
                 onLongClick = {},
@@ -2441,7 +2537,7 @@ private fun ZoomableImage(
                 image = remember(it) { BitmapImageSource(it) },
                 contentDescription = displayPhoto.displayName,
                 contentScale = contentScale,
-                alignment = if (rests) RestAlignment else Alignment.Center,
+                alignment = alignment,
                 state = zoomableState,
                 onClick = { onTap() },
                 onLongClick = {},
@@ -2456,7 +2552,7 @@ private fun ZoomableImage(
             val src = Size(it.width.toFloat(), it.height.toFloat())
             val scale = contentScale.computeScaleFactor(src, Size(box.width.toFloat(), box.height.toFloat()))
             val drawn = IntSize((src.width * scale.scaleX).roundToInt(), (src.height * scale.scaleY).roundToInt())
-            val at = (if (rests) RestAlignment else Alignment.Center).align(drawn, box, LayoutDirection.Ltr)
+            val at = alignment.align(drawn, box, LayoutDirection.Ltr)
             PhotoMorphProxy(it, Rect(at.x.toFloat(), at.y.toFloat(), (at.x + drawn.width).toFloat(), (at.y + drawn.height).toFloat()))
         }
 
@@ -2643,6 +2739,10 @@ private val ViewerActionSlotWidth = 70.dp
 // The strip centred in the item row, and how far it drops in full view.
 private val VersionStripRest = ViewerActionRowHeight + (ViewerItemRowHeight - VersionStripHeight) / 2
 private val FullViewStripDrop = 56.dp
+// Turned, a video's controls stack up from the band's bottom edge: the timeline 8 dp up, ¼× / 1× and sound on it,
+// and the paused frame pills above those.
+private val TurnedTimelineBottom = 8.dp
+private val TurnedPillsBottom = 100.dp
 
 /** A burst frame's strip tile: the frame, its number (a star on the cover), and the edge line when chosen. */
 @Composable
@@ -2659,18 +2759,26 @@ private class BurstFrames(val photoId: String? = null, val files: List<File> = e
 private class ViewerAction(val icon: ImageVector, val label: String, val whyNot: String?, val onClick: () -> Unit)
 
 /**
- * Fits a picture between the top row and the item row ([top] and [bottom] px kept free), as wide as the screen
- * allows; with [RestAlignment] it rests in that band rather than in the screen's middle.
+ * Fits a picture between the top row and the item row ([top] and [bottom] px kept free), or turned between the
+ * side columns ([left] and [right]); with [RestAlignment] or [SideRestAlignment] it rests in that band rather than
+ * in the screen's middle.
  */
-private class RestScale(private val top: Float, private val bottom: Float) : ContentScale {
+private class RestScale(
+    private val left: Float = 0f,
+    private val top: Float = 0f,
+    private val right: Float = 0f,
+    private val bottom: Float = 0f,
+) : ContentScale {
     override fun computeScaleFactor(srcSize: Size, dstSize: Size): ScaleFactor {
-        val scale = min(dstSize.width / srcSize.width, (dstSize.height - top - bottom) / srcSize.height)
+        val scale = min((dstSize.width - left - right) / srcSize.width, (dstSize.height - top - bottom) / srcSize.height)
         return ScaleFactor(scale, scale)
     }
 }
 
 // The free space above and below the picture split as the rows are: 48 above, 120 below.
 private val RestAlignment = BiasAlignment(0f, 48f / 168f * 2f - 1f)
+// Turned, the same split left and right: 48 on the left, 120 on the right.
+private val SideRestAlignment = BiasAlignment(48f / 168f * 2f - 1f, 0f)
 
 // Double-tap shows the preview pixel for pixel, never less than a clear step in.
 private const val MinDoubleTapZoom = 1.25f
