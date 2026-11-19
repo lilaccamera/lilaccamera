@@ -2267,6 +2267,9 @@
     <string name="video_save_frame">Save frame</string>
     <string name="video_frame_saved">Frame saved as a photo</string>
     <string name="video_frame_save_failed">Couldn’t save the frame</string>
+    <string name="video_unplayable">This video can’t be played</string>
+    <string name="viewer_frame_tools">Frame step and Save frame</string>
+    <string name="viewer_frame_tools_line">Buttons on a paused video</string>
     <string name="gallery_paste_look">Paste look</string>
     <string name="gallery_re_render">Re-render</string>
     <string name="gallery_export_lilac_only">Export is for Lilac’s own photos</string>

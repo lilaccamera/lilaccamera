@@ -79,6 +79,7 @@ import kotlinx.coroutines.launch
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import com.hinnka.mycamera.video.SlowedCopy
@@ -277,6 +278,7 @@ fun GalleryDetailScreen(
     var showHdrStrengthPanel by remember { mutableStateOf(false) }
     val videoPreviewHandle = remember { VideoPreviewHandle() }
     var showShootingInfo by rememberPreference(UserPreferences::viewerShootingInfo)
+    var showFrameTools by rememberPreference(UserPreferences::viewerFrameTools)
 
     val currentColorSpace = remember { mutableStateOf<ColorSpace?>(null) }
     // The current page's picture and its photo id, handed to the editor as it opens.
@@ -607,10 +609,11 @@ fun GalleryDetailScreen(
             viewModel.getGridThumbnailBitmap(photo)?.let { runCatching { ImageHistogram.fromBitmap(it).binsFor(CurveChannel.MASTER) }.getOrNull() }
         }
     }
-    val currentVideoRate by produceState<SlowedCopy.Rate?>(null, currentPhoto?.id) {
-        value = null
-        value = currentPhoto?.takeIf { it.isVideo }?.let { viewModel.videoRate(it) }
+    // Held with its clip's id: produceState keeps the old value until it reruns, which would give a new clip the last one's ¼×.
+    val loadedVideoRate by produceState<Pair<String, SlowedCopy.Rate>?>(null, currentPhoto?.id) {
+        value = currentPhoto?.takeIf { it.isVideo }?.let { it.id to viewModel.videoRate(it) }
     }
+    val currentVideoRate = loadedVideoRate?.takeIf { it.first == currentPhoto?.id }?.second
     val canShowHdr = !isCurrentPhotoProcessing &&
         currentPhoto != null &&
         currentPhoto.isImage &&
@@ -1163,6 +1166,7 @@ fun GalleryDetailScreen(
                             slowed = (videoSlowedChoice ?: currentVideoRate?.isHighFrameRate) == true,
                             onSlowed = { videoSlowedChoice = it },
                             barsShown = !overlaysHidden,
+                            frameTools = showFrameTools,
                             keepsSlowPart = viewModel.selectedTab == GalleryTab.PHOTON,
                             explain = ::explain,
                             fade = rowsFade,
@@ -1659,6 +1663,18 @@ fun GalleryDetailScreen(
                     onClick = { showShootingInfo = !showShootingInfo }
                 )
             )
+            if (currentPhoto.isVideo) {
+                add(
+                    GalleryMoreAction(
+                        group = MoreGroup.SHOW,
+                        icon = AppIcons.PhotoDownLine,
+                        text = context.getString(R.string.viewer_frame_tools),
+                        secondLine = context.getString(R.string.viewer_frame_tools_line),
+                        checked = showFrameTools,
+                        onClick = { showFrameTools = !showFrameTools }
+                    )
+                )
+            }
 
             if (currentPhoto.isImage && (viewModel.selectedTab == GalleryTab.PHOTON || currentPhoto.relatedPhoto != null)) {
                 add(
@@ -1964,16 +1980,16 @@ private fun VideoDetailPlayer(
         if (exoPlayer != null && isActive) {
             delay(150) // Wait for transitions to complete and EGL surface to be fully ready
             PLog.d("VideoDetailPlayer", "Preparing and starting ExoPlayer.")
-            if (viewModel.videoRate(photo).isHighFrameRate) {
-                exoPlayer.setPlaybackSpeed(1f / SlowedCopy.FACTOR)
-                exoPlayer.volume = 0f
-            }
+            // Read before playback so the transport, which sets speed and sound, knows a 120 fps clip by READY.
+            viewModel.videoRate(photo)
             exoPlayer.setMediaItem(MediaItem.fromUri(mediaUri))
             exoPlayer.prepare()
             exoPlayer.playWhenReady = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
         }
     }
 
+    // The last aspect ratio given to the PlayerView, so recompositions don't re-layout it.
+    val appliedAspect = remember(exoPlayer) { floatArrayOf(0f) }
     if (exoPlayer != null) {
       Box(modifier = modifier.autoRotate(matchParentSize = true)) {
         AndroidView(
@@ -1982,19 +1998,23 @@ private fun VideoDetailPlayer(
                 playerView
             },
             update = {
-                PLog.d("VideoDetailPlayer", "Updating PlayerView with player.")
+                // These setters skip unchanged values, so a rerun lays nothing out again.
                 it.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                // With effects, Player.videoSize may remain UNKNOWN. Fit the Surface itself
-                // to the effect output so a paused/ended buffer has no baked-in letterboxing
-                // that would be stretched when autoRotate swaps the container dimensions.
-                videoOutputSize?.let { size ->
-                    it.findViewById<AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame)
-                        .setAspectRatio(size.width.toFloat() / size.height)
-                }
                 // VideoTransport draws the controls in the viewer's rows.
                 it.useController = false
                 it.setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
                 it.isVisible = true
+                // With effects, Player.videoSize may remain UNKNOWN. Fit the Surface itself
+                // to the effect output so a paused/ended buffer has no baked-in letterboxing
+                // that would be stretched when autoRotate swaps the container dimensions.
+                videoOutputSize?.let { size ->
+                    val aspect = size.width.toFloat() / size.height
+                    if (aspect != appliedAspect[0]) {
+                        appliedAspect[0] = aspect
+                        PLog.d("VideoTransport", "PlayerView aspect ${size.width}x${size.height} for ${photo.id}")
+                        it.findViewById<AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame).setAspectRatio(aspect)
+                    }
+                }
             },
             modifier = Modifier.fillMaxSize()
         )
@@ -2046,6 +2066,8 @@ private fun BoxScope.VideoTransport(
     slowed: Boolean,
     onSlowed: (Boolean) -> Unit,
     barsShown: Boolean,
+    // The frame step and Save frame pills, chosen in More.
+    frameTools: Boolean,
     // Only a Lilac video keeps its slow part; a System tab item changes this playback only.
     keepsSlowPart: Boolean,
     explain: (String) -> Unit,
@@ -2062,9 +2084,15 @@ private fun BoxScope.VideoTransport(
     // Where the finger holds the timeline; shown instead of the player's position, which lags at sync frames.
     var scrubMs by remember { mutableStateOf<Long?>(null) }
     var muted by remember { mutableStateOf(false) }
+    // The frame loop runs only while frames advance; idle, buffering and ended follow the listener.
+    var playing by remember { mutableStateOf(player.isPlaying) }
+    // Played or scrubbed once: before that a paused clip is still opening, and the pills would flash.
+    var engaged by remember { mutableStateOf(false) }
+    var unplayable by remember { mutableStateOf(false) }
+    // Set below after each composition; the listener and the loop outlive this composition's [slowed] and call the latest one.
+    val applySpeedNow = remember { arrayOf<(String) -> Unit>({}) }
     DisposableEffect(player) {
         fun read() {
-            // Not before the player is prepared, so the paused-only pills don't flash while a clip opens.
             paused = player.playbackState != Player.STATE_IDLE &&
                 (!player.playWhenReady || player.playbackState == Player.STATE_ENDED)
             player.duration.takeIf { it != C.TIME_UNSET && it > 0 }?.let { durationMs = it }
@@ -2072,6 +2100,33 @@ private fun BoxScope.VideoTransport(
         }
         val listener = object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) = read()
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                playing = isPlaying
+                if (isPlaying) engaged = true
+            }
+            override fun onPlaybackStateChanged(state: Int) {
+                // A broken recording reports no length; READY or ENDED without one never shows a picture.
+                val noLength = player.duration == C.TIME_UNSET || player.duration <= 0
+                if ((state == Player.STATE_READY || state == Player.STATE_ENDED) && noLength) {
+                    PLog.w("VideoTransport", "No playable length for ${photo.id} (state $state)")
+                    unplayable = true
+                }
+                when (state) {
+                    Player.STATE_READY -> applySpeedNow[0]("ready")
+                    Player.STATE_ENDED -> {
+                        PLog.d("VideoTransport", "ENDED at ${player.currentPosition} ms of ${photo.id}")
+                        // ENDED keeps playWhenReady, so any later seek (a frame step, a scrub) would play the tail again.
+                        player.playWhenReady = false
+                    }
+                }
+            }
+            override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
+                PLog.d("VideoTransport", "Player speed now ${playbackParameters.speed}")
+            }
+            override fun onPlayerError(error: PlaybackException) {
+                PLog.w("VideoTransport", "Cannot play ${photo.id}: ${error.errorCodeName}")
+                unplayable = true
+            }
         }
         player.addListener(listener)
         read()
@@ -2091,30 +2146,47 @@ private fun BoxScope.VideoTransport(
     }
     fun inSlowPart(ms: Long) = !hasSlowPart || slowPart?.let { ms in it.first..it.second } ?: true
 
-    fun applySpeed() {
-        val speed = if (slowed && inSlowPart(positionMs)) 1f / SlowedCopy.FACTOR else 1f
-        if (player.playbackParameters.speed != speed) player.setPlaybackSpeed(speed)
+    // The only place that sets speed and sound: ¼× only inside the slow part in ¼× mode, otherwise 1×.
+    fun applySpeed(reason: String) {
+        val speed = if (slowed && inSlowPart(player.currentPosition)) 1f / SlowedCopy.FACTOR else 1f
         // Slowed clips play without sound, as their slowed copies do.
-        player.volume = if (slowed || muted) 0f else 1f
+        val volume = if (slowed || muted) 0f else 1f
+        if (player.playbackParameters.speed == speed && player.volume == volume) return
+        PLog.d("VideoTransport", "Speed $speed, volume $volume ($reason) at ${player.currentPosition} ms of ${photo.id}")
+        player.playbackParameters = PlaybackParameters(speed)
+        player.volume = volume
     }
-    LaunchedEffect(player, slowed, muted, slowPart) { applySpeed() }
-    // The loop outlives this composition's [slowed]; it calls the latest one.
-    val applySpeedNow by rememberUpdatedState(::applySpeed)
-    LaunchedEffect(player, paused) {
-        if (paused) return@LaunchedEffect
+    SideEffect { applySpeedNow[0] = ::applySpeed }
+    LaunchedEffect(player, slowed, muted, slowPart) { applySpeed("choice") }
+    LaunchedEffect(player, playing) {
+        if (!playing) return@LaunchedEffect
         while (true) {
             withFrameNanos { }
             positionMs = player.currentPosition
-            applySpeedNow()
+            // Changes speed only on crossing a slow part's end.
+            applySpeedNow[0]("slow part edge")
         }
     }
-    fun seek(ms: Long, exact: Boolean) {
+    fun seek(ms: Long, exact: Boolean, reason: String) {
+        PLog.d("VideoTransport", "Seek to $ms ms ($reason) of ${photo.id}")
+        engaged = true
         player.setSeekParameters(if (exact) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC)
         player.seekTo(ms)
         positionMs = ms
     }
     val shownMs = scrubMs ?: positionMs
 
+    if (unplayable) {
+        Text(
+            stringResource(R.string.video_unplayable),
+            color = SonyText,
+            fontSize = 15.sp,
+            textAlign = TextAlign.Center,
+            style = LocalTextStyle.current.copy(shadow = ViewfinderTextShadow),
+            modifier = Modifier.align(Alignment.Center).then(inBand).padding(horizontal = 32.dp)
+        )
+        return
+    }
     if (!barsShown) return
     Box(
         Modifier
@@ -2125,8 +2197,9 @@ private fun BoxScope.VideoTransport(
             .clip(CircleShape)
             .background(Color.Black.copy(alpha = 0.45f))
             .clickable(role = Role.Button, onClickLabel = stringResource(if (paused) R.string.video_play else R.string.video_pause)) {
+                PLog.d("VideoTransport", "${if (paused) "Play" else "Pause"} by user at ${player.currentPosition} ms of ${photo.id}")
                 if (paused) {
-                    if (player.playbackState == Player.STATE_ENDED) seek(0L, exact = true)
+                    if (player.playbackState == Player.STATE_ENDED) seek(0L, exact = true, reason = "play after end")
                     player.play()
                 } else {
                     player.pause()
@@ -2137,8 +2210,9 @@ private fun BoxScope.VideoTransport(
         Icon(if (paused) AppIcons.PlayLine else AppIcons.PauseLine, contentDescription = null, tint = SonyText, modifier = Modifier.size(30.dp))
     }
 
-    // Paused: step a frame either way, or keep this one as a photo.
-    if (paused) {
+    // Paused after playing or a scrub: step a frame either way, or keep this one as a photo. Not gated on buffering,
+    // as each frame step rebuffers and the pills would blink; a clip still loading is not yet [engaged].
+    if (frameTools && paused && engaged) {
         val frameRate by produceState(30, photo.id) {
             value = withContext(Dispatchers.IO) { (GalleryManager.loadMetadata(context, photo.id) ?: photo.metadata)?.frameRate }
                 ?.takeIf { it > 0 } ?: 30
@@ -2146,7 +2220,7 @@ private fun BoxScope.VideoTransport(
         fun step(frames: Int) {
             // To the first millisecond of the frame, so rounding never shows the same frame twice.
             val frame = Math.round(shownMs * frameRate / 1000.0) + frames
-            seek(kotlin.math.ceil(frame * 1000.0 / frameRate).toLong().coerceIn(0L, durationMs), exact = true)
+            seek(kotlin.math.ceil(frame * 1000.0 / frameRate).toLong().coerceIn(0L, durationMs), exact = true, reason = "frame step $frames")
         }
         var savingFrame by remember { mutableStateOf(false) }
         val busy = stringResource(R.string.viewer_busy)
@@ -2271,7 +2345,7 @@ private fun BoxScope.VideoTransport(
                     fun follow() {
                         if (end == null) {
                             scrubMs = msAt(x)
-                            seek(msAt(x), exact = false)
+                            seek(msAt(x), exact = false, reason = "scrub")
                         } else {
                             val (a, b) = slowPart ?: (0L to durationMs)
                             val gap = durationMs / 20
@@ -2290,7 +2364,7 @@ private fun BoxScope.VideoTransport(
                         }
                     } finally {
                         if (end == null) {
-                            seek(msAt(x), exact = true)
+                            seek(msAt(x), exact = true, reason = "scrub end")
                             scrubMs = null
                         } else {
                             val part = slowPart

@@ -281,6 +281,8 @@ class UserPreferences internal constructor(
     var addToLilacExplained by bool("add_to_lilac_explained", false)
     // The viewer's settings line and histogram on the picture; off keeps the picture clear.
     var viewerShootingInfo by bool("viewer_shooting_info", false)
+    // Frame step and Save frame pills on a paused video; off keeps the picture clear.
+    var viewerFrameTools by bool("viewer_frame_tools", false)
     var enableLogicalMultiCameraDiscovery by bool("enable_logical_multi_camera_discovery", false)  // 是否自动探测逻辑多摄物理镜头绑定
 
     // ---------------------------------------------------------------------------------------
