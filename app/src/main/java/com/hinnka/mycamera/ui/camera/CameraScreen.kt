@@ -2083,27 +2083,28 @@ fun CameraScreen(
             val topEdgeMarks = buildList {
                 if (isVideoMode) {
                     if (state.videoConfig.torchEnabled && state.videoCapabilities.supportsTorch && !state.slowMotion.enabled) {
-                        add(TopEdgeMark(AppIcons.BulbLine))
+                        add(TopEdgeMark(Badge(AppIcons.BulbLine)))
                     }
-                    if (state.videoConfig.logProfile != VideoLogProfile.OFF) add(TopEdgeMark(null, "LOG"))
-                    if (state.slowMotion.enabled && !state.videoRecordingState.isRecording && !state.videoRecordingState.isProcessing) add(TopEdgeMark(null, stringResource(R.string.slow_motion_mark)))
+                    if (state.videoConfig.logProfile != VideoLogProfile.OFF) add(TopEdgeMark(Badge(text = "LOG")))
+                    if (state.slowMotion.enabled && !state.videoRecordingState.isRecording && !state.videoRecordingState.isProcessing) add(TopEdgeMark(Badge(AppIcons.GaugeLine, sub = stringResource(R.string.quick_on).uppercase())))
                 } else {
-                    if (useLivePhoto) add(TopEdgeMark(AppIcons.LivePhotoLine))
-                    if (state.timerSeconds > 0) add(TopEdgeMark(AppIcons.StopwatchLine, "${state.timerSeconds}s"))
-                    smileSizeLetter(viewModel.smileThreshold)?.let { add(TopEdgeMark(AppIcons.MoodSmileLine, it)) }
+                    if (useLivePhoto) add(TopEdgeMark(Badge(AppIcons.LivePhotoLine)))
+                    if (state.timerSeconds > 0) add(TopEdgeMark(Badge(AppIcons.StopwatchLine, sub = "${state.timerSeconds}s")))
+                    smileSizeLetter(viewModel.smileThreshold)?.let { add(TopEdgeMark(Badge(AppIcons.MoodSmileLine, sub = it))) }
                     // The front camera has no LED: only its screen flash shows, whatever else the flash mode says.
                     if (state.usesScreenFlash || (state.flashMode != 0 && state.videoCapabilities.supportsTorch)) {
-                        add(TopEdgeMark(if (state.flashMode == 2) AppIcons.BulbLine else AppIcons.BoltLine))
+                        add(TopEdgeMark(if (state.flashMode == 2) Badge(AppIcons.BulbLine) else Badge(AppIcons.BoltLine, sub = stringResource(R.string.quick_on).uppercase())))
                     }
                     if (useMultipleExposure) {
-                        add(TopEdgeMark(AppIcons.MultiExposureLine, "$exposureCount/${multipleExposureState.targetCount}"))
+                        add(TopEdgeMark(Badge(AppIcons.MultiExposureLine, sub = "$exposureCount/${multipleExposureState.targetCount}")))
                     }
                     // Frames don't show on the live picture, so a mark says one will be added.
-                    if (viewModel.currentFrameId != null) add(TopEdgeMark(AppIcons.FrameLine))
+                    if (viewModel.currentFrameId != null) add(TopEdgeMark(Badge(AppIcons.FrameLine)))
                     // Exposure held by a half-pressed camera key, like a camera's AE lock mark.
-                    if (state.exposureHeld) add(TopEdgeMark(null, "AE-L", ModeAmber))
+                    if (state.exposureHeld) add(TopEdgeMark(Badge(text = "AE-L")))
                     ambientLux?.takeIf { it < LuxMarkBelow }?.let { lux ->
-                        add(TopEdgeMark(AppIcons.SunLowLine, stringResource(R.string.night_lux_mark, lux.roundToInt())))
+                        // A reading, not a setting: white.
+                        add(TopEdgeMark(Badge(AppIcons.SunLowLine, text = stringResource(R.string.night_lux_mark, lux.roundToInt())), Color.White))
                     }
                 }
             }

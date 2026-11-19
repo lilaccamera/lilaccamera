@@ -398,8 +398,8 @@ internal fun CameraTopSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(72.dp)
-                    .padding(horizontal = 6.dp),
+                    .height(56.dp)
+                    .padding(horizontal = 4.dp),
                 content = everydayItems
             )
             Spacer(Modifier.height(6.dp))
@@ -948,26 +948,31 @@ private fun RowScope.PhotoEverydayItems(
         label = "${stringResource(R.string.quick_live)} ${if (useLivePhoto) on else off}",
         active = useLivePhoto,
         onClick = onLivePhotoToggle,
-        modifier = itemModifier
-    ) { color -> Icon(AppIcons.LivePhotoLine, contentDescription = null, tint = color, modifier = Modifier.size(24.dp)) }
+        modifier = itemModifier,
+        badge = Badge(if (useLivePhoto) AppIcons.LivePhotoLine else AppIcons.LivePhotoOffLine)
+    )
     EverydayItem(
         label = "${stringResource(R.string.timer)} ${if (timerSeconds > 0) "${timerSeconds}s" else off}",
         active = timerSeconds > 0,
         onClick = onTimerToggle,
-        modifier = itemModifier
-    ) { color -> Icon(AppIcons.StopwatchLine, contentDescription = null, tint = color, modifier = Modifier.size(24.dp)) }
+        modifier = itemModifier,
+        badge = if (timerSeconds > 0) Badge(AppIcons.StopwatchLine, sub = "${timerSeconds}s") else Badge(AppIcons.StopwatchOffLine)
+    )
     EverydayItem(
         label = "${stringResource(R.string.smile)} ${smileSizeLetter(smileThreshold) ?: off}",
         active = smileThreshold > 0,
         onClick = onSmileToggle,
-        modifier = itemModifier
-    ) { color -> Icon(AppIcons.MoodSmileLine, contentDescription = null, tint = color, modifier = Modifier.size(24.dp)) }
+        modifier = itemModifier,
+        badge = Badge(AppIcons.MoodSmileLine, sub = smileSizeLetter(smileThreshold) ?: off.uppercase())
+    )
     EverydayItem(
         label = aspectRatio.getDisplayName(),
         active = false,
+        plain = true,
         onClick = onAspectClick,
-        modifier = itemModifier
-    ) { color -> AspectIcon(aspectRatio, color) }
+        modifier = itemModifier,
+        badge = Badge(text = aspectRatio.getDisplayName(), framed = true)
+    )
     EverydayItem(
         label = "${stringResource(R.string.flash)} ${
             when (flashMode) {
@@ -979,19 +984,13 @@ private fun RowScope.PhotoEverydayItems(
         active = flashAvailable && flashMode != 0,
         enabled = flashAvailable,
         onClick = onFlashToggle,
-        modifier = itemModifier
-    ) { color ->
-        Icon(
-            imageVector = when (flashMode) {
-                1 -> AppIcons.BoltLine
-                2 -> AppIcons.BulbLine
-                else -> AppIcons.BoltOffLine
-            },
-            contentDescription = null,
-            tint = color,
-            modifier = Modifier.size(24.dp)
-        )
-    }
+        modifier = itemModifier,
+        badge = when (flashMode) {
+            1 -> Badge(AppIcons.BoltLine, sub = on.uppercase())
+            2 -> Badge(AppIcons.BulbLine)
+            else -> Badge(AppIcons.BoltOffLine)
+        }
+    )
 }
 
 @Composable
@@ -1007,24 +1006,38 @@ private fun RowScope.VideoEverydayItems(
     onSlowMotionToggle: () -> Unit,
     itemModifier: Modifier
 ) {
-    val resolution = if (videoConfig.resolution == VideoResolutionPreset.MAX) {
-        stringResource(R.string.video_resolution_max)
-    } else {
-        videoConfig.resolution.displayName
+    // As Sony labels video sizes.
+    val resolution = when (videoConfig.resolution) {
+        VideoResolutionPreset.MAX -> stringResource(R.string.video_resolution_max)
+        VideoResolutionPreset.UHD_2160P -> "4K"
+        VideoResolutionPreset.FHD_1080P -> "FHD"
+        VideoResolutionPreset.HD_720P -> "HD"
     }
-    EverydayItem(stringResource(R.string.photo_resolution), active = false, onClick = onResolutionClick, modifier = itemModifier) { color ->
-        EverydayValue(resolution, color)
-    }
-    EverydayItem(stringResource(R.string.quick_fps), active = false, onClick = onFpsClick, modifier = itemModifier) { color ->
-        EverydayValue(videoConfig.fps.fps.toString(), color)
-    }
+    EverydayItem(
+        "${stringResource(R.string.photo_resolution)} $resolution",
+        active = false,
+        plain = true,
+        onClick = onResolutionClick,
+        modifier = itemModifier,
+        badge = Badge(text = resolution)
+    )
+    EverydayItem(
+        "${stringResource(R.string.quick_fps)} ${videoConfig.fps.fps}",
+        active = false,
+        plain = true,
+        onClick = onFpsClick,
+        modifier = itemModifier,
+        badge = Badge(text = videoConfig.fps.fps.toString())
+    )
     if (slowMotionAvailable) {
+        val state = stringResource(if (slowMotionEnabled) R.string.quick_on else R.string.quick_off)
         EverydayItem(
-            label = "${stringResource(R.string.slow_motion_chip)} ${stringResource(if (slowMotionEnabled) R.string.quick_on else R.string.quick_off)}",
+            label = "${stringResource(R.string.slow_motion_chip)} $state",
             active = slowMotionEnabled,
             onClick = onSlowMotionToggle,
-            modifier = itemModifier
-        ) { color -> EverydayValue("960", color) }
+            modifier = itemModifier,
+            badge = Badge(AppIcons.GaugeLine, sub = state.uppercase())
+        )
     }
     val torch = videoConfig.torchEnabled
     EverydayItem(
@@ -1033,33 +1046,34 @@ private fun RowScope.VideoEverydayItems(
         // Slow motion's camera session carries no torch and no stabilisation setting.
         enabled = videoCapabilities.supportsTorch && !slowMotionEnabled,
         onClick = onTorchToggle,
-        modifier = itemModifier
-    ) { color ->
-        Icon(
-            imageVector = if (torch) AppIcons.BulbLine else AppIcons.BulbOffLine,
-            contentDescription = null,
-            tint = color,
-            modifier = Modifier.size(24.dp)
-        )
-    }
+        modifier = itemModifier,
+        badge = Badge(if (torch) AppIcons.BulbLine else AppIcons.BulbOffLine)
+    )
     val modes = videoCapabilities.availableStabilizationModes
     if (modes.size > 1) {
+        val mode = videoStabilizationModeLabel(videoConfig.stabilizationMode)
         EverydayItem(
-            label = stringResource(R.string.quick_stabilise),
+            label = "${stringResource(R.string.quick_stabilise)} $mode",
             active = false,
+            plain = true,
             enabled = !slowMotionEnabled,
             onClick = {
                 onStabilizationModeChange(modes[(modes.indexOf(videoConfig.stabilizationMode) + 1).mod(modes.size)])
             },
-            modifier = itemModifier
-        ) { color -> EverydayValue(videoStabilizationModeLabel(videoConfig.stabilizationMode), color) }
+            modifier = itemModifier,
+            badge = Badge(text = mode.uppercase())
+        )
     }
 }
 
 // Everyday items turn with the phone in the sheet; on the picture's top edge they stay upright.
 private val LocalEverydayTurns = staticCompositionLocalOf { true }
 
-/** An everyday setting: its icon or value, and its name with the value underneath. Turns with the phone. */
+/**
+ * An everyday setting, its value drawn in its icon as Sony's camera does: grey when off, orange when on, light
+ * for a [plain] value that is never off (aspect, size, frame rate). [label] names it for screen readers.
+ * Turns with the phone.
+ */
 @Composable
 private fun EverydayItem(
     label: String,
@@ -1067,15 +1081,17 @@ private fun EverydayItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    big: @Composable (Color) -> Unit
+    plain: Boolean = false,
+    badge: Badge
 ) {
     val color = when {
-        !enabled -> SheetText.copy(alpha = 0.35f)
+        !enabled -> SonySecondary.copy(alpha = 0.35f)
         active -> ModeAmber
-        else -> SheetText
+        plain -> SonyText
+        else -> SonySecondary
     }
-    // The item floats on the picture, so a pressed box would look out of place: the icon and its name
-    // shrink and dim under the finger instead.
+    // The item floats on the picture, so a pressed box would look out of place: the icon shrinks and dims
+    // under the finger instead.
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val press by animateFloatAsState(if (pressed) 1f else 0f, tween(if (pressed) 60 else 180), label = "press")
@@ -1088,49 +1104,20 @@ private fun EverydayItem(
                 enabled = enabled,
                 role = Role.Button,
                 onClick = onClick
-            ),
+            )
+            .semantics { contentDescription = label },
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            modifier = Modifier
+        Box(
+            Modifier
                 .graphicsLayer {
                     scaleX = 1f - 0.12f * press
                     scaleY = 1f - 0.12f * press
                     alpha = 1f - 0.4f * press
                 }
-                .then(if (LocalEverydayTurns.current) Modifier.autoRotate() else Modifier),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(5.dp)
-        ) {
-            Box(Modifier.height(24.dp), contentAlignment = Alignment.Center) { big(color) }
-            Text(
-                text = label,
-                color = if (active || !enabled) color else SheetDim,
-                fontSize = 10.5.sp,
-                maxLines = 1,
-                softWrap = false,
-                style = SheetTextStyle
-            )
-        }
+                .then(if (LocalEverydayTurns.current) Modifier.autoRotate() else Modifier)
+        ) { BadgeView(badge, color) }
     }
-}
-
-@Composable
-private fun EverydayValue(text: String, color: Color) {
-    Text(text = text, color = color, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, style = SheetTextStyle)
-}
-
-/** An outline of the frame in that ratio, upright, at most 22 dp. */
-@Composable
-private fun AspectIcon(ratio: AspectRatio, color: Color) {
-    val w = ratio.heightRatio.toFloat()
-    val h = ratio.widthRatio.toFloat()
-    val scale = 22f / maxOf(w, h)
-    Box(
-        Modifier
-            .size(width = maxOf(8f, w * scale).dp, height = (h * scale).dp)
-            .border(1.5.dp, color, RoundedCornerShape(2.dp))
-    )
 }
 
 @Composable
@@ -1152,7 +1139,7 @@ internal val GroupGold = Color(0xFFB28E02)
 
 /**
  * A group of rows: [title] with a bar in [color] on top (a tap on it opens [onGuide] when given, shown by an
- * info mark), parted from the group above by a line unless [divider] is false.
+ * info mark), parted from the group above by a line unless [divider] is false. A title runs into that line.
  */
 @Composable
 internal fun QuickGroup(
@@ -1162,13 +1149,14 @@ internal fun QuickGroup(
     divider: Boolean = true,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    if (divider) GroupDivider() else Spacer(Modifier.height(6.dp))
+    if (!divider) Spacer(Modifier.height(6.dp)) else if (title == null) GroupDivider()
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         if (title != null) {
             val guideDescription = stringResource(R.string.mode_guide_open, title)
             Row(
                 modifier = Modifier
-                    .height(28.dp)
+                    .fillMaxWidth()
+                    .height(24.dp)
                     .then(
                         if (onGuide != null) {
                             Modifier.clickable(onClick = onGuide).semantics { contentDescription = guideDescription }
@@ -1191,6 +1179,8 @@ internal fun QuickGroup(
                 if (onGuide != null) {
                     Icon(AppIcons.InfoLine, contentDescription = null, tint = SonySecondary, modifier = Modifier.padding(start = 5.dp).size(12.dp))
                 }
+                // The title sits on the line between groups, so it costs no height of its own.
+                if (divider) Box(Modifier.padding(start = 8.dp).weight(1f).height(1.dp).background(SonyDivider))
             }
         }
         content()
@@ -1246,8 +1236,8 @@ private fun QuickTabPages(tab: Int, onTab: (Int) -> Unit, pages: List<@Composabl
     val position by animateFloatAsState(tab.toFloat(), tween(250, easing = FastOutSlowInEasing), label = "qTab")
     val currentTab by rememberUpdatedState(tab)
     val currentOnTab by rememberUpdatedState(onTab)
-    QuickScroll(
-        Modifier.pointerInput(pages.size) {
+    Box(
+        Modifier.fillMaxWidth().clipToBounds().pointerInput(pages.size) {
             val swipe = 50.dp.toPx()
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
@@ -1270,10 +1260,9 @@ private fun QuickTabPages(tab: Int, onTab: (Int) -> Unit, pages: List<@Composabl
             }
         }
     ) {
-        Box(Modifier.fillMaxWidth().clipToBounds()) {
-            pages.forEachIndexed { i, page ->
-                Column(Modifier.fillMaxWidth().graphicsLayer { translationX = (i - position) * size.width }) { page() }
-            }
+        // Each page scrolls on its own, so a short page never scrolls.
+        pages.forEachIndexed { i, page ->
+            QuickScroll(Modifier.fillMaxWidth().graphicsLayer { translationX = (i - position) * size.width }) { page() }
         }
     }
 }
