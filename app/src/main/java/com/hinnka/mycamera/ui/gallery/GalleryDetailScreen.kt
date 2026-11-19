@@ -107,6 +107,11 @@ import me.saket.telephoto.zoomable.rememberZoomableState
 import kotlinx.coroutines.withContext
 import me.saket.telephoto.zoomable.DoubleClickToZoomListener
 import java.io.File
+import android.graphics.BitmapFactory
+import androidx.compose.ui.res.vectorResource
+import com.hinnka.mycamera.ui.components.EdgeRingStyle
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import kotlin.math.min
 import kotlin.math.roundToInt
 import com.hinnka.mycamera.ui.icons.AppIcons
@@ -204,7 +209,6 @@ fun GalleryDetailScreen(
     fromGrid: Boolean = false,
     onGoToCamera: (() -> Unit)? = null,
     onEdit: () -> Unit,
-    onViewBurst: ((String) -> Unit)? = null,
     onOpenRenderQueue: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -234,6 +238,7 @@ fun GalleryDetailScreen(
     // A tap on the photo hides the bars and labels; the version strip only dims.
     var overlaysHidden by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
+    var exportAllFrames by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
     var isExportingDng by remember { mutableStateOf(false) }
     var isCopyingSettings by remember { mutableStateOf(false) }
@@ -520,10 +525,41 @@ fun GalleryDetailScreen(
         val photo = currentPhoto?.takeIf { it.isImage } ?: return@produceState
         value = withContext(Dispatchers.IO) { viewModel.isRawMedia(photo) }
     }
-    val burstCount by produceState(0, currentPhoto?.id) {
-        value = 0
-        val photo = currentPhoto?.takeIf { it.isImage && it.isBurstPhoto } ?: return@produceState
-        value = withContext(Dispatchers.IO) { GalleryManager.getBurstPhotos(context, photo.id).size }
+    // The shown burst's frames, oldest first, and the cover among them: the frame the photo's own file is a copy of.
+    var burstReload by remember { mutableIntStateOf(0) }
+    val burst by produceState(BurstFrames(), currentPhoto?.id, currentPhoto?.id?.let { viewModel.photoRefreshKeys[it] }, burstReload) {
+        val photo = currentPhoto?.takeIf { it.isImage && it.isBurstPhoto }
+        if (photo == null) {
+            value = BurstFrames()
+            return@produceState
+        }
+        value = withContext(Dispatchers.IO) {
+            val files = GalleryManager.getBurstPhotos(context, photo.id)
+            val main = GalleryManager.getPhotoFile(context, photo.id)
+            BurstFrames(photo.id, files, if (main.exists()) files.indexOfFirst { it.length() == main.length() } else -1)
+        }
+    }
+    // The frame shown per burst photo; none, or the cover, shows the burst photo itself.
+    val burstFrame = remember { mutableStateMapOf<String, Int>() }
+    // A burst that is also a stack shows its versions in the strip instead of its frames.
+    val burstStrip = burst.photoId == currentPhoto?.id && burst.files.isNotEmpty() &&
+        photos.getOrNull(pagerState.currentPage)?.let(stacks::versionsOf).orEmpty().size <= 1
+    val shownFrameIndex = burst.photoId?.let { burstFrame[it] }
+        ?.takeIf { burstStrip && it in burst.files.indices && it != burst.cover }
+    val shownFrame = shownFrameIndex?.let(burst.files::get)
+    // Burst frames export one by one, each decoded whole, as copies of the photo named burstN.
+    fun exportBurstFrames(photo: MediaData, files: List<File>, indices: List<Int>, onDone: (Boolean) -> Unit) {
+        scope.launch(Dispatchers.IO) {
+            var allSuccess = true
+            indices.forEach { i ->
+                val success = suspendCancellableCoroutine { continuation ->
+                    val bitmap = BitmapFactory.decodeFile(files[i].path)
+                    viewModel.exportPhoto(photo, bitmap, suffix = "burst${i + 1}") { continuation.resume(it) }
+                }
+                if (!success) allSuccess = false
+            }
+            withContext(Dispatchers.Main) { onDone(allSuccess) }
+        }
     }
     val currentVideoRate by produceState<SlowedCopy.Rate?>(null, currentPhoto?.id) {
         value = null
@@ -674,6 +710,7 @@ fun GalleryDetailScreen(
                                             photo.relatedPhoto == null
                                         ZoomableImage(
                                             photo = photo,
+                                            frame = if (page == pagerState.currentPage) shownFrame else null,
                                             colorSpace = currentColorSpace,
                                             showOrigin = showOrigin || forceSystemOrigin,
                                             isActive = page == pagerState.currentPage,
@@ -737,14 +774,13 @@ fun GalleryDetailScreen(
                     version = currentPhoto,
                     versions = currentVersions,
                     isRaw = tagIsRaw,
-                    burstCount = if (isCurrentPhotoProcessing) 0 else burstCount,
+                    burstCount = if (isCurrentPhotoProcessing || burst.photoId != currentPhoto.id) 0 else burst.files.size,
                     canPlayLive = !isCurrentPhotoProcessing && currentPhoto.isImage && currentPhoto.isMotionPhoto,
                     livePlaying = liveTagStack != null,
                     hdrOn = if (canShowHdr) viewModel.isManualHdrEnhanceEnabled(currentPhoto) else null,
                     videoRate = currentVideoRate,
                     videoSlowed = (videoSpeeds[currentPhoto.id] ?: 1f) < 1f,
                     onLive = { liveTagStack = PhotoStacks.stackIdOf(currentPhoto) },
-                    onBurst = { onViewBurst?.invoke(currentPhoto.id) },
                     onHdr = { showHdrStrengthPanel = !showHdrStrengthPanel },
                     explain = ::explain,
                     accent = com.hinnka.mycamera.ui.camera.ModeAmber,
@@ -766,8 +802,8 @@ fun GalleryDetailScreen(
             label = "stripBottom"
         )
         val stripAlpha by animateFloatAsState(if (overlaysHidden) 0.6f else 1f, label = "stripAlpha")
-        val hasStrip = currentPhoto != null && currentVersions.size > 1
-        if (currentPhoto != null && hasStrip) {
+        val hasStrip = currentPhoto != null && (currentVersions.size > 1 || burstStrip)
+        if (currentPhoto != null && currentVersions.size > 1) {
             val renderPendingIds by RenderQueue.pendingPhotoIds.collectAsState()
             val renderStatus by RenderQueue.status.collectAsState()
             val runningIds = processingPhotos.keys +
@@ -785,6 +821,24 @@ fun GalleryDetailScreen(
                     .alpha(stripAlpha)
                     .then(rowsFade)
             )
+        } else if (currentPhoto != null && burstStrip) {
+            val burstId = currentPhoto.id
+            val selectedFrame = shownFrameIndex ?: burst.cover
+            PhotoStrip(
+                items = burst.files,
+                selectedIndex = selectedFrame,
+                key = { it.name },
+                onSelect = { if (it == burst.cover) burstFrame.remove(burstId) else burstFrame[burstId] = it },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = stripBottom)
+                    .alpha(stripAlpha)
+                    .then(rowsFade)
+            ) { index, file ->
+                AsyncImage(model = file, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                if (index == burst.cover) StripLabel("★", com.hinnka.mycamera.ui.camera.ModeAmber) else StripLabel("${index + 1}")
+                if (index == selectedFrame) StripRing(EdgeRingStyle.SOLID, SonyText)
+            }
         }
         if (currentPhoto != null && !overlaysHidden && viewModel.selectedTab == GalleryTab.PHOTON) {
             Box(
@@ -826,7 +880,9 @@ fun GalleryDetailScreen(
                     currentPhoto?.let(viewModel::sharePhoto)
                 },
                 if (currentPhoto?.isImage == true || currentPhoto?.isVideo == true) {
-                    ViewerAction(AppIcons.AdjustmentsLine, stringResource(R.string.edit), whyNot(preparingEditPhotoId == currentPhoto.id)) {
+                    val editWhyNot = whyNot(preparingEditPhotoId == currentPhoto.id)
+                        ?: shownFrame?.let { stringResource(R.string.viewer_burst_edit_cover) }
+                    ViewerAction(AppIcons.AdjustmentsLine, stringResource(R.string.edit), editWhyNot) {
                         viewModel.prepareCurrentPhotoForEdit(
                             index = allPhotos.indexOf(currentPhoto),
                             onReady = onEdit,
@@ -995,6 +1051,28 @@ fun GalleryDetailScreen(
                         },
                         onCancel = { showDeleteDialog = false },
                     )
+                } else if (burstStrip) {
+                    DeleteVersionsButtons(
+                        thisVersionText = stringResource(R.string.viewer_delete_this_frame),
+                        allVersionsText = stringResource(R.string.viewer_delete_whole_burst),
+                        onDeleteThis = {
+                            val frame = shownFrame
+                            if (frame == null) {
+                                explain(context.getString(R.string.viewer_burst_cover_delete))
+                            } else {
+                                scope.launch {
+                                    withContext(Dispatchers.IO) { frame.delete() }
+                                    burstReload++
+                                }
+                            }
+                            showDeleteDialog = false
+                        },
+                        onDeleteAll = {
+                            currentPhoto?.let { viewModel.requestDeletePhoto(it, resolveDeleteExported()) }
+                            showDeleteDialog = false
+                        },
+                        onCancel = { showDeleteDialog = false },
+                    )
                 } else {
                     TextButton(
                         onClick = {
@@ -1007,7 +1085,7 @@ fun GalleryDetailScreen(
                 }
             },
             dismissButton = {
-                if (deleteVersions.size <= 1) {
+                if (deleteVersions.size <= 1 && !burstStrip) {
                     TextButton(onClick = { showDeleteDialog = false }) {
                         Text(stringResource(R.string.cancel))
                     }
@@ -1023,9 +1101,9 @@ fun GalleryDetailScreen(
     if (showExportDialog && !isCurrentPhotoProcessing) {
         AlertDialog(
             onDismissRequest = { showExportDialog = false },
-            title = { Text(stringResource(R.string.export)) },
+            title = { Text(stringResource(if (exportAllFrames) R.string.viewer_export_all_frames else R.string.export)) },
             text = {
-                Text(stringResource(R.string.export_confirm))
+                Text(stringResource(if (exportAllFrames) R.string.export_all_confirm else R.string.export_confirm))
             },
             confirmButton = {
                 TextButton(
@@ -1033,13 +1111,19 @@ fun GalleryDetailScreen(
                         showExportDialog = false
                         currentPhoto?.let {
                             isSaving = true
-                            viewModel.exportPhoto(it) { success ->
+                            val all = exportAllFrames
+                            val onDone = { success: Boolean ->
                                 isSaving = false
                                 if (success) {
-                                    Toast.makeText(context, R.string.export_success, Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, if (all) R.string.export_all_success else R.string.export_success, Toast.LENGTH_SHORT).show()
                                 } else {
                                     Toast.makeText(context, R.string.export_failed, Toast.LENGTH_SHORT).show()
                                 }
+                            }
+                            when {
+                                all -> exportBurstFrames(it, burst.files, burst.files.indices.toList(), onDone)
+                                shownFrameIndex != null -> exportBurstFrames(it, burst.files, listOf(shownFrameIndex), onDone)
+                                else -> viewModel.exportPhoto(it, onComplete = onDone)
                             }
                         }
                     }
@@ -1338,6 +1422,7 @@ fun GalleryDetailScreen(
     // 更多 BottomSheet
     if (showMoreSheet && currentPhoto != null && !isCurrentPhotoProcessing) {
         val moreSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val exportAllIcon = ImageVector.vectorResource(R.drawable.ic_output_all)
         val moreActions = buildList {
             add(
                 GalleryMoreAction(
@@ -1357,6 +1442,38 @@ fun GalleryDetailScreen(
                         isLoading = isSaving,
                         enabled = !isCopyingSettings && !isPastingSettings,
                         onClick = {
+                            exportAllFrames = false
+                            showExportDialog = true
+                        }
+                    )
+                )
+            }
+            if (burstStrip) {
+                add(
+                    GalleryMoreAction(
+                        icon = AppIcons.StarBorder,
+                        text = context.getString(R.string.burst_use_as_cover),
+                        onClick = {
+                            val frame = shownFrame
+                            if (frame == null) {
+                                explain(context.getString(R.string.viewer_burst_already_cover))
+                            } else {
+                                showMoreSheet = false
+                                viewModel.setMainBurstPhoto(currentPhoto, frame) { success ->
+                                    explain(context.getString(if (success) R.string.burst_cover_set else R.string.burst_cover_failed))
+                                }
+                            }
+                        }
+                    )
+                )
+                add(
+                    GalleryMoreAction(
+                        icon = exportAllIcon,
+                        text = context.getString(R.string.viewer_export_all_frames),
+                        isLoading = isSaving,
+                        enabled = !isCopyingSettings && !isPastingSettings,
+                        onClick = {
+                            exportAllFrames = true
                             showExportDialog = true
                         }
                     )
@@ -2205,6 +2322,8 @@ private fun SpeedPill(slowed: Boolean, onClick: () -> Unit, modifier: Modifier =
 @Composable
 private fun ZoomableImage(
     photo: MediaData,
+    // A burst frame shown in place of the photo's own picture.
+    frame: File?,
     colorSpace: MutableState<ColorSpace?>,
     showOrigin: Boolean,
     isActive: Boolean,
@@ -2214,6 +2333,7 @@ private fun ZoomableImage(
     onZoomChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var isLoading by remember { mutableStateOf(true) }
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     val density = LocalDensity.current
@@ -2270,8 +2390,28 @@ private fun ZoomableImage(
         val settledMaxEdge = (max(windowSize.width, windowSize.height) * 1.5f).toInt().coerceIn(1024, 4096)
         val previewMaxEdge = if (isSettledActive) settledMaxEdge else 1024
 
-        LaunchedEffect(displayPhoto.id, metadataHash, showOrigin, refreshKey, isSettledActive) {
+        LaunchedEffect(displayPhoto.id, metadataHash, showOrigin, refreshKey, isSettledActive, frame) {
             isLoading = bitmap == null
+            if (frame != null) {
+                // The frame goes through the photo's own look, capped like the photo; it has no HDR detail.
+                val frameBitmap = withContext(Dispatchers.IO) {
+                    GalleryManager.loadBitmap(context, Uri.fromFile(frame), previewMaxEdge)
+                }
+                bitmap = frameBitmap?.let {
+                    viewModel.getPreviewBitmap(
+                        displayPhoto,
+                        showOrigin = showOrigin,
+                        bitmap = it,
+                        ignoreDenoise = !isSettledActive,
+                        maxEdge = previewMaxEdge,
+                        cacheTag = frame.name
+                    )
+                }
+                colorSpace.value = bitmap?.colorSpace
+                isLoading = bitmap == null
+                hdrBitmap = null
+                return@LaunchedEffect
+            }
             bitmap = viewModel.getPreviewBitmap(
                 displayPhoto,
                 showOrigin = showOrigin,
@@ -2504,8 +2644,8 @@ private class BitmapImageSource(private val bitmap: Bitmap) : ZoomableImageSourc
     }
 }
 
-/** The version strip's height: 48 dp thumbnails plus 8 dp padding above and below. */
-private val VersionStripHeight = 64.dp
+/** The version strip's height: 44 dp tiles plus 6 dp above and below. */
+private val VersionStripHeight = 56.dp
 
 // The viewer's rows, from the screen's edges: the top row, the item row above the action row.
 private val ViewerTopRowHeight = 48.dp
@@ -2515,6 +2655,9 @@ private val ViewerActionSlotWidth = 70.dp
 // The strip centred in the item row, and how far it drops in full view.
 private val VersionStripRest = ViewerActionRowHeight + (ViewerItemRowHeight - VersionStripHeight) / 2
 private val FullViewStripDrop = 56.dp
+
+/** A burst photo's frames, oldest first, and which one the photo's own file copies (-1: none). */
+private class BurstFrames(val photoId: String? = null, val files: List<File> = emptyList(), val cover: Int = -1)
 
 /** One control on the action row; [whyNot] is said instead when it cannot run now. */
 private class ViewerAction(val icon: ImageVector, val label: String, val whyNot: String?, val onClick: () -> Unit)

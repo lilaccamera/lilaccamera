@@ -2180,4 +2180,11 @@
     <string name="viewer_tag_version_hint">%1$s: %2$s. Pick another version below.</string>
     <string name="viewer_version_original">the first render of the RAW</string>
     <string name="viewer_version_photo_mode">Photo mode</string>
+    <string name="viewer_tag_burst_hint">Burst of %1$d. Pick a frame in the strip; the cover shows in the gallery.</string>
+    <string name="viewer_burst_edit_cover">Edit works on the cover. Use More › Use as cover first.</string>
+    <string name="viewer_burst_already_cover">This frame is already the cover.</string>
+    <string name="viewer_burst_cover_delete">The cover goes only with the whole burst. Use another frame as cover first.</string>
+    <string name="viewer_export_all_frames">Export all frames</string>
+    <string name="viewer_delete_this_frame">This frame</string>
+    <string name="viewer_delete_whole_burst">Whole burst</string>
 </resources>

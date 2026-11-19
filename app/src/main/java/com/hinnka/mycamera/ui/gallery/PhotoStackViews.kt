@@ -7,6 +7,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,7 +31,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import com.hinnka.mycamera.ui.camera.CondensedBold
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.Icons
@@ -59,9 +63,6 @@ import com.hinnka.mycamera.ui.camera.ModeAmber
 import com.hinnka.mycamera.ui.components.EdgeRingStyle
 import com.hinnka.mycamera.ui.components.SonyText
 import com.hinnka.mycamera.ui.components.ThumbnailEdgeRing
-import com.hinnka.mycamera.ui.components.ThumbnailGloss
-import com.hinnka.mycamera.ui.components.ThumbnailSize
-import com.hinnka.mycamera.ui.components.ThumbnailTile
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
@@ -75,12 +76,12 @@ internal fun stackedFrameCount(version: MediaData): Int? = version.metadata
 
 /**
  * The tag in a strip thumbnail's corner: CAM (built-in camera), ×9 (Photo mode stack, JPG if it saved no count),
- * RAW (Pro original), R1, R2… (re-renders by age).
+ * ORIG (Pro original), R1, R2… (re-renders by age).
  */
 internal fun versionTag(version: MediaData, versions: List<MediaData>): String = when {
     PhotoStacks.isCameraJpeg(version.metadata) -> "CAM"
     version.metadata?.captureMode == "jpg_max" -> stackedFrameCount(version)?.let { "×$it" } ?: "JPG"
-    version.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY) == null -> "RAW"
+    version.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY) == null -> "ORIG"
     else -> "R" + (versions.takeWhile { it.id != version.id }
         .count { it.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY) != null } + 1)
 }
@@ -97,7 +98,7 @@ internal data class ViewerTag(
 /**
  * What the viewer's top row says about [photo] (the item's own data; on the system tab the Lilac photo it came
  * from), in a fixed order. [version] is the shown version of a stack of [versions]. Plain tags explain themselves
- * through [explain]; LIVE, BURST and HDR act instead. An on state shows in [accent]. A [burstCount] of 0 or a null [hdrOn] leaves that tag out.
+ * through [explain]; LIVE and HDR act instead. An on state shows in [accent]. A [burstCount] of 0 or a null [hdrOn] leaves that tag out.
  */
 internal fun viewerTags(
     context: Context,
@@ -112,7 +113,6 @@ internal fun viewerTags(
     videoRate: SlowedCopy.Rate?,
     videoSlowed: Boolean,
     onLive: () -> Unit,
-    onBurst: () -> Unit,
     onHdr: () -> Unit,
     explain: (String) -> Unit,
     accent: Color,
@@ -125,7 +125,7 @@ internal fun viewerTags(
     metadata?.multipleExposureFrameCount?.takeIf { metadata.captureMode == "multiple_exposure" && it > 1 }?.let { n ->
         add(ViewerTag("ME ×$n") { explain(context.getString(R.string.viewer_tag_multiple_exposure_hint, n)) })
     }
-    if (burstCount > 0) add(ViewerTag("BURST $burstCount", onClick = onBurst))
+    if (burstCount > 0) add(ViewerTag("BURST $burstCount") { explain(context.getString(R.string.viewer_tag_burst_hint, burstCount)) })
     if (canPlayLive) {
         add(ViewerTag("LIVE", color = if (livePlaying) accent else SonyText, icon = Icons.Filled.PlayArrow, onClick = onLive))
     }
@@ -156,7 +156,7 @@ internal fun viewerTags(
         }
     }
     if (versions.size > 1) {
-        val tag = versionTag(version, versions).let { if (it == "RAW") "ORIG" else it }
+        val tag = versionTag(version, versions)
         // A Photo mode stack's own tag already reads ×9.
         if (none { it.text == tag }) {
             val label = version.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY)
@@ -201,9 +201,8 @@ internal fun ViewerTagRow(tags: List<ViewerTag>, modifier: Modifier = Modifier) 
 }
 
 /**
- * The versions of a stack, oldest first, as a row that scrolls under a fixed centre: the centred thumbnail is the
- * shown version and carries the viewfinder thumbnail's edge line. Flicking switches versions live as each one
- * reaches the centre; a tap centres that one. [runningIds] render now (running arc), [waitingIds] wait (dots).
+ * The versions of a stack, oldest first, in a [PhotoStrip]: the shown version carries the viewfinder thumbnail's
+ * edge line. [runningIds] render now (running arc), [waitingIds] wait (dots).
  */
 @Composable
 internal fun PhotoVersionStrip(
@@ -215,78 +214,120 @@ internal fun PhotoVersionStrip(
     onSelect: (MediaData) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    PhotoStrip(
+        items = versions,
+        selectedIndex = versions.indexOfFirst { it.id == selectedId },
+        key = { it.id },
+        onSelect = { onSelect(versions[it]) },
+        modifier = modifier,
+    ) { _, version ->
+        val thumbnail by produceState<Bitmap?>(null, version.id, version.thumbnailUri) {
+            value = viewModel.getGridThumbnailBitmap(version)
+        }
+        thumbnail?.takeUnless { it.isRecycled }?.let {
+            Image(
+                bitmap = it.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        StripLabel(versionTag(version, versions))
+        when {
+            version.id in runningIds -> StripRing(EdgeRingStyle.RUNNING, ModeAmber)
+            version.id in waitingIds -> StripRing(EdgeRingStyle.DOTTED, SonyText)
+            version.id == selectedId -> StripRing(EdgeRingStyle.SOLID, SonyText)
+        }
+    }
+}
+
+/**
+ * A row of small tiles that scrolls under a fixed centre: the centred tile is the shown one. Flicking switches
+ * live as each tile reaches the centre; a tap centres that one. [tile] draws a tile's picture, label and edge line.
+ */
+@Composable
+internal fun <T> PhotoStrip(
+    items: List<T>,
+    selectedIndex: Int,
+    key: (T) -> Any,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    tile: @Composable BoxScope.(index: Int, item: T) -> Unit,
+) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val currentVersions by rememberUpdatedState(versions)
+    val currentCount by rememberUpdatedState(items.size)
     val currentOnSelect by rememberUpdatedState(onSelect)
-    // Live selection: the item nearest the centre of the row is the shown version.
+    // Live selection: the item nearest the centre of the row is the shown one.
     LaunchedEffect(listState) {
         snapshotFlow {
             val info = listState.layoutInfo
             val centre = (info.viewportStartOffset + info.viewportEndOffset) / 2
             info.visibleItemsInfo.minByOrNull { abs(it.offset + it.size / 2 - centre) }?.index
         }.filterNotNull().distinctUntilChanged().collect { index ->
-            if (listState.isScrollInProgress) currentVersions.getOrNull(index)?.let(currentOnSelect)
+            if (listState.isScrollInProgress && index < currentCount) currentOnSelect(index)
         }
     }
-    // A version chosen elsewhere (opening the photo, deleting one) is brought to the centre.
-    LaunchedEffect(selectedId, versions.size) {
-        val index = versions.indexOfFirst { it.id == selectedId }
-        if (index >= 0 && !listState.isScrollInProgress) listState.scrollToItem(index)
+    // An item chosen elsewhere (opening the photo, deleting one) is brought to the centre.
+    LaunchedEffect(items.getOrNull(selectedIndex)?.let(key), items.size) {
+        if (selectedIndex >= 0 && !listState.isScrollInProgress) listState.scrollToItem(selectedIndex)
     }
-    BoxWithConstraints(modifier.fillMaxWidth()) {
+    BoxWithConstraints(modifier.fillMaxWidth().height(StripHeight), contentAlignment = Alignment.Center) {
         LazyRow(
             state = listState,
             flingBehavior = rememberSnapFlingBehavior(listState),
-            // Half the row on each side, so the first and last versions can reach the centre too.
-            contentPadding = PaddingValues(horizontal = (maxWidth - ThumbnailSize) / 2),
+            // Half the row on each side, so the first and last items can reach the centre too.
+            contentPadding = PaddingValues(horizontal = (maxWidth - StripTileSize) / 2),
             horizontalArrangement = Arrangement.spacedBy(StripGap),
         ) {
-            itemsIndexed(versions, key = { _, version -> version.id }) { index, version ->
-                val selected = version.id == selectedId
-                val thumbnail by produceState<Bitmap?>(null, version.id, version.thumbnailUri) {
-                    value = viewModel.getGridThumbnailBitmap(version)
-                }
-                // The edge line lies over the whole tile, as on the viewfinder thumbnail.
-                Box {
-                ThumbnailTile(
-                    onClick = { scope.launch { listState.animateScrollToItem(index) }; onSelect(version) },
-                    modifier = Modifier.semantics { this.selected = selected }
+            itemsIndexed(items, key = { _, item -> key(item) }) { index, item ->
+                val selected = index == selectedIndex
+                Box(
+                    Modifier
+                        .size(StripTileSize)
+                        .clip(StripTileShape)
+                        .background(StripTileColor)
+                        .semantics { this.selected = selected }
+                        .clickable(role = Role.Button) {
+                            scope.launch { listState.animateScrollToItem(index) }
+                            onSelect(index)
+                        }
                 ) {
-                    thumbnail?.takeUnless { it.isRecycled }?.let {
-                        Image(
-                            bitmap = it.asImageBitmap(),
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        ThumbnailGloss()
-                    }
-                    Text(
-                        text = versionTag(version, versions),
-                        color = Color.White,
-                        fontSize = 8.sp,
-                        lineHeight = 9.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(4.dp)
-                            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(3.dp))
-                            .padding(horizontal = 3.dp)
-                    )
-                }
-                when {
-                    version.id in runningIds -> ThumbnailEdgeRing(EdgeRingStyle.RUNNING, ModeAmber, Modifier.matchParentSize())
-                    version.id in waitingIds -> ThumbnailEdgeRing(EdgeRingStyle.DOTTED, SonyText, Modifier.matchParentSize())
-                    selected -> ThumbnailEdgeRing(EdgeRingStyle.SOLID, SonyText, Modifier.matchParentSize())
-                }
+                    tile(index, item)
                 }
             }
         }
     }
 }
 
+/** A strip tile's label, in its bottom-left corner. */
+@Composable
+internal fun BoxScope.StripLabel(text: String, color: Color = SonyText) {
+    Text(
+        text = text,
+        color = color,
+        style = TextStyle(fontFamily = CondensedBold, fontSize = 9.5.sp, lineHeight = 10.5.sp),
+        modifier = Modifier
+            .align(Alignment.BottomStart)
+            .padding(3.dp)
+            .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(3.dp))
+            .padding(horizontal = 3.dp, vertical = 1.dp)
+    )
+}
+
+/** The viewfinder thumbnail's edge line, on a strip tile's corners. */
+@Composable
+internal fun BoxScope.StripRing(style: EdgeRingStyle, color: Color) {
+    ThumbnailEdgeRing(style, color, Modifier.matchParentSize(), corner = StripTileCorner)
+}
+
+private val StripTileSize = 44.dp
+private val StripTileCorner = 8.dp
+private val StripTileShape = RoundedCornerShape(StripTileCorner)
+private val StripTileColor = Color(0xFF333333)
 private val StripGap = 8.dp
+/** A strip's height: its tiles with 6 dp above and below. */
+private val StripHeight = 56.dp
 
 /** Stacked delete choices for a photo stack with more than one version, Cancel last. */
 @Composable

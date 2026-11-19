@@ -91,7 +91,6 @@ import com.hinnka.mycamera.ui.camera.FilmDetailScreen
 import com.hinnka.mycamera.ui.camera.FilmLibraryScreen
 import com.hinnka.mycamera.ui.camera.ToolboxScreen
 import com.hinnka.mycamera.ui.camera.PuzzleScreen
-import com.hinnka.mycamera.ui.gallery.BurstDetailScreen
 import com.hinnka.mycamera.ui.gallery.GalleryDetailScreen
 import com.hinnka.mycamera.ui.gallery.GalleryScreen
 import com.hinnka.mycamera.ui.gallery.GalleryEditScreen
@@ -127,7 +126,6 @@ object Routes {
     const val CAMERA = "camera"
     const val GALLERY = "gallery"
     const val PHOTO_DETAIL = "photo_detail/{tab}/{index}?photoId={photoId}"
-    const val BURST_DETAIL = "burst_detail/{photoId}"
     const val PHOTO_EDIT = "photo_edit"
     const val SETTINGS = "settings?target={target}"
     const val FILTER_MANAGEMENT = "filter_management?locateLutId={locateLutId}&videoLut={videoLut}"
@@ -166,8 +164,6 @@ object Routes {
             ?.joinToString(prefix = "?", separator = "&")
             .orEmpty()
     }
-
-    fun burstDetail(photoId: String) = "burst_detail/$photoId"
 
     fun frameEditor(frameId: String? = null, imageFrame: Boolean = false): String {
         return buildString {
@@ -906,9 +902,6 @@ fun NavigationHost(
                             onEdit = {
                                 navController.navigate(Routes.PHOTO_EDIT)
                             },
-                            onViewBurst = { photoId ->
-                                navController.navigate(Routes.burstDetail(photoId))
-                            },
                             onOpenRenderQueue = {
                                 navController.navigate(Routes.RENDER_QUEUE)
                             },
@@ -1040,28 +1033,8 @@ fun NavigationHost(
                     onEdit = {
                         navController.navigate(Routes.PHOTO_EDIT)
                     },
-                    onViewBurst = { id ->
-                        navController.navigate(Routes.burstDetail(id))
-                    },
                     onOpenRenderQueue = {
                         navController.navigate(Routes.RENDER_QUEUE)
-                    }
-                )
-            }
-
-            composable(
-                route = Routes.BURST_DETAIL,
-                arguments = listOf(navArgument("photoId") { type = NavType.StringType })
-            ) { backStackEntry ->
-                val photoId = backStackEntry.arguments?.getString("photoId") ?: ""
-                BurstDetailScreen(
-                    viewModel = galleryViewModel,
-                    photoId = photoId,
-                    onEdit = {
-                        navController.navigate(Routes.PHOTO_EDIT)
-                    },
-                    onBack = {
-                        navController.popBackStack()
                     }
                 )
             }

@@ -117,12 +117,12 @@ fun GalleryThumbnail(
     }
 }
 
-/** The gallery thumbnail's size and corner, shared by the viewfinder thumbnail, its edge line and the version strip. */
+/** The gallery thumbnail's size and corner, shared by the viewfinder thumbnail and its edge line. */
 internal val ThumbnailSize = 48.dp
 internal val ThumbnailCorner = 12.dp
 private val ThumbnailInnerCorner = 7.dp
 
-/** The viewfinder's thumbnail tile: one look for the camera's gallery button and the photo view's version strip. */
+/** The viewfinder's thumbnail tile, the camera's gallery button. */
 @Composable
 internal fun ThumbnailTile(
     onClick: (() -> Unit)?,
@@ -185,10 +185,11 @@ internal fun ThumbnailEdgeRing(
     color: Color,
     modifier: Modifier,
     alpha: () -> Float = { 1f },
+    corner: Dp = ThumbnailCorner,
 ) {
     val density = LocalDensity.current
     val strokePx = with(density) { 2.dp.toPx() }
-    val cornerPx = with(density) { ThumbnailCorner.toPx() }
+    val cornerPx = with(density) { corner.toPx() }
     val periodTargetPx = with(density) { 8.dp.toPx() }
     val gapPx = with(density) { 3.5.dp.toPx() }
     // Only animates while running, so a waiting or paused thumbnail asks for no frames.
