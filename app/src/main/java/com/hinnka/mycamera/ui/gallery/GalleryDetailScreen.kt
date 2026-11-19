@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -189,19 +190,6 @@ private class VideoPreviewHandle {
     }
 }
 
-@Composable
-private fun videoExportResolutionLabel(resolution: VideoExportResolution): String {
-    return stringResource(
-        when (resolution) {
-            VideoExportResolution.ORIGINAL -> R.string.export_video_resolution_original
-            VideoExportResolution.UHD_8K -> R.string.export_video_resolution_8k
-            VideoExportResolution.UHD_4K -> R.string.export_video_resolution_4k
-            VideoExportResolution.FHD_1080P -> R.string.export_video_resolution_1080p
-            VideoExportResolution.HD_720P -> R.string.export_video_resolution_720p
-        }
-    )
-}
-
 /**
  * 照片详情界面
  */
@@ -253,6 +241,7 @@ fun GalleryDetailScreen(
     var isExportingDng by remember { mutableStateOf(false) }
     var isCopyingSettings by remember { mutableStateOf(false) }
     var isPastingSettings by remember { mutableStateOf(false) }
+    var isSavingFrame by remember { mutableStateOf(false) }
     val isVideoExporting = viewModel.isVideoExporting
     val videoExportProgress = viewModel.videoExportProgress
     var showVideoExportConfirmDialog by remember { mutableStateOf(false) }
@@ -632,6 +621,11 @@ fun GalleryDetailScreen(
                         }
                         .graphicsLayer { translationY = swipeDown.value },
                     userScrollEnabled = !isZoomed,
+                    // The page, its row and the neighbour's row settle together, or spring back, on one short curve.
+                    flingBehavior = PagerDefaults.flingBehavior(
+                        state = pagerState,
+                        snapAnimationSpec = tween(220, easing = CubicBezierEasing(.2f, .8f, .3f, 1f)),
+                    ),
                     beyondViewportPageCount = 1
                 ) { page ->
                     val photo = photos.getOrNull(page)?.let(::shownVersion)
@@ -814,76 +808,115 @@ fun GalleryDetailScreen(
             label = "stripBottom"
         )
         val stripAlpha by animateFloatAsState(if (overlaysHidden) 0.6f else 1f, label = "stripAlpha")
-        val hasStrip = currentPhoto != null && (currentVersions.size > 1 || burstStrip)
-        if (currentPhoto != null && currentVersions.size > 1) {
-            val renderPendingIds by RenderQueue.pendingPhotoIds.collectAsState()
-            val renderStatus by RenderQueue.status.collectAsState()
-            val runningIds = processingPhotos.keys +
-                listOfNotNull(renderStatus.currentPhotoId.takeIf { renderStatus.running })
-            PhotoVersionStrip(
-                versions = currentVersions,
-                selectedId = currentPhoto.id,
-                runningIds = runningIds,
-                waitingIds = renderPendingIds - runningIds,
-                viewModel = viewModel,
-                onSelect = ::showVersion,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = stripBottom)
-                    .alpha(stripAlpha)
-                    .then(rowsFade)
-            )
-        } else if (currentPhoto != null && burstStrip) {
-            val burstId = currentPhoto.id
-            val selectedFrame = shownFrameIndex ?: burst.cover
-            PhotoStrip(
-                items = burst.files,
-                selectedIndex = selectedFrame,
-                key = { it.name },
-                onSelect = { if (it == burst.cover) burstFrame.remove(burstId) else burstFrame[burstId] = it },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = stripBottom)
-                    .alpha(stripAlpha)
-                    .then(rowsFade)
-            ) { index, file ->
-                AsyncImage(model = file, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                if (index == burst.cover) StripLabel("★", com.hinnka.mycamera.ui.camera.ModeAmber) else StripLabel("${index + 1}")
-                if (index == selectedFrame) StripRing(EdgeRingStyle.SOLID, SonyText)
+        val renderPendingIds by RenderQueue.pendingPhotoIds.collectAsState()
+        val renderStatus by RenderQueue.status.collectAsState()
+        val runningIds = processingPhotos.keys +
+            listOfNotNull(renderStatus.currentPhotoId.takeIf { renderStatus.running })
+        val pageWidth = constraints.maxWidth.toFloat()
+
+        // Each item's row is locked to its photo, moving with its page. A neighbour's row (a ghost, drawn only while
+        // the pager moves) uses cheap state only: thumbnails, the queue's flows, a plain timeline; it takes no touches.
+        @Composable
+        fun ItemRow(page: Int, ghost: Boolean) {
+            val tile = photos.getOrNull(page) ?: return
+            val photo = shownVersion(tile)
+            val versions = stacks.versionsOf(tile)
+            val ghostBurst by produceState(BurstFrames(), photo.id, ghost) {
+                if (!ghost || !photo.isImage || !photo.isBurstPhoto || versions.size > 1) return@produceState
+                value = withContext(Dispatchers.IO) {
+                    val files = GalleryManager.getBurstPhotos(context, photo.id)
+                    val main = GalleryManager.getPhotoFile(context, photo.id)
+                    BurstFrames(photo.id, files, if (main.exists()) files.indexOfFirst { it.length() == main.length() } else -1)
+                }
             }
-        }
-        if (currentPhoto != null && !overlaysHidden && viewModel.selectedTab == GalleryTab.PHOTON) {
+            val hasStrip = versions.size > 1 || (if (ghost) ghostBurst.files.isNotEmpty() else burstStrip)
             Box(
                 Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, bottom = if (hasStrip) VersionStripRest + VersionStripHeight else ViewerActionRowHeight)
-                    .then(if (hasStrip) Modifier else Modifier.height(ViewerItemRowHeight))
-                    .then(rowsFade),
-                contentAlignment = Alignment.Center
+                    .matchParentSize()
+                    .graphicsLayer {
+                        translationX = (page - pagerState.currentPage - pagerState.currentPageOffsetFraction) * pageWidth
+                    }
             ) {
-                RenderQueuePhotoChip(
-                    photoId = currentPhoto.id,
-                    onClick = onOpenRenderQueue,
-                    processingInCamera = isCurrentPhotoProcessing,
-                )
+                val stripModifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = stripBottom)
+                    .alpha(stripAlpha)
+                    .then(rowsFade)
+                if (versions.size > 1) {
+                    PhotoVersionStrip(
+                        versions = versions,
+                        selectedId = photo.id,
+                        runningIds = runningIds,
+                        waitingIds = renderPendingIds - runningIds,
+                        viewModel = viewModel,
+                        onSelect = ::showVersion,
+                        modifier = stripModifier,
+                        ghost = ghost,
+                    )
+                } else if (ghost && hasStrip) {
+                    val selectedFrame = burstFrame[photo.id]?.takeIf { it in ghostBurst.files.indices } ?: ghostBurst.cover
+                    PhotoStrip(
+                        items = ghostBurst.files,
+                        selectedIndex = selectedFrame,
+                        key = { it.name },
+                        onSelect = {},
+                        modifier = stripModifier,
+                        ghost = true,
+                    ) { index, file -> BurstTile(file, index, ghostBurst.cover, selectedFrame) }
+                } else if (!ghost && burstStrip) {
+                    val burstId = photo.id
+                    val selectedFrame = shownFrameIndex ?: burst.cover
+                    PhotoStrip(
+                        items = burst.files,
+                        selectedIndex = selectedFrame,
+                        key = { it.name },
+                        onSelect = { if (it == burst.cover) burstFrame.remove(burstId) else burstFrame[burstId] = it },
+                        modifier = stripModifier,
+                    ) { index, file -> BurstTile(file, index, burst.cover, selectedFrame) }
+                }
+                if (!overlaysHidden && viewModel.selectedTab == GalleryTab.PHOTON) {
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, bottom = if (hasStrip) VersionStripRest + VersionStripHeight else ViewerActionRowHeight)
+                            .then(if (hasStrip) Modifier else Modifier.height(ViewerItemRowHeight))
+                            .then(rowsFade),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        RenderQueuePhotoChip(
+                            photoId = photo.id,
+                            onClick = onOpenRenderQueue,
+                            processingInCamera = photo.id in processingPhotos,
+                            ghost = ghost,
+                        )
+                    }
+                }
+
+                val videoPlayer = videoPreviewHandle.player
+                if (photo.isVideo && ghost) {
+                    if (!overlaysHidden) GhostTimeline(photo.durationMs ?: 0L, rowsFade)
+                } else if (photo.isVideo && videoPlayer != null) {
+                    key(photo.id, videoPlayer) {
+                        VideoTransport(
+                            player = videoPlayer,
+                            photo = photo,
+                            rate = currentVideoRate,
+                            slowed = (videoSlowedChoice ?: currentVideoRate?.isHighFrameRate) == true,
+                            onSlowed = { videoSlowedChoice = it },
+                            barsShown = !overlaysHidden,
+                            keepsSlowPart = viewModel.selectedTab == GalleryTab.PHOTON,
+                            explain = ::explain,
+                            fade = rowsFade,
+                        )
+                    }
+                }
             }
         }
-
-        val videoPlayer = videoPreviewHandle.player
-        if (currentPhoto != null && currentPhoto.isVideo && videoPlayer != null) {
-            key(currentPhoto.id, videoPlayer) {
-                VideoTransport(
-                    player = videoPlayer,
-                    photo = currentPhoto,
-                    rate = currentVideoRate,
-                    slowed = (videoSlowedChoice ?: currentVideoRate?.isHighFrameRate) == true,
-                    onSlowed = { videoSlowedChoice = it },
-                    barsShown = !overlaysHidden,
-                    keepsSlowPart = viewModel.selectedTab == GalleryTab.PHOTON,
-                    explain = ::explain,
-                    fade = rowsFade,
-                )
+        key(pagerState.currentPage) { ItemRow(pagerState.currentPage, ghost = false) }
+        if (pagerState.isScrollInProgress) {
+            for (page in listOf(pagerState.currentPage - 1, pagerState.currentPage + 1)) {
+                key(page) { ItemRow(page, ghost = true) }
             }
         }
 
@@ -964,32 +997,6 @@ fun GalleryDetailScreen(
                     }
                 }
             }
-        }
-
-        if (!overlaysHidden && showHdrStrengthPanel && canShowHdr && currentPhoto != null) {
-            HdrStrengthPanel(
-                enabled = viewModel.isManualHdrEnhanceEnabled(currentPhoto),
-                strength = hdrStrengthSliderValue,
-                onEnabledChange = {
-                    viewModel.toggleManualHdrEnhance(currentPhoto) { success ->
-                        if (!success) {
-                            Toast.makeText(context, R.string.hdr_toggle_failed, Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                },
-                onStrengthChange = { hdrStrengthSliderValue = it },
-                onStrengthChangeFinished = {
-                    viewModel.setManualHdrStrength(currentPhoto, hdrStrengthSliderValue) { success ->
-                        if (!success) {
-                            Toast.makeText(context, R.string.hdr_strength_update_failed, Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                },
-                // Under the top row, below the HDR tag.
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = ViewerTopRowHeight)
-            )
         }
     }
 
@@ -1127,362 +1134,126 @@ fun GalleryDetailScreen(
         )
     }
 
-    // 导出确认对话框
     if (showExportDialog && !isCurrentPhotoProcessing) {
-        AlertDialog(
-            onDismissRequest = { showExportDialog = false },
-            title = { Text(stringResource(if (exportAllFrames) R.string.viewer_export_all_frames else R.string.export)) },
-            text = {
-                Text(stringResource(if (exportAllFrames) R.string.export_all_confirm else R.string.export_confirm))
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showExportDialog = false
-                        currentPhoto?.let {
-                            isSaving = true
-                            val all = exportAllFrames
-                            val onDone = { success: Boolean ->
-                                isSaving = false
-                                if (success) {
-                                    Toast.makeText(context, if (all) R.string.export_all_success else R.string.export_success, Toast.LENGTH_SHORT).show()
-                                } else {
-                                    Toast.makeText(context, R.string.export_failed, Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                            when {
-                                all -> exportBurstFrames(it, burst.files, burst.files.indices.toList(), onDone)
-                                shownFrameIndex != null -> exportBurstFrames(it, burst.files, listOf(shownFrameIndex), onDone)
-                                else -> viewModel.exportPhoto(it, onComplete = onDone)
-                            }
+        ViewerExportSheet(
+            allFrames = exportAllFrames,
+            onDismiss = { showExportDialog = false },
+            onExport = {
+                showExportDialog = false
+                currentPhoto?.let {
+                    isSaving = true
+                    val all = exportAllFrames
+                    val onDone = { success: Boolean ->
+                        isSaving = false
+                        if (success) {
+                            Toast.makeText(context, if (all) R.string.export_all_success else R.string.export_success, Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, R.string.export_failed, Toast.LENGTH_SHORT).show()
                         }
                     }
-                ) {
-                    Text(stringResource(R.string.export), color = AccentColor)
+                    when {
+                        all -> exportBurstFrames(it, burst.files, burst.files.indices.toList(), onDone)
+                        shownFrameIndex != null -> exportBurstFrames(it, burst.files, listOf(shownFrameIndex), onDone)
+                        else -> viewModel.exportPhoto(it, onComplete = onDone)
+                    }
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { showExportDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-            containerColor = Color(0xFF2D2D2D),
-            titleContentColor = Color.White,
-            textContentColor = Color.White
         )
     }
 
-    // 视频导出确认对话框
     if (showVideoExportConfirmDialog && !isCurrentPhotoProcessing) {
-        AlertDialog(
-            onDismissRequest = {
-                showVideoExportConfirmDialog = false
-                selectedVideoExportOption = null
-            },
-            title = { Text(stringResource(R.string.export_video)) },
-            text = {
-                Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(stringResource(R.string.export_video_select_resolution))
-                    if (isLoadingVideoExportOptions) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 24.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            CircularProgressIndicator()
-                        }
-                    } else {
-                        videoExportOptions.forEach { option ->
-                            val selectable = option.isSelectable && !isVideoExporting
-                            val statusText = when (option.support) {
-                                VideoExportSupport.SUPPORTED -> null
-                                VideoExportSupport.MAY_FAIL -> R.string.export_video_resolution_may_fail
-                                VideoExportSupport.UNSUPPORTED -> R.string.export_video_resolution_unsupported
-                                VideoExportSupport.SOURCE_TOO_SMALL -> R.string.export_video_resolution_source_too_small
-                            }
-                            val statusColor = when (option.support) {
-                                VideoExportSupport.SUPPORTED -> MaterialTheme.colorScheme.primary
-                                VideoExportSupport.MAY_FAIL -> WarningYellow
-                                VideoExportSupport.UNSUPPORTED,
-                                VideoExportSupport.SOURCE_TOO_SMALL -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                            }
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable(enabled = selectable) {
-                                        selectedVideoExportOption = option
-                                    }
-                                    .padding(horizontal = 4.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                RadioButton(
-                                    selected = selectedVideoExportOption == option,
-                                    onClick = { selectedVideoExportOption = option },
-                                    enabled = selectable,
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = videoExportResolutionLabel(option.resolution),
-                                        color = if (selectable) {
-                                            MaterialTheme.colorScheme.onSurface
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                        },
-                                        fontWeight = FontWeight.Medium,
-                                    )
-                                    Text(
-                                        text = if (statusText == null) {
-                                            stringResource(
-                                                R.string.export_video_resolution_dimensions,
-                                                option.outputWidth,
-                                                option.outputHeight,
-                                            )
-                                        } else {
-                                            stringResource(
-                                                R.string.export_video_resolution_details,
-                                                option.outputWidth,
-                                                option.outputHeight,
-                                                stringResource(statusText),
-                                            )
-                                        },
-                                        color = statusColor,
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                            }
-                        }
+        val closeVideoExport = {
+            showVideoExportConfirmDialog = false
+            selectedVideoExportOption = null
+        }
+        ViewerExportVideoSheet(
+            options = videoExportOptions,
+            loading = isLoadingVideoExportOptions,
+            exporting = isVideoExporting,
+            selected = selectedVideoExportOption,
+            onSelect = { selectedVideoExportOption = it },
+            onExport = { exportOption ->
+                closeVideoExport()
+                currentPhoto?.let { photo ->
+                    viewModel.exportVideo(photo, exportOption) { success, _ ->
+                        val msgRes = if (success) R.string.export_video_success else R.string.export_video_failed
+                        Toast.makeText(context, msgRes, Toast.LENGTH_SHORT).show()
                     }
-                    Text(
-                        text = stringResource(R.string.export_video_confirm),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             },
-            confirmButton = {
-                TextButton(
-                    enabled = selectedVideoExportOption != null && !isLoadingVideoExportOptions,
-                    onClick = {
-                        val exportOption = selectedVideoExportOption ?: return@TextButton
-                        showVideoExportConfirmDialog = false
-                        selectedVideoExportOption = null
-                        currentPhoto?.let { photo ->
-                            viewModel.exportVideo(photo, exportOption) { success, _ ->
-                                val msgRes = if (success) R.string.export_video_success else R.string.export_video_failed
-                                Toast.makeText(context, msgRes, Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    },
-                ) {
-                    Text(stringResource(R.string.export_video))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showVideoExportConfirmDialog = false
-                    selectedVideoExportOption = null
-                }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            }
+            explain = ::explain,
+            onDismiss = closeVideoExport,
         )
     }
 
     HighFrameRateChoiceDialog(viewModel)
 
-    // 照片信息对话框
     if (showInfoDialog && currentPhoto != null && !isCurrentPhotoProcessing) {
         val infoPhoto = currentPhoto.relatedPhoto ?: currentPhoto
-        val infoMetadata = infoPhoto.metadata ?: currentPhoto.metadata
-        // The full look of this version; the badge only shows what sets it apart. The original's look is in its render job.
-        val versionInfo by produceState<String?>(null, currentPhoto.id) {
-            val metadata = currentPhoto.metadata
-            value = when {
-                PhotoStacks.isCameraJpeg(metadata) -> context.getString(R.string.photo_info_version_camera_jpeg)
-                metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY) != null ->
-                    metadata.customProperties[RenderLook.LABEL_PROPERTY]
-                metadata != null -> withContext(Dispatchers.IO) {
-                    // Only Pro photos rendered in the queue have a job; reading a missing one logs an error.
-                    val jobFile = java.io.File(RenderJob.photoDir(context, currentPhoto.id), RenderJob.JOB_FILE)
-                    if (jobFile.isFile) RenderJob.read(context, currentPhoto.id) else null
-                }
-                    ?.let { job -> withContext(Dispatchers.IO) { context.getString(R.string.photo_info_version_original, RenderLook.fromPhoto(metadata, job).label(context)) } }
-                else -> null
-            }
-        }
-        // What this version's folder really holds, so the panel never names data that was not kept.
-        val savedFiles by produceState<List<java.io.File>>(emptyList(), currentPhoto.id) {
-            value = withContext(Dispatchers.IO) { GalleryManager.savedPhotoFiles(context, currentPhoto.id) }
-        }
-        var savedExpanded by remember(currentPhoto.id) { mutableStateOf(false) }
-        var hdrExpanded by remember(currentPhoto.id) { mutableStateOf(false) }
-        AlertDialog(
-            onDismissRequest = { showInfoDialog = false },
-            title = { Text(stringResource(if (currentPhoto.isVideo) R.string.video_info else R.string.photo_info)) },
-            text = {
-                Column {
-                    if (viewModel.selectedTab == GalleryTab.SYSTEM) {
-                        InfoRow(stringResource(R.string.name), currentPhoto.displayName)
-                    }
-                    InfoRow(stringResource(R.string.photo_info_date), currentPhoto.getFormattedDate())
-                    InfoRow(stringResource(R.string.photo_info_resolution), currentPhoto.getResolution())
-                    InfoRow(stringResource(R.string.photo_info_size), currentPhoto.copy(size = displayPhotoSize).getFormattedSize())
-                    versionInfo?.let { InfoRow(stringResource(R.string.photo_info_version), it) }
-                    if (!currentPhoto.isVideo) {
-                        val names = savedFiles.map { it.name }
-                        val mainType = when {
-                            "original.heic" in names -> "HEIC"
-                            "original.jxl" in names -> "JPEG XL"
-                            "original.jpg" in names -> "JPEG"
-                            else -> currentPhoto.mimeType?.substringAfter('/')?.uppercase()
-                        }
-                        mainType?.let { type ->
-                            InfoRow(
-                                stringResource(R.string.photo_info_file_type),
-                                if ("original.dng" in names) stringResource(R.string.photo_info_file_type_from_raw, type) else type,
-                            )
-                        }
-                        val frameMetadata = currentPhoto.metadata
-                        frameMetadata?.multipleExposureFrameCount?.takeIf { it > 1 }?.let { count ->
-                            InfoRow(
-                                stringResource(R.string.photo_info_frames),
-                                stringResource(
-                                    if (frameMetadata.captureMode == "multiple_exposure") {
-                                        R.string.photo_info_frames_multiple_exposure
-                                    } else {
-                                        R.string.photo_info_frames_stacked
-                                    },
-                                    count,
-                                ),
-                            )
-                        }
-                        frameMetadata?.customProperties?.let { props ->
-                            val used = RawPhotonHdrMetadata.read(props) ?: return@let
-                            InfoCollapsibleHeader(
-                                stringResource(R.string.photo_info_hdr, used),
-                                hdrExpanded,
-                            ) { hdrExpanded = !hdrExpanded }
-                            if (hdrExpanded) {
-                                InfoSubRow(stringResource(R.string.photo_info_hdr_used, used))
-                                RawPhotonHdrMetadata.readWanted(props)?.let {
-                                    InfoSubRow(stringResource(R.string.photo_info_hdr_wanted, it))
-                                }
-                                RawPhotonHdrMetadata.readLimit(props)?.let {
-                                    InfoSubRow(stringResource(R.string.photo_info_hdr_limit, it))
-                                }
-                                RawPhotonHdrMetadata.readInputExposureEv(props)?.let {
-                                    InfoSubRow(stringResource(R.string.photo_info_hdr_viewfinder, it))
-                                }
-                            }
-                        }
-                        val extras = savedFiles
-                            .filter { it.name !in MAIN_PHOTO_FILES && !it.name.endsWith(".tmp") }
-                            .sortedBy { it.name }
-                        if (extras.isNotEmpty()) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { savedExpanded = !savedExpanded }
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = stringResource(R.string.photo_info_saved_with),
-                                    color = Color.White.copy(alpha = 0.7f),
-                                    fontSize = 14.sp,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Icon(
-                                    if (savedExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                                    contentDescription = null,
-                                    tint = Color.White.copy(alpha = 0.7f),
-                                )
-                            }
-                            if (savedExpanded) {
-                                extras.forEach { file ->
-                                    Text(
-                                        text = "${savedFileLabel(context, file.name)} · " +
-                                            android.text.format.Formatter.formatShortFileSize(context, file.length()),
-                                        color = Color.White,
-                                        fontSize = 13.sp,
-                                        modifier = Modifier.padding(start = 12.dp, top = 2.dp, bottom = 2.dp),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    infoMetadata?.let {
-                        if (currentPhoto.isVideo) {
-                            InfoRow(stringResource(R.string.video_info_duration), currentPhoto.getFormattedDuration())
-                            InfoRow(stringResource(R.string.video_info_mime), it.mimeType ?: (currentPhoto.mimeType ?: "N/A"))
-                            InfoRow(stringResource(R.string.video_info_frame_rate), it.frameRate?.toString() ?: "N/A")
-                            InfoRow(stringResource(R.string.video_info_bitrate), it.bitrate?.let { bitrate -> "${bitrate / 1000} kbps" } ?: "N/A")
-                            InfoRow(stringResource(R.string.video_info_has_audio), it.hasAudio?.let { hasAudio -> if (hasAudio) stringResource(R.string.yes) else stringResource(R.string.no) } ?: "N/A")
-                            InfoRow(stringResource(R.string.video_info_rotation), it.rotationDegrees?.toString() ?: "N/A")
-                        } else {
-                            InfoRow(stringResource(R.string.photo_info_focal_length), it.focalLength35mm ?: "N/A")
-                            InfoRow(stringResource(R.string.photo_info_aperture), it.aperture ?: "N/A")
-                            InfoRow(stringResource(R.string.photo_info_iso), it.iso?.toString() ?: "N/A")
-                            InfoRow(stringResource(R.string.photo_info_shutter_speed), it.shutterSpeed ?: "N/A")
-                            InfoRow("LV", "%.2f".format(it.lv))
-                            InfoRow(stringResource(R.string.photo_info_brightness), "%.2f".format(viewModel.currentBrightness[currentPhoto.id]))
-                        }
-                    }
-                    currentColorSpace.value?.let {
-                        InfoRow(stringResource(R.string.color_space), it.name)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showInfoDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-            containerColor = Color(0xFF2D2D2D),
-            titleContentColor = Color.White,
-            textContentColor = Color.White
+        ViewerInfoSheet(
+            photo = currentPhoto,
+            metadata = infoPhoto.metadata ?: currentPhoto.metadata,
+            showName = viewModel.selectedTab == GalleryTab.SYSTEM,
+            fileSize = displayPhotoSize,
+            colorSpace = currentColorSpace.value,
+            brightness = viewModel.currentBrightness[currentPhoto.id],
+            onDismiss = { showInfoDialog = false },
         )
     }
 
-    // 更多 BottomSheet
+    if (showHdrStrengthPanel && canShowHdr && currentPhoto != null) {
+        ViewerHdrSheet(
+            enabled = viewModel.isManualHdrEnhanceEnabled(currentPhoto),
+            strength = hdrStrengthSliderValue,
+            onEnabledChange = {
+                viewModel.toggleManualHdrEnhance(currentPhoto) { success ->
+                    if (!success) {
+                        Toast.makeText(context, R.string.hdr_toggle_failed, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            onStrengthChange = { hdrStrengthSliderValue = it },
+            onStrengthChangeFinished = {
+                viewModel.setManualHdrStrength(currentPhoto, hdrStrengthSliderValue) { success ->
+                    if (!success) {
+                        Toast.makeText(context, R.string.hdr_strength_update_failed, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            onDismiss = { showHdrStrengthPanel = false },
+        )
+    }
+
     if (showMoreSheet && currentPhoto != null && !isCurrentPhotoProcessing) {
-        val moreSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        val exportAllIcon = ImageVector.vectorResource(R.drawable.ic_output_all)
+        val renderPendingIds by RenderQueue.pendingPhotoIds.collectAsState()
+        val renderStatus by RenderQueue.status.collectAsState()
+        // A paused video's frame can be kept as a photo; read as the sheet opens.
+        val pausedAtMs = videoPreviewHandle.player?.takeIf {
+            currentPhoto.isVideo && it.playbackState != Player.STATE_IDLE &&
+                (!it.playWhenReady || it.playbackState == Player.STATE_ENDED)
+        }?.currentPosition
+        val lookBusy = isCopyingSettings || isPastingSettings || isSharing || isSaving
         val moreActions = buildList {
             add(
                 GalleryMoreAction(
+                    group = MoreGroup.ITEM,
                     icon = AppIcons.InfoLine,
-                    text = context.getString(if (currentPhoto.isVideo) R.string.video_info else R.string.photo_info),
+                    text = context.getString(R.string.viewer_info),
+                    secondLine = context.getString(R.string.viewer_info_line),
                     onClick = {
                         showMoreSheet = false
                         showInfoDialog = true
                     }
                 )
             )
-            if (currentPhoto.isImage && (viewModel.selectedTab == GalleryTab.PHOTON || currentPhoto.relatedPhoto != null)) {
-                add(
-                    GalleryMoreAction(
-                        icon = AppIcons.Output,
-                        text = context.getString(R.string.export),
-                        isLoading = isSaving,
-                        enabled = !isCopyingSettings && !isPastingSettings,
-                        onClick = {
-                            exportAllFrames = false
-                            showExportDialog = true
-                        }
-                    )
-                )
-            }
+            // Protect's row belongs here, after Info.
             if (burstStrip) {
                 add(
                     GalleryMoreAction(
+                        group = MoreGroup.ITEM,
                         icon = AppIcons.StarBorder,
                         text = context.getString(R.string.burst_use_as_cover),
+                        secondLine = context.getString(R.string.viewer_cover_line, (shownFrameIndex ?: burst.cover) + 1),
                         onClick = {
                             val frame = shownFrame
                             if (frame == null) {
@@ -1496,28 +1267,174 @@ fun GalleryDetailScreen(
                         }
                     )
                 )
+            }
+            if (pausedAtMs != null) {
                 add(
                     GalleryMoreAction(
-                        icon = exportAllIcon,
-                        text = context.getString(R.string.viewer_export_all_frames),
-                        isLoading = isSaving,
-                        enabled = !isCopyingSettings && !isPastingSettings,
+                        group = MoreGroup.ITEM,
+                        icon = AppIcons.PhotoDownLine,
+                        text = context.getString(R.string.viewer_save_this_frame),
+                        secondLine = context.getString(R.string.viewer_save_frame_line),
+                        isLoading = isSavingFrame,
                         onClick = {
-                            exportAllFrames = true
-                            showExportDialog = true
+                            showMoreSheet = false
+                            isSavingFrame = true
+                            scope.launch {
+                                val saved = saveVideoFrame(context, currentPhoto, pausedAtMs) != null
+                                explain(context.getString(if (saved) R.string.video_frame_saved else R.string.video_frame_save_failed))
+                                isSavingFrame = false
+                            }
+                        }
+                    )
+                )
+            }
+            if (canShowHdr) {
+                add(
+                    GalleryMoreAction(
+                        group = MoreGroup.ITEM,
+                        icon = AppIcons.SunHighLine,
+                        text = context.getString(R.string.viewer_hdr_display),
+                        secondLine = if (viewModel.isManualHdrEnhanceEnabled(currentPhoto)) {
+                            context.getString(R.string.viewer_hdr_display_on, (hdrStrengthSliderValue * 100f).roundToInt())
+                        } else {
+                            context.getString(R.string.viewer_off)
+                        },
+                        onClick = {
+                            showMoreSheet = false
+                            showHdrStrengthPanel = true
                         }
                     )
                 )
             }
 
+            add(
+                GalleryMoreAction(
+                    group = MoreGroup.LOOK,
+                    icon = AppIcons.ContentCopy,
+                    text = context.getString(R.string.viewer_copy_look),
+                    isLoading = isCopyingSettings,
+                    enabled = !lookBusy,
+                    onClick = {
+                        isCopyingSettings = true
+                        viewModel.copyPhotoSettings(currentPhoto) { success ->
+                            isCopyingSettings = false
+                            if (success) {
+                                showMoreSheet = false
+                            }
+                            Toast.makeText(
+                                context,
+                                if (success) R.string.copy_settings_success else R.string.copy_settings_failed,
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                )
+            )
+            add(
+                GalleryMoreAction(
+                    group = MoreGroup.LOOK,
+                    icon = AppIcons.ContentCopy,
+                    text = context.getString(R.string.viewer_paste_look),
+                    secondLine = if (hasCopiedEditSettings) null else context.getString(R.string.viewer_paste_look_empty),
+                    isLoading = isPastingSettings,
+                    enabled = hasCopiedEditSettings && !lookBusy,
+                    whyNot = if (hasCopiedEditSettings) null else context.getString(R.string.viewer_paste_nothing),
+                    onClick = {
+                        isPastingSettings = true
+                        viewModel.pasteCopiedSettingsToPhoto(currentPhoto) { success ->
+                            isPastingSettings = false
+                            if (success) {
+                                showMoreSheet = false
+                            }
+                            Toast.makeText(
+                                context,
+                                if (success) R.string.paste_settings_success else R.string.paste_settings_failed,
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                )
+            )
+            if (renderAgainSource != null) {
+                add(
+                    GalleryMoreAction(
+                        group = MoreGroup.LOOK,
+                        icon = AppIcons.Tune,
+                        text = context.getString(R.string.viewer_render_again),
+                        secondLine = context.getString(R.string.viewer_render_again_line),
+                        // Busy while an export, DNG export or settings copy/paste runs.
+                        enabled = !isSaving && !isExportingDng && !isCopyingSettings && !isPastingSettings,
+                        onClick = {
+                            showMoreSheet = false
+                            showRenderAgainSheet = true
+                        }
+                    )
+                )
+            }
+            if (currentPhoto.isImage && viewModel.isRaw(currentPhoto.id)) {
+                val isRefreshing = viewModel.refreshingPhotos.contains(currentPhoto.id)
+                add(
+                    GalleryMoreAction(
+                        group = MoreGroup.LOOK,
+                        icon = Icons.Default.Refresh,
+                        text = context.getString(R.string.viewer_refresh_preview),
+                        secondLine = context.getString(R.string.viewer_refresh_preview_line),
+                        isLoading = isRefreshing,
+                        enabled = !isRefreshing,
+                        onClick = {
+                            showMoreSheet = false
+                            viewModel.refreshRawPreview(currentPhoto) { success ->
+                                Toast.makeText(
+                                    context,
+                                    if (success) R.string.refresh_success else R.string.refresh_failed,
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    )
+                )
+            }
+            if (currentPhoto.id in renderPendingIds || (renderStatus.running && renderStatus.currentPhotoId == currentPhoto.id)) {
+                add(
+                    GalleryMoreAction(
+                        group = MoreGroup.LOOK,
+                        icon = AppIcons.ClockLine,
+                        text = context.getString(R.string.viewer_processing_queue),
+                        secondLine = context.getString(R.string.viewer_processing_queue_line),
+                        onClick = {
+                            showMoreSheet = false
+                            onOpenRenderQueue()
+                        }
+                    )
+                )
+            }
+
+            if (currentPhoto.isImage && (viewModel.selectedTab == GalleryTab.PHOTON || currentPhoto.relatedPhoto != null)) {
+                add(
+                    GalleryMoreAction(
+                        group = MoreGroup.EXPORT,
+                        icon = AppIcons.Output,
+                        text = context.getString(R.string.viewer_export_photo),
+                        secondLine = context.getString(R.string.viewer_export_photo_line),
+                        isLoading = isSaving,
+                        enabled = !isCopyingSettings && !isPastingSettings,
+                        onClick = {
+                            exportAllFrames = false
+                            showExportDialog = true
+                        }
+                    )
+                )
+            }
             if (currentPhoto.isVideo) {
                 add(
                     GalleryMoreAction(
+                        group = MoreGroup.EXPORT,
                         icon = AppIcons.Output,
-                        text = if (isVideoExporting && videoExportProgress > 0) {
+                        text = context.getString(R.string.viewer_export_video),
+                        secondLine = if (isVideoExporting && videoExportProgress > 0) {
                             "$videoExportProgress%"
                         } else {
-                            context.getString(R.string.export)
+                            context.getString(R.string.viewer_export_video_line)
                         },
                         isLoading = isVideoExporting,
                         enabled = !isCopyingSettings && !isPastingSettings,
@@ -1536,95 +1453,28 @@ fun GalleryDetailScreen(
                     )
                 )
             }
-
-            add(
-                GalleryMoreAction(
-                    icon = AppIcons.ContentCopy,
-                    text = context.getString(R.string.copy_settings),
-                    isLoading = isCopyingSettings,
-                    enabled = !isCopyingSettings &&
-                        !isPastingSettings &&
-                        !isSharing &&
-                        !isSaving,
-                    onClick = {
-                        isCopyingSettings = true
-                        viewModel.copyPhotoSettings(currentPhoto) { success ->
-                            isCopyingSettings = false
-                            if (success) {
-                                showMoreSheet = false
-                            }
-                            Toast.makeText(
-                                context,
-                                if (success) {
-                                    R.string.copy_settings_success
-                                } else {
-                                    R.string.copy_settings_failed
-                                },
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    }
-                )
-            )
-
-            add(
-                GalleryMoreAction(
-                    icon = AppIcons.ContentCopy,
-                    text = context.getString(R.string.paste_settings),
-                    isLoading = isPastingSettings,
-                    enabled = hasCopiedEditSettings &&
-                        !isCopyingSettings &&
-                        !isPastingSettings &&
-                        !isSharing &&
-                        !isSaving,
-                    onClick = {
-                        isPastingSettings = true
-                        viewModel.pasteCopiedSettingsToPhoto(currentPhoto) { success ->
-                            isPastingSettings = false
-                            if (success) {
-                                showMoreSheet = false
-                            }
-                            Toast.makeText(
-                                context,
-                                if (success) {
-                                    R.string.paste_settings_success
-                                } else {
-                                    R.string.paste_settings_failed
-                                },
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    }
-                )
-            )
-
-            if (currentPhoto.isImage && viewModel.isRaw(currentPhoto.id)) {
-                val isRefreshing = viewModel.refreshingPhotos.contains(currentPhoto.id)
+            if (burstStrip) {
                 add(
                     GalleryMoreAction(
-                        icon = Icons.Default.Refresh,
-                        text = context.getString(R.string.viewer_refresh_preview),
-                        isLoading = isRefreshing,
-                        enabled = !isRefreshing,
+                        group = MoreGroup.EXPORT,
+                        icon = ImageVector.vectorResource(context.theme, context.resources, R.drawable.ic_output_all),
+                        text = context.getString(R.string.viewer_export_all_frames),
+                        isLoading = isSaving,
+                        enabled = !isCopyingSettings && !isPastingSettings,
                         onClick = {
-                            showMoreSheet = false
-                            viewModel.refreshRawPreview(currentPhoto) { success ->
-                                Toast.makeText(
-                                    context,
-                                    if (success) R.string.refresh_success else R.string.refresh_failed,
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
+                            exportAllFrames = true
+                            showExportDialog = true
                         }
                     )
                 )
             }
-
             if (isCurrentRawPhoto) {
                 add(
                     GalleryMoreAction(
-                        iconText = context.getString(R.string.dng_format),
-                        text = context.getString(R.string.dng_format),
+                        group = MoreGroup.EXPORT,
+                        icon = AppIcons.DownloadLine,
+                        text = context.getString(R.string.viewer_export_dng),
+                        secondLine = context.getString(R.string.viewer_export_dng_line),
                         isLoading = isExportingDng,
                         enabled = !isSaving &&
                             !isExportingDng &&
@@ -1646,116 +1496,7 @@ fun GalleryDetailScreen(
                 )
             }
         }
-
-        @OptIn(ExperimentalMaterial3Api::class)
-        AppModalBottomSheet(
-            containerColor = GallerySheetSurface,
-            shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
-            scrimColor = Color.Black.copy(alpha = 0.64f),
-            onDismissRequest = { showMoreSheet = false },
-            sheetState = moreSheetState,
-            contentColor = GalleryToolbarContent,
-            dragHandle = {
-                BottomSheetDefaults.DragHandle(
-                    width = 36.dp,
-                    height = 4.dp,
-                    color = GalleryToolbarContent.copy(alpha = 0.24f)
-                )
-            }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .navigationBarsPadding()
-                    .padding(start = 20.dp, end = 20.dp, bottom = 24.dp)
-            ) {
-                Column(modifier = Modifier.padding(horizontal = 4.dp)) {
-                    Text(
-                        text = stringResource(R.string.more_options),
-                        color = GalleryToolbarContent,
-                        fontSize = 21.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = (-0.2).sp
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(18.dp))
-                HorizontalDivider(color = GalleryToolbarContent.copy(alpha = 0.09f))
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    moreActions.chunked(4).forEach { rowActions ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            rowActions.forEach { action ->
-                                GalleryMoreActionCard(
-                                    action = action,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            repeat(4 - rowActions.size) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            }
-                        }
-                    }
-                }
-
-                if (renderAgainSource != null) {
-                    // Busy like the tiles above while an export, DNG export or settings copy/paste runs.
-                    val renderAgainEnabled = !isSaving && !isExportingDng && !isCopyingSettings && !isPastingSettings
-                    Spacer(modifier = Modifier.height(14.dp))
-                    PhysicalButton(
-                        enabled = renderAgainEnabled,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .alpha(if (renderAgainEnabled) 1f else 0.38f)
-                            .shadow(
-                                elevation = 4.dp,
-                                shape = CircleShape,
-                                ambientColor = Color.Black.copy(alpha = 0.15f),
-                                spotColor = Color.Black.copy(alpha = 0.15f)
-                            ),
-                        onClick = {
-                            showMoreSheet = false
-                            showRenderAgainSheet = true
-                        },
-                        shape = CircleShape,
-                        backgroundColor = GalleryToolbarButton
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(start = 16.dp, end = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = AppIcons.Tune,
-                                contentDescription = null,
-                                tint = GalleryToolbarContent,
-                                modifier = Modifier.size(19.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = stringResource(R.string.render_again),
-                                color = GalleryToolbarContent,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Icon(
-                                imageVector = AppIcons.ChevronRight,
-                                contentDescription = null,
-                                tint = GalleryToolbarContent.copy(alpha = 0.6f),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
+        ViewerMoreSheet(currentPhoto.isVideo, moreActions, ::explain) { showMoreSheet = false }
     }
 
     val renderAgainPhoto = currentPhoto
@@ -1788,209 +1529,6 @@ fun GalleryDetailScreen(
     }
 }
 
-@Composable
-private fun HdrStrengthPanel(
-    enabled: Boolean,
-    strength: Float,
-    onEnabledChange: (Boolean) -> Unit,
-    onStrengthChange: (Float) -> Unit,
-    onStrengthChangeFinished: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        color = Color(0x881E1E1E),
-        shape = RoundedCornerShape(16.dp),
-        modifier = modifier.width(200.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = stringResource(R.string.hdr_label),
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
-                )
-                Switch(
-                    checked = enabled,
-                    onCheckedChange = onEnabledChange,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = OnAccentColor,
-                        checkedTrackColor = AccentColor,
-                        uncheckedThumbColor = Color.LightGray,
-                        uncheckedTrackColor = Color.DarkGray
-                    )
-                )
-            }
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = stringResource(R.string.hdr_strength_label),
-                        color = Color.White.copy(alpha = 0.86f),
-                        fontSize = 9.sp,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        text = "${(strength * 100f).roundToInt()}%",
-                        color = AccentColor,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 9.sp
-                    )
-                }
-                CustomSlider(
-                    value = strength,
-                    onValueChange = onStrengthChange,
-                    valueRange = HdrGainmapStrength.MIN..HdrGainmapStrength.MAX,
-                    enabled = enabled,
-                    onValueChangeFinished = onStrengthChangeFinished,
-                )
-            }
-        }
-    }
-}
-
-private data class GalleryMoreAction(
-    val text: String,
-    val onClick: () -> Unit,
-    val icon: ImageVector? = null,
-    val iconText: String? = null,
-    val enabled: Boolean = true,
-    val contentColor: Color = GalleryToolbarContent,
-    val isLoading: Boolean = false
-)
-
-@Composable
-private fun GalleryMoreActionCard(
-    action: GalleryMoreAction,
-    modifier: Modifier = Modifier
-) {
-    val isInteractive = action.enabled && !action.isLoading
-    Column(
-        modifier = modifier.alpha(if (action.enabled || action.isLoading) 1f else 0.38f),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        PhysicalButton(
-            modifier = Modifier
-                .size(44.dp)
-                .shadow(
-                    elevation = 4.dp,
-                    shape = CircleShape,
-                    ambientColor = Color.Black.copy(alpha = 0.15f),
-                    spotColor = Color.Black.copy(alpha = 0.15f)
-                ),
-            onClick = action.onClick,
-            enabled = isInteractive,
-            shape = CircleShape,
-            backgroundColor = GalleryToolbarButton
-        ) {
-            if (action.isLoading) {
-                CircularProgressIndicator(
-                    color = action.contentColor,
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 1.8.dp
-                )
-            } else if (action.icon != null) {
-                Icon(
-                    imageVector = action.icon,
-                    contentDescription = action.text,
-                    tint = action.contentColor,
-                    modifier = Modifier.size(19.dp)
-                )
-            } else if (action.iconText != null) {
-                Text(
-                    text = action.iconText,
-                    color = action.contentColor,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(7.dp))
-        Text(
-            text = action.text,
-            color = GalleryToolbarContent.copy(alpha = 0.86f),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
-            lineHeight = 14.sp,
-            maxLines = 2,
-            textAlign = TextAlign.Center,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
-}
-
-private val MAIN_PHOTO_FILES = setOf("original.jpg", "original.heic", "original.jxl")
-
-/** A plain name for a file kept in a photo's folder; unknown files show their file name. */
-private fun savedFileLabel(context: android.content.Context, name: String): String = when (name) {
-    "original.dng" -> context.getString(R.string.photo_info_saved_dng)
-    "viewfinder.jpg" -> context.getString(R.string.photo_info_saved_viewfinder)
-    "render_job.json" -> context.getString(R.string.photo_info_saved_render_job)
-    "thumbnail.jpg" -> context.getString(R.string.photo_info_saved_thumbnail)
-    "detail_hdr.jpg" -> context.getString(R.string.photo_info_saved_detail_hdr)
-    "original_hdr.bin" -> context.getString(R.string.photo_info_saved_hdr)
-    "video.mp4" -> context.getString(R.string.photo_info_saved_video)
-    "bokeh.jpg" -> context.getString(R.string.photo_info_saved_bokeh)
-    "ai_denoise.jpg" -> context.getString(R.string.photo_info_saved_ai_denoise)
-    "preview.jpg" -> context.getString(R.string.photo_info_saved_preview)
-    else -> name
-}
-
-@Composable
-private fun InfoCollapsibleHeader(text: String, expanded: Boolean, onToggle: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(text = text, color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp, modifier = Modifier.weight(1f))
-        Icon(
-            if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-            contentDescription = null,
-            tint = Color.White.copy(alpha = 0.7f),
-        )
-    }
-}
-
-@Composable
-private fun InfoSubRow(text: String) {
-    Text(text = text, color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(start = 12.dp, top = 2.dp, bottom = 2.dp))
-}
-
-@Composable
-private fun InfoRow(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            color = Color.White.copy(alpha = 0.7f),
-            fontSize = 14.sp,
-            modifier = Modifier.width(80.dp)
-        )
-        Text(
-            text = value,
-            color = Color.White,
-            fontSize = 14.sp
-        )
-    }
-}
 
 private fun resolveCurrentMediaSize(context: Context, photo: MediaData): Long {
     if (photo.size > 0L) return photo.size
@@ -2508,30 +2046,51 @@ private fun BoxScope.VideoTransport(
             }
             .padding(horizontal = 16.dp)
     ) {
-        val timeStyle = LocalTextStyle.current.copy(shadow = ViewfinderTextShadow)
-        Text(clipTime(shownMs), color = com.hinnka.mycamera.ui.components.SonySecondary, fontSize = 11.sp, style = timeStyle,
-            modifier = Modifier.align(Alignment.TopStart).padding(top = 4.dp))
-        Text(clipTime(durationMs), color = com.hinnka.mycamera.ui.components.SonySecondary, fontSize = 11.sp, style = timeStyle,
-            modifier = Modifier.align(Alignment.TopEnd).padding(top = 4.dp))
-        val amber = com.hinnka.mycamera.ui.camera.ModeAmber
-        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
-            fun xOf(ms: Long) = if (durationMs > 0) size.width * (ms.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
-            val track = 4.dp.toPx()
-            val trackTop = 26.dp.toPx()
-            drawRoundRect(com.hinnka.mycamera.ui.components.SonyTrack, Offset(0f, trackTop), Size(size.width, track), CornerRadius(track / 2))
-            val part = if (hasSlowPart) slowPart ?: (0L to durationMs) else null
-            if (part != null) {
-                drawRoundRect(amber.copy(alpha = 0.45f), Offset(xOf(part.first), 24.dp.toPx()),
-                    Size(xOf(part.second) - xOf(part.first), 8.dp.toPx()), CornerRadius(2.dp.toPx()))
-            }
-            drawRoundRect(SonyText, Offset(0f, trackTop), Size(xOf(shownMs), track), CornerRadius(track / 2))
-            if (part != null) {
-                listOf(part.first, part.second).forEach { ms ->
-                    drawRoundRect(amber, Offset(xOf(ms) - 3.dp.toPx(), 16.dp.toPx()), Size(6.dp.toPx(), 24.dp.toPx()), CornerRadius(3.dp.toPx()))
-                }
-            }
-            drawCircle(SonyText, 8.dp.toPx(), Offset(xOf(shownMs), trackTop + track / 2))
+        TimelineTrack(shownMs, durationMs, if (hasSlowPart) slowPart ?: (0L to durationMs) else null)
+    }
+}
+
+/** A neighbouring video's timeline during a swipe: the track and its length, nothing to touch. */
+@Composable
+private fun BoxScope.GhostTimeline(durationMs: Long, fade: Modifier) {
+    Box(
+        Modifier
+            .align(Alignment.BottomCenter)
+            .padding(bottom = ViewerActionRowHeight + (ViewerItemRowHeight - 48.dp) / 2)
+            .fillMaxWidth()
+            .height(48.dp)
+            .then(fade)
+            .padding(horizontal = 16.dp)
+    ) {
+        TimelineTrack(0L, durationMs, null)
+    }
+}
+
+/** The timeline's times, track, slow [part] with its ends, and the knob at [shownMs]. */
+@Composable
+private fun BoxScope.TimelineTrack(shownMs: Long, durationMs: Long, part: Pair<Long, Long>?) {
+    val timeStyle = LocalTextStyle.current.copy(shadow = ViewfinderTextShadow)
+    Text(clipTime(shownMs), color = com.hinnka.mycamera.ui.components.SonySecondary, fontSize = 11.sp, style = timeStyle,
+        modifier = Modifier.align(Alignment.TopStart).padding(top = 4.dp))
+    Text(clipTime(durationMs), color = com.hinnka.mycamera.ui.components.SonySecondary, fontSize = 11.sp, style = timeStyle,
+        modifier = Modifier.align(Alignment.TopEnd).padding(top = 4.dp))
+    val amber = com.hinnka.mycamera.ui.camera.ModeAmber
+    androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+        fun xOf(ms: Long) = if (durationMs > 0) size.width * (ms.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+        val track = 4.dp.toPx()
+        val trackTop = 26.dp.toPx()
+        drawRoundRect(com.hinnka.mycamera.ui.components.SonyTrack, Offset(0f, trackTop), Size(size.width, track), CornerRadius(track / 2))
+        if (part != null) {
+            drawRoundRect(amber.copy(alpha = 0.45f), Offset(xOf(part.first), 24.dp.toPx()),
+                Size(xOf(part.second) - xOf(part.first), 8.dp.toPx()), CornerRadius(2.dp.toPx()))
         }
+        drawRoundRect(SonyText, Offset(0f, trackTop), Size(xOf(shownMs), track), CornerRadius(track / 2))
+        if (part != null) {
+            listOf(part.first, part.second).forEach { ms ->
+                drawRoundRect(amber, Offset(xOf(ms) - 3.dp.toPx(), 16.dp.toPx()), Size(6.dp.toPx(), 24.dp.toPx()), CornerRadius(3.dp.toPx()))
+            }
+        }
+        drawCircle(SonyText, 8.dp.toPx(), Offset(xOf(shownMs), trackTop + track / 2))
     }
 }
 
@@ -2924,6 +2483,14 @@ private val ViewerActionSlotWidth = 70.dp
 // The strip centred in the item row, and how far it drops in full view.
 private val VersionStripRest = ViewerActionRowHeight + (ViewerItemRowHeight - VersionStripHeight) / 2
 private val FullViewStripDrop = 56.dp
+
+/** A burst frame's strip tile: the frame, its number (a star on the cover), and the edge line when chosen. */
+@Composable
+private fun BoxScope.BurstTile(file: File, index: Int, cover: Int, selected: Int) {
+    AsyncImage(model = file, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+    if (index == cover) StripLabel("★", com.hinnka.mycamera.ui.camera.ModeAmber) else StripLabel("${index + 1}")
+    if (index == selected) StripRing(EdgeRingStyle.SOLID, SonyText)
+}
 
 /** A burst photo's frames, oldest first, and which one the photo's own file copies (-1: none). */
 private class BurstFrames(val photoId: String? = null, val files: List<File> = emptyList(), val cover: Int = -1)

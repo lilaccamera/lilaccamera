@@ -455,7 +455,7 @@ private fun MemoryInfoRow(icon: ImageVector, title: Int?, text: Int) {
 /**
  * The photo viewer's processing line: a queued RAW photo's queue state with the one button that acts on it, and
  * Queue, which opens [RenderQueueScreen]. A photo still finishing in the camera ([processingInCamera]) gets the
- * line without buttons. Draws nothing otherwise.
+ * line without buttons. Draws nothing otherwise. A [ghost] line (a neighbouring item's, during a swipe) takes no touches.
  */
 @Composable
 fun RenderQueuePhotoChip(
@@ -463,6 +463,7 @@ fun RenderQueuePhotoChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     processingInCamera: Boolean = false,
+    ghost: Boolean = false,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -564,9 +565,9 @@ fun RenderQueuePhotoChip(
     }
     val description = stringResource(R.string.render_chip_description, listOfNotNull(text, detail).joinToString(" · "))
     ProcessingLine(modifier, icon, text, detail, failed) {
-        button?.let { (label, action) -> ViewerPill(onClick = action, text = label) }
+        button?.let { (label, action) -> ViewerPill(onClick = action.takeUnless { ghost }, text = label) }
         ViewerPill(
-            onClick = onClick,
+            onClick = onClick.takeUnless { ghost },
             text = stringResource(R.string.viewer_proc_queue),
             trailing = AppIcons.ChevronRightLine,
             description = description,

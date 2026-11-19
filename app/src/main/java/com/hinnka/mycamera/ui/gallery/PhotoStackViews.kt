@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -215,6 +217,7 @@ internal fun PhotoVersionStrip(
     viewModel: GalleryViewModel,
     onSelect: (MediaData) -> Unit,
     modifier: Modifier = Modifier,
+    ghost: Boolean = false,
 ) {
     PhotoStrip(
         items = versions,
@@ -222,6 +225,7 @@ internal fun PhotoVersionStrip(
         key = { it.id },
         onSelect = { onSelect(versions[it]) },
         modifier = modifier,
+        ghost = ghost,
     ) { _, version ->
         val thumbnail by produceState<Bitmap?>(null, version.id, version.thumbnailUri) {
             value = viewModel.getGridThumbnailBitmap(version)
@@ -246,6 +250,7 @@ internal fun PhotoVersionStrip(
 /**
  * A row of small tiles that scrolls under a fixed centre: the centred tile is the shown one. Flicking switches
  * live as each tile reaches the centre; a tap centres that one. [tile] draws a tile's picture, label and edge line.
+ * A [ghost] strip (a neighbouring item's, during a swipe) is drawn still, with nothing to touch.
  */
 @Composable
 internal fun <T> PhotoStrip(
@@ -254,9 +259,30 @@ internal fun <T> PhotoStrip(
     key: (T) -> Any,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    ghost: Boolean = false,
     tile: @Composable BoxScope.(index: Int, item: T) -> Unit,
 ) {
-    val listState = rememberLazyListState()
+    if (ghost) {
+        val centre = selectedIndex.coerceAtLeast(0)
+        Box(modifier.fillMaxWidth().height(StripHeight), contentAlignment = Alignment.Center) {
+            Row(
+                Modifier
+                    .wrapContentWidth(unbounded = true)
+                    .offset(x = (StripTileSize + StripGap) * ((items.size - 1) / 2f - centre)),
+                horizontalArrangement = Arrangement.spacedBy(StripGap),
+            ) {
+                items.forEachIndexed { index, item ->
+                    Box(Modifier.size(StripTileSize).clip(StripTileShape).background(StripTileColor)) {
+                        // Only the tiles that can be on screen load a picture.
+                        if (abs(index - centre) <= 4) tile(index, item)
+                    }
+                }
+            }
+        }
+        return
+    }
+    // Starting at the chosen tile, which the content padding centres, so a new strip never shows the first one first.
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = selectedIndex.coerceAtLeast(0))
     val scope = rememberCoroutineScope()
     val currentCount by rememberUpdatedState(items.size)
     val currentOnSelect by rememberUpdatedState(onSelect)
@@ -353,7 +379,8 @@ internal fun DeleteVersionsButtons(
  */
 @Composable
 internal fun ViewerPill(
-    onClick: () -> Unit,
+    // Null draws the pill without taking touches.
+    onClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
     text: String? = null,
     icon: ImageVector? = null,
@@ -367,7 +394,7 @@ internal fun ViewerPill(
             .widthIn(min = 48.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(fill)
-            .clickable(role = Role.Button, onClick = onClick)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
             .semantics { if (description != null) contentDescription = description }
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
