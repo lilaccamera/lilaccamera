@@ -182,10 +182,10 @@ img.icon { height: 1.25em; width: auto; vertical-align: -0.25em; }
 .lilac-fig .xz-cam { fill: #26262c; stroke: #4a4a52; stroke-width: 1; }
 .lilac-fig .ui-icon { filter: invert(84%) sepia(6%) saturate(180%) hue-rotate(15deg); }
 .lilac-fig .ui-icon.ui-amber { filter: invert(67%) sepia(54%) saturate(870%) hue-rotate(353deg) brightness(98%) contrast(92%); }
-.lilac-fig text.ui-text { fill: #fff; font-size: 7px; font-weight: 500; }
+.lilac-fig text.ui-text { fill: #fff; font-size: 7px; font-weight: 500; font-family: Roboto, "Helvetica Neue", Arial, sans-serif; }
 .lilac-fig text.ui-end { fill: #9C9A92; font-size: 4.8px; font-weight: 500; }
 .lilac-fig text.ui-knob { fill: #EF9F27; font-size: 5.8px; font-weight: 600; }
-.lilac-fig text.ui-mark { fill: #D3D1C7; font-size: 6.7px; font-weight: 500; opacity: .75; }
+.lilac-fig text.ui-mark { fill: #D3D1C7; font-size: 6.7px; font-weight: 500; letter-spacing: .24px; font-family: Roboto, "Helvetica Neue", Arial, sans-serif; opacity: .75; }
 .lilac-fig .key-line { fill: none; stroke: var(--md-primary-fg-color); stroke-width: .8; }
 .lilac-fig .key-dot { fill: var(--md-primary-fg-color); }
 .lilac-fig text.key-num { fill: var(--lilac-on-primary); font-size: 9px; font-weight: 700; }
