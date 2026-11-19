@@ -40,6 +40,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -264,6 +268,8 @@ fun GalleryDetailScreen(
     var showShootingInfo by rememberPreference(UserPreferences::viewerShootingInfo)
 
     val currentColorSpace = remember { mutableStateOf<ColorSpace?>(null) }
+    // The current page's picture and its photo id, handed to the editor as it opens.
+    val shownPicture = remember { mutableStateOf<Pair<String, Bitmap>?>(null) }
 
     // Activity Result Launcher for delete confirmation
     val deletePhotoLauncher = rememberLauncherForActivityResult(
@@ -800,6 +806,7 @@ fun GalleryDetailScreen(
                                             photo = photo,
                                             frame = if (page == pagerState.currentPage) shownFrame else null,
                                             colorSpace = currentColorSpace,
+                                            shownPicture = shownPicture,
                                             showOrigin = showOrigin || forceSystemOrigin,
                                             isActive = page == pagerState.currentPage,
                                             isScrollInProgress = pagerState.isScrollInProgress,
@@ -830,7 +837,7 @@ fun GalleryDetailScreen(
 
         // Top row: the grid, the position beside it, the tags centred on the whole width, and a slot on the right.
         if (currentPhoto != null && tagPhoto != null && !overlaysHidden) {
-            Box(Modifier.fillMaxWidth().height(ViewerTopRowHeight).then(rowsFade)) {
+            Box(Modifier.fillMaxWidth().height(ViewerTopRowHeight).then(rowsFade).photoMorphEdge(top = true)) {
                 if (onGoToGallery != null) {
                     Box(
                         Modifier
@@ -951,6 +958,7 @@ fun GalleryDetailScreen(
                     .graphicsLayer {
                         translationX = (page - pagerState.currentPage - pagerState.currentPageOffsetFraction) * pageWidth
                     }
+                    .photoMorphEdge(top = false)
             ) {
                 val stripModifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -1065,7 +1073,8 @@ fun GalleryDetailScreen(
                     .fillMaxWidth()
                     .padding(start = 16.dp, end = 16.dp, bottom = ViewerActionRowHeight + ViewerItemRowHeight)
                     .height(28.dp)
-                    .then(rowsFade),
+                    .then(rowsFade)
+                    .photoMorphEdge(top = false),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1114,7 +1123,10 @@ fun GalleryDetailScreen(
                     ViewerAction(AppIcons.AdjustmentsLine, stringResource(R.string.edit), editWhyNot) {
                         viewModel.prepareCurrentPhotoForEdit(
                             index = allPhotos.indexOf(currentPhoto),
-                            onReady = onEdit,
+                            onReady = {
+                                viewModel.editHandoff = shownPicture.value?.takeIf { it.first == currentPhoto.id }?.second
+                                onEdit()
+                            },
                             onFailure = {
                                 Toast.makeText(context, R.string.gallery_prepare_edit_failed, Toast.LENGTH_SHORT).show()
                             }
@@ -1130,6 +1142,7 @@ fun GalleryDetailScreen(
                     .fillMaxWidth()
                     .height(ViewerActionRowHeight)
                     .then(rowsFade)
+                    .photoMorphEdge(top = false)
             ) {
                 actions.forEachIndexed { slot, action ->
                     if (action == null) return@forEachIndexed
@@ -2279,6 +2292,7 @@ private fun ZoomableImage(
     // A burst frame shown in place of the photo's own picture.
     frame: File?,
     colorSpace: MutableState<ColorSpace?>,
+    shownPicture: MutableState<Pair<String, Bitmap>?>,
     showOrigin: Boolean,
     isActive: Boolean,
     isScrollInProgress: Boolean,
@@ -2289,7 +2303,9 @@ private fun ZoomableImage(
 ) {
     val context = LocalContext.current
     var isLoading by remember { mutableStateOf(true) }
-    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val morph = LocalPhotoMorph.current
+    // Back from the editor: its last picture shows until this photo's own is loaded.
+    var bitmap by remember { mutableStateOf(if (isActive && morph?.active == true) viewModel.takeEditHandoff() else null) }
     val density = LocalDensity.current
     val windowSize = LocalWindowInfo.current.containerSize
     // Pictures no taller than 3:4 rest between the top row and the item row; taller ones, or any picture while
@@ -2316,8 +2332,16 @@ private fun ZoomableImage(
     LaunchedEffect(zoomableState.zoomableState.zoomFraction) {
         onZoomChange((zoomableState.zoomableState.zoomFraction ?: 0f) > 0.01f)
     }
+    LaunchedEffect(bitmap, isActive) {
+        if (isActive) bitmap?.let { shownPicture.value = photo.id to it }
+    }
+    // To or from the editor the picture moves between its place here and the editor's. Not while zoomed (the
+    // screen just fades), nor turned: the editor is portrait only, so the window turns during the move.
+    val morphing = morph?.running == true && isActive &&
+        (zoomableState.zoomableState.zoomFraction ?: 0f) <= 0.01f &&
+        windowSize.height > windowSize.width && !OrientationObserver.isLandscape
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
@@ -2408,7 +2432,7 @@ private fun ZoomableImage(
                 onClick = { onTap() },
                 onLongClick = {},
                 onDoubleClick = OneToOneDoubleClick,
-                modifier = Modifier.fillMaxSize().autoRotate(matchParentSize = true)
+                modifier = Modifier.fillMaxSize().alpha(if (morphing) 0f else 1f).autoRotate(matchParentSize = true)
             )
         }
 
@@ -2422,8 +2446,18 @@ private fun ZoomableImage(
                 onClick = { onTap() },
                 onLongClick = {},
                 onDoubleClick = OneToOneDoubleClick,
-                modifier = Modifier.fillMaxSize().alpha(hdrAlpha).autoRotate(matchParentSize = true)
+                modifier = Modifier.fillMaxSize().alpha(if (morphing) 0f else hdrAlpha).autoRotate(matchParentSize = true)
             )
+        }
+
+        bitmap?.takeIf { morphing }?.let {
+            // Where Telephoto draws it at rest: the same scale and alignment over this box.
+            val box = IntSize(constraints.maxWidth, constraints.maxHeight)
+            val src = Size(it.width.toFloat(), it.height.toFloat())
+            val scale = contentScale.computeScaleFactor(src, Size(box.width.toFloat(), box.height.toFloat()))
+            val drawn = IntSize((src.width * scale.scaleX).roundToInt(), (src.height * scale.scaleY).roundToInt())
+            val at = (if (rests) RestAlignment else Alignment.Center).align(drawn, box, LayoutDirection.Ltr)
+            PhotoMorphProxy(it, Rect(at.x.toFloat(), at.y.toFloat(), (at.x + drawn.width).toFloat(), (at.y + drawn.height).toFloat()))
         }
 
         if (isLoading) {

@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import com.hinnka.mycamera.processor.BokehStage
 import com.hinnka.mycamera.processor.PortraitBlurMetadata
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.draw.clipToBounds
@@ -280,8 +281,9 @@ fun GalleryEditScreen(
     var isLoadingPreview by remember { mutableStateOf(false) }
     val defaultPresetName = stringResource(R.string.preset_new_preset_default)
 
-    // 预览 Bitmap 状态
-    var previewBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    // 预览 Bitmap 状态. Opened from the viewer, the viewer's picture shows until the first render is ready.
+    val photoMorph = LocalPhotoMorph.current
+    var previewBitmap by remember { mutableStateOf(viewModel.takeEditHandoff()?.takeIf { photoMorph?.active == true }) }
     var cropPreviewBitmap by remember(editSourcePhoto?.id) { mutableStateOf<Bitmap?>(null) }
     var thumbnailBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
@@ -769,6 +771,8 @@ fun GalleryEditScreen(
     }
 
     fun leaveEditor() {
+        // A discarded edit is not handed back: the viewer shows the photo as it was.
+        viewModel.editHandoff = previewBitmap?.takeIf { viewModel.editChangedKeys().isEmpty() }
         viewModel.exitEditMode()
         onBack()
     }
@@ -978,11 +982,16 @@ fun GalleryEditScreen(
                 )
             }
             val curveFreeNow by rememberUpdatedState(curveFree)
+            // To or from the viewer a still copy moves into place over the photo, which shows once it has arrived.
+            val morphBitmap = previewBitmap?.takeIf {
+                photoMorph?.running == true && !currentPhoto.isVideo && !isZoomed && viewportSize != IntSize.Zero
+            }
 
             Box(
                 modifier = Modifier
                     .offset(photoX.dp, photoY.dp)
                     .size(photoW.dp, photoH.dp)
+                    .alpha(if (morphBitmap != null) 0f else 1f)
                     .clipToBounds()
                     .pointerInput(Unit) {
                         // Any finger on the photo fades the edge icons.
@@ -1294,6 +1303,12 @@ fun GalleryEditScreen(
                     onZoomChange = { isZoomed = it },
                     onContentBounds = { contentBounds = it },
                 )
+            }
+            // At the photo's place, not the animated one: that starts from an empty screen as the editor opens.
+            morphBitmap?.let {
+                with(density) {
+                    PhotoMorphProxy(it, Rect(targetRect.x.dp.toPx(), targetRect.y.dp.toPx(), (targetRect.x + targetRect.w).dp.toPx(), (targetRect.y + targetRect.h).dp.toPx()))
+                }
             }
 
             if (!fullView) {
@@ -1685,6 +1700,7 @@ fun GalleryEditScreen(
                                     viewModel.saveEditMetadata(currentPhoto) { success ->
                                         isSaving = false
                                         if (success) {
+                                            viewModel.editHandoff = previewBitmap
                                             onBack()
                                         } else {
                                             // Still editing: changes go back to the small copies until the next Save.
@@ -1718,7 +1734,7 @@ fun GalleryEditScreen(
                             }
                         }
                     },
-                    modifier = Modifier.align(Alignment.TopCenter)
+                    modifier = Modifier.align(Alignment.TopCenter).photoMorphEdge(top = true)
                 )
 
                 EditorStatus(
@@ -2494,7 +2510,8 @@ private fun BoxScope.EditorControlLayer(content: @Composable BoxScope.() -> Unit
             .align(Alignment.BottomCenter)
             .padding(bottom = EDITOR_BLOCK_DP.dp)
             .fillMaxWidth()
-            .height(EDITOR_CONTROL_DP.dp),
+            .height(EDITOR_CONTROL_DP.dp)
+            .photoMorphEdge(top = false),
         content = content,
     )
 }
@@ -3025,6 +3042,7 @@ private fun BoxScope.EditorToolBlock(
             .align(Alignment.BottomCenter)
             .fillMaxWidth()
             .height(EDITOR_BLOCK_DP.dp)
+            .photoMorphEdge(top = false)
             .background(
                 when (depth) {
                     0 -> Color.Black

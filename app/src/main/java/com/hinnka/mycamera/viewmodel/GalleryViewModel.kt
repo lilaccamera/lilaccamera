@@ -280,6 +280,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     var preparingEditPhotoId by mutableStateOf<String?>(null)
         private set
 
+    // The picture on screen as the viewer opens the editor, or as the editor goes back: the next screen shows it at
+    // once, by reference, while it renders its own, so the move between them has a picture from the first frame.
+    var editHandoff: Bitmap? = null
+    fun takeEditHandoff(): Bitmap? = editHandoff.also { editHandoff = null }
+
     // LUT 编辑状态
     var editLutId = MutableStateFlow<String?>(null)
         private set

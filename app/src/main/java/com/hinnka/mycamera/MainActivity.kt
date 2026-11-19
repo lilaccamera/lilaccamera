@@ -21,6 +21,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -71,6 +75,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.combine
 import androidx.navigation.NavController
 import androidx.navigation.NavType
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -98,6 +103,10 @@ import com.hinnka.mycamera.ui.camera.PuzzleScreen
 import com.hinnka.mycamera.ui.gallery.GalleryDetailScreen
 import com.hinnka.mycamera.ui.gallery.GalleryScreen
 import com.hinnka.mycamera.ui.gallery.GalleryEditScreen
+import com.hinnka.mycamera.ui.gallery.LocalPhotoMorph
+import com.hinnka.mycamera.ui.gallery.PHOTO_MORPH_MS
+import com.hinnka.mycamera.ui.gallery.PhotoMorph
+import com.hinnka.mycamera.ui.gallery.PhotoMorphEasing
 import com.hinnka.mycamera.ui.gallery.RenderQueueScreen
 import com.hinnka.mycamera.ui.settings.FilterManagementScreen
 import com.hinnka.mycamera.ui.settings.FrameEditorScreen
@@ -737,6 +746,7 @@ private fun AppUpdateInstallPrompt() {
     )
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun NavigationHost(
     cameraViewModel: CameraViewModel,
@@ -817,9 +827,14 @@ fun NavigationHost(
     ) {
         onExternalGalleryReviewBack()
     }
+    // The latest navigation went between the viewer and the editor: the picture moves from one to the other.
+    var photoMorph by remember { mutableStateOf(false) }
     DisposableEffect(navController) {
+        var lastRoute: String? = null
         val listener = NavController.OnDestinationChangedListener { _, destination, _ ->
             BuglyHelper.setUserScene(context, destination.route.hashCode())
+            photoMorph = setOf(lastRoute, destination.route) == setOf(Routes.PHOTO_DETAIL, Routes.PHOTO_EDIT)
+            lastRoute = destination.route
             // The gallery and viewer turn with the system rotation (and its lock); every other screen stays portrait.
             val systemRotates = destination.route == Routes.GALLERY || destination.route == Routes.PHOTO_DETAIL
             OrientationObserver.systemRotates = systemRotates
@@ -844,21 +859,25 @@ fun NavigationHost(
             if (!unlocked) navController.popBackStack(Routes.CAMERA, inclusive = false)
         }
     }
-    Box(modifier = Modifier.fillMaxSize()) {
+    // Between the viewer and the editor the screens only fade: the picture moving between them carries the motion.
+    val morphFade = tween<Float>(PHOTO_MORPH_MS, easing = PhotoMorphEasing)
+    fun AnimatedContentTransitionScope<NavBackStackEntry>.morphs() =
+        setOf(initialState.destination.route, targetState.destination.route) == setOf(Routes.PHOTO_DETAIL, Routes.PHOTO_EDIT)
+    SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
         NavHost(
             navController = navController,
             startDestination = Routes.CAMERA,
             enterTransition = {
-                slideInHorizontally(initialOffsetX = { it }) + fadeIn()
+                if (morphs()) fadeIn(morphFade) else slideInHorizontally(initialOffsetX = { it }) + fadeIn()
             },
             exitTransition = {
-                slideOutHorizontally(targetOffsetX = { -it }) + fadeOut()
+                if (morphs()) fadeOut(morphFade) else slideOutHorizontally(targetOffsetX = { -it }) + fadeOut()
             },
             popEnterTransition = {
-                slideInHorizontally(initialOffsetX = { -it }) + fadeIn()
+                if (morphs()) fadeIn(morphFade) else slideInHorizontally(initialOffsetX = { -it }) + fadeIn()
             },
             popExitTransition = {
-                slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
+                if (morphs()) fadeOut(morphFade) else slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
             }
         ) {
             composable(Routes.CAMERA) {
@@ -1017,54 +1036,58 @@ fun NavigationHost(
                 val tab = backStackEntry.arguments?.getString("tab") ?: GalleryTab.PHOTON.name
                 val photoId = backStackEntry.arguments?.getString("photoId")
                 BackHandler(enabled = warnBeforeCamera) { showStackMemoryWarning = true }
-                GalleryDetailScreen(
-                    viewModel = galleryViewModel,
-                    initialIndex = index,
-                    selectedTab = GalleryTab.valueOf(tab),
-                    photoId = photoId,
-                    onBack = {
-                        if (externalGalleryReviewReturnToCaller ||
-                            navController.previousBackStackEntry?.destination?.route != Routes.GALLERY
-                        ) {
+                CompositionLocalProvider(LocalPhotoMorph provides PhotoMorph(this@SharedTransitionLayout, this, photoMorph)) {
+                    GalleryDetailScreen(
+                        viewModel = galleryViewModel,
+                        initialIndex = index,
+                        selectedTab = GalleryTab.valueOf(tab),
+                        photoId = photoId,
+                        onBack = {
+                            if (externalGalleryReviewReturnToCaller ||
+                                navController.previousBackStackEntry?.destination?.route != Routes.GALLERY
+                            ) {
+                                galleryViewModel.requestGalleryScrollToPhoto(null)
+                            }
+                            handleGalleryBack()
+                        },
+                        onGoToGallery = returnToGallery,
+                        onGoToCamera = {
                             galleryViewModel.requestGalleryScrollToPhoto(null)
+                            when {
+                                externalGalleryReviewReturnToCaller -> onExternalGalleryReviewBack()
+                                backStacksInFlight > 0 -> showStackMemoryWarning = true
+                                else -> if (!navController.popBackStack(Routes.CAMERA, inclusive = false)) navController.popBackStack()
+                            }
+                        },
+                        onEdit = {
+                            navController.navigate(Routes.PHOTO_EDIT)
+                        },
+                        onOpenRenderQueue = {
+                            navController.navigate(Routes.RENDER_QUEUE)
                         }
-                        handleGalleryBack()
-                    },
-                    onGoToGallery = returnToGallery,
-                    onGoToCamera = {
-                        galleryViewModel.requestGalleryScrollToPhoto(null)
-                        when {
-                            externalGalleryReviewReturnToCaller -> onExternalGalleryReviewBack()
-                            backStacksInFlight > 0 -> showStackMemoryWarning = true
-                            else -> if (!navController.popBackStack(Routes.CAMERA, inclusive = false)) navController.popBackStack()
-                        }
-                    },
-                    onEdit = {
-                        navController.navigate(Routes.PHOTO_EDIT)
-                    },
-                    onOpenRenderQueue = {
-                        navController.navigate(Routes.RENDER_QUEUE)
-                    }
-                )
+                    )
+                }
             }
 
             composable(Routes.PHOTO_EDIT) {
-                GalleryEditScreen(
-                    viewModel = galleryViewModel,
-                    cameraViewModel = cameraViewModel,
-                    onBack = {
-                        navController.popBackStack()
-                    },
-                    onOpenFrameEditor = { frameId ->
-                        navController.navigate(Routes.frameEditor(frameId = frameId))
-                    },
-                    onFilterManagementClick = { lutId ->
-                        navController.navigate(Routes.filterManagement(lutId))
-                    },
-                    onCreatePresetClick = {
-                        navController.navigate(Routes.presetEditor(null))
-                    }
-                )
+                CompositionLocalProvider(LocalPhotoMorph provides PhotoMorph(this@SharedTransitionLayout, this, photoMorph)) {
+                    GalleryEditScreen(
+                        viewModel = galleryViewModel,
+                        cameraViewModel = cameraViewModel,
+                        onBack = {
+                            navController.popBackStack()
+                        },
+                        onOpenFrameEditor = { frameId ->
+                            navController.navigate(Routes.frameEditor(frameId = frameId))
+                        },
+                        onFilterManagementClick = { lutId ->
+                            navController.navigate(Routes.filterManagement(lutId))
+                        },
+                        onCreatePresetClick = {
+                            navController.navigate(Routes.presetEditor(null))
+                        }
+                    )
+                }
             }
 
             composable(
