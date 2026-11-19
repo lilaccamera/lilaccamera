@@ -14,8 +14,8 @@ There is no tour. A small pill, **How to use Lilac**, sits above the shutter in 
 
 ## The camera screen
 
-- **Top line:** small marks for anything not at its default, such as a timer (`3s`), Live, Smile, flash or a light reading like `12 lux`. Tap them to open the everyday row. Sony's [scene icons](hardware.md#scene-and-condition-detection) can appear at the right end.
-- **Above the shutter:** quick settings ![Quick settings](../icons/Sliders.svg){ .icon } on the left, the zoom ring in the middle, looks ![Looks](../icons/Film.svg){ .icon } on the right.
+- **Top line:** small marks for anything switched on or not at its default, such as a timer (`3s`), Live, Smile, flash or a light reading like `12 lux`. Tap them to open the everyday row. Sony's [scene icons](hardware.md#scene-and-condition-detection) can appear at the right end.
+- **Above the shutter:** quick settings ![Quick settings](../icons/Sliders.svg){ .icon } on the left, the zoom control (a thumbwheel) in the middle, looks ![Looks](../icons/Film.svg){ .icon } on the right.
 - **Bottom row:** the latest photo on the left, the shutter with the mode dial in the middle, the camera switch ![Switch camera](../icons/TurningArrows.svg){ .icon } on the right.
 
 Tap the picture to focus and meter there. A long press locks focus. Pinch to zoom.
@@ -38,10 +38,10 @@ Pro is only on the dial when the camera gives apps RAW frames. On the front came
 
 ## Quick settings
 
-Tap quick settings ![Quick settings](../icons/Sliders.svg){ .icon }. A sheet rises from the bottom; tap the picture or drag the sheet down to close it.
+Tap quick settings ![Quick settings](../icons/Sliders.svg){ .icon }. A sheet rises from the bottom; tap the picture or drag the sheet down to close it. Group titles are off by default, to keep the lists short; switch them on with **Group titles** in Settings.
 
-- The **everyday row** on top: Live, timer, Smile, aspect and flash in the photo modes; resolution, frame rate, torch and stabilisation in Video. Tap an item to step to its next value. You can also swipe down on the picture to show just this row.
-- Below it, the current mode's own group comes first, outlined in amber, then the settings for all photo modes.
+- The **everyday row** on top: Live, timer, Smile, aspect and flash in the photo modes; resolution, frame rate, torch and stabilisation in Video. Tap an item to step to its next value; its value shows inside or beside the icon. You can also swipe down on the picture to show just this row.
+- Below it are two tabs. **Shooting** holds what changes the shot (Lens, Stacking, Exposure, HDR+ and the mode's own settings), **Output** what changes the file. Swipe sideways or tap a tab. The same row has the Toolbox, Content management and Settings icons. The front camera has one page and no tabs.
 - Tap a setting's name for a one-line explanation. Long-press it to open the full setting in Settings.
 
 ## Symbols on the camera screen
@@ -75,7 +75,9 @@ Tap quick settings ![Quick settings](../icons/Sliders.svg){ .icon }. A sheet ris
 
 ## Zoom
 
-Pull the ring above the shutter sideways. The further you pull, the faster it zooms; it springs back when you let go. Tap **W** or **T** to step, or hold them to keep zooming. The ring stops at 4×; pinching reaches the full range. With Volume Key Action set to Focal Switch, the volume buttons step the zoom too (see [Buttons on the side](#buttons-on-the-side)).
+Turn the thumbwheel above the shutter with your thumb: its rim follows your finger, holds for a moment at each stop with a tick, coasts after a flick, and a tap on a number goes there. While you zoom the note line shows the zoom and its 35 mm focal length. Pinching reaches the full range.
+
+In Settings › Setup › Interface, **Zoom control** can be changed to a simple **pill** (the same, with a white disc) or the **collar**: a curved band that zooms faster the harder you pull it sideways, left to zoom in, and springs back. Tap **T** or **W** on the collar to step, or hold them to keep zooming. With Volume Key Action set to Focal Switch, the volume buttons step the zoom too (see [Buttons on the side](#buttons-on-the-side)).
 
 ## Buttons on the side
 
@@ -83,11 +85,11 @@ The XZ1 Compact's side buttons work as camera controls, so you can shoot without
 
 - **Camera key, half-press:** focuses and holds focus and exposure while you keep it there. See [Focus and faces](focus.md#the-camera-key).
 - **Camera key, full press:** takes the photo, or starts and stops a video. During a slow-motion recording it fires the 960 fps burst.
-- **Volume buttons:** take the photo by default. In Settings › System & Controls › **Volume Key Action** you can make them **Focal Switch** (zoom: up steps in, down steps out, one stop at a time, like tapping T or W), **Exposure Comp.** (up brightens, down darkens) or **Volume Control** (they change the volume as usual).
+- **Volume buttons:** take the photo by default. In Settings › Setup › Controls › **Volume Key Action** you can make them **Focal Switch** (zoom: up steps in, down steps out, one stop at a time, like tapping T or W), **Exposure Comp.** (up brightens, down darkens) or **Volume Control** (they change the volume as usual).
 
 ## Looks
 
-A look is a colour style (a LUT). Swipe sideways on the picture to step through your favourite looks. Tap ![Looks](../icons/Film.svg){ .icon } for all of them, with Intensity, colour recipe, frame and presets.
+A look is a colour style (a LUT). Swipe sideways on the picture to step through your favourite looks. Tap ![Looks](../icons/Film.svg){ .icon } for all of them, with Intensity, colour recipe, frame and presets. A **Manage** tile at the end of the strip opens content management.
 
 In Night that button becomes Night's Fast or Accurate switch instead. Looks cannot change while a video records.
 

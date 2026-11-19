@@ -12,13 +12,13 @@ Pro needs RAW from the camera. On the XZ1 Compact that comes from the raw19 shim
 
 Like Photo mode, Pro can merge several frames. Lilac calls it **HDR+**: it is the pipeline of Google's camera app (GCam), with GCam's merge, learned exposure and HDRNet tone mapping (see [what comes from GCam](../index.md#gcams-multi-frame-processing)). The idea: merging many frames removes noise, so the photo can be exposed darker to keep the highlights, and the shadows are lifted back afterwards. It has nothing to do with Sony's HDR.
 
-**HDR+ frames** in quick settings sets how many RAW frames one press takes: 1 to 20, default 3. One frame means a single RAW shot.
+**HDR+ frames** in quick settings sets how many RAW frames one press takes: 1 to 20, default 8 on a new install. One frame means a single RAW shot.
 
 Merging RAW is cleaner than merging Photo mode's frames: RAW is linear, Lilac knows this sensor's noise, and the processing runs once on the merged frame. Why: [Pro: stacking RAW](how-pictures-are-made.md#pro-stacking-raw).
 
 Each RAW frame is a full-size still, so frames come about 0.44 s apart: 3 frames take about 1.5 s, 13 frames about 6 s. Hold still, or lean on something, for 3 or more frames. A merged burst takes 15 to 22 s from press to saved photo.
 
-??? info "HDR+ settings in Settings › Professional mode"
+??? info "HDR+ settings in Settings › Pro"
     - **HDR+ merge mode:** **Sabre** (default) merges frames all taken at the same exposure. **Spatial** also allows bracket exposure.
     - **HDR+ bracket exposure** (Spatial only, off by default): the burst gets one darker frame for highlights and some brighter frames for shadows. Of N frames, one is short, about a quarter are long and the rest normal.
     - **Long frame exposure** (+2.5 EV) and **Short frame exposure** (−1.6 EV): how much brighter or darker those frames are asked to be.
@@ -34,7 +34,7 @@ Each RAW frame is a full-size still, so frames come about 0.44 s apart: 3 frames
 | Size | Full, 12 MP or 8 MP | always full, 19 MP |
 | Speed | fast; frames 1/30 s apart, finished in the camera | slow; frames 0.44 s apart, 15 to 22 s for a 13-frame burst |
 | Memory | light at 12 MP | heavy: about 1 GB to develop one RAW |
-| Highlights | white in every frame stays white | shot darker when needed, lifted later |
+| Highlights | kept by one darker [bracket frame](hdr.md#exposure-bracketing) | the whole burst shot darker when needed, shadows lifted later |
 | Later changes | look and edits | the RAW can be developed again |
 | Wins for | people, moving subjects, quick shots, the front camera | landscapes, still scenes, high contrast, editing later |
 
