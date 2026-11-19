@@ -600,6 +600,8 @@ fun GalleryDetailScreen(
         currentPhoto.isImage &&
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
         !DeviceUtil.isHarmonyOS &&
+        // A screen with no HDR headroom shows the HDR picture exactly like the SDR one.
+        GalleryManager.hdrSdrRatio > 1f &&
         viewModel.canToggleManualHdrEnhance(currentPhoto)
 
     var deleteExportedPref by rememberPreference(UserPreferences::deleteExported)
@@ -2381,7 +2383,7 @@ private fun ZoomableImage(
             colorSpace.value = bitmap?.colorSpace
             isLoading = bitmap == null
 
-            if (displayPhoto.metadata?.manualHdrEffectEnabled == true && isSettledActive) {
+            if (displayPhoto.metadata?.manualHdrEffectEnabled == true && isSettledActive && GalleryManager.hdrSdrRatio > 1f) {
                 hdrBitmap = viewModel.getDetailBitmap(displayPhoto, maxEdge = previewMaxEdge)
                 hdrBitmap?.let {
                     colorSpace.value = it.colorSpace

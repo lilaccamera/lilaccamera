@@ -1207,6 +1207,8 @@ object GalleryManager {
         noiseReduction: Float = 0f,
         chromaNoiseReduction: Float = 0f
     ) {
+        // Only the viewer reads this cache, and only on a screen with HDR headroom; exports never read it.
+        if (hdrSdrRatio <= 1f) return
         val existingJob = detailHdrBuildJobs[photoId]
         val generation = nextDetailHdrBuildGeneration(photoId)
         val job = processingScope.launch {
