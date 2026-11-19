@@ -2,6 +2,8 @@ package com.hinnka.mycamera.ui.camera
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -237,12 +239,95 @@ internal fun ShadowedLineIcon(icon: ImageVector, size: Dp) {
 
 private val TopEdgeTextStyle = TextStyle(shadow = ViewfinderTextShadow, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, color = Color.White)
 
-/** One active-setting mark on the top edge: a 20 dp line icon, with a short value after it if any. */
-internal data class TopEdgeMark(val icon: ImageVector?, val text: String? = null, val color: Color = Color.White)
+/** One active-setting mark on the top edge, drawn as the everyday row draws it; [color] null is the accent. */
+internal data class TopEdgeMark(val badge: Badge, val color: Color? = null)
+
+// Sony's camera writes values in icons with a bold condensed face.
+internal val CondensedBold = FontFamily(android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.BOLD))
+
+/**
+ * A setting as Sony's camera draws it: an [icon] with its value as a small subscript ([sub]), the value alone
+ * as [text] (in an outlined box when [framed]), or an icon followed by a plain reading (both [icon] and [text]).
+ */
+internal data class Badge(
+    val icon: ImageVector? = null,
+    val sub: String? = null,
+    val text: String? = null,
+    val framed: Boolean = false
+)
+
+/** Draws a [Badge]: 24 dp icons in the everyday row, 22 dp on the top edge ([small]), where icons get a shadow. */
+@Composable
+internal fun BadgeView(badge: Badge, color: Color, small: Boolean = false) {
+    val icon = badge.icon
+    val text = badge.text
+    if (icon != null && text != null) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            BadgeIcon(icon, if (small) 22.dp else 24.dp, color, small)
+            Text(text, style = TopEdgeTextStyle.copy(color = color), maxLines = 1)
+        }
+        return
+    }
+    val tight = TextStyle(
+        fontFamily = CondensedBold,
+        shadow = ViewfinderTextShadow,
+        platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+    )
+    if (text != null) {
+        val size = when {
+            badge.framed -> if (small) 12.5.sp else 14.sp
+            small -> 15.sp
+            else -> 17.sp
+        }
+        Box(Modifier.height(if (small) 28.dp else 32.dp).widthIn(min = if (small) 24.dp else 32.dp), contentAlignment = Alignment.Center) {
+            Text(
+                text = text,
+                color = color,
+                maxLines = 1,
+                style = tight.copy(fontSize = size, letterSpacing = (-0.3).sp),
+                modifier = if (badge.framed) {
+                    Modifier
+                        .border(1.5.dp, color, RoundedCornerShape(3.dp))
+                        .padding(start = 3.dp, end = 3.dp, top = 2.dp, bottom = 1.dp)
+                } else {
+                    Modifier
+                }
+            )
+        }
+        return
+    }
+    // The subscript starts a little right of the icon's centre, on the badge's bottom edge, and may run past it.
+    val subStart = if (small) 6.dp else 7.dp
+    Layout(
+        content = {
+            if (icon != null) BadgeIcon(icon, if (small) 22.dp else 24.dp, color, small)
+            badge.sub?.let {
+                Text(it, color = color, maxLines = 1, style = tight.copy(fontSize = if (small) 10.5.sp else 11.sp, letterSpacing = (-0.2).sp))
+            }
+        }
+    ) { measurables, constraints ->
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val placeables = measurables.map { it.measure(loose) }
+        val width = maxOf((if (small) 24.dp else 32.dp).roundToPx(), placeables.firstOrNull()?.width ?: 0)
+        val height = (if (small) 28.dp else 32.dp).roundToPx()
+        layout(width, height) {
+            placeables.getOrNull(0)?.let { it.place((width - it.width) / 2, (height - it.height) / 2) }
+            placeables.getOrNull(1)?.let { it.place(width / 2 + subStart.roundToPx(), height - it.height) }
+        }
+    }
+}
+
+@Composable
+private fun BadgeIcon(icon: ImageVector, size: Dp, color: Color, shadow: Boolean) {
+    Box {
+        if (shadow) Icon(icon, null, tint = Color.Black.copy(alpha = 0.5f), modifier = Modifier.offset(y = 1.dp).size(size))
+        Icon(icon, null, tint = color, modifier = Modifier.size(size))
+    }
+}
 
 /**
  * The top edge of the picture while everything is closed: marks for settings that change how a shot is
- * taken and differ from the default, then the histogram. White with a soft shadow; it never turns.
+ * taken and differ from the default, then the histogram. Orange with a soft shadow; it never turns.
  */
 @Composable
 internal fun TopEdgeLine(
@@ -256,13 +341,9 @@ internal fun TopEdgeLine(
     val tapModifier = Modifier
         .height(TopEdgeLineHeight)
         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+    val accent = ModeAmber
     val markRow: @Composable () -> Unit = {
-        marks.forEach { mark ->
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                mark.icon?.let { ShadowedLineIcon(it, 20.dp) }
-                mark.text?.let { Text(it, style = TopEdgeTextStyle.copy(color = mark.color), maxLines = 1) }
-            }
-        }
+        marks.forEach { mark -> BadgeView(mark.badge, mark.color ?: accent, small = true) }
         if (histogram != null) {
             HistogramView(histogram = histogram, modifier = Modifier.size(width = 64.dp, height = 22.dp))
         }
@@ -270,7 +351,7 @@ internal fun TopEdgeLine(
     if (center == null) {
         Row(
             modifier = modifier.then(tapModifier),
-            horizontalArrangement = Arrangement.spacedBy(20.dp),
+            horizontalArrangement = Arrangement.spacedBy(22.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             markRow()
@@ -282,7 +363,7 @@ internal fun TopEdgeLine(
     Row(modifier = modifier.fillMaxWidth().then(tapModifier), verticalAlignment = Alignment.CenterVertically) {
         Row(
             modifier = Modifier.weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.End),
+            horizontalArrangement = Arrangement.spacedBy(22.dp, Alignment.End),
             verticalAlignment = Alignment.CenterVertically
         ) { markRow() }
         Spacer(Modifier.width(20.dp))

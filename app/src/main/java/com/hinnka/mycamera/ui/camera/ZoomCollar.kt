@@ -103,8 +103,9 @@ internal fun Density.onZoomCollar(fromShutterCentre: Offset): Boolean {
 
 /**
  * A zoom lever round the top of the shutter, like the one round a compact camera's shutter release. Pulled round,
- * it turns about the shutter's centre and zooms, faster the further it turns, then springs back. A tap on W or T
- * steps one stop that way, a hold zooms that way, and a tap on the knob walks the stops up and back down.
+ * it turns about the shutter's centre and zooms (left in, right out), faster the further it turns, then springs
+ * back. A tap on T (left) or W (right) steps one stop that way, a hold zooms that way, and a tap on the knob walks
+ * the stops up and back down.
  */
 @Composable
 internal fun ZoomCollar(
@@ -222,7 +223,8 @@ internal fun ZoomCollar(
                             last = now
                             if (rate != 0f) {
                                 // A ratio already outside the collar's range, set by pinching, is not pulled into it.
-                                val next = (z * exp(rate * ZOOM_RATE * dt))
+                                // Turned left (rate below 0) zooms in, as the wheel's rim does.
+                                val next = (z * exp(-rate * ZOOM_RATE * dt))
                                     .coerceIn(minOf(currentMin, z), maxOf(currentMax, z))
                                 if (next != z) zoomTo(next)
                             }
@@ -264,7 +266,7 @@ internal fun ZoomCollar(
                         if (moved || held) {
                             settleContinuousZoomStop(currentStops, z).snapZoomStop?.let { if (it != z) zoomTo(it) }
                         } else if (lifted) {
-                            if (side == 0) stepFromKnob() else step(side)
+                            if (side == 0) stepFromKnob() else step(-side)
                         }
                     } finally {
                         holdJob?.cancel()
@@ -316,8 +318,8 @@ internal fun ZoomCollar(
                         drawPath(band, lineColor, style = stroke)
                         drawPath(knob, (if (light) Color.Black else Color.White).copy(alpha = 0.16f))
                         for ((layout, angle, lit) in listOf(
-                            Triple(wLayout, -END_ANGLE, turn < -0.05f),
-                            Triple(tLayout, END_ANGLE, turn > 0.05f)
+                            Triple(tLayout, -END_ANGLE, turn < -0.05f),
+                            Triple(wLayout, END_ANGLE, turn > 0.05f)
                         )) {
                             val p = c + polar(mid, angle)
                             rotate(angle, pivot = p) {

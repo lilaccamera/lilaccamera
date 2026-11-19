@@ -100,6 +100,7 @@ internal fun CurveOverlay(
     others: List<Pair<CurveChannel, FloatArray>>,
     selected: Int?,
 ) {
+    val accent = ModeAmber
     Canvas(Modifier.fillMaxSize()) {
         val box = curveBox(contentBounds, free, CURVE_INSET_DP.dp.toPx()) ?: return@Canvas
         val shade = Color.Black.copy(alpha = 0.45f)
@@ -122,8 +123,8 @@ internal fun CurveOverlay(
         points.forEachIndexed { i, (x, y) ->
             val center = Offset(box.left + x * box.width, box.top + (1f - y) * box.height)
             drawCircle(Color(0xFF141413), radius, center)
-            drawCircle(if (i == selected) ModeAmber else color, radius, center, style = Stroke(2.dp.toPx()))
-            if (i == selected) drawCircle(ModeAmber, radius - 4.dp.toPx(), center)
+            drawCircle(if (i == selected) accent else color, radius, center, style = Stroke(2.dp.toPx()))
+            if (i == selected) drawCircle(accent, radius - 4.dp.toPx(), center)
         }
     }
 }

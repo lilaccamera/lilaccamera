@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -47,6 +48,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
@@ -84,7 +86,9 @@ private const val RIDGE_FADE = 185f      // dp from the centre where the ridges 
 private const val TAP_GRACE_MS = 250L  // wait after a neighbour tap's roll for a further tap
 private const val RESISTANCE = 0.3f      // past Night and Video
 
-internal val ModeAmber = Color(0xFFEF9F27)
+// "On, and changes the shot": the app's accent (Sony orange unless changed in the appearance settings).
+internal val ModeAmber: Color
+    @Composable @ReadOnlyComposable get() = com.hinnka.mycamera.ui.theme.AccentColor
 private val AutoGreen = Color(0xFF5DCAA5)
 private val VideoRed = Color(0xFFE24B4A)
 private val RidgeColor = Color(0xFF6B6A65)
@@ -206,6 +210,10 @@ internal fun ModeLine(
     modifier: Modifier = Modifier,
     // Drawn under the shutter in the mode zone; presses that start on it are its own.
     collar: (@Composable () -> Unit)? = null,
+    // The collar's ring round the shutter takes its presses; the thumbwheel and pill sit above the mode zone.
+    collarRing: Boolean = true,
+    // The footer's padding under the mode zone, so the ridges sit on the screen's bottom edge.
+    bottomPadding: Dp = CameraControlsLayoutDefaults.BottomPadding,
     // Off when another app asked for a photo: the shutter and collar stay, the mode marks go.
     marks: Boolean = true,
     shutter: @Composable (Modifier) -> Unit
@@ -225,7 +233,7 @@ internal fun ModeLine(
     val currentLo by rememberUpdatedState(lo)
     val currentLast by rememberUpdatedState(last)
     val currentOnSelect by rememberUpdatedState(onSelect)
-    val hasCollar by rememberUpdatedState(collar != null)
+    val hasCollar by rememberUpdatedState(collar != null && collarRing)
 
     // A mode change from elsewhere (the front camera has no Pro, for example) moves the dial silently.
     val selectedIndex = selected.dialIndex(proAvailable)
@@ -355,7 +363,7 @@ internal fun ModeLine(
             val cx = size.width / 2
             val cy = size.height / 2
             val unit = SPACING.dp.toPx()
-            val bottom = cy + (CameraControlsLayoutDefaults.ModeZoneHeight / 2 + CameraControlsLayoutDefaults.BottomPadding).toPx()
+            val bottom = cy + (CameraControlsLayoutDefaults.ModeZoneHeight / 2 + bottomPadding).toPx()
             // A soft backdrop instead of a band of its own: it only shows over a picture reaching the footer.
             val backdropTop = cy - 110.dp.toPx()
             drawRect(

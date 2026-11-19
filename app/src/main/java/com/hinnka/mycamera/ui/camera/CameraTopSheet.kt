@@ -38,6 +38,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -80,12 +85,19 @@ import com.hinnka.mycamera.ui.components.rawRenderingEngineName
 import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.hinnka.mycamera.ui.prefs.preferenceValue
+import com.hinnka.mycamera.ui.components.ChosenFill
 import com.hinnka.mycamera.ui.components.LilacChip
 import com.hinnka.mycamera.ui.components.LilacDim
 import com.hinnka.mycamera.ui.components.LilacLabel
 import com.hinnka.mycamera.ui.components.LilacSecondary
 import com.hinnka.mycamera.ui.components.LilacText
 import com.hinnka.mycamera.ui.components.LilacTextStyle
+import com.hinnka.mycamera.ui.components.SonyDim
+import com.hinnka.mycamera.ui.components.SonyDivider
+import com.hinnka.mycamera.ui.components.SonySecondary
+import com.hinnka.mycamera.ui.components.SonyText
+import com.hinnka.mycamera.ui.components.SonyTrack
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import java.util.Locale
@@ -97,6 +109,9 @@ internal val SheetText = LilacText
 internal val SheetLabel = LilacLabel
 internal val SheetDim = LilacSecondary
 internal val SheetGrey = LilacDim
+// The quick settings and Looks panels: black over the picture, so they meet the phone's black bezel without an edge.
+internal val SheetPanel = Color.Black.copy(alpha = 0.82f)
+internal val SheetShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
 private val SheetTextStyle = LilacTextStyle
 
 /** One camera the Lens row can switch to: a second camera at the same zoom, or a macro camera. */
@@ -260,6 +275,9 @@ internal fun CameraTopSheet(
     // One explanation and one inline picker (Log, Microphone) open at a time.
     var explained by remember { mutableStateOf<String?>(null) }
     var openPicker by remember { mutableStateOf<String?>(null) }
+    // Shooting (0) or Output (1); opens on Shooting and keeps the last pick while the camera screen lives.
+    // Opens on the first page in a new mode; the page shown last is kept only while the mode stays.
+    var qTab by remember(captureMode, useRaw, isPortraitMode, isNightMode) { mutableIntStateOf(0) }
     fun handleContentManagementAction(action: () -> Unit) {
         showContentManagementOptions = false
         action()
@@ -382,8 +400,8 @@ internal fun CameraTopSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(72.dp)
-                    .padding(horizontal = 6.dp),
+                    .height(56.dp)
+                    .padding(horizontal = 4.dp),
                 content = everydayItems
             )
             Spacer(Modifier.height(6.dp))
@@ -391,22 +409,29 @@ internal fun CameraTopSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // shortcut: plain 72 % black, no blur (Compose can't blur a GL preview surface behind it); add a GL blur pass if the plain sheet hides too much.
-                    .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                    // shortcut: plain black, no blur (Compose can't blur a GL preview surface behind it); add a GL blur pass if the plain sheet hides too much.
+                    .background(SheetPanel, SheetShape)
                     .navigationBarsPadding()
-                    .padding(start = 10.dp, end = 10.dp, bottom = 6.dp)
+                    .padding(bottom = 8.dp)
             ) {
-                SheetHeader(
+                // The front camera has few rows that apply: one page, no tabs.
+                val tabbed = isVideo || !isFrontCamera
+                SheetTabRow(
+                    tabbed = tabbed,
+                    tab = qTab,
+                    onTab = { qTab = it },
                     onToolboxClick = onToolboxClick,
                     onContentManagementClick = { showContentManagementOptions = !showContentManagementOptions },
                     onSettingsClick = onMoreSettingsClick
                 )
-                ContentManagementOptionsPanel(
-                    visible = showContentManagementOptions,
-                    onFilterManageClick = { handleContentManagementAction(onFilterManageClick) },
-                    onFrameManageClick = { handleContentManagementAction(onFrameManageClick) },
-                    onPresetManageClick = { handleContentManagementAction(onPresetManageClick) }
-                )
+                Box(Modifier.padding(horizontal = 10.dp)) {
+                    ContentManagementOptionsPanel(
+                        visible = showContentManagementOptions,
+                        onFilterManageClick = { handleContentManagementAction(onFilterManageClick) },
+                        onFrameManageClick = { handleContentManagementAction(onFrameManageClick) },
+                        onPresetManageClick = { handleContentManagementAction(onPresetManageClick) }
+                    )
+                }
                 if (showContentManagementOptions) Spacer(Modifier.height(8.dp))
 
                 val rows = QuickRows(
@@ -414,111 +439,39 @@ internal fun CameraTopSheet(
                     onExplain = { key -> explained = if (explained == key) null else key },
                     onOpenSettingsAt = onOpenSettingsAt
                 )
-                if (isVideo) {
-                    QuickGroup {
-                        rows.Setting(
-                            key = "vasp",
-                            label = stringResource(R.string.video_aspect_chip),
-                            explanation = stringResource(R.string.quick_explain_video_aspect)
-                        ) {
-                            VideoAspectRatio.entries.forEach { ratio ->
-                                QuickChoice(
-                                    text = videoAspectRatioLabel(ratio),
-                                    selected = videoAspectRatio == ratio,
-                                    minWidth = 56.dp,
-                                    onClick = { onVideoAspectRatioChange(ratio) }
-                                )
-                            }
-                        }
-                        rows.Setting(
-                            key = "log",
-                            label = stringResource(R.string.video_log_chip),
-                            explanation = stringResource(R.string.quick_explain_log),
-                            last = openPicker != "log"
-                        ) {
-                            QuickLink(videoLogProfileLabel(videoLogProfile), open = openPicker == "log") {
-                                openPicker = if (openPicker == "log") null else "log"
-                            }
-                        }
-                        InlinePicker(visible = openPicker == "log") {
-                            availableVideoLogProfiles.forEach { profile ->
-                                VideoOptionChip(
-                                    title = videoLogProfileLabel(profile),
-                                    selected = videoLogProfile == profile,
-                                    onClick = { onVideoLogProfileChange(profile) }
-                                )
-                            }
-                        }
-                    }
-                    QuickGroup {
-                        rows.Setting(
-                            key = "bitrate",
-                            label = stringResource(R.string.quick_bitrate),
-                            explanation = stringResource(R.string.quick_explain_bitrate)
-                        ) {
-                            VideoBitratePreset.entries.forEach { bitrate ->
-                                QuickChoice(
-                                    text = bitrate.bitrateMbps.toString(),
-                                    selected = videoBitrate == bitrate,
-                                    minWidth = 42.dp,
-                                    onClick = { onVideoBitrateChange(bitrate) }
-                                )
-                            }
-                        }
-                        rows.Setting(
-                            key = "codec",
-                            label = stringResource(R.string.quick_codec),
-                            explanation = stringResource(R.string.quick_explain_codec),
-                            last = true
-                        ) {
-                            VideoCodec.entries.forEach { codec ->
-                                QuickChoice(
-                                    text = codec.displayName,
-                                    selected = videoCodec == codec,
-                                    minWidth = 56.dp,
-                                    onClick = { onVideoCodecChange(codec) }
-                                )
-                            }
-                        }
-                    }
-                    QuickGroup {
-                        rows.Setting(
-                            key = "mic",
-                            label = stringResource(R.string.video_microphone_title),
-                            explanation = stringResource(R.string.quick_explain_microphone),
-                            last = openPicker != "mic"
-                        ) {
-                            QuickLink(
-                                selectedVideoAudioInputLabel(videoAudioInputId, videoAudioInputOptions),
-                                open = openPicker == "mic"
+
+                // Group bodies; each page decides the titles, since a page with one group shows none.
+                val lensGroup: @Composable (first: Boolean) -> Unit = { first ->
+                    if (lensChoices.isNotEmpty()) {
+                        QuickGroup(stringResource(R.string.quick_lens), GroupRed, divider = !first) {
+                            rows.Setting(
+                                key = "lens",
+                                label = stringResource(R.string.quick_lens),
+                                explanation = stringResource(R.string.quick_explain_lens),
+                                last = true
                             ) {
-                                openPicker = if (openPicker == "mic") null else "mic"
-                            }
-                        }
-                        InlinePicker(visible = openPicker == "mic") {
-                            VideoOptionChip(
-                                title = stringResource(R.string.video_microphone_auto),
-                                selected = videoAudioInputId == VIDEO_AUDIO_INPUT_AUTO,
-                                onClick = { onVideoAudioInputChange(VIDEO_AUDIO_INPUT_AUTO) }
-                            )
-                            videoAudioInputOptions.forEach { option ->
-                                VideoOptionChip(
-                                    title = videoAudioInputLabel(option),
-                                    selected = videoAudioInputId == option.id,
-                                    onClick = { onVideoAudioInputChange(option.id) }
-                                )
+                                // shortcut: one line of choices, so about six lenses fit; wrap them if a phone offers more.
+                                lensChoices.forEach { choice ->
+                                    QuickChoice(
+                                        text = choice.label.ifEmpty { stringResource(R.string.quick_lens_macro) },
+                                        selected = choice.cameraId == currentCameraId,
+                                        minWidth = 42.dp,
+                                        onClick = { onLensSelect(choice.cameraId) }
+                                    )
+                                }
                             }
                         }
                     }
-                } else {
-                    // Multi-frame and multi-exposure, shown in Photo's own section or in a plain group in Portrait.
-                    // They exclude each other: the one given way slides to Off as soon as the other is moved,
-                    // not only once the camera has switched.
-                    var stackPick by remember { mutableStateOf<String?>(null) }
-                    LaunchedEffect(useJpgMax, useMultipleExposure) {
-                        if (stackPick == "mf" && !useMultipleExposure || stackPick == "mexp" && !useJpgMax) stackPick = null
-                    }
-                    val photoStackRows: @Composable ColumnScope.() -> Unit = {
+                }
+
+                // Multi-frame and multi-exposure exclude each other: the one given way slides to Off as soon as
+                // the other is moved, not only once the camera has switched.
+                var stackPick by remember { mutableStateOf<String?>(null) }
+                LaunchedEffect(useJpgMax, useMultipleExposure) {
+                    if (stackPick == "mf" && !useMultipleExposure || stackPick == "mexp" && !useJpgMax) stackPick = null
+                }
+                val stackGroup: @Composable (first: Boolean, onGuide: (() -> Unit)?) -> Unit = { first, onGuide ->
+                    QuickGroup(stringResource(R.string.quick_group_stacking), GroupRed, onGuide = onGuide, divider = !first) {
                         rows.Setting(
                             key = "mf",
                             label = stringResource(R.string.quick_multi_frame),
@@ -539,16 +492,18 @@ internal fun CameraTopSheet(
                                 }
                             )
                         }
-                        rows.Setting(
-                            key = "bracket",
-                            label = stringResource(R.string.quick_bracketing),
-                            explanation = stringResource(R.string.quick_explain_bracketing)
-                        ) {
-                            when {
-                                isFrontCamera -> QuickFixed(stringResource(R.string.quick_bracketing_back_only))
-                                !useJpgMax -> QuickFixed(stringResource(R.string.quick_bracketing_needs_multi_frame))
-                                bracketBlockedBySize -> QuickFixed(stringResource(R.string.quick_bracketing_needs_12mp))
-                                else -> QuickSwitch(bracketing) { onBracketingChange(!bracketing) }
+                        // The front camera cannot bracket: it has no manual exposure.
+                        if (!isFrontCamera) {
+                            rows.Setting(
+                                key = "bracket",
+                                label = stringResource(R.string.quick_bracketing),
+                                explanation = stringResource(R.string.quick_explain_bracketing)
+                            ) {
+                                when {
+                                    !useJpgMax -> QuickFixed(stringResource(R.string.quick_bracketing_needs_multi_frame))
+                                    bracketBlockedBySize -> QuickFixed(stringResource(R.string.quick_bracketing_needs_12mp))
+                                    else -> QuickSwitch(bracketing) { onBracketingChange(!bracketing) }
+                                }
                             }
                         }
                         rows.Setting(
@@ -577,102 +532,80 @@ internal fun CameraTopSheet(
                             )
                         }
                     }
-                    // The current mode's own settings, always first and marked, so the shared groups
-                    // below keep their place at the bottom of the sheet from mode to mode.
-                    ModeGroup(
-                        title = stringResource(
-                            when {
-                                isPortraitMode -> R.string.capture_mode_portrait
-                                isNightMode -> R.string.capture_mode_night
-                                isProfessionalMode -> R.string.capture_mode_professional
-                                else -> R.string.capture_mode_photo
-                            }
-                        ),
-                        onGuide = when {
-                            isPortraitMode -> onPortraitHelp
-                            isProfessionalMode -> onProHelp
-                            else -> onBasicsHelp
+                }
+
+                val portraitGroup: @Composable (first: Boolean) -> Unit = { first ->
+                    QuickGroup(stringResource(R.string.capture_mode_portrait), GroupRed, onGuide = onPortraitHelp, divider = !first) {
+                        rows.Setting(
+                            key = "pblur",
+                            label = stringResource(R.string.portrait_blur),
+                            explanation = stringResource(R.string.quick_explain_portrait_blur),
+                            onLongClick = onPortraitHelp
+                        ) {
+                            QuickChoice(
+                                text = stringResource(R.string.portrait_blur_quick),
+                                selected = portraitQuickBlur,
+                                minWidth = 56.dp,
+                                onClick = { onPortraitQuickBlurChange(true) }
+                            )
+                            QuickChoice(
+                                text = stringResource(R.string.portrait_blur_depth),
+                                selected = !portraitQuickBlur,
+                                minWidth = 56.dp,
+                                onClick = { onPortraitQuickBlurChange(false) }
+                            )
                         }
-                    ) {
-                        if (isPortraitMode) {
-                            rows.Setting(
-                                key = "pblur",
-                                label = stringResource(R.string.portrait_blur),
-                                explanation = stringResource(R.string.quick_explain_portrait_blur),
-                                onLongClick = onPortraitHelp
-                            ) {
+                        rows.Setting(
+                            key = "pbokeh",
+                            label = stringResource(R.string.gallery_bokeh_style_title),
+                            explanation = stringResource(R.string.quick_explain_portrait_bokeh),
+                            last = true
+                        ) {
+                            listOf(
+                                BokehStyle.NATURAL to R.string.gallery_bokeh_style_natural,
+                                BokehStyle.DEFAULT to R.string.gallery_bokeh_style_default,
+                                BokehStyle.BUBBLE to R.string.gallery_bokeh_style_bubble,
+                            ).forEach { (style, label) ->
                                 QuickChoice(
-                                    text = stringResource(R.string.portrait_blur_quick),
-                                    selected = portraitQuickBlur,
-                                    minWidth = 56.dp,
-                                    onClick = { onPortraitQuickBlurChange(true) }
-                                )
-                                QuickChoice(
-                                    text = stringResource(R.string.portrait_blur_depth),
-                                    selected = !portraitQuickBlur,
-                                    minWidth = 56.dp,
-                                    onClick = { onPortraitQuickBlurChange(false) }
+                                    text = stringResource(label),
+                                    selected = portraitBokehStyle == style,
+                                    minWidth = 48.dp,
+                                    onClick = { onPortraitBokehStyleChange(style) }
                                 )
                             }
-                            rows.Setting(
-                                key = "pbokeh",
-                                label = stringResource(R.string.gallery_bokeh_style_title),
-                                explanation = stringResource(R.string.quick_explain_portrait_bokeh),
-                                last = true
-                            ) {
-                                listOf(
-                                    BokehStyle.NATURAL to R.string.gallery_bokeh_style_natural,
-                                    BokehStyle.DEFAULT to R.string.gallery_bokeh_style_default,
-                                    BokehStyle.BUBBLE to R.string.gallery_bokeh_style_bubble,
-                                ).forEach { (style, label) ->
-                                    QuickChoice(
-                                        text = stringResource(label),
-                                        selected = portraitBokehStyle == style,
-                                        minWidth = 48.dp,
-                                        onClick = { onPortraitBokehStyleChange(style) }
-                                    )
-                                }
-                            }
-                        } else if (isProfessionalMode) {
-                            rows.Setting(
-                                key = "engine",
-                                label = stringResource(R.string.quick_rendering),
-                                explanation = rawColorEngineDescription(rawRenderingEngine),
-                                settingsTarget = SettingsTarget.RAW_DEVELOPMENT
-                            ) {
-                                QuickLink(rawRenderingEngineName(rawRenderingEngine), open = false) {
-                                    showRenderingEngineSheet = true
-                                }
-                            }
-                            rows.Setting(
-                                key = "hdrp",
-                                label = stringResource(R.string.quick_hdr_plus_frames),
-                                explanation = stringResource(R.string.settings_hdr_plus_frame_count_description),
-                                settingsTarget = SettingsTarget.HDR_PLUS
-                            ) {
-                                FrameCountSlider(
-                                    frames = hdrPlusFrameCount,
-                                    min = hdrPlusMinFrames,
-                                    withOff = false,
-                                    onFramesChange = onHdrPlusFrameCountChange
-                                )
-                            }
-                            rows.Setting(
-                                key = "hdrr",
-                                label = stringResource(R.string.quick_hdr_ratio),
-                                explanation = stringResource(R.string.settings_ml_ae_max_hdr_ratio_description),
-                                settingsTarget = SettingsTarget.HDR_PLUS,
-                                last = true
-                            ) {
-                                HdrRatioSlider(hdrRatioLimit, onHdrRatioLimitChange)
-                            }
-                        } else {
-                            photoStackRows()
                         }
                     }
-                    // In Portrait, Photo's own multi-frame and multi-exposure keep their plain group after Portrait's.
-                    if (isPortraitMode) QuickGroup { photoStackRows() }
-                    QuickGroup {
+                }
+
+                val hdrGroup: @Composable (first: Boolean) -> Unit = { first ->
+                    QuickGroup(stringResource(R.string.quick_group_hdr_plus), GroupMagenta, onGuide = onProHelp, divider = !first) {
+                        rows.Setting(
+                            key = "hdrp",
+                            label = stringResource(R.string.quick_hdr_plus_frames),
+                            explanation = stringResource(R.string.settings_hdr_plus_frame_count_description),
+                            settingsTarget = SettingsTarget.HDR_PLUS
+                        ) {
+                            FrameCountSlider(
+                                frames = hdrPlusFrameCount,
+                                min = hdrPlusMinFrames,
+                                withOff = false,
+                                onFramesChange = onHdrPlusFrameCountChange
+                            )
+                        }
+                        rows.Setting(
+                            key = "hdrr",
+                            label = stringResource(R.string.quick_hdr_ratio),
+                            explanation = stringResource(R.string.settings_ml_ae_max_hdr_ratio_description),
+                            settingsTarget = SettingsTarget.HDR_PLUS,
+                            last = true
+                        ) {
+                            HdrRatioSlider(hdrRatioLimit, onHdrRatioLimitChange)
+                        }
+                    }
+                }
+
+                val exposureGroup: @Composable () -> Unit = {
+                    QuickGroup(stringResource(R.string.quick_group_exposure), GroupMagenta) {
                         rows.Setting(
                             key = "meter",
                             label = stringResource(R.string.metering_mode),
@@ -685,26 +618,48 @@ internal fun CameraTopSheet(
                                 MeteringMode.AVERAGE to R.string.quick_metering_average,
                                 MeteringMode.HIGHLIGHT_PRIORITY to R.string.quick_metering_highlight,
                             ).forEach { (mode, label) ->
+                                // Slimmer chips, so the five choices fit beside the name on one line.
                                 QuickChoice(
                                     text = stringResource(label),
                                     selected = meteringMode == mode,
-                                    minWidth = 42.dp,
+                                    minWidth = 0.dp,
+                                    fontSize = 14.sp,
+                                    horizontalPadding = 6.dp,
                                     onClick = { onMeteringModeChange(mode) }
                                 )
                             }
                         }
                         rows.Setting(
                             key = "hist",
+                            quiet = true,
                             label = stringResource(R.string.histogram),
                             explanation = stringResource(R.string.quick_explain_histogram),
                             last = true
                         ) {
-                            QuickSwitch(showHistogram) { onHistogramChange(!showHistogram) }
+                            QuickSwitch(showHistogram, quiet = true) { onHistogramChange(!showHistogram) }
                         }
                     }
-                    QuickGroup {
+                }
+
+                // The file: Rendering (Pro), Resolution, Colour (front), Camera JPEG, Ultra HDR (back).
+                val outputGroup: @Composable (title: Boolean) -> Unit = { title ->
+                    QuickGroup(if (title) stringResource(R.string.quick_group_output) else null, GroupGold, divider = title) {
+                        if (isProfessionalMode) {
+                            rows.Setting(
+                                key = "engine",
+                                label = stringResource(R.string.quick_rendering),
+                                explanation = rawColorEngineDescription(rawRenderingEngine),
+                                settingsTarget = SettingsTarget.RAW_DEVELOPMENT
+                            ) {
+                                QuickLink(rawRenderingEngineName(rawRenderingEngine), open = false) {
+                                    showRenderingEngineSheet = true
+                                }
+                            }
+                        }
                         rows.Setting(
                             key = "res",
+                            // Pro is always full size, so its row only reports that.
+                            quiet = isProfessionalMode,
                             label = stringResource(R.string.photo_resolution),
                             explanation = stringResource(
                                 if (isFrontCamera && !isProfessionalMode) R.string.quick_explain_resolution_front
@@ -745,7 +700,7 @@ internal fun CameraTopSheet(
                                 explanation = stringResource(R.string.quick_explain_colour_front)
                             ) {
                                 listOf(false, true).forEach { accurate ->
-                                    LilacChip(
+                                    QuickChoice(
                                         text = stringResource(
                                             if (accurate) R.string.quick_colour_accurate else R.string.quick_colour_fast
                                         ),
@@ -759,40 +714,168 @@ internal fun CameraTopSheet(
                         }
                         rows.Setting(
                             key = "jpeg",
+                            quiet = true,
                             label = stringResource(R.string.camera_jpeg),
-                            explanation = stringResource(R.string.quick_explain_camera_jpeg)
+                            explanation = stringResource(R.string.quick_explain_camera_jpeg),
+                            last = isFrontCamera
                         ) {
-                            QuickSwitch(saveCameraJpeg) { onSaveCameraJpegChange(!saveCameraJpeg) }
+                            QuickSwitch(saveCameraJpeg, quiet = true) { onSaveCameraJpegChange(!saveCameraJpeg) }
                         }
-                        rows.Setting(
-                            key = "uhdr",
-                            label = stringResource(R.string.settings_ultra_hdr_gain_map),
-                            explanation = stringResource(R.string.quick_explain_ultra_hdr),
-                            settingsTarget = SettingsTarget.ULTRA_HDR,
-                            last = true
-                        ) {
-                            QuickSwitch(ultraHdrEnabled) { onUltraHdrToggle(!ultraHdrEnabled) }
+                        // The front camera makes no gain map.
+                        if (!isFrontCamera) {
+                            rows.Setting(
+                                key = "uhdr",
+                                quiet = true,
+                                label = stringResource(R.string.settings_ultra_hdr_gain_map),
+                                explanation = stringResource(R.string.quick_explain_ultra_hdr),
+                                settingsTarget = SettingsTarget.ULTRA_HDR,
+                                last = true
+                            ) {
+                                QuickSwitch(ultraHdrEnabled, quiet = true) { onUltraHdrToggle(!ultraHdrEnabled) }
+                            }
                         }
                     }
                 }
-                if (lensChoices.isNotEmpty()) {
-                    QuickGroup {
+
+                val videoPictureGroup: @Composable (first: Boolean) -> Unit = { first ->
+                    QuickGroup(stringResource(R.string.quick_group_picture), GroupRed, divider = !first) {
                         rows.Setting(
-                            key = "lens",
-                            label = stringResource(R.string.quick_lens),
-                            explanation = stringResource(R.string.quick_explain_lens),
-                            last = true
+                            key = "vasp",
+                            label = stringResource(R.string.video_aspect_chip),
+                            explanation = stringResource(R.string.quick_explain_video_aspect)
                         ) {
-                            // shortcut: one line of choices, so about six lenses fit; wrap them if a phone offers more.
-                            lensChoices.forEach { choice ->
+                            VideoAspectRatio.entries.forEach { ratio ->
                                 QuickChoice(
-                                    text = choice.label.ifEmpty { stringResource(R.string.quick_lens_macro) },
-                                    selected = choice.cameraId == currentCameraId,
-                                    minWidth = 42.dp,
-                                    onClick = { onLensSelect(choice.cameraId) }
+                                    text = videoAspectRatioLabel(ratio),
+                                    selected = videoAspectRatio == ratio,
+                                    minWidth = 56.dp,
+                                    onClick = { onVideoAspectRatioChange(ratio) }
                                 )
                             }
                         }
+                        rows.Setting(
+                            key = "log",
+                            label = stringResource(R.string.video_log_chip),
+                            explanation = stringResource(R.string.quick_explain_log),
+                            last = openPicker != "log"
+                        ) {
+                            QuickLink(videoLogProfileLabel(videoLogProfile), open = openPicker == "log") {
+                                openPicker = if (openPicker == "log") null else "log"
+                            }
+                        }
+                        InlinePicker(visible = openPicker == "log") {
+                            availableVideoLogProfiles.forEach { profile ->
+                                VideoOptionChip(
+                                    title = videoLogProfileLabel(profile),
+                                    selected = videoLogProfile == profile,
+                                    onClick = { onVideoLogProfileChange(profile) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                val videoSoundGroup: @Composable () -> Unit = {
+                    QuickGroup(stringResource(R.string.quick_group_sound), GroupGold) {
+                        rows.Setting(
+                            key = "mic",
+                            quiet = true,
+                            label = stringResource(R.string.video_microphone_title),
+                            explanation = stringResource(R.string.quick_explain_microphone),
+                            last = openPicker != "mic"
+                        ) {
+                            QuickLink(
+                                selectedVideoAudioInputLabel(videoAudioInputId, videoAudioInputOptions),
+                                open = openPicker == "mic"
+                            ) {
+                                openPicker = if (openPicker == "mic") null else "mic"
+                            }
+                        }
+                        InlinePicker(visible = openPicker == "mic") {
+                            VideoOptionChip(
+                                title = stringResource(R.string.video_microphone_auto),
+                                selected = videoAudioInputId == VIDEO_AUDIO_INPUT_AUTO,
+                                onClick = { onVideoAudioInputChange(VIDEO_AUDIO_INPUT_AUTO) }
+                            )
+                            videoAudioInputOptions.forEach { option ->
+                                VideoOptionChip(
+                                    title = videoAudioInputLabel(option),
+                                    selected = videoAudioInputId == option.id,
+                                    onClick = { onVideoAudioInputChange(option.id) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // One tab, so no title: Recording.
+                val videoRecordingGroup: @Composable () -> Unit = {
+                    QuickGroup(divider = false) {
+                        rows.Setting(
+                            key = "bitrate",
+                            label = stringResource(R.string.quick_bitrate),
+                            explanation = stringResource(R.string.quick_explain_bitrate)
+                        ) {
+                            VideoBitratePreset.entries.forEach { bitrate ->
+                                QuickChoice(
+                                    text = bitrate.bitrateMbps.toString(),
+                                    selected = videoBitrate == bitrate,
+                                    minWidth = 42.dp,
+                                    onClick = { onVideoBitrateChange(bitrate) }
+                                )
+                            }
+                        }
+                        rows.Setting(
+                            key = "codec",
+                            quiet = true,
+                            label = stringResource(R.string.quick_codec),
+                            explanation = stringResource(R.string.quick_explain_codec),
+                            last = true
+                        ) {
+                            VideoCodec.entries.forEach { codec ->
+                                QuickChoice(
+                                    text = codec.displayName,
+                                    selected = videoCodec == codec,
+                                    minWidth = 56.dp,
+                                    onClick = { onVideoCodecChange(codec) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Shooting: what changes the shot. The mode's own group carries its guide.
+                val shooting: @Composable () -> Unit = {
+                    lensGroup(true)
+                    val afterLens = lensChoices.isEmpty()
+                    if (isVideo) {
+                        videoPictureGroup(afterLens)
+                        videoSoundGroup()
+                    } else {
+                        when {
+                            isPortraitMode -> {
+                                portraitGroup(afterLens)
+                                stackGroup(false, null)
+                            }
+                            isProfessionalMode -> hdrGroup(afterLens)
+                            else -> stackGroup(afterLens, onBasicsHelp)
+                        }
+                        exposureGroup()
+                    }
+                }
+                // Output: what changes the file.
+                val output: @Composable () -> Unit = {
+                    if (isVideo) videoRecordingGroup() else outputGroup(false)
+                }
+
+                if (tabbed) {
+                    QuickTabPages(tab = qTab, onTab = { qTab = it }, pages = listOf(shooting, output))
+                } else {
+                    QuickScroll {
+                        lensGroup(true)
+                        stackGroup(lensChoices.isEmpty(), onBasicsHelp)
+                        exposureGroup()
+                        outputGroup(true)
                     }
                 }
             }
@@ -870,26 +953,31 @@ private fun RowScope.PhotoEverydayItems(
         label = "${stringResource(R.string.quick_live)} ${if (useLivePhoto) on else off}",
         active = useLivePhoto,
         onClick = onLivePhotoToggle,
-        modifier = itemModifier
-    ) { color -> Icon(AppIcons.LivePhotoLine, contentDescription = null, tint = color, modifier = Modifier.size(24.dp)) }
+        modifier = itemModifier,
+        badge = Badge(if (useLivePhoto) AppIcons.LivePhotoLine else AppIcons.LivePhotoOffLine)
+    )
     EverydayItem(
         label = "${stringResource(R.string.timer)} ${if (timerSeconds > 0) "${timerSeconds}s" else off}",
         active = timerSeconds > 0,
         onClick = onTimerToggle,
-        modifier = itemModifier
-    ) { color -> Icon(AppIcons.StopwatchLine, contentDescription = null, tint = color, modifier = Modifier.size(24.dp)) }
+        modifier = itemModifier,
+        badge = if (timerSeconds > 0) Badge(AppIcons.StopwatchLine, sub = "${timerSeconds}s") else Badge(AppIcons.StopwatchOffLine)
+    )
     EverydayItem(
         label = "${stringResource(R.string.smile)} ${smileSizeLetter(smileThreshold) ?: off}",
         active = smileThreshold > 0,
         onClick = onSmileToggle,
-        modifier = itemModifier
-    ) { color -> Icon(AppIcons.MoodSmileLine, contentDescription = null, tint = color, modifier = Modifier.size(24.dp)) }
+        modifier = itemModifier,
+        badge = Badge(AppIcons.MoodSmileLine, sub = smileSizeLetter(smileThreshold) ?: off.uppercase())
+    )
     EverydayItem(
         label = aspectRatio.getDisplayName(),
         active = false,
+        plain = true,
         onClick = onAspectClick,
-        modifier = itemModifier
-    ) { color -> AspectIcon(aspectRatio, color) }
+        modifier = itemModifier,
+        badge = Badge(text = aspectRatio.getDisplayName(), framed = true)
+    )
     EverydayItem(
         label = "${stringResource(R.string.flash)} ${
             when (flashMode) {
@@ -901,19 +989,13 @@ private fun RowScope.PhotoEverydayItems(
         active = flashAvailable && flashMode != 0,
         enabled = flashAvailable,
         onClick = onFlashToggle,
-        modifier = itemModifier
-    ) { color ->
-        Icon(
-            imageVector = when (flashMode) {
-                1 -> AppIcons.BoltLine
-                2 -> AppIcons.BulbLine
-                else -> AppIcons.BoltOffLine
-            },
-            contentDescription = null,
-            tint = color,
-            modifier = Modifier.size(24.dp)
-        )
-    }
+        modifier = itemModifier,
+        badge = when (flashMode) {
+            1 -> Badge(AppIcons.BoltLine, sub = on.uppercase())
+            2 -> Badge(AppIcons.BulbLine)
+            else -> Badge(AppIcons.BoltOffLine)
+        }
+    )
 }
 
 @Composable
@@ -929,24 +1011,38 @@ private fun RowScope.VideoEverydayItems(
     onSlowMotionToggle: () -> Unit,
     itemModifier: Modifier
 ) {
-    val resolution = if (videoConfig.resolution == VideoResolutionPreset.MAX) {
-        stringResource(R.string.video_resolution_max)
-    } else {
-        videoConfig.resolution.displayName
+    // As Sony labels video sizes.
+    val resolution = when (videoConfig.resolution) {
+        VideoResolutionPreset.MAX -> stringResource(R.string.video_resolution_max)
+        VideoResolutionPreset.UHD_2160P -> "4K"
+        VideoResolutionPreset.FHD_1080P -> "FHD"
+        VideoResolutionPreset.HD_720P -> "HD"
     }
-    EverydayItem(stringResource(R.string.photo_resolution), active = false, onClick = onResolutionClick, modifier = itemModifier) { color ->
-        EverydayValue(resolution, color)
-    }
-    EverydayItem(stringResource(R.string.quick_fps), active = false, onClick = onFpsClick, modifier = itemModifier) { color ->
-        EverydayValue(videoConfig.fps.fps.toString(), color)
-    }
+    EverydayItem(
+        "${stringResource(R.string.photo_resolution)} $resolution",
+        active = false,
+        plain = true,
+        onClick = onResolutionClick,
+        modifier = itemModifier,
+        badge = Badge(text = resolution)
+    )
+    EverydayItem(
+        "${stringResource(R.string.quick_fps)} ${videoConfig.fps.fps}",
+        active = false,
+        plain = true,
+        onClick = onFpsClick,
+        modifier = itemModifier,
+        badge = Badge(text = videoConfig.fps.fps.toString())
+    )
     if (slowMotionAvailable) {
+        val state = stringResource(if (slowMotionEnabled) R.string.quick_on else R.string.quick_off)
         EverydayItem(
-            label = "${stringResource(R.string.slow_motion_chip)} ${stringResource(if (slowMotionEnabled) R.string.quick_on else R.string.quick_off)}",
+            label = "${stringResource(R.string.slow_motion_chip)} $state",
             active = slowMotionEnabled,
             onClick = onSlowMotionToggle,
-            modifier = itemModifier
-        ) { color -> EverydayValue("960", color) }
+            modifier = itemModifier,
+            badge = Badge(AppIcons.GaugeLine, sub = state.uppercase())
+        )
     }
     val torch = videoConfig.torchEnabled
     EverydayItem(
@@ -955,33 +1051,34 @@ private fun RowScope.VideoEverydayItems(
         // Slow motion's camera session carries no torch and no stabilisation setting.
         enabled = videoCapabilities.supportsTorch && !slowMotionEnabled,
         onClick = onTorchToggle,
-        modifier = itemModifier
-    ) { color ->
-        Icon(
-            imageVector = if (torch) AppIcons.BulbLine else AppIcons.BulbOffLine,
-            contentDescription = null,
-            tint = color,
-            modifier = Modifier.size(24.dp)
-        )
-    }
+        modifier = itemModifier,
+        badge = Badge(if (torch) AppIcons.BulbLine else AppIcons.BulbOffLine)
+    )
     val modes = videoCapabilities.availableStabilizationModes
     if (modes.size > 1) {
+        val mode = videoStabilizationModeLabel(videoConfig.stabilizationMode)
         EverydayItem(
-            label = stringResource(R.string.quick_stabilise),
+            label = "${stringResource(R.string.quick_stabilise)} $mode",
             active = false,
+            plain = true,
             enabled = !slowMotionEnabled,
             onClick = {
                 onStabilizationModeChange(modes[(modes.indexOf(videoConfig.stabilizationMode) + 1).mod(modes.size)])
             },
-            modifier = itemModifier
-        ) { color -> EverydayValue(videoStabilizationModeLabel(videoConfig.stabilizationMode), color) }
+            modifier = itemModifier,
+            badge = Badge(text = mode.uppercase())
+        )
     }
 }
 
 // Everyday items turn with the phone in the sheet; on the picture's top edge they stay upright.
 private val LocalEverydayTurns = staticCompositionLocalOf { true }
 
-/** An everyday setting: its icon or value, and its name with the value underneath. Turns with the phone. */
+/**
+ * An everyday setting, its value drawn in its icon as Sony's camera does: grey when off, orange when on, light
+ * for a [plain] value that is never off (aspect, size, frame rate). [label] names it for screen readers.
+ * Turns with the phone.
+ */
 @Composable
 private fun EverydayItem(
     label: String,
@@ -989,15 +1086,17 @@ private fun EverydayItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    big: @Composable (Color) -> Unit
+    plain: Boolean = false,
+    badge: Badge
 ) {
     val color = when {
-        !enabled -> SheetText.copy(alpha = 0.35f)
+        !enabled -> SonySecondary.copy(alpha = 0.35f)
         active -> ModeAmber
-        else -> SheetText
+        plain -> SonyText
+        else -> SonySecondary
     }
-    // The item floats on the picture, so a pressed box would look out of place: the icon and its name
-    // shrink and dim under the finger instead.
+    // The item floats on the picture, so a pressed box would look out of place: the icon shrinks and dims
+    // under the finger instead.
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val press by animateFloatAsState(if (pressed) 1f else 0f, tween(if (pressed) 60 else 180), label = "press")
@@ -1010,70 +1109,19 @@ private fun EverydayItem(
                 enabled = enabled,
                 role = Role.Button,
                 onClick = onClick
-            ),
+            )
+            .semantics { contentDescription = label },
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            modifier = Modifier
+        Box(
+            Modifier
                 .graphicsLayer {
                     scaleX = 1f - 0.12f * press
                     scaleY = 1f - 0.12f * press
                     alpha = 1f - 0.4f * press
                 }
-                .then(if (LocalEverydayTurns.current) Modifier.autoRotate() else Modifier),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(5.dp)
-        ) {
-            Box(Modifier.height(24.dp), contentAlignment = Alignment.Center) { big(color) }
-            Text(
-                text = label,
-                color = if (active || !enabled) color else SheetDim,
-                fontSize = 10.5.sp,
-                maxLines = 1,
-                softWrap = false,
-                style = SheetTextStyle
-            )
-        }
-    }
-}
-
-@Composable
-private fun EverydayValue(text: String, color: Color) {
-    Text(text = text, color = color, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, style = SheetTextStyle)
-}
-
-/** An outline of the frame in that ratio, upright, at most 22 dp. */
-@Composable
-private fun AspectIcon(ratio: AspectRatio, color: Color) {
-    val w = ratio.heightRatio.toFloat()
-    val h = ratio.widthRatio.toFloat()
-    val scale = 22f / maxOf(w, h)
-    Box(
-        Modifier
-            .size(width = maxOf(8f, w * scale).dp, height = (h * scale).dp)
-            .border(1.5.dp, color, RoundedCornerShape(2.dp))
-    )
-}
-
-@Composable
-private fun SheetHeader(
-    onToolboxClick: () -> Unit,
-    onContentManagementClick: () -> Unit,
-    onSettingsClick: () -> Unit
-) {
-    Box(Modifier.fillMaxWidth().height(34.dp)) {
-        Box(
-            Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 8.dp)
-                .size(width = 36.dp, height = 3.dp)
-                .background(SheetGrey, RoundedCornerShape(2.dp))
-        )
-        Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            HeaderIcon(AppIcons.ToolboxLine, stringResource(R.string.toolbox_title), onToolboxClick)
-            HeaderIcon(AppIcons.FoldersLine, stringResource(R.string.settings_section_management), onContentManagementClick)
-            HeaderIcon(AppIcons.SettingsLine, stringResource(R.string.settings_title), onSettingsClick)
-        }
+                .then(if (LocalEverydayTurns.current) Modifier.autoRotate() else Modifier)
+        ) { BadgeView(badge, color) }
     }
 }
 
@@ -1081,60 +1129,181 @@ private fun SheetHeader(
 internal fun HeaderIcon(icon: ImageVector, description: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(width = 40.dp, height = 34.dp)
+            .size(width = 48.dp, height = 56.dp)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = description, tint = SheetDim, modifier = Modifier.size(19.dp))
+        Icon(icon, contentDescription = description, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(24.dp))
     }
 }
 
-@Composable
-internal fun QuickGroup(content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 8.dp)
-            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(14.dp))
-            .padding(start = 12.dp, end = 6.dp),
-        content = content
-    )
-}
+// Group title colours, as Sony's camera tabs: Shooting red, Exposure magenta, Setup gold.
+internal val GroupRed = Color(0xFFEA2546)
+internal val GroupMagenta = Color(0xFFF54FBA)
+internal val GroupGold = Color(0xFFB28E02)
 
-/** Like [QuickGroup], for the current mode's own settings: an amber outline and the mode's name on top. */
+/**
+ * A group of rows: [title] with a bar in [color] on top (a tap on it opens [onGuide] when given, shown by an
+ * info mark), parted from the group above by a line unless [divider] is false. A title runs into that line.
+ */
 @Composable
-private fun ModeGroup(title: String, onGuide: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 8.dp)
-            .border(1.dp, ModeAmber.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
-            .padding(start = 12.dp, end = 6.dp)
-    ) {
-        // A mode with a guide shows a small info mark after its name; a tap on either opens the guide.
-        val guideDescription = stringResource(R.string.mode_guide_open, title)
-        Row(
-            modifier = Modifier
-                .padding(top = 7.dp)
-                .then(
-                    if (onGuide != null) {
-                        Modifier
-                            .clickable(onClick = onGuide)
-                            .semantics { contentDescription = guideDescription }
-                    } else {
-                        Modifier
-                    }
-                ),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(text = title, color = ModeAmber, fontSize = 10.5.sp, fontWeight = FontWeight.Medium)
-            if (onGuide != null) {
-                Icon(AppIcons.InfoLine, contentDescription = null, tint = ModeAmber.copy(alpha = 0.8f), modifier = Modifier.size(12.dp))
+internal fun QuickGroup(
+    groupTitle: String? = null,
+    color: Color = GroupRed,
+    onGuide: (() -> Unit)? = null,
+    divider: Boolean = true,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val titlesShown by preferenceValue { it.panelGroupTitles }
+    val title = groupTitle.takeIf { titlesShown }
+    if (!divider) Spacer(Modifier.height(6.dp)) else if (title == null) GroupDivider()
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        if (title != null) {
+            val guideDescription = stringResource(R.string.mode_guide_open, title)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(24.dp)
+                    .then(
+                        if (onGuide != null) {
+                            Modifier.clickable(onClick = onGuide).semantics { contentDescription = guideDescription }
+                        } else {
+                            Modifier
+                        }
+                    ),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(Modifier.size(width = 3.dp, height = 11.dp).background(color))
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    text = title.uppercase(),
+                    color = SonyText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 1.2.sp,
+                    maxLines = 1
+                )
+                if (onGuide != null) {
+                    Icon(AppIcons.InfoLine, contentDescription = null, tint = SonySecondary, modifier = Modifier.padding(start = 5.dp).size(12.dp))
+                }
+                // The title sits on the line between groups, so it costs no height of its own.
+                if (divider) Box(Modifier.padding(start = 8.dp).weight(1f).height(1.dp).background(SonyDivider))
             }
         }
         content()
     }
+}
+
+/** The sheet's top row: the Shooting / Output tabs on the left, then Toolbox, Content management and Settings. */
+@Composable
+private fun SheetTabRow(
+    tabbed: Boolean,
+    tab: Int,
+    onTab: (Int) -> Unit,
+    onToolboxClick: () -> Unit,
+    onContentManagementClick: () -> Unit,
+    onSettingsClick: () -> Unit
+) {
+    Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (tabbed) {
+            SheetTab(stringResource(R.string.quick_tab_shooting), tab == 0, GroupRed) { onTab(0) }
+            SheetTab(stringResource(R.string.quick_tab_output), tab == 1, GroupGold) { onTab(1) }
+        }
+        Spacer(Modifier.weight(1f))
+        if (tabbed) Box(Modifier.width(1.dp).height(24.dp).background(SonyTrack))
+        Spacer(Modifier.width(6.dp))
+        HeaderIcon(AppIcons.ToolboxLine, stringResource(R.string.toolbox_title), onToolboxClick)
+        HeaderIcon(AppIcons.FoldersLine, stringResource(R.string.settings_section_management), onContentManagementClick)
+        HeaderIcon(AppIcons.SettingsLine, stringResource(R.string.settings_title), onSettingsClick)
+    }
+    Box(Modifier.fillMaxWidth().height(1.dp).background(SonyDivider))
+}
+
+@Composable
+private fun SheetTab(text: String, selected: Boolean, color: Color, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .width(100.dp)
+            .fillMaxHeight()
+            .clickable(onClick = onClick)
+            .semantics { this.selected = selected },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, color = if (selected) SonyText else SonySecondary, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        if (selected) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth(0.44f).height(3.dp).background(color))
+    }
+}
+
+/**
+ * The tabs' pages side by side in one track, so the sheet keeps the taller page's height whichever tab shows.
+ * A tap on a tab or a sideways swipe over 50 dp slides to the other page over 250 ms.
+ */
+@Composable
+private fun QuickTabPages(tab: Int, onTab: (Int) -> Unit, pages: List<@Composable () -> Unit>) {
+    val position by animateFloatAsState(tab.toFloat(), tween(250, easing = FastOutSlowInEasing), label = "qTab")
+    val currentTab by rememberUpdatedState(tab)
+    val currentOnTab by rememberUpdatedState(onTab)
+    Box(
+        Modifier.fillMaxWidth().clipToBounds().pointerInput(pages.size) {
+            val swipe = 50.dp.toPx()
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                var dx = 0f
+                var dy = 0f
+                while (true) {
+                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                    // A slider or the list's own scroll took the drag.
+                    if (!change.pressed || change.isConsumed) break
+                    val moved = change.positionChange()
+                    dx += moved.x
+                    dy += moved.y
+                    if (abs(dx) > swipe && abs(dx) > 1.5f * abs(dy)) {
+                        val next = (currentTab + if (dx < 0) 1 else -1).coerceIn(0, pages.size - 1)
+                        if (next != currentTab) currentOnTab(next)
+                        change.consume()
+                        break
+                    }
+                }
+            }
+        }
+    ) {
+        // Each page scrolls on its own, so a short page never scrolls.
+        pages.forEachIndexed { i, page ->
+            QuickScroll(Modifier.fillMaxWidth().graphicsLayer { translationX = (i - position) * size.width }) { page() }
+        }
+    }
+}
+
+/** The list under the tab row: scrolls past 300 dp, fading out over its last 28 dp while more lies below. */
+@Composable
+private fun QuickScroll(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val state = rememberScrollState()
+    Column(
+        modifier = modifier
+            .heightIn(max = 300.dp)
+            .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+            .drawWithContent {
+                drawContent()
+                if (state.canScrollForward) {
+                    val fade = 28.dp.toPx()
+                    drawRect(
+                        brush = Brush.verticalGradient(listOf(Color.Black, Color.Transparent), size.height - fade, size.height),
+                        topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - fade),
+                        size = androidx.compose.ui.geometry.Size(size.width, fade),
+                        blendMode = BlendMode.DstIn
+                    )
+                }
+            }
+            .verticalScroll(state),
+        content = content
+    )
+}
+
+/** Groups are parted by a 1 dp line and a 6 dp gap, with no boxes around them. */
+@Composable
+private fun GroupDivider() {
+    Box(Modifier.fillMaxWidth().height(1.dp).background(SonyDivider))
+    Spacer(Modifier.height(6.dp))
 }
 
 /** List rows: the name on the left (tap: explanation, long press: Settings), the choices on the right. */
@@ -1153,18 +1322,21 @@ internal class QuickRows(
         last: Boolean = false,
         // A long press that does something else than opening Settings.
         onLongClick: (() -> Unit)? = null,
-        // A small amber dot after the name: something here differs from what was saved.
+        // A small orange dot after the name: something here differs from what was saved.
         marked: Boolean = false,
+        // A set-and-forget row: shorter and grey, still a 48 dp target.
+        quiet: Boolean = false,
         content: @Composable RowScope.() -> Unit
     ) {
         val open = explained == key
+        val rowHeight = if (quiet) 48.dp else 56.dp
         // The choices drop to a second line, still right-aligned, when they don't fit beside the name.
         FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             LongerLongPress {
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .height(36.dp)
+                        .height(rowHeight)
                         .combinedClickable(
                             onClick = { onExplain(key) },
                             onLongClick = onLongClick ?: settingsTarget?.let { target -> { onOpenSettingsAt(target) } }
@@ -1173,8 +1345,8 @@ internal class QuickRows(
                 ) {
                     Text(
                         text = label,
-                        color = if (open) Color.White else SheetLabel,
-                        fontSize = 12.5.sp,
+                        color = if (open) Color.White else if (quiet) SonySecondary else SonyText,
+                        fontSize = if (quiet) 14.sp else 16.sp,
                         maxLines = 1,
                         softWrap = false
                     )
@@ -1184,7 +1356,7 @@ internal class QuickRows(
                 }
             }
             Row(
-                modifier = Modifier.height(36.dp),
+                modifier = Modifier.height(rowHeight),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 content = content
@@ -1193,37 +1365,61 @@ internal class QuickRows(
         if (open) {
             Text(
                 text = explanation,
-                color = SheetDim,
-                fontSize = 11.5.sp,
+                color = SonySecondary,
+                fontSize = 14.sp,
                 lineHeight = 1.4.em,
-                modifier = Modifier.padding(top = 2.dp, end = 8.dp, bottom = if (last) 11.dp else 4.dp)
+                modifier = Modifier.padding(end = 8.dp, bottom = if (last) 11.dp else 8.dp)
             )
         }
+        if (!last) Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
     }
 }
 
 @Composable
-internal fun QuickChoice(text: String, selected: Boolean, minWidth: Dp, onClick: () -> Unit) =
-    LilacChip(text = text, selected = selected, onClick = onClick, minWidth = minWidth)
+internal fun QuickChoice(
+    text: String,
+    selected: Boolean,
+    minWidth: Dp,
+    icon: ImageVector? = null,
+    fontSize: TextUnit = 15.sp,
+    horizontalPadding: Dp = 10.dp,
+    onClick: () -> Unit
+) =
+    LilacChip(
+        text = text,
+        selected = selected,
+        onClick = onClick,
+        minWidth = maxOf(minWidth, 48.dp),
+        height = 40.dp,
+        touchHeight = 48.dp,
+        fontSize = fontSize,
+        horizontalPadding = horizontalPadding,
+        icon = icon,
+        textColor = SonySecondary
+    )
 
+/** Grey track and thumb when off; a light track with a black thumb on the right when on. [quiet] is smaller. */
 @Composable
-private fun QuickSwitch(checked: Boolean, onClick: () -> Unit) {
-    val knob by androidx.compose.animation.core.animateDpAsState(if (checked) 25.dp else 5.dp, tween(150), label = "quickSwitch")
-    val color = if (checked) ModeAmber else SheetGrey
+private fun QuickSwitch(checked: Boolean, quiet: Boolean = false, onClick: () -> Unit) {
+    val width = if (quiet) 46.dp else 52.dp
+    val height = if (quiet) 28.dp else 32.dp
+    val thumb = if (quiet) 16.dp else 20.dp
+    val inset = 6.dp
+    val knob by androidx.compose.animation.core.animateDpAsState(if (checked) width - inset - thumb else inset, tween(150), label = "quickSwitch")
     Box(
         modifier = Modifier
-            .height(36.dp)
+            .height(48.dp)
             .clickable(onClick = onClick)
             .padding(start = 8.dp, end = 4.dp),
         contentAlignment = Alignment.Center
     ) {
-        Box(Modifier.size(width = 42.dp, height = 22.dp).border(1.25.dp, color, RoundedCornerShape(11.dp))) {
+        Box(Modifier.size(width = width, height = height).background(if (checked) SonyText else SonyTrack, RoundedCornerShape(height / 2))) {
             Box(
                 Modifier
                     .align(Alignment.CenterStart)
                     .offset(x = knob)
-                    .size(12.dp)
-                    .background(color, CircleShape)
+                    .size(thumb)
+                    .background(if (checked) Color.Black else SonyDim, CircleShape)
             )
         }
     }
@@ -1234,13 +1430,13 @@ private fun QuickSwitch(checked: Boolean, onClick: () -> Unit) {
 internal fun QuickLink(value: String, open: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
-            .height(36.dp)
+            .height(48.dp)
             .clickable(onClick = onClick)
             .padding(start = 8.dp, end = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Text(value, color = SheetText, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        Text(value, color = SonySecondary, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
         Icon(
             imageVector = if (open) AppIcons.ChevronUpLine else AppIcons.ChevronRightLine,
             contentDescription = null,
@@ -1254,8 +1450,8 @@ internal fun QuickLink(value: String, open: Boolean, onClick: () -> Unit) {
 private fun QuickFixed(text: String) {
     Text(
         text = text,
-        color = SheetGrey,
-        fontSize = 12.5.sp,
+        color = SonySecondary,
+        fontSize = 15.sp,
         fontWeight = FontWeight.Medium,
         modifier = Modifier.padding(end = 6.dp)
     )
@@ -1311,8 +1507,6 @@ private fun FrameCountSlider(
     QuickSlider(
         text = if (shown == 0) stringResource(R.string.quick_frames_off)
         else countLabel?.let { pluralStringResource(it, shown, shown) } ?: shown.toString(),
-        valueWidth = if (countLabel != null) 52.dp else 40.dp,
-        active = if (withOff) shown > 0 else shown > 1,
         fraction = position.value,
         onFraction = { f ->
             val position = (start + f * (max - start)).roundToInt()
@@ -1342,7 +1536,6 @@ private fun HdrRatioSlider(limit: Float, onLimitChange: (Float) -> Unit) {
     val shown = dragged ?: limit
     QuickSlider(
         text = String.format(Locale.getDefault(), "%.1f×", shown),
-        active = shown != default,
         fraction = (shown - min) / (max - min),
         onFraction = { f ->
             val value = ((min + f * (max - min)) * 2f).roundToInt() / 2f
@@ -1356,42 +1549,41 @@ private fun HdrRatioSlider(limit: Float, onLimitChange: (Float) -> Unit) {
 }
 
 /**
- * The sheet's slider: the value on the left (amber when [active]), a 150 dp track; reports 0..1 while dragging.
- * The track is as long as fits beside the longest slider name (Multi-exposure) on a 360 dp wide screen.
+ * The sheet's slider: the value on the left, a 112 dp track with 10 dp to touch on each side; reports 0..1
+ * while dragging.
  */
 @Composable
 internal fun QuickSlider(
     text: String,
-    active: Boolean,
     fraction: Float,
     onFraction: (Float) -> Unit,
-    onDoubleTap: (() -> Unit)? = null,
-    valueWidth: Dp = 40.dp
+    onDoubleTap: (() -> Unit)? = null
 ) {
-    val trackWidth = 150.dp
+    val trackWidth = 112.dp
     val currentOnFraction by rememberUpdatedState(onFraction)
     val currentOnDoubleTap by rememberUpdatedState(onDoubleTap)
     Row(
-        modifier = Modifier.height(36.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        modifier = Modifier.height(48.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = text,
-            color = if (active) ModeAmber else SheetText,
-            fontSize = 12.5.sp,
+            color = SonySecondary,
+            fontSize = 15.sp,
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.End,
             maxLines = 1,
-            modifier = Modifier.width(valueWidth)
+            modifier = Modifier.width(66.dp)
         )
+        // At the left end the knob reaches 10 dp past the track; keep it clear of the value.
+        Spacer(Modifier.width(8.dp))
         Box(
             modifier = Modifier
-                .padding(end = 8.dp)
-                .width(trackWidth)
+                .width(trackWidth + 20.dp)
                 .fillMaxHeight()
                 .pointerInput(Unit) {
-                    fun select(x: Float) = currentOnFraction((x / size.width).coerceIn(0f, 1f))
+                    val edge = 10.dp.toPx()
+                    fun select(x: Float) = currentOnFraction(((x - edge) / (size.width - 2 * edge)).coerceIn(0f, 1f))
                     var lastDown = 0L
                     awaitEachGesture {
                         val down = awaitFirstDown()
@@ -1416,24 +1608,25 @@ internal fun QuickSlider(
             Box(
                 Modifier
                     .align(Alignment.CenterStart)
+                    .padding(horizontal = 10.dp)
                     .fillMaxWidth()
-                    .height(2.dp)
-                    .background(Color.White.copy(alpha = 0.3f), RoundedCornerShape(1.dp))
+                    .height(4.dp)
+                    .background(SonyTrack, RoundedCornerShape(2.dp))
             )
             Box(
                 Modifier
                     .align(Alignment.CenterStart)
-                    .fillMaxWidth(fraction)
-                    .height(2.dp)
-                    .background(ModeAmber, RoundedCornerShape(1.dp))
+                    .padding(start = 10.dp)
+                    .width(trackWidth * fraction)
+                    .height(4.dp)
+                    .background(SonyText, RoundedCornerShape(2.dp))
             )
             Box(
                 Modifier
                     .align(Alignment.CenterStart)
-                    .offset(x = trackWidth * fraction - 8.dp)
-                    .size(16.dp)
-                    .background(Color.Black, CircleShape)
-                    .border(1.5.dp, ModeAmber, CircleShape)
+                    .offset(x = trackWidth * fraction)
+                    .size(20.dp)
+                    .background(SonyText, CircleShape)
             )
         }
     }
@@ -1454,7 +1647,7 @@ private fun VideoOptionChip(
             .heightIn(min = 36.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (selected) AccentColor else Color.White.copy(alpha = 0.12f)
+                if (selected) ChosenFill else Color.White.copy(alpha = 0.12f)
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -1462,7 +1655,7 @@ private fun VideoOptionChip(
     ) {
         Text(
             text = title,
-            color = if (selected) OnAccentColor else Color.White,
+            color = if (selected) Color.Black else Color.White,
             fontSize = 12.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
         )

@@ -514,6 +514,7 @@ fun SettingsScreen(
     var autoRotateEnabled by rememberPreference(UserPreferences::autoRotateEnabled)
     val developAnimationStyle by preferenceValue { it.developAnimationStyle }
     var zoomControl by rememberPreference(UserPreferences::zoomControl)
+    var panelGroupTitles by rememberPreference(UserPreferences::panelGroupTitles)
     var photoQuality by rememberPreference(UserPreferences::photoQuality)
     val useHeicExport by preferenceValue { it.useHeicExport }
     val useJpeg444Export by preferenceValue { it.useJpeg444Export }
@@ -2547,6 +2548,15 @@ fun SettingsScreen(
                                 onColorSelected = { preferencesRepository.updateAsync { this.accentColor = it } }
                             )
                         }
+
+                        SettingsRowDivider()
+
+                        SwitchSettingItem(
+                            title = stringResource(R.string.settings_panel_group_titles),
+                            description = stringResource(R.string.settings_panel_group_titles_description),
+                            checked = panelGroupTitles,
+                            onCheckedChange = { panelGroupTitles = it }
+                        )
 
                         SettingsRowDivider()
 

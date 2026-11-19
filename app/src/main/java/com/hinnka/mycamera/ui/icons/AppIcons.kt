@@ -455,6 +455,20 @@ object AppIcons {
                 "M12 3v.01M8.1 3.89v.01M4.96 6.39v.01M3.23 10v.01M3.23 14v.01M4.96 17.61v.01M8.1 20.11v.01M12 21v.01"
         )
     }
+    val LivePhotoOffLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.LivePhotoOffLine",
+            "M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" +
+                "M15.9 20.11v.01M19.04 17.61v.01M20.77 14v.01M20.77 10v.01M19.04 6.39v.01M15.9 3.89v.01" +
+                "M12 3v.01M8.1 3.89v.01M4.96 6.39v.01M3.23 10v.01M3.23 14v.01M4.96 17.61v.01M8.1 20.11v.01M12 21v.01" + Slash
+        )
+    }
+    val StopwatchOffLine: ImageVector by lazy {
+        lineIcon("AppIcons.StopwatchOffLine", "M5 13a7 7 0 1 0 14 0a7 7 0 0 0 -14 0zM14.5 10.5l-2.5 2.5M17 8l1 -1M14 3h-4" + Slash)
+    }
+    // A speedometer: slow motion.
+    val ZoomInLine: ImageVector by lazy { lineIcon("AppIcons.ZoomInLine", "M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0M7 10l6 0M10 7l0 6M21 21l-6 -6") }
+    val GaugeLine: ImageVector by lazy { lineIcon("AppIcons.GaugeLine", "M5.636 19.364a9 9 0 1 1 12.728 0M16 9l-4 4") }
     val ChevronRightLine: ImageVector by lazy { lineIcon("AppIcons.ChevronRightLine", "M9 6l6 6l-6 6") }
     val ChevronUpLine: ImageVector by lazy { lineIcon("AppIcons.ChevronUpLine", "M6 15l6 -6l6 6") }
     val ToolboxLine: ImageVector by lazy {

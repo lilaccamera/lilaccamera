@@ -134,38 +134,27 @@ internal fun FilmPanel(
                 categoryOrder = categoryOrder,
                 onSelect = onLutSelected,
                 onSelectedClick = onEditClick,
-                onLongPress = onLutManageClick
+                onLongPress = onLutManageClick,
+                onManage = { showContentManagement = !showContentManagement }
             )
             Spacer(Modifier.height(8.dp))
 
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // shortcut: plain 72 % black like quick settings, no blur (Compose can't blur the GL preview behind it).
-                    .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                    // shortcut: plain black like quick settings, no blur (Compose can't blur the GL preview behind it).
+                    .background(SheetPanel, SheetShape)
                     .navigationBarsPadding()
-                    .padding(start = 10.dp, end = 10.dp, bottom = 6.dp)
+                    .padding(bottom = 8.dp)
             ) {
-                Box(Modifier.fillMaxWidth().height(34.dp)) {
-                    Box(
-                        Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = 8.dp)
-                            .size(width = 36.dp, height = 3.dp)
-                            .background(SheetGrey, RoundedCornerShape(2.dp))
+                Box(Modifier.padding(horizontal = 10.dp)) {
+                    ContentManagementOptionsPanel(
+                        visible = showContentManagement,
+                        onFilterManageClick = { onLutManageClick(null) },
+                        onFrameManageClick = onFrameManageClick,
+                        onPresetManageClick = onPresetManageClick
                     )
-                    Box(Modifier.align(Alignment.CenterEnd)) {
-                        HeaderIcon(AppIcons.FoldersLine, stringResource(R.string.settings_section_management)) {
-                            showContentManagement = !showContentManagement
-                        }
-                    }
                 }
-                ContentManagementOptionsPanel(
-                    visible = showContentManagement,
-                    onFilterManageClick = { onLutManageClick(null) },
-                    onFrameManageClick = onFrameManageClick,
-                    onPresetManageClick = onPresetManageClick
-                )
                 if (showContentManagement) Spacer(Modifier.height(8.dp))
 
                 val rows = QuickRows(
@@ -173,7 +162,7 @@ internal fun FilmPanel(
                     onExplain = { key -> explained = if (explained == key) null else key },
                     onOpenSettingsAt = {}
                 )
-                QuickGroup {
+                QuickGroup(stringResource(R.string.quick_group_look), GroupMagenta, divider = false) {
                     // None has no strength to set.
                     if (currentLutId != null && currentLutId != "none") {
                         val percent = (RecipeParam.LUT_INTENSITY.clamp(intensity) * 100).roundToInt()
@@ -184,7 +173,6 @@ internal fun FilmPanel(
                         ) {
                             QuickSlider(
                                 text = "$percent%",
-                                active = percent < 100,
                                 fraction = percent / 100f,
                                 onFraction = { onIntensityChange((it * 100).roundToInt() / 100f) },
                                 onDoubleTap = { onIntensityChange(1f) }
@@ -202,7 +190,7 @@ internal fun FilmPanel(
                 }
 
                 if (isVideoLog) {
-                    QuickGroup {
+                    QuickGroup(stringResource(R.string.quick_group_log_video), GroupRed) {
                         rows.Setting(
                             key = "loglut",
                             label = stringResource(R.string.film_log_lut),
@@ -227,7 +215,7 @@ internal fun FilmPanel(
                         }
                     }
                 } else {
-                    QuickGroup {
+                    QuickGroup(stringResource(R.string.frame), GroupGold) {
                         rows.Setting(
                             key = "frame",
                             label = stringResource(R.string.frame),
@@ -242,7 +230,7 @@ internal fun FilmPanel(
                             }
                         }
                     }
-                    QuickGroup {
+                    QuickGroup(stringResource(R.string.film_preset), GroupGold) {
                         rows.Setting(
                             key = "preset",
                             label = stringResource(R.string.film_preset),

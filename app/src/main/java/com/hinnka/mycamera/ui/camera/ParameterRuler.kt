@@ -260,6 +260,7 @@ fun ParameterRuler(
                     )
                 }
         ) {
+            val accent = ModeAmber
             Canvas(Modifier.fillMaxSize()) {
                 val center = size.width / 2f
                 val shadow = Color.Black.copy(alpha = 0.6f)
@@ -284,7 +285,7 @@ fun ParameterRuler(
                 }
                 // The needle marks the current value.
                 drawLine(shadow, Offset(center + 1f, 2.dp.toPx() + 1f), Offset(center + 1f, 26.dp.toPx() + 1f), 2.5.dp.toPx(), StrokeCap.Round)
-                drawLine(ModeAmber, Offset(center, 2.dp.toPx()), Offset(center, 26.dp.toPx()), 2.5.dp.toPx(), StrokeCap.Round)
+                drawLine(accent, Offset(center, 2.dp.toPx()), Offset(center, 26.dp.toPx()), 2.5.dp.toPx(), StrokeCap.Round)
             }
         }
         Box(Modifier.width(48.dp), contentAlignment = Alignment.Center) {

@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.hinnka.mycamera.data.ZoomControl
 
 /** True while the footer is white (front flash lights the face with it): its light ink turns dark. */
 internal val LocalLightFooter = compositionLocalOf { false }
@@ -46,6 +47,20 @@ internal object CameraControlsLayoutDefaults {
     // Room above the mode zone for the zoom collar.
     val CollarRise = CaptureButtonSize / 2 + CollarClearance - ModeZoneHeight / 2
     val CollapsedControlsHeight = CaptureAreaHeight + CollarRise + CaptureClearance + ParameterBarHeight
+
+    // With the thumbwheel or pill the footer group sits lower, so that under a 4:3 picture on a 360 x 640 dp screen the
+    // gaps are equal: 13.5 dp picture to control, 13 dp control to shutter (the wheel's index sits there), 13.5 dp below.
+    fun bottomPadding(control: ZoomControl): Dp = if (control == ZoomControl.COLLAR) BottomPadding else 3.5.dp
+    fun captureAreaHeight(control: ZoomControl): Dp = ModeZoneHeight + bottomPadding(control)
+
+    fun zoomClearance(control: ZoomControl): Dp =
+        if (control == ZoomControl.COLLAR) CollarClearance else 13.dp + zoomDialHeight(control)
+    fun zoomRise(control: ZoomControl): Dp = CaptureButtonSize / 2 + zoomClearance(control) - ModeZoneHeight / 2
+    fun collapsedControlsHeight(control: ZoomControl): Dp =
+        captureAreaHeight(control) + zoomRise(control) + CaptureClearance + ParameterBarHeight
+    // Q and Looks: 61 dp over the shutter's centre beside the collar, level with the wheel or pill's centre line.
+    fun looksRise(control: ZoomControl): Dp =
+        if (control == ZoomControl.COLLAR) 61.dp else CaptureButtonSize / 2 + zoomClearance(control) - zoomDialHeight(control) / 2
 }
 
 /**
