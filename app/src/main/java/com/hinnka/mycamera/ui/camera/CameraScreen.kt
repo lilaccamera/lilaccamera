@@ -1270,6 +1270,11 @@ fun CameraScreen(
                 ((contentHeight - pictureHeight) / 2).coerceAtLeast(0.dp)
             }
         val viewfinderTop = viewfinderTopFor(cardHeight, balance = !isXpan)
+        // The picture reaches up under the thumbwheel or pill (16:9, full screen): the wheel is drawn see-through.
+        val zoomOverPicture = viewfinderTop + cardHeight > contentHeight -
+            (CameraControlsLayoutDefaults.bottomPadding(zoomControl) +
+                (CameraControlsLayoutDefaults.ModeZoneHeight + CameraControlsLayoutDefaults.CaptureButtonSize) / 2 +
+                CameraControlsLayoutDefaults.zoomClearance(zoomControl))
         // The top line, the swipe-down row, the manual values and the guide pills stay where a 4:3 picture's
         // edges would put them, so they don't move when the aspect ratio changes.
         val overlayCardHeight = minOf(width * 4f / 3f, contentHeight)
@@ -1969,6 +1974,7 @@ fun CameraScreen(
                             fold = fold
                         ) else ZoomDial(
                             kind = zoomControl,
+                            overPicture = zoomOverPicture,
                             viewModel = viewModel,
                             zoomRatio = viewModel.zoomRatioByMain,
                             availableCameras = state.availableCameras,

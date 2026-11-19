@@ -115,6 +115,8 @@ internal fun zoomText(z: Float): String {
 @Composable
 internal fun ZoomDial(
     kind: ZoomControl,
+    // The picture lies under the control: the wheel drops its black slot and draws in white.
+    overPicture: Boolean,
     viewModel: CameraViewModel,
     zoomRatio: Float,
     availableCameras: List<CameraInfo>,
@@ -315,7 +317,7 @@ internal fun ZoomDial(
     ) {
         val cx = size.width / 2f
         val cy = 8.dp.toPx() + height.toPx() / 2f
-        if (wheel) drawWheel(cx, cy, scale.pos(shown), stopPos, stops, scale.pos(zMax), textMeasurer, numberStyle)
+        if (wheel) drawWheel(cx, cy, scale.pos(shown), stopPos, stops, scale.pos(zMax), textMeasurer, numberStyle, overPicture)
         else drawPill(cx, cy, shown, zMin, zMax, textMeasurer, numberStyle, discStyle)
     }
 }
@@ -324,7 +326,7 @@ private fun rad(d: Float) = d * PI.toFloat() / 180f
 
 private fun DrawScope.drawWheel(
     cx: Float, cy: Float, p: Float, stopPos: List<Float>, stops: List<Float>, pMax: Float,
-    measurer: androidx.compose.ui.text.TextMeasurer, style: TextStyle
+    measurer: androidx.compose.ui.text.TextMeasurer, style: TextStyle, seeThrough: Boolean
 ) {
     val dp = density
     val r = WHEEL_RADIUS * dp
@@ -332,11 +334,17 @@ private fun DrawScope.drawWheel(
     val y0 = cy - 15 * dp
     val y1 = cy + 15 * dp
     val gap = 10 * dp
-    drawRoundRect(Color.Black, Offset(cx - 80 * dp, cy - 20 * dp), Size(160 * dp, 40 * dp), CornerRadius(14 * dp))
-    drawRoundRect(SlotEdge, Offset(cx - 80 * dp, cy - 20 * dp), Size(160 * dp, 40 * dp), CornerRadius(14 * dp), style = Stroke(1.5f * dp))
-    drawRect(
-        Brush.horizontalGradient(listOf(Glow.copy(alpha = 0f), Glow, Glow.copy(alpha = 0f)), cx - 72 * dp, cx + 72 * dp),
-        Offset(cx - 72 * dp, y0 - 3 * dp), Size(144 * dp, y1 - y0 + 6 * dp)
+    // Over the picture: no black slot or glow, a white outline and white lines that stay readable on any picture.
+    if (!seeThrough) {
+        drawRoundRect(Color.Black, Offset(cx - 80 * dp, cy - 20 * dp), Size(160 * dp, 40 * dp), CornerRadius(14 * dp))
+        drawRect(
+            Brush.horizontalGradient(listOf(Glow.copy(alpha = 0f), Glow, Glow.copy(alpha = 0f)), cx - 72 * dp, cx + 72 * dp),
+            Offset(cx - 72 * dp, y0 - 3 * dp), Size(144 * dp, y1 - y0 + 6 * dp)
+        )
+    }
+    drawRoundRect(
+        if (seeThrough) Color.White else SlotEdge,
+        Offset(cx - 80 * dp, cy - 20 * dp), Size(160 * dp, 40 * dp), CornerRadius(14 * dp), style = Stroke(1.5f * dp)
     )
     val atEnd = p > pMax - 0.02f
     val minusX = cx - 71 * dp
@@ -348,7 +356,10 @@ private fun DrawScope.drawWheel(
         if (abs(ph) > 84f) return@mapNotNull null
         val layout = measurer.measure(
             zoomText(stops[i]).removeSuffix("×"),
-            style.copy(color = if (abs(ph) < WHEEL_DEG * 0.18f) Color.White else SonySecondary)
+            style.copy(
+                color = if (abs(ph) < WHEEL_DEG * 0.18f) Color.White else if (seeThrough) Color.White.copy(alpha = 0.75f) else SonySecondary,
+                shadow = if (seeThrough) ViewfinderTextShadow else null
+            )
         )
         Label(cx + r * sin(rad(ph)), layout.size.width / 2f * cos(rad(ph)), ph, layout)
     }
@@ -360,9 +371,10 @@ private fun DrawScope.drawWheel(
         val shade = (34 + 86 * c * c) / 255f
         val op = if (atEnd && abs(x - minusX) < 8 * dp) 0f else c.pow(1.6f)
         if (op <= 0f) return
-        val col = Color(shade, shade, shade, op)
+        val col = if (seeThrough) Color.White.copy(alpha = op * (0.45f + 0.5f * c * c)) else Color(shade, shade, shade, op)
         val sx = x + (if (ph == 0f) 1f else sign(ph)) * 1.6f * dp
-        val shadow = Color.Black.copy(alpha = 0.9f * c)
+        // The groove beside each line; none over the picture, where it reads as a dark bar.
+        val shadow = if (seeThrough) Color.Transparent else Color.Black.copy(alpha = 0.9f * c)
         // A stop's own line is split round its number; a line beside a number fades at its middle, more the closer it
         // comes, so it never pops in or out as the wheel turns.
         if (labels.any { abs(it.ph - ph) < 0.5f }) {
@@ -396,7 +408,7 @@ private fun DrawScope.drawWheel(
             drawText(l.layout, topLeft = Offset(l.x - l.layout.size.width / 2f, cy - l.layout.size.height / 2f), alpha = c.pow(1.5f))
         }
     }
-    if (atEnd) drawLine(SonySecondary, Offset(minusX - 4.5f * dp, cy), Offset(minusX + 4.5f * dp, cy), 1.75f * dp, StrokeCap.Round)
+    if (atEnd) drawLine(if (seeThrough) Color.White else SonySecondary, Offset(minusX - 4.5f * dp, cy), Offset(minusX + 4.5f * dp, cy), 1.75f * dp, StrokeCap.Round)
     // The index, under the slot.
     drawPath(
         Path().apply {
@@ -416,7 +428,8 @@ private fun DrawScope.drawPill(
     val dp = density
     // Levels at 40 dp steps, 1x at 60 dp left of centre.
     fun px(v: Float) = cx + (-60f + (v - 1f) * PILL_STEP) * dp
-    drawRoundRect(SlotEdge, Offset(cx - 80 * dp, cy - 20 * dp), Size(160 * dp, 40 * dp), CornerRadius(20 * dp), style = Stroke(1.5f * dp))
+    // A white outline: the grey one disappears over a picture.
+    drawRoundRect(Color.White, Offset(cx - 80 * dp, cy - 20 * dp), Size(160 * dp, 40 * dp), CornerRadius(20 * dp), style = Stroke(1.5f * dp))
     val x = px(z.coerceIn(zMin - 0.15f, zMax + 0.15f))
     for (n in 1..4) {
         if (n < zMin - 0.01f || n > zMax + 0.01f) continue
