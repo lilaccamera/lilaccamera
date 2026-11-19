@@ -1483,6 +1483,15 @@ object AppIcons {
     }
     val StackLine: ImageVector by lazy { lineIcon("AppIcons.StackLine", "M12 4l-8 4l8 4l8 -4zM4 12l8 4l8 -4M4 16l8 4l8 -4") }
     val ChecksLine: ImageVector by lazy { lineIcon("AppIcons.ChecksLine", "M7 12l5 5l10 -10M2 12l5 5m5 -5l5 -5") }
+    val FileExportLine: ImageVector by lazy {
+        lineIcon("AppIcons.FileExportLine", "M14 3v4a1 1 0 0 0 1 1h4M11.5 21h-4.5a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v5m-5 6h7m-3 -3l3 3l-3 3")
+    }
+    val ClipboardLine: ImageVector by lazy {
+        lineIcon("AppIcons.ClipboardLine", "M9 5h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2h-2M9 5a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2z")
+    }
+    val RefreshLine: ImageVector by lazy {
+        lineIcon("AppIcons.RefreshLine", "M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4")
+    }
     val PhotoPlusLine: ImageVector by lazy {
         lineIcon(
             "AppIcons.PhotoPlusLine",

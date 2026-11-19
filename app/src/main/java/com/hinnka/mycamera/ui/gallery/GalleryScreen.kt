@@ -68,7 +68,11 @@ import com.hinnka.mycamera.gallery.PhotoStacks
 import com.hinnka.mycamera.gallery.ProcessingPhoto
 import com.hinnka.mycamera.render.RenderLook
 import com.hinnka.mycamera.render.RenderQueue
+import com.hinnka.mycamera.ui.components.ActionRow
 import com.hinnka.mycamera.ui.components.EdgeRingStyle
+import com.hinnka.mycamera.ui.components.RowAction
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import com.hinnka.mycamera.ui.components.TileEdgeLineView
 import coil.load
 import coil.dispose
@@ -158,6 +162,12 @@ fun GalleryScreen(
     val selectedTab = viewModel.selectedTab
     val hasPermission = viewModel.hasGalleryPermission
     val isBatchOperationRunning = isExporting || isPastingSettings
+    // Re-render dims when no selected photo has a RAW to render again from; unknown while checking.
+    val selectedIds = selectedPhotos.map { it.id }
+    val canRenderAgain by produceState<Boolean?>(null, selectedIds) {
+        value = null
+        value = selectedIds.any { RenderQueue.renderAgainSource(context, it) != null }
+    }
     val scope = rememberCoroutineScope()
     var shouldRenderGrid by rememberSaveable { mutableStateOf(false) }
     val tick = rememberSettingsTick()
@@ -270,215 +280,6 @@ fun GalleryScreen(
     // Immersive like the viewer, so the bars do not flash between the grid and a photo.
     HideNavigationBar()
     Scaffold(
-        bottomBar = {
-            // 多选模式下显示操作栏
-            AnimatedVisibility(
-                visible = isSelectionMode && selectedPhotos.isNotEmpty(),
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-            ) {
-                Surface(
-                    color = Color(0xFF1A1A1A),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        batchOperationProgress?.let { progress ->
-                            val progressLabel = when (progress.operation) {
-                                GalleryBatchOperation.PASTE_SETTINGS ->
-                                    R.string.pasting_settings_progress
-                                GalleryBatchOperation.EXPORT ->
-                                    R.string.exporting_progress
-                            }
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp, end = 16.dp, top = 12.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = stringResource(
-                                        progressLabel,
-                                        progress.completed,
-                                        progress.total
-                                    ),
-                                    color = Color.White.copy(alpha = 0.8f),
-                                    fontSize = 12.sp
-                                )
-                                LinearProgressIndicator(
-                                    progress = {
-                                        progress.completed.toFloat() /
-                                            progress.total.coerceAtLeast(1).toFloat()
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(4.dp),
-                                    color = AccentColor,
-                                    trackColor = Color.White.copy(alpha = 0.15f)
-                                )
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            // 删除按钮
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.clickable(
-                                    enabled = !isBatchOperationRunning
-                                ) {
-                                    showDeleteDialog = true
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = stringResource(R.string.delete),
-                                    tint = if (isBatchOperationRunning) {
-                                        Color.White.copy(alpha = 0.38f)
-                                    } else {
-                                        Color.White
-                                    },
-                                    modifier = Modifier.size(28.dp)
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = stringResource(R.string.delete),
-                                    color = Color.White,
-                                    fontSize = 12.sp
-                                )
-                            }
-
-                            // 分享按钮
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.clickable(
-                                    enabled = !isSharing && !isBatchOperationRunning
-                                ) {
-                                    viewModel.shareSelectedPhotos()
-                                }
-                            ) {
-                                if (isSharing) {
-                                    CircularProgressIndicator(
-                                        color = Color.White,
-                                        modifier = Modifier.size(28.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = Icons.Default.Share,
-                                        contentDescription = stringResource(R.string.share),
-                                        tint = if (isBatchOperationRunning) {
-                                            Color.White.copy(alpha = 0.38f)
-                                        } else {
-                                            Color.White
-                                        },
-                                        modifier = Modifier.size(28.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = stringResource(R.string.share),
-                                    color = Color.White,
-                                    fontSize = 12.sp
-                                )
-                            }
-
-                            // 批量粘贴设置
-                            val canPasteSettings = hasCopiedEditSettings &&
-                                selectedImageCount > 0 &&
-                                !isBatchOperationRunning
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.clickable(enabled = canPasteSettings) {
-                                    viewModel.pasteCopiedSettingsToSelectedPhotos {
-                                            successCount,
-                                            total ->
-                                            Toast.makeText(
-                                                context,
-                                                context.getString(
-                                                    R.string.paste_settings_complete,
-                                                    successCount,
-                                                    total
-                                                ),
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                    }
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = AppIcons.ContentCopy,
-                                    contentDescription =
-                                        stringResource(R.string.paste_settings),
-                                    tint = if (canPasteSettings) {
-                                        AccentColor
-                                    } else {
-                                        Color.White.copy(alpha = 0.38f)
-                                    },
-                                    modifier = Modifier.size(28.dp)
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = stringResource(R.string.paste_settings),
-                                    color = if (canPasteSettings) {
-                                        Color.White
-                                    } else {
-                                        Color.White.copy(alpha = 0.38f)
-                                    },
-                                    fontSize = 12.sp
-                                )
-                            }
-
-                            // 批量导出
-                            if (viewModel.selectedTab == GalleryTab.PHOTON) {
-                                val canExport = selectedImageCount > 0 &&
-                                    !isBatchOperationRunning
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    modifier = Modifier.clickable(enabled = canExport) {
-                                        viewModel.exportSelectedPhotos { count ->
-                                            if (count > 0) {
-                                                Toast.makeText(
-                                                    context,
-                                                    R.string.export_complete,
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
-                                            }
-                                        }
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = AppIcons.Output,
-                                        contentDescription =
-                                            stringResource(R.string.export),
-                                        tint = if (canExport) {
-                                            AccentColor
-                                        } else {
-                                            Color.White.copy(alpha = 0.38f)
-                                        },
-                                        modifier = Modifier.size(28.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = stringResource(R.string.export),
-                                        color = if (canExport) {
-                                            Color.White
-                                        } else {
-                                            Color.White.copy(alpha = 0.38f)
-                                        },
-                                        fontSize = 12.sp
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
         containerColor = Color.Black,
         modifier = modifier
     ) { paddingValues ->
@@ -605,21 +406,6 @@ fun GalleryScreen(
                         onBack()
                     }
                 },
-                onRenderAgain = {
-                    val ids = selectedPhotos.map { it.id }
-                    scope.launch {
-                        val sources = ids.mapNotNull { loadRenderAgainSource(context, it) }
-                        if (sources.isEmpty()) {
-                            Toast.makeText(context, R.string.render_again_not_eligible, Toast.LENGTH_SHORT).show()
-                        } else {
-                            batchRenderAgain = BatchRenderAgain(
-                                photoIds = ids,
-                                eligibleCount = sources.size,
-                                appLook = appRenderLook(context, sources.first().metadata.cameraId),
-                            )
-                        }
-                    }
-                },
                 onSelectAll = {
                     val selectable = photos.filterNot { it.id in processingPhotos }
                     val allSelected = selectable.all { photo -> selectedPhotos.any { it.id == photo.id } }
@@ -635,6 +421,82 @@ fun GalleryScreen(
                     launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
                 }
             )
+            val landscape = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
+            AnimatedVisibility(
+                visible = isSelectionMode && selectedPhotos.isNotEmpty(),
+                enter = if (landscape) fadeIn() else slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = if (landscape) fadeOut() else slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                modifier = if (landscape) Modifier.align(Alignment.CenterEnd).width(GalleryActionRowHeight).fillMaxHeight()
+                else Modifier.align(Alignment.BottomStart).fillMaxWidth().height(GalleryActionRowHeight)
+            ) {
+                val busy = stringResource(R.string.viewer_busy)
+                val running = if (isBatchOperationRunning) busy else null
+                val progress = batchOperationProgress?.let { it.completed.toFloat() / it.total.coerceAtLeast(1) }
+                ActionRow(
+                    listOf(
+                        RowAction(
+                            AppIcons.FileExportLine, stringResource(R.string.export),
+                            running ?: when {
+                                selectedTab != GalleryTab.PHOTON -> stringResource(R.string.gallery_export_lilac_only)
+                                selectedImageCount == 0 -> stringResource(R.string.gallery_export_photos_only)
+                                else -> null
+                            }
+                        ) {
+                            viewModel.exportSelectedPhotos { count ->
+                                if (count > 0) Toast.makeText(context, R.string.export_complete, Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        RowAction(AppIcons.ShareLine, stringResource(R.string.share), running ?: busy.takeIf { isSharing }) {
+                            viewModel.shareSelectedPhotos()
+                        },
+                        RowAction(
+                            AppIcons.ClipboardLine, stringResource(R.string.gallery_paste_look),
+                            running ?: when {
+                                !hasCopiedEditSettings -> stringResource(R.string.viewer_paste_nothing)
+                                selectedImageCount == 0 -> stringResource(R.string.gallery_paste_needs_photo)
+                                else -> null
+                            }
+                        ) {
+                            viewModel.pasteCopiedSettingsToSelectedPhotos { successCount, total ->
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.paste_settings_complete, successCount, total),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        },
+                        RowAction(AppIcons.TrashLine, stringResource(R.string.delete), running) {
+                            showDeleteDialog = true
+                        },
+                        RowAction(
+                            AppIcons.RefreshLine, stringResource(R.string.gallery_re_render),
+                            running ?: stringResource(R.string.render_again_not_eligible).takeIf { canRenderAgain == false }
+                        ) {
+                            val ids = selectedPhotos.map { it.id }
+                            scope.launch {
+                                val sources = ids.mapNotNull { loadRenderAgainSource(context, it) }
+                                if (sources.isEmpty()) {
+                                    Toast.makeText(context, R.string.render_again_not_eligible, Toast.LENGTH_SHORT).show()
+                                } else {
+                                    batchRenderAgain = BatchRenderAgain(
+                                        photoIds = ids,
+                                        eligibleCount = sources.size,
+                                        appLook = appRenderLook(context, sources.first().metadata.cameraId),
+                                    )
+                                }
+                            }
+                        },
+                    ),
+                    vertical = landscape,
+                    // Export, Share and Paste progress as a line along the row's top edge (turned: its start edge).
+                    modifier = Modifier.fillMaxSize().drawBehind {
+                        if (progress == null) return@drawBehind
+                        val line = 2.dp.toPx()
+                        if (landscape) drawRect(SonyText, size = Size(line, size.height * progress))
+                        else drawRect(SonyText, size = Size(size.width * progress, line))
+                    }
+                )
+            }
         }
     }
 
@@ -767,6 +629,8 @@ fun GalleryScreen(
     }
 }
 
+private val GalleryActionRowHeight = 64.dp
+
 /** The selection a batch re-render applies to; ineligible photos stay in [photoIds] to be counted as skipped. */
 private data class BatchRenderAgain(val photoIds: List<String>, val eligibleCount: Int, val appLook: RenderLook)
 
@@ -784,7 +648,6 @@ private fun GalleryTopLine(
     pendingCount: Int,
     failedCount: Int,
     onBack: () -> Unit,
-    onRenderAgain: () -> Unit,
     onSelectAll: () -> Unit,
     onRenderQueue: () -> Unit,
     onImport: () -> Unit,
@@ -807,9 +670,6 @@ private fun GalleryTopLine(
                 HaloText(stringResource(R.string.items_selected, selectedCount), fontSize = 18.sp)
             }
             Spacer(Modifier.weight(1f))
-            if (selectedCount > 0) {
-                LineButton(AppIcons.SlidersLine, stringResource(R.string.render_again), enabled, onRenderAgain)
-            }
             LineButton(AppIcons.ChecksLine, stringResource(R.string.select_all), enabled, onSelectAll)
         } else {
             GalleryTab.entries.forEach { tab ->
@@ -1000,6 +860,21 @@ private fun GalleryRecyclerGrid(
                 val recyclerView = container.getChildAt(0) as RecyclerView
                 (container.getChildAt(1) as GridFadeView).fadeBottom = isSelectionMode
                 val fastScroller = container.getChildAt(2) as GalleryFastScrollerView
+                // Room for the floating action row while selecting: 72 dp under the grid, or turned, a 64 dp column
+                // at the end, with the fast scroller to its left.
+                val density = container.resources.displayMetrics.density
+                val half = (4f * density).toInt().coerceAtLeast(1) / 2
+                val column = if (isSelectionMode && spanCount == 5) (64 * density).toInt() else 0
+                recyclerView.setPadding(
+                    half, recyclerView.paddingTop, half + column,
+                    ((if (isSelectionMode && column == 0) 72 else 16) * density).toInt()
+                )
+                (fastScroller.layoutParams as FrameLayout.LayoutParams).let {
+                    if (it.rightMargin != column) {
+                        it.rightMargin = column
+                        fastScroller.layoutParams = it
+                    }
+                }
                 val layoutManager = recyclerView.layoutManager as? StaggeredGridLayoutManager
                 if (layoutManager != null && layoutManager.spanCount != spanCount) {
                     layoutManager.spanCount = spanCount
@@ -1529,7 +1404,9 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                         }
                     },
                     onLongClick = {
-                        if (photo.id !in processingPhotos) {
+                        if (photo.id in processingPhotos || (!isSelectionMode && (photo.id in runningIds || photo.id in waitingIds))) {
+                            Toast.makeText(holder.itemView.context, R.string.gallery_busy_not_selectable, Toast.LENGTH_SHORT).show()
+                        } else {
                             if (!isSelectionMode) {
                                 model.enterSelectionMode()
                             }
@@ -1616,7 +1493,7 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                 onLongClick = onLongClick
             )
             view.bindTags(tags())
-            view.bindQueueState(edge, accent)
+            view.bindQueueState(edge, accent, chosen = isSelectionMode && isSelected)
             view.bindProcessingPreview(processingPhoto)
             if (processingPhoto == null) {
                 job = scope.launch {
@@ -1748,11 +1625,11 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
         imageView.setImageBitmap(bitmap)
     }
 
-    /** A rendering or waiting tile carries the edge line, its picture softened and dimmed. */
-    fun bindQueueState(style: EdgeRingStyle?, accent: Int) {
-        edgeLine.style = style
+    /** A rendering or waiting tile carries the edge line, its picture softened and dimmed; a [chosen] one the solid edge. */
+    fun bindQueueState(style: EdgeRingStyle?, accent: Int, chosen: Boolean) {
+        edgeLine.style = if (chosen) EdgeRingStyle.SOLID else style
         edgeLine.accent = accent
-        edgeLine.contentDescription = if (style == null) null else context.getString(R.string.gallery_photo_processing)
+        edgeLine.contentDescription = if (style == null || chosen) null else context.getString(R.string.gallery_photo_processing)
         val busy = style != null
         imageView.colorFilter = if (busy) PorterDuffColorFilter(0xFFCCCCCC.toInt(), PorterDuff.Mode.MULTIPLY) else null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -48,6 +49,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
@@ -82,6 +84,8 @@ import com.hinnka.mycamera.ui.camera.ModeAmber
 import com.hinnka.mycamera.ui.camera.ShadowedLineIcon
 import com.hinnka.mycamera.ui.camera.SpacedBuzz
 import com.hinnka.mycamera.ui.camera.ViewfinderTextShadow
+import com.hinnka.mycamera.ui.camera.autoRotate
+import android.widget.Toast
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.ui.icons.AppIcons
 import com.hinnka.mycamera.utils.VibrationHelper
@@ -449,6 +453,58 @@ internal fun LabelledIcon(
             style = if (shadowed) LocalTextStyle.current.merge(LilacTextStyle) else LocalTextStyle.current,
             modifier = Modifier.height(14.dp)
         )
+    }
+}
+
+/** A slot of [ActionRow]: a [whyNot] dims it, and a tap then shows that reason instead of running [onClick]. */
+internal class RowAction(val icon: ImageVector, val label: String, val whyNot: String?, val onClick: () -> Unit)
+
+private val ActionSlotWidth = 70.dp
+
+/**
+ * The viewer's action row on the camera's 70 dp grid: [slots] centred at x 40, 110, 180, 250, 320 of a 360 dp width,
+ * a null slot left empty. [vertical] stacks them 70 dp apart, centred, for a right-edge column. The caller sizes it.
+ */
+@Composable
+internal fun ActionRow(slots: List<RowAction?>, vertical: Boolean, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val haptics = remember(context) { SpacedBuzz(VibrationHelper(context)) }
+    BoxWithConstraints(modifier) {
+        slots.forEachIndexed { slot, action ->
+            if (action == null) return@forEachIndexed
+            Box(
+                (if (vertical) {
+                    Modifier
+                        .offset(y = (maxHeight - ActionSlotWidth * 5) / 2 + ActionSlotWidth * slot)
+                        .height(ActionSlotWidth)
+                        .fillMaxWidth()
+                } else {
+                    Modifier
+                        .offset(x = maxWidth * ((40f + 70f * slot) / 360f) - ActionSlotWidth / 2)
+                        .width(ActionSlotWidth)
+                        .fillMaxHeight()
+                })
+                    .clickable(role = Role.Button) {
+                        val why = action.whyNot
+                        if (why != null) {
+                            Toast.makeText(context, why, Toast.LENGTH_SHORT).show()
+                        } else {
+                            haptics.buzz(VibrationHelper.LIGHT_TICK_MS)
+                            action.onClick()
+                        }
+                    }
+            ) {
+                LabelledIcon(
+                    icon = action.icon,
+                    label = action.label,
+                    tint = SonyText,
+                    shadowed = true,
+                    modifier = (if (vertical) Modifier.align(Alignment.Center) else Modifier.align(Alignment.TopCenter).padding(top = 11.dp))
+                        .alpha(if (action.whyNot == null) 1f else 0.38f)
+                        .autoRotate()
+                )
+            }
+        }
     }
 }
 

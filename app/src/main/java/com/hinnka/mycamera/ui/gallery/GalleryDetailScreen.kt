@@ -150,7 +150,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.media3.exoplayer.SeekParameters
 import com.hinnka.mycamera.ui.components.HideNavigationBar
+import com.hinnka.mycamera.ui.components.ActionRow
 import com.hinnka.mycamera.ui.components.LabelledIcon
+import com.hinnka.mycamera.ui.components.RowAction
 import com.hinnka.mycamera.ui.components.UndoBanner
 import com.hinnka.mycamera.ui.components.SonyText
 import com.hinnka.mycamera.ui.components.CurveChannel
@@ -1232,19 +1234,19 @@ fun GalleryDetailScreen(
                 else -> null
             }
             val actions = listOf(
-                if (isExpanded) null else ViewerAction(
+                if (isExpanded) null else RowAction(
                     icon = AppIcons.CameraLine,
                     label = stringResource(R.string.camera),
                     whyNot = null,
                     onClick = { leaveDetail(onGoToCamera ?: onBack) }
                 ),
-                ViewerAction(AppIcons.ShareLine, stringResource(R.string.share), whyNot(isSharing)) {
+                RowAction(AppIcons.ShareLine, stringResource(R.string.share), whyNot(isSharing)) {
                     currentPhoto?.let(viewModel::sharePhoto)
                 },
                 if (currentPhoto?.isImage == true || currentPhoto?.isVideo == true) {
                     val editWhyNot = whyNot(preparingEditPhotoId == currentPhoto.id)
                         ?: shownFrame?.let { stringResource(R.string.viewer_burst_edit_cover) }
-                    ViewerAction(AppIcons.AdjustmentsLine, stringResource(R.string.edit), editWhyNot) {
+                    RowAction(AppIcons.AdjustmentsLine, stringResource(R.string.edit), editWhyNot) {
                         viewModel.prepareCurrentPhotoForEdit(
                             index = allPhotos.indexOf(currentPhoto),
                             onReady = {
@@ -1257,52 +1259,17 @@ fun GalleryDetailScreen(
                         )
                     }
                 } else null,
-                ViewerAction(AppIcons.TrashLine, stringResource(R.string.delete), whyNot(), ::startDelete),
-                ViewerAction(AppIcons.DotsLine, stringResource(R.string.viewer_more), whyNot()) { showMoreSheet = true },
+                RowAction(AppIcons.TrashLine, stringResource(R.string.delete), whyNot(), ::startDelete),
+                RowAction(AppIcons.DotsLine, stringResource(R.string.viewer_more), whyNot()) { showMoreSheet = true },
             )
-            Box(
-                (if (landscape) Modifier.align(Alignment.CenterEnd).padding(end = navRight).width(ViewerActionRowHeight).fillMaxHeight()
+            ActionRow(
+                actions,
+                vertical = landscape,
+                modifier = (if (landscape) Modifier.align(Alignment.CenterEnd).padding(end = navRight).width(ViewerActionRowHeight).fillMaxHeight()
                 else Modifier.align(Alignment.BottomStart).fillMaxWidth().height(ViewerActionRowHeight))
                     .then(rowsFade)
                     .photoMorphEdge(top = false)
-            ) {
-                actions.forEachIndexed { slot, action ->
-                    if (action == null) return@forEachIndexed
-                    // Slots centred at x 40, 110, 180, 250, 320 of a 360 dp width; turned, stacked 70 dp apart, centred.
-                    Box(
-                        (if (landscape) {
-                            Modifier
-                                .offset(y = (screenHeight - ViewerActionSlotWidth * 5) / 2 + ViewerActionSlotWidth * slot)
-                                .height(ViewerActionSlotWidth)
-                                .fillMaxWidth()
-                        } else {
-                            Modifier
-                                .offset(x = screenWidth * ((40f + 70f * slot) / 360f) - ViewerActionSlotWidth / 2)
-                                .width(ViewerActionSlotWidth)
-                                .fillMaxHeight()
-                        })
-                            .clickable(role = Role.Button) {
-                                val why = action.whyNot
-                                if (why != null) {
-                                    explain(why)
-                                } else {
-                                    haptics.buzz(VibrationHelper.LIGHT_TICK_MS)
-                                    action.onClick()
-                                }
-                            }
-                    ) {
-                        LabelledIcon(
-                            icon = action.icon,
-                            label = action.label,
-                            tint = SonyText,
-                            shadowed = true,
-                            modifier = (if (landscape) Modifier.align(Alignment.Center) else Modifier.align(Alignment.TopCenter).padding(top = 11.dp))
-                                .alpha(if (action.whyNot == null) 1f else 0.38f)
-                                .autoRotate()
-                        )
-                    }
-                }
-            }
+            )
         }
 
         // Undo for the last delete, above the action row (turned: across the picture band's bottom edge), while the
@@ -2778,7 +2745,6 @@ private val VersionStripHeight = 56.dp
 private val ViewerTopRowHeight = 48.dp
 private val ViewerItemRowHeight = 56.dp
 private val ViewerActionRowHeight = 64.dp
-private val ViewerActionSlotWidth = 70.dp
 // The strip centred in the item row, and how far it drops in full view.
 private val VersionStripRest = ViewerActionRowHeight + (ViewerItemRowHeight - VersionStripHeight) / 2
 private val FullViewStripDrop = 56.dp
@@ -2799,7 +2765,6 @@ private fun BoxScope.BurstTile(file: File, index: Int, cover: Int, selected: Int
 private class BurstFrames(val photoId: String? = null, val files: List<File> = emptyList(), val cover: Int = -1)
 
 /** One control on the action row; [whyNot] is said instead when it cannot run now. */
-private class ViewerAction(val icon: ImageVector, val label: String, val whyNot: String?, val onClick: () -> Unit)
 
 /**
  * Where an upright photo rests, as both its scale and its alignment so every reader agrees. At full width when that
