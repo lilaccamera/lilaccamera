@@ -2330,6 +2330,16 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /** [requested] without its protected items, saying how many were kept. */
+    fun unprotected(requested: List<MediaData>): List<MediaData> {
+        val toDelete = requested.filterNot(::isProtected)
+        (requested.size - toDelete.size).takeIf { it > 0 }?.let { kept ->
+            val app = getApplication<Application>()
+            Toast.makeText(app, app.resources.getQuantityString(R.plurals.delete_protected_kept, kept, kept), Toast.LENGTH_SHORT).show()
+        }
+        return toDelete
+    }
+
     /**
      * 批量删除选中的照片
      *
@@ -2338,11 +2348,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * - false: 只删除应用内部照片，不删除系统相册
      */
     fun deleteSelectedPhotos(deleteExported: Boolean = true, requested: List<MediaData> = selectedPhotos.toList()) {
-        val toDelete = requested.filterNot(::isProtected)
-        (requested.size - toDelete.size).takeIf { it > 0 }?.let { kept ->
-            val app = getApplication<Application>()
-            Toast.makeText(app, app.resources.getQuantityString(R.plurals.delete_protected_kept, kept, kept), Toast.LENGTH_SHORT).show()
-        }
+        val toDelete = unprotected(requested)
         if (toDelete.isEmpty()) return
 
         if (selectedTab == GalleryTab.SYSTEM) {
@@ -2363,9 +2369,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
 
                 try {
-                    val pendingIntent = MediaStore.createDeleteRequest(
+                    // The system trash: one system dialog, and the items stay recoverable there.
+                    val pendingIntent = MediaStore.createTrashRequest(
                         context.contentResolver,
-                        uris
+                        uris,
+                        true
                     )
                     pendingDeletePhotos = toDelete
                     batchDeletePendingIntent = pendingIntent
@@ -2442,6 +2450,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private fun deleteBatchPhotosOnlyInternal(
         photos: List<MediaData>,
         deleteExportedDocuments: Boolean = false,
+        // False for a delete that ran after its Undo window: a selection started since then stays.
+        exitSelection: Boolean = true,
         onDone: () -> Unit = {},
     ) {
         viewModelScope.launch {
@@ -2462,7 +2472,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
 
-            exitSelectionMode()
+            if (exitSelection) exitSelectionMode()
             removePhotonPhotosFromState(deletedIds)
             loadPhotosInternal()
             PLog.d(TAG, "Batch deleted $deletedCount photos (app only)")
@@ -2522,7 +2532,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         } else {
             val ids = pending.photos.map { it.id }.toSet()
             // Hidden until gone from the list, so a deleted item never shows again for a moment.
-            deleteBatchPhotosOnlyInternal(pending.photos) { hiddenPhotoIds -= ids }
+            deleteBatchPhotosOnlyInternal(pending.photos, exitSelection = false) { hiddenPhotoIds -= ids }
         }
     }
 

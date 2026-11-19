@@ -186,7 +186,7 @@ internal fun ViewerOption(
 
 /** Cancel and the sheet's action, side by side at its foot. */
 @Composable
-internal fun ViewerSheetButtons(go: String, onCancel: () -> Unit, onGo: () -> Unit, goDimmed: Boolean = false) {
+internal fun ViewerSheetButtons(go: String, onCancel: () -> Unit, onGo: () -> Unit, goDimmed: Boolean = false, destructive: Boolean = false) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -194,7 +194,9 @@ internal fun ViewerSheetButtons(go: String, onCancel: () -> Unit, onGo: () -> Un
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         SheetButton(stringResource(R.string.cancel), SettingsLine, SettingsText, onCancel)
-        SheetButton(go, SettingsText.copy(alpha = if (goDimmed) 0.38f else 1f), Color.Black, onGo)
+        // A destructive action is Sony red, like the camera's red groups.
+        val fill = if (destructive) com.hinnka.mycamera.ui.camera.GroupRed else SettingsText
+        SheetButton(go, fill.copy(alpha = if (goDimmed) 0.38f else 1f), if (destructive) Color.White else Color.Black, onGo)
     }
 }
 
@@ -327,7 +329,7 @@ internal fun ViewerDeleteSheet(
                 }
             }
         }
-        ViewerSheetButtons(stringResource(R.string.delete), onCancel = onDismiss, onGo = { onDelete(chooseAll, withCopies && copyCount > 0) })
+        ViewerSheetButtons(stringResource(R.string.delete), onCancel = onDismiss, onGo = { onDelete(chooseAll, withCopies && copyCount > 0) }, destructive = true)
     }
 }
 

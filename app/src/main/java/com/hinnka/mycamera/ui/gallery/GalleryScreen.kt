@@ -71,6 +71,7 @@ import com.hinnka.mycamera.render.RenderQueue
 import com.hinnka.mycamera.ui.components.ActionRow
 import com.hinnka.mycamera.ui.components.EdgeRingStyle
 import com.hinnka.mycamera.ui.components.RowAction
+import com.hinnka.mycamera.ui.components.UndoBanner
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
 import com.hinnka.mycamera.ui.components.TileEdgeLineView
@@ -131,7 +132,9 @@ fun GalleryScreen(
     modifier: Modifier = Modifier
 ) {
     val allPhotos by viewModel.currentPhotos.collectAsState()
-    val stacks = remember(allPhotos) { PhotoStacks.of(allPhotos) }
+    // Deleted items waiting for Undo leave the grid at once.
+    val hiddenIds = viewModel.hiddenPhotoIds
+    val stacks = remember(allPhotos, hiddenIds) { PhotoStacks.of(allPhotos.filterNot { it.id in hiddenIds }) }
     // One tile per photo stack: selection and batch actions act on the version the tile shows.
     val photos = stacks.tiles
     val processingPhotos by viewModel.processingPhotos.collectAsState()
@@ -242,7 +245,37 @@ fun GalleryScreen(
         }
     }
 
-    var showDeleteDialog by remember { mutableStateOf(false) }
+    // The shown tiles a delete asks about, while its sheet is open.
+    var deleteSheet by remember { mutableStateOf<List<MediaData>?>(null) }
+    var deleteExportedPref by rememberPreference(UserPreferences::deleteExported)
+    // Copies a delete may also remove: a photo's exports, and the system's file of a video Lilac captured.
+    fun exportedCopies(photos: List<MediaData>): Int = photos.sumOf { photo ->
+        val metadata = photo.metadata
+        val capturedVideo = photo.isVideo && metadata?.isImported != true && !metadata?.sourceUri.isNullOrBlank()
+        (metadata?.exportedUris?.size ?: 0) + if (capturedVideo) 1 else 0
+    }
+    fun deleteTargets(shown: List<MediaData>, all: Boolean): List<MediaData> =
+        if (all) shown.flatMap(stacks::versionsOf).distinct().filterNot { it.id in processingPhotos } else shown
+    // App-owned files go after an Undo window; with their exported copies, through the system's dialog at once.
+    fun runDelete(photos: List<MediaData>, withCopies: Boolean) {
+        if (photos.isEmpty()) return
+        if (withCopies) {
+            viewModel.deleteSelectedPhotos(true, photos)
+        } else {
+            viewModel.deleteWithUndo(photos, null, context.resources.getQuantityString(R.plurals.gallery_deleted_count, photos.size, photos.size))
+            viewModel.exitSelectionMode()
+        }
+    }
+    // The Delete action: the sheet only when there is a choice; other apps' files go to the system trash.
+    fun startDelete() {
+        if (selectedTab == GalleryTab.SYSTEM) return viewModel.deleteSelectedPhotos()
+        val shown = viewModel.unprotected(selectedPhotos.toList())
+        when {
+            shown.isEmpty() -> Unit
+            shown.any { stacks.versionsOf(it).size > 1 } || exportedCopies(shown) > 0 -> deleteSheet = shown
+            else -> runDelete(shown, false)
+        }
+    }
     var batchRenderAgain by remember { mutableStateOf<BatchRenderAgain?>(null) }
     var isBatchRenderingAgain by remember { mutableStateOf(false) }
 
@@ -268,10 +301,13 @@ fun GalleryScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 loadCurrentTabData()
             }
+            // A pending delete runs when the app goes to the background, not only after its Undo window.
+            if (event == Lifecycle.Event.ON_STOP) viewModel.commitPendingDelete()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.commitPendingDelete()
         }
     }
 
@@ -465,9 +501,7 @@ fun GalleryScreen(
                                 ).show()
                             }
                         },
-                        RowAction(AppIcons.TrashLine, stringResource(R.string.delete), running) {
-                            showDeleteDialog = true
-                        },
+                        RowAction(AppIcons.TrashLine, stringResource(R.string.delete), running, ::startDelete),
                         RowAction(
                             AppIcons.RefreshLine, stringResource(R.string.gallery_re_render),
                             running ?: stringResource(R.string.render_again_not_eligible).takeIf { canRenderAgain == false }
@@ -497,108 +531,36 @@ fun GalleryScreen(
                     }
                 )
             }
+            UndoBanner(
+                message = viewModel.pendingDelete?.message,
+                restartKey = viewModel.pendingDelete,
+                onUndo = { viewModel.undoPendingDelete() },
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(bottom = if (landscape) 0.dp else GalleryActionRowHeight, end = if (landscape) GalleryActionRowHeight else 0.dp),
+            )
         }
     }
 
-    var deleteExportedPref by rememberPreference(UserPreferences::deleteExported)
-
-    // 删除确认对话框
     HighFrameRateChoiceDialog(viewModel)
 
-    if (showDeleteDialog) {
-        val exportedPhotosCount = remember(selectedPhotos) {
-            selectedPhotos.sumOf { photo ->
-                val baseCount = photo.metadata?.exportedUris?.size ?: 0
-                val sourceUri = photo.metadata?.sourceUri
-                val isVideoAndCaptured = photo.isVideo &&
-                        photo.metadata?.isImported != true &&
-                        !sourceUri.isNullOrBlank()
-                baseCount + (if (isVideoAndCaptured) 1 else 0)
-            }
-        }
-        val selectedOnlyVideos = remember(selectedPhotos) {
-            selectedPhotos.isNotEmpty() && selectedPhotos.all { it.isVideo }
-        }
-        var deleteExportedState by remember(showDeleteDialog) { mutableStateOf(deleteExportedPref) }
-
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text(stringResource(R.string.delete)) },
-            text = {
-                Column {
-                    Text(
-                        text = stringResource(R.string.delete_multiple_confirm, selectedPhotos.size)
-                    )
-                    if (viewModel.selectedTab == GalleryTab.PHOTON) {
-                        if (exportedPhotosCount > 0) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { deleteExportedState = !deleteExportedState }
-                                    .padding(vertical = 4.dp)
-                            ) {
-                                Checkbox(
-                                    checked = deleteExportedState,
-                                    onCheckedChange = { deleteExportedState = it },
-                                    colors = CheckboxDefaults.colors(
-                                        checkedColor = AccentColor,
-                    checkmarkColor = OnAccentColor,
-                                        uncheckedColor = Color.White.copy(alpha = 0.6f)
-                                    )
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = if (selectedOnlyVideos) {
-                                        stringResource(R.string.delete_exported_videos_count, exportedPhotosCount)
-                                    } else {
-                                        stringResource(R.string.delete_exported_photos_count, exportedPhotosCount)
-                                    },
-                                    color = Color.White,
-                                    fontSize = 14.sp
-                                )
-                            }
-                        }
-                    }
-                }
+    deleteSheet?.let { shown ->
+        val anyStack = shown.any { stacks.versionsOf(it).size > 1 }
+        ViewerDeleteSheet(
+            thisOne = if (anyStack) stringResource(R.string.delete_shown_versions) else null,
+            all = if (anyStack) stringResource(R.string.delete_all_versions_selected) else null,
+            allFirst = false,
+            copies = { exportedCopies(deleteTargets(shown, it)) },
+            videos = shown.all { it.isVideo },
+            copiesFirst = deleteExportedPref,
+            onDelete = { all, withCopies ->
+                deleteSheet = null
+                val targets = deleteTargets(shown, all)
+                if (exportedCopies(targets) > 0) deleteExportedPref = withCopies
+                // Shown tiles were checked already; this only finds protected versions behind them.
+                runDelete(if (all) viewModel.unprotected(targets) else targets, withCopies)
             },
-            confirmButton = {
-                fun delete(photos: List<MediaData>) {
-                    val finalDeleteExported = if (viewModel.selectedTab == GalleryTab.PHOTON && exportedPhotosCount > 0) deleteExportedState else true
-                    if (viewModel.selectedTab == GalleryTab.PHOTON && exportedPhotosCount > 0) {
-                        deleteExportedPref = deleteExportedState
-                    }
-                    viewModel.deleteSelectedPhotos(finalDeleteExported, photos)
-                    showDeleteDialog = false
-                }
-                val shown = selectedPhotos.toList()
-                if (shown.any { stacks.versionsOf(it).size > 1 }) {
-                    DeleteVersionsButtons(
-                        thisVersionText = stringResource(R.string.delete_shown_versions),
-                        allVersionsText = stringResource(R.string.delete_all_versions_selected),
-                        onDeleteThis = { delete(shown) },
-                        onDeleteAll = {
-                            delete(shown.flatMap(stacks::versionsOf).filterNot { it.id in processingPhotos })
-                        },
-                        onCancel = { showDeleteDialog = false },
-                    )
-                } else {
-                    TextButton(onClick = { delete(shown) }) {
-                        Text(stringResource(R.string.delete), color = Color.Red)
-                    }
-                }
-            },
-            dismissButton = {
-                if (selectedPhotos.none { stacks.versionsOf(it).size > 1 }) {
-                    TextButton(onClick = { showDeleteDialog = false }) {
-                        Text(stringResource(R.string.cancel))
-                    }
-                }
-            },
-            containerColor = Color(0xFF2D2D2D),
-            titleContentColor = Color.White,
-            textContentColor = Color.White
+            onDismiss = { deleteSheet = null },
         )
     }
 

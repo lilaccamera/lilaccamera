@@ -399,22 +399,6 @@ private val StripGap = 8.dp
 /** A strip's height: its tiles with 6 dp above and below. */
 private val StripHeight = 56.dp
 
-/** Stacked delete choices for a photo stack with more than one version, Cancel last. */
-@Composable
-internal fun DeleteVersionsButtons(
-    thisVersionText: String,
-    allVersionsText: String,
-    onDeleteThis: () -> Unit,
-    onDeleteAll: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    Column(horizontalAlignment = Alignment.End) {
-        TextButton(onClick = onDeleteThis) { Text(thisVersionText, color = Color.Red) }
-        TextButton(onClick = onDeleteAll) { Text(allVersionsText, color = Color.Red) }
-        TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
-    }
-}
-
 /**
  * The viewer's 40 dp grey pill button over the picture: an [icon], a [text], or both, with an optional
  * [trailing] icon. [description] names an icon-only pill for TalkBack.

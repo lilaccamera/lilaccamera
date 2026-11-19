@@ -2273,4 +2273,8 @@
     <string name="gallery_export_photos_only">Export takes photos only</string>
     <string name="gallery_paste_needs_photo">Paste needs a photo in the selection</string>
     <string name="gallery_busy_not_selectable">Still processing: it can be selected when it’s done</string>
+    <plurals name="gallery_deleted_count">
+        <item quantity="one">%d deleted</item>
+        <item quantity="other">%d deleted</item>
+    </plurals>
 </resources>
