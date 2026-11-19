@@ -147,9 +147,11 @@
     <string name="export_video_resolution_details">%1$d × %2$d · %3$s</string>
     <string name="export_video_resolution_dimensions">%1$d × %2$d</string>
     <string name="export_video_confirm">Bake effects into video and save to gallery? This may take a while depending on video length. The original video will not be changed.</string>
-    <string name="hfr_badge_slowed">%1$d fps · plays ¼×</string>
-    <string name="hfr_badge_full">%1$d fps · full speed</string>
     <string name="hfr_speed_button_desc">Playback speed</string>
+    <string name="video_play">Play</string>
+    <string name="video_pause">Pause</string>
+    <string name="video_sound">Sound</string>
+    <string name="video_slowed_no_sound">Slowed clips play without sound</string>
     <string name="hfr_share_title">Share %1$d fps video</string>
     <string name="hfr_export_title">Export %1$d fps video</string>
     <string name="hfr_choice_line">Other apps play it at full speed.</string>
@@ -1752,6 +1754,19 @@
     <string name="render_chip_paused">Paused</string>
     <string name="render_chip_failed">Couldn’t finish · Try again</string>
     <string name="render_chip_skipped">Skipped</string>
+    <string name="viewer_proc_rendering">Rendering · %1$d %%</string>
+    <string name="viewer_proc_pausing">Pausing…</string>
+    <string name="viewer_proc_waiting">Waiting</string>
+    <string name="viewer_proc_in_line">%1$s in line</string>
+    <string name="viewer_proc_paused_line">The queue is paused</string>
+    <string name="viewer_proc_failed">Couldn’t finish</string>
+    <string name="viewer_proc_raw_safe">The RAW is safe</string>
+    <string name="viewer_proc_struggle_line">Queue says how to finish</string>
+    <string name="viewer_proc_retry">Retry</string>
+    <string name="viewer_proc_render">Render</string>
+    <string name="viewer_proc_render_now">Render now</string>
+    <string name="viewer_proc_next">Renders next, after the one running now</string>
+    <string name="viewer_proc_queue">Queue</string>
     <string name="render_again">Re-render as a copy</string>
     <string name="render_again_subtitle">The original and the app’s settings stay as they are.</string>
     <string name="render_again_start_from">Start from</string>
@@ -2176,6 +2191,7 @@
     <string name="viewer_tag_portrait_hint">Portrait: background blur saved. Change it in Edit.</string>
     <string name="viewer_tag_ai_denoise_hint">AI denoise was applied in the editor.</string>
     <string name="viewer_tag_high_frame_rate_hint">%1$d fps: plays at ¼× without sound. The ¼× / 1× button switches the speed.</string>
+    <string name="video_slow_part_hint">Drag to choose the part that plays slowly</string>
     <string name="viewer_tag_video_format_hint">Video: %1$d × %2$d, %3$d fps.</string>
     <string name="viewer_tag_version_hint">%1$s: %2$s. Pick another version below.</string>
     <string name="viewer_version_original">the first render of the RAW</string>
@@ -2187,4 +2203,9 @@
     <string name="viewer_export_all_frames">Export all frames</string>
     <string name="viewer_delete_this_frame">This frame</string>
     <string name="viewer_delete_whole_burst">Whole burst</string>
+    <string name="video_previous_frame">Previous frame</string>
+    <string name="video_next_frame">Next frame</string>
+    <string name="video_save_frame">Save frame</string>
+    <string name="video_frame_saved">Frame saved as a photo</string>
+    <string name="video_frame_save_failed">Couldn’t save the frame</string>
 </resources>

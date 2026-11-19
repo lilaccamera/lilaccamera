@@ -72,11 +72,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import com.hinnka.mycamera.video.SlowedCopy
-import androidx.media3.common.util.Util
 import androidx.media3.common.C
-import androidx.media3.common.PlaybackParameters
-import androidx.media3.ui.TimeBar
-import androidx.media3.ui.PlayerControlView
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.isVisible
@@ -137,6 +133,13 @@ import androidx.compose.ui.semantics.Role
 import com.hinnka.mycamera.ui.camera.ShadowedLineIcon
 import com.hinnka.mycamera.ui.camera.SpacedBuzz
 import com.hinnka.mycamera.ui.camera.ViewfinderTextShadow
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.media3.exoplayer.SeekParameters
 import com.hinnka.mycamera.ui.components.HideNavigationBar
 import com.hinnka.mycamera.ui.components.LabelledIcon
 import com.hinnka.mycamera.ui.components.SonyText
@@ -151,14 +154,20 @@ internal val GallerySheetSurface = Color(0xFF171717)
 private class VideoPreviewHandle {
     private var activeLease: Lease? = null
 
+    /** The shown video's player, for the controls in the item row; null while none is attached. */
+    var player by mutableStateOf<ExoPlayer?>(null)
+        private set
+
     fun attach(player: ExoPlayer): Lease {
         release()
+        this.player = player
         return Lease(player).also { activeLease = it }
     }
 
     fun release(lease: Lease) {
         if (activeLease === lease) {
             activeLease = null
+            player = null
         }
         lease.release()
     }
@@ -166,6 +175,7 @@ private class VideoPreviewHandle {
     fun release() {
         activeLease?.release()
         activeLease = null
+        player = null
     }
 
     class Lease(private val player: ExoPlayer) {
@@ -517,7 +527,8 @@ fun GalleryDetailScreen(
             liveTagStack = null
         }
     }
-    val videoSpeeds = remember { mutableStateMapOf<String, Float>() }
+    // ¼× or 1× as chosen on the shown video's player; null until chosen, when 120 fps clips play slowed.
+    var videoSlowedChoice by remember(videoPreviewHandle.player) { mutableStateOf<Boolean?>(null) }
     // On the system tab the tags describe the Lilac photo an exported copy came from.
     val tagPhoto = currentPhoto?.let { if (viewModel.selectedTab == GalleryTab.SYSTEM) it.relatedPhoto ?: it else it }
     val tagIsRaw by produceState(false, currentPhoto?.id) {
@@ -701,9 +712,10 @@ fun GalleryDetailScreen(
                                                 !isVideoExporting,
                                             viewModel = viewModel,
                                             previewHandle = videoPreviewHandle,
-                                            onSpeed = { videoSpeeds[photo.id] = it },
-                                            // Above the action row, so the player's own controls stay usable.
-                                            modifier = Modifier.fillMaxSize().padding(bottom = ViewerActionRowHeight)
+                                            // Under the bars, which a tap hides as on photos.
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .pointerInput(Unit) { detectTapGestures(onTap = { overlaysHidden = !overlaysHidden }) }
                                         )
                                     } else {
                                         val forceSystemOrigin = viewModel.selectedTab == GalleryTab.SYSTEM &&
@@ -779,7 +791,7 @@ fun GalleryDetailScreen(
                     livePlaying = liveTagStack != null,
                     hdrOn = if (canShowHdr) viewModel.isManualHdrEnhanceEnabled(currentPhoto) else null,
                     videoRate = currentVideoRate,
-                    videoSlowed = (videoSpeeds[currentPhoto.id] ?: 1f) < 1f,
+                    videoSlowed = (videoSlowedChoice ?: currentVideoRate?.isHighFrameRate) == true,
                     onLive = { liveTagStack = PhotoStacks.stackIdOf(currentPhoto) },
                     onHdr = { showHdrStrengthPanel = !showHdrStrengthPanel },
                     explain = ::explain,
@@ -844,6 +856,7 @@ fun GalleryDetailScreen(
             Box(
                 Modifier
                     .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
                     .padding(start = 16.dp, end = 16.dp, bottom = if (hasStrip) VersionStripRest + VersionStripHeight else ViewerActionRowHeight)
                     .then(if (hasStrip) Modifier else Modifier.height(ViewerItemRowHeight))
                     .then(rowsFade),
@@ -853,6 +866,23 @@ fun GalleryDetailScreen(
                     photoId = currentPhoto.id,
                     onClick = onOpenRenderQueue,
                     processingInCamera = isCurrentPhotoProcessing,
+                )
+            }
+        }
+
+        val videoPlayer = videoPreviewHandle.player
+        if (currentPhoto != null && currentPhoto.isVideo && videoPlayer != null) {
+            key(currentPhoto.id, videoPlayer) {
+                VideoTransport(
+                    player = videoPlayer,
+                    photo = currentPhoto,
+                    rate = currentVideoRate,
+                    slowed = (videoSlowedChoice ?: currentVideoRate?.isHighFrameRate) == true,
+                    onSlowed = { videoSlowedChoice = it },
+                    barsShown = !overlaysHidden,
+                    keepsSlowPart = viewModel.selectedTab == GalleryTab.PHOTON,
+                    explain = ::explain,
+                    fade = rowsFade,
                 )
             }
         }
@@ -2053,7 +2083,6 @@ private fun VideoDetailPlayer(
     isActive: Boolean,
     viewModel: GalleryViewModel,
     previewHandle: VideoPreviewHandle,
-    onSpeed: (Float) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -2131,17 +2160,6 @@ private fun VideoDetailPlayer(
 
     val playerView = rememberVideoPlayerView(exoPlayer)
 
-    // High-frame-rate clips open at a quarter speed without sound; the ¼×/1× button beside the time line switches.
-    val videoRate by produceState<SlowedCopy.Rate?>(null, photo.id) { value = viewModel.videoRate(photo) }
-    val highFrameRate = videoRate?.isHighFrameRate == true
-    var playbackSpeed by remember(exoPlayer) { mutableFloatStateOf(1f) }
-    if (highFrameRate && exoPlayer != null) {
-        HighFrameRateControls(exoPlayer, playerView) {
-            playbackSpeed = it
-            onSpeed(it)
-        }
-    }
-
     DisposableEffect(exoPlayer, previewHandle) {
         val previewLease = exoPlayer?.let(previewHandle::attach)
         onDispose {
@@ -2184,39 +2202,13 @@ private fun VideoDetailPlayer(
                     it.findViewById<AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame)
                         .setAspectRatio(size.width.toFloat() / size.height)
                 }
-                it.useController = true
-                it.controllerAutoShow = false
+                // VideoTransport draws the controls in the viewer's rows.
+                it.useController = false
                 it.setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
                 it.isVisible = true
             },
             modifier = Modifier.fillMaxSize()
         )
-        if (highFrameRate) {
-            // On the picture's top-left corner: a box of the picture's shape, centred like the fitted picture
-            val aspect = videoOutputSize?.let { it.width.toFloat() / it.height }
-            Box(
-                Modifier.align(Alignment.Center)
-                    .then(if (aspect != null && aspect > 0f) Modifier.aspectRatio(aspect) else Modifier.fillMaxSize())
-            ) {
-                Text(
-                    text = stringResource(
-                        if (playbackSpeed < 1f) R.string.hfr_badge_slowed else R.string.hfr_badge_full,
-                        videoRate!!.captureFps.roundToInt(),
-                    ),
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    modifier = Modifier.padding(12.dp)
-                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(9.dp))
-                        .padding(horizontal = 7.dp, vertical = 2.dp)
-                )
-            }
-            // Bottom centre, clear of the player's time line so scrubbing stays easy
-            SpeedPill(
-                slowed = playbackSpeed < 1f,
-                onClick = { exoPlayer.setPlaybackSpeed(if (playbackSpeed < 1f) 1f else 1f / SlowedCopy.FACTOR) },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 112.dp)
-            )
-        }
       }
     } else {
         // Show video thumbnail with a play icon when player is not active
@@ -2252,67 +2244,344 @@ private fun VideoDetailPlayer(
 }
 
 /**
- * Keeps the sound off while slowed and shows position and length in played time. [onSpeed] gets every speed the
- * player takes, also one picked in the player's own settings.
+ * The shown video's controls: play / pause in the middle of the picture, the timeline in the item row, and
+ * ¼× / 1× with sound just above it on the right. Only the controls hide in full view; the frame loop that
+ * follows the position (and switches the speed at the slow part's ends) keeps running.
  */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-private fun HighFrameRateControls(player: ExoPlayer, playerView: PlayerView, onSpeed: (Float) -> Unit) {
-    DisposableEffect(player, playerView) {
-        val controls = playerView.findViewById<PlayerControlView>(androidx.media3.ui.R.id.exo_controller)
-        val positionView = playerView.findViewById<android.widget.TextView>(androidx.media3.ui.R.id.exo_position)
-        val durationView = playerView.findViewById<android.widget.TextView>(androidx.media3.ui.R.id.exo_duration)
-        val timeBar = playerView.findViewById<android.view.View>(androidx.media3.ui.R.id.exo_progress) as? TimeBar
-        val builder = StringBuilder()
-        val formatter = java.util.Formatter(builder, java.util.Locale.getDefault())
-        fun played(ms: Long) = Util.getStringForTime(builder, formatter, (ms / player.playbackParameters.speed).toLong())
-        fun showTimes(positionMs: Long) {
-            positionView?.text = played(positionMs)
-            durationView?.text = played(player.duration.takeIf { it != C.TIME_UNSET } ?: 0L)
-        }
-        fun showSpeed(speed: Float) {
-            player.volume = if (speed < 1f) 0f else 1f
-            showTimes(player.contentPosition)
-            onSpeed(speed)
+private fun BoxScope.VideoTransport(
+    player: ExoPlayer,
+    photo: MediaData,
+    rate: SlowedCopy.Rate?,
+    slowed: Boolean,
+    onSlowed: (Boolean) -> Unit,
+    barsShown: Boolean,
+    // Only a Lilac video keeps its slow part; a System tab item changes this playback only.
+    keepsSlowPart: Boolean,
+    explain: (String) -> Unit,
+    fade: Modifier,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var positionMs by remember { mutableLongStateOf(player.currentPosition) }
+    var durationMs by remember { mutableLongStateOf(rate?.durationMs ?: 0L) }
+    var paused by remember { mutableStateOf(true) }
+    // Where the finger holds the timeline; shown instead of the player's position, which lags at sync frames.
+    var scrubMs by remember { mutableStateOf<Long?>(null) }
+    var muted by remember { mutableStateOf(false) }
+    DisposableEffect(player) {
+        fun read() {
+            // Not before the player is prepared, so the paused-only pills don't flash while a clip opens.
+            paused = player.playbackState != Player.STATE_IDLE &&
+                (!player.playWhenReady || player.playbackState == Player.STATE_ENDED)
+            player.duration.takeIf { it != C.TIME_UNSET && it > 0 }?.let { durationMs = it }
+            positionMs = player.currentPosition
         }
         val listener = object : Player.Listener {
-            override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) = showSpeed(playbackParameters.speed)
-        }
-        // The controller writes media time first; these run after it and write played time
-        val scrub = object : TimeBar.OnScrubListener {
-            override fun onScrubStart(timeBar: TimeBar, position: Long) = showTimes(position)
-            override fun onScrubMove(timeBar: TimeBar, position: Long) = showTimes(position)
-            override fun onScrubStop(timeBar: TimeBar, position: Long, canceled: Boolean) = Unit
+            override fun onEvents(player: Player, events: Player.Events) = read()
         }
         player.addListener(listener)
-        controls?.setProgressUpdateListener { position, _ -> showTimes(position) }
-        timeBar?.addListener(scrub)
-        showSpeed(player.playbackParameters.speed)
-        onDispose {
-            player.removeListener(listener)
-            controls?.setProgressUpdateListener(null)
-            timeBar?.removeListener(scrub)
+        read()
+        onDispose { player.removeListener(listener) }
+    }
+
+    // The 120 fps slow part: the whole clip until its ends are dragged. A 960 fps clip has its slow part recorded in.
+    val hasSlowPart = slowed && rate?.isHighFrameRate == true && rate.captureFps < 900f
+    var slowPart by remember { mutableStateOf<Pair<Long, Long>?>(null) }
+    var canKeepSlowPart by remember { mutableStateOf(false) }
+    LaunchedEffect(photo.id) {
+        if (!keepsSlowPart) return@LaunchedEffect
+        val metadata = withContext(Dispatchers.IO) { GalleryManager.loadMetadata(context, photo.id) } ?: return@LaunchedEffect
+        canKeepSlowPart = true
+        slowPart = metadata.customProperties[SlowPartProperty]?.split(',')?.mapNotNull { it.toLongOrNull() }
+            ?.takeIf { it.size == 2 && it[0] < it[1] }?.let { it[0] to it[1] }
+    }
+    fun inSlowPart(ms: Long) = !hasSlowPart || slowPart?.let { ms in it.first..it.second } ?: true
+
+    fun applySpeed() {
+        val speed = if (slowed && inSlowPart(positionMs)) 1f / SlowedCopy.FACTOR else 1f
+        if (player.playbackParameters.speed != speed) player.setPlaybackSpeed(speed)
+        // Slowed clips play without sound, as their slowed copies do.
+        player.volume = if (slowed || muted) 0f else 1f
+    }
+    LaunchedEffect(player, slowed, muted, slowPart) { applySpeed() }
+    // The loop outlives this composition's [slowed]; it calls the latest one.
+    val applySpeedNow by rememberUpdatedState(::applySpeed)
+    LaunchedEffect(player, paused) {
+        if (paused) return@LaunchedEffect
+        while (true) {
+            withFrameNanos { }
+            positionMs = player.currentPosition
+            applySpeedNow()
+        }
+    }
+    fun seek(ms: Long, exact: Boolean) {
+        player.setSeekParameters(if (exact) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC)
+        player.seekTo(ms)
+        positionMs = ms
+    }
+    val shownMs = scrubMs ?: positionMs
+
+    if (!barsShown) return
+    Box(
+        Modifier
+            .align(Alignment.Center)
+            .then(fade)
+            .size(64.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.45f))
+            .clickable(role = Role.Button, onClickLabel = stringResource(if (paused) R.string.video_play else R.string.video_pause)) {
+                if (paused) {
+                    if (player.playbackState == Player.STATE_ENDED) seek(0L, exact = true)
+                    player.play()
+                } else {
+                    player.pause()
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(if (paused) AppIcons.PlayLine else AppIcons.PauseLine, contentDescription = null, tint = SonyText, modifier = Modifier.size(30.dp))
+    }
+
+    // Paused: step a frame either way, or keep this one as a photo.
+    if (paused) {
+        val frameRate by produceState(30, photo.id) {
+            value = withContext(Dispatchers.IO) { (GalleryManager.loadMetadata(context, photo.id) ?: photo.metadata)?.frameRate }
+                ?.takeIf { it > 0 } ?: 30
+        }
+        fun step(frames: Int) {
+            // To the first millisecond of the frame, so rounding never shows the same frame twice.
+            val frame = Math.round(shownMs * frameRate / 1000.0) + frames
+            seek(kotlin.math.ceil(frame * 1000.0 / frameRate).toLong().coerceIn(0L, durationMs), exact = true)
+        }
+        var savingFrame by remember { mutableStateOf(false) }
+        val busy = stringResource(R.string.viewer_busy)
+        val saved = stringResource(R.string.video_frame_saved)
+        val failed = stringResource(R.string.video_frame_save_failed)
+        val pillFill = com.hinnka.mycamera.ui.components.SonyDivider.copy(alpha = 0.85f)
+        Row(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = ViewerActionRowHeight + ViewerItemRowHeight + 48.dp)
+                .height(48.dp)
+                .then(fade),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ViewerPill(onClick = { step(-1) }, icon = AppIcons.ChevronLeftLine, description = stringResource(R.string.video_previous_frame), fill = pillFill)
+            ViewerPill(
+                onClick = {
+                    if (savingFrame) {
+                        explain(busy)
+                    } else {
+                        savingFrame = true
+                        scope.launch {
+                            explain(if (saveVideoFrame(context, photo, shownMs) != null) saved else failed)
+                            savingFrame = false
+                        }
+                    }
+                },
+                icon = AppIcons.PhotoDownLine,
+                text = stringResource(R.string.video_save_frame),
+                fill = pillFill,
+            )
+            ViewerPill(onClick = { step(1) }, icon = AppIcons.ChevronRightLine, description = stringResource(R.string.video_next_frame), fill = pillFill)
+        }
+    }
+
+    Row(
+        Modifier
+            .align(Alignment.BottomEnd)
+            .padding(bottom = ViewerActionRowHeight + ViewerItemRowHeight)
+            .height(40.dp)
+            .then(fade),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (rate?.isHighFrameRate == true) {
+            val speedLabel = stringResource(R.string.hfr_speed_button_desc)
+            Row(
+                Modifier
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(com.hinnka.mycamera.ui.components.SonyDivider)
+                    .padding(2.dp)
+                    .semantics { contentDescription = speedLabel }
+            ) {
+                listOf(true to "¼×", false to "1×").forEach { (slow, label) ->
+                    val chosen = slow == slowed
+                    Box(
+                        Modifier
+                            .fillMaxHeight()
+                            .widthIn(min = 38.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (chosen) com.hinnka.mycamera.ui.components.ChosenFill else Color.Transparent)
+                            .clickable(role = Role.Tab) { onSlowed(slow) }
+                            .padding(horizontal = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            label,
+                            color = if (chosen) Color.Black else com.hinnka.mycamera.ui.components.SonySecondary,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+            }
+        }
+        val noSound = stringResource(R.string.video_slowed_no_sound)
+        Box(
+            Modifier
+                .size(44.dp, 48.dp)
+                .clickable(role = Role.Switch, onClickLabel = stringResource(R.string.video_sound)) {
+                    if (slowed) explain(noSound) else muted = !muted
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            ShadowedLineIcon(if (slowed || muted) AppIcons.VolumeOffLine else AppIcons.VolumeLine, 22.dp, SonyText)
+        }
+    }
+
+    // The timeline takes the whole width: scrubbing on a small screen needs every millimetre.
+    val slowPartHint = stringResource(R.string.video_slow_part_hint)
+    Box(
+        Modifier
+            .align(Alignment.BottomCenter)
+            .padding(bottom = ViewerActionRowHeight + (ViewerItemRowHeight - 48.dp) / 2)
+            .fillMaxWidth()
+            .height(48.dp)
+            .then(fade)
+            .pointerInput(player, hasSlowPart) {
+                val margin = 16.dp.toPx()
+                fun msAt(x: Float) = (((x - margin) / (size.width - 2 * margin)).coerceIn(0f, 1f) * durationMs).toLong()
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    down.consume()
+                    // A slow part's end within reach of the finger is dragged instead of the position.
+                    val ends = (slowPart ?: (0L to durationMs)).toList()
+                    val end = if (hasSlowPart && durationMs > 0) {
+                        ends.indices.minBy { kotlin.math.abs(margin + ends[it] * (size.width - 2 * margin) / durationMs - down.position.x) }
+                            .takeIf { kotlin.math.abs(margin + ends[it] * (size.width - 2 * margin) / durationMs - down.position.x) <= 20.dp.toPx() }
+                    } else null
+                    if (end != null && !slowPartHintShown) {
+                        slowPartHintShown = true
+                        explain(slowPartHint)
+                    }
+                    var x = down.position.x
+                    fun follow() {
+                        if (end == null) {
+                            scrubMs = msAt(x)
+                            seek(msAt(x), exact = false)
+                        } else {
+                            val (a, b) = slowPart ?: (0L to durationMs)
+                            val gap = durationMs / 20
+                            slowPart = if (end == 0) msAt(x).coerceAtMost(b - gap).coerceAtLeast(0L) to b
+                            else a to msAt(x).coerceAtLeast(a + gap).coerceAtMost(durationMs)
+                        }
+                    }
+                    try {
+                        follow()
+                        while (true) {
+                            val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            change.consume()
+                            x = change.position.x
+                            follow()
+                        }
+                    } finally {
+                        if (end == null) {
+                            seek(msAt(x), exact = true)
+                            scrubMs = null
+                        } else {
+                            val part = slowPart
+                            if (canKeepSlowPart && part != null) {
+                                scope.launch(Dispatchers.IO) {
+                                    GalleryManager.updateMetadata(context, photo.id) {
+                                        it.copy(customProperties = it.customProperties + (SlowPartProperty to "${part.first},${part.second}"))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(horizontal = 16.dp)
+    ) {
+        val timeStyle = LocalTextStyle.current.copy(shadow = ViewfinderTextShadow)
+        Text(clipTime(shownMs), color = com.hinnka.mycamera.ui.components.SonySecondary, fontSize = 11.sp, style = timeStyle,
+            modifier = Modifier.align(Alignment.TopStart).padding(top = 4.dp))
+        Text(clipTime(durationMs), color = com.hinnka.mycamera.ui.components.SonySecondary, fontSize = 11.sp, style = timeStyle,
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 4.dp))
+        val amber = com.hinnka.mycamera.ui.camera.ModeAmber
+        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+            fun xOf(ms: Long) = if (durationMs > 0) size.width * (ms.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+            val track = 4.dp.toPx()
+            val trackTop = 26.dp.toPx()
+            drawRoundRect(com.hinnka.mycamera.ui.components.SonyTrack, Offset(0f, trackTop), Size(size.width, track), CornerRadius(track / 2))
+            val part = if (hasSlowPart) slowPart ?: (0L to durationMs) else null
+            if (part != null) {
+                drawRoundRect(amber.copy(alpha = 0.45f), Offset(xOf(part.first), 24.dp.toPx()),
+                    Size(xOf(part.second) - xOf(part.first), 8.dp.toPx()), CornerRadius(2.dp.toPx()))
+            }
+            drawRoundRect(SonyText, Offset(0f, trackTop), Size(xOf(shownMs), track), CornerRadius(track / 2))
+            if (part != null) {
+                listOf(part.first, part.second).forEach { ms ->
+                    drawRoundRect(amber, Offset(xOf(ms) - 3.dp.toPx(), 16.dp.toPx()), Size(6.dp.toPx(), 24.dp.toPx()), CornerRadius(3.dp.toPx()))
+                }
+            }
+            drawCircle(SonyText, 8.dp.toPx(), Offset(xOf(shownMs), trackTop + track / 2))
         }
     }
 }
 
-/** The ¼×/1× switch: orange while slowed, styled like the viewfinder's info pill. */
-@Composable
-private fun SpeedPill(slowed: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val description = stringResource(R.string.hfr_speed_button_desc)
-    Text(
-        text = if (slowed) "¼×" else "1×",
-        color = if (slowed) com.hinnka.mycamera.ui.camera.ModeAmber else Color.White,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Medium,
-        textAlign = TextAlign.Center,
-        modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.Black.copy(alpha = 0.55f))
-            .clickable(onClickLabel = description, onClick = onClick)
-            .widthIn(min = 56.dp)
-            .padding(horizontal = 14.dp, vertical = 6.dp)
-    )
+/** Where a 120 fps clip's slow part is kept, as "startMs,endMs", in the video's Lilac metadata. */
+private const val SlowPartProperty = "slowPartMs"
+
+/** The slow part's hint shows on the first drag of its ends in a run of the app. */
+private var slowPartHintShown = false
+
+private fun clipTime(ms: Long): String = (ms / 1000).let { "%d:%02d".format(it / 60, it % 60) }
+
+/**
+ * Saves the video frame at [positionMs], at its own size, as a new Lilac photo with the video's look, through the
+ * same import as a picked photo. Returns the photo's id, or null when it failed.
+ */
+private suspend fun saveVideoFrame(context: Context, photo: MediaData, positionMs: Long): String? = withContext(Dispatchers.IO) {
+    val retriever = android.media.MediaMetadataRetriever()
+    val file = File(context.cacheDir, "video_frame_${System.currentTimeMillis()}.jpg")
+    try {
+        retriever.setDataSource(context, photo.sourceUri ?: photo.uri)
+        val bitmap = retriever.getFrameAtTime(positionMs * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST)
+            ?: return@withContext null
+        val rotation = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+        val codedWidth = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+        // The retriever turns frames upright; a frame still in the coded size (90° or 270°) gets the turn as EXIF.
+        val upright = rotation % 180 == 0 || bitmap.width != codedWidth || bitmap.width == bitmap.height
+        try {
+            file.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it)) }
+        } finally {
+            bitmap.recycle()
+        }
+        if (!upright) {
+            androidx.exifinterface.media.ExifInterface(file).apply {
+                setAttribute(
+                    androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                    (if (rotation == 90) androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90
+                    else androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270).toString()
+                )
+                saveAttributes()
+            }
+        }
+        val lutId = (GalleryManager.loadMetadata(context, photo.id) ?: photo.metadata)?.lutId
+        GalleryManager.importPhoto(context, Uri.fromFile(file), lutId)?.also { GalleryManager.notifyPhotoLibraryChanged() }
+    } catch (e: Exception) {
+        PLog.e("VideoTransport", "Could not save the frame at $positionMs ms of ${photo.id}", e)
+        null
+    } finally {
+        retriever.release()
+        file.delete()
+    }
 }
 
 /**

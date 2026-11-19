@@ -471,6 +471,16 @@ object AppIcons {
     val GaugeLine: ImageVector by lazy { lineIcon("AppIcons.GaugeLine", "M5.636 19.364a9 9 0 1 1 12.728 0M16 9l-4 4") }
     val ChevronRightLine: ImageVector by lazy { lineIcon("AppIcons.ChevronRightLine", "M9 6l6 6l-6 6") }
     val ChevronUpLine: ImageVector by lazy { lineIcon("AppIcons.ChevronUpLine", "M6 15l6 -6l6 6") }
+    val ChevronLeftLine: ImageVector by lazy { lineIcon("AppIcons.ChevronLeftLine", "M15 6l-6 6l6 6") }
+    val VolumeLine: ImageVector by lazy {
+        lineIcon("AppIcons.VolumeLine", "M15 8a5 5 0 0 1 0 8M17.7 5a9 9 0 0 1 0 14M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5")
+    }
+    val VolumeOffLine: ImageVector by lazy {
+        lineIcon("AppIcons.VolumeOffLine", "M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5M16 10l4 4m0 -4l-4 4")
+    }
+    val PhotoDownLine: ImageVector by lazy {
+        lineIcon("AppIcons.PhotoDownLine", "M15 8h.01M12.5 21h-6.5a3 3 0 0 1 -3 -3v-12a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v6.5M3 16l5 -5c.928 -.893 2.072 -.893 3 0l4 4M14 14l1 -1c.653 -.629 1.413 -.815 2.13 -.559M19 16v6M22 19l-3 3l-3 -3")
+    }
     val ToolboxLine: ImageVector by lazy {
         lineIcon(
             "AppIcons.ToolboxLine",
@@ -501,6 +511,10 @@ object AppIcons {
             "M15 8h.01M3 6a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3zM3 16l5 -5c.928 -.893 2.072 -.893 3 0l5 5" +
                 "M14 14l1 -1c.928 -.893 2.072 -.893 3 0l3 3"
         )
+    }
+    val ClockLine: ImageVector by lazy { lineIcon("AppIcons.ClockLine", "M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0M12 7v5l3 3") }
+    val AlertLine: ImageVector by lazy {
+        lineIcon("AppIcons.AlertLine", "M10.24 3.957l-8.422 14.06a1.989 1.989 0 0 0 1.7 2.983h16.845a1.989 1.989 0 0 0 1.7 -2.983l-8.423 -14.06a1.989 1.989 0 0 0 -3.4 0zM12 9v4M12 17h.01")
     }
     val CloseLine: ImageVector by lazy { lineIcon("AppIcons.CloseLine", "M18 6l-12 12M6 6l12 12") }
     val PlusLine: ImageVector by lazy { lineIcon("AppIcons.PlusLine", "M12 5v14M5 12h14") }

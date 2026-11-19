@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -342,5 +344,38 @@ internal fun DeleteVersionsButtons(
         TextButton(onClick = onDeleteThis) { Text(thisVersionText, color = Color.Red) }
         TextButton(onClick = onDeleteAll) { Text(allVersionsText, color = Color.Red) }
         TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
+    }
+}
+
+/**
+ * The viewer's 40 dp grey pill button over the picture: an [icon], a [text], or both, with an optional
+ * [trailing] icon. [description] names an icon-only pill for TalkBack.
+ */
+@Composable
+internal fun ViewerPill(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    text: String? = null,
+    icon: ImageVector? = null,
+    trailing: ImageVector? = null,
+    description: String? = null,
+    fill: Color = com.hinnka.mycamera.ui.components.SonyDivider,
+) {
+    Row(
+        modifier
+            .height(40.dp)
+            .widthIn(min = 48.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(fill)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { if (description != null) contentDescription = description }
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+    ) {
+        val tint = com.hinnka.mycamera.ui.components.SonyText
+        if (icon != null) androidx.compose.material3.Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
+        if (text != null) Text(text, color = tint, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+        if (trailing != null) androidx.compose.material3.Icon(trailing, null, tint = tint, modifier = Modifier.size(20.dp))
     }
 }
