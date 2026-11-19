@@ -33,13 +33,16 @@ object OrientationObserver {
     var uiAutoRotateEnabled by mutableStateOf(true)
         private set
 
+    // Set on screens whose window turns with the system rotation; their content must not also be spun by hand.
+    var systemRotates by mutableStateOf(false)
+
     // 界面元素自适应旋转使用的角度；关闭自动旋转时固定为竖屏
     val uiRotationDegrees: Float
-        get() = if (uiAutoRotateEnabled) rotationDegrees else 0f
+        get() = if (uiAutoRotateEnabled && !systemRotates) rotationDegrees else 0f
 
     // 界面元素自适应旋转使用的横屏状态；关闭自动旋转时固定为竖屏
     val isUiLandscape: Boolean
-        get() = uiAutoRotateEnabled && isLandscape
+        get() = uiAutoRotateEnabled && !systemRotates && isLandscape
 
     // 未经过平放阈值过滤的连续设备姿态传感器角，用于 PhysicalButton 材质高光。
     // 消费方负责将传感器的顺时针角度转换到自己的屏幕坐标系。

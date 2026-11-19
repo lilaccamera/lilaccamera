@@ -2291,15 +2291,15 @@ private fun ZoomableImage(
     var isLoading by remember { mutableStateOf(true) }
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     val density = LocalDensity.current
+    val windowSize = LocalWindowInfo.current.containerSize
     // Pictures no taller than 3:4 rest between the top row and the item row; taller ones, or any picture while
-    // the screen is turned, fit the whole screen.
-    val rests = OrientationObserver.uiRotationDegrees == 0f &&
+    // the screen or window is turned, fit the whole screen.
+    val rests = OrientationObserver.uiRotationDegrees == 0f && windowSize.height > windowSize.width &&
         bitmap?.let { it.width >= it.height * 0.749f } == true
     val contentScale = remember(rests, density) {
         if (rests) with(density) { RestScale(ViewerTopRowHeight.toPx(), (ViewerItemRowHeight + ViewerActionRowHeight).toPx()) }
         else ContentScale.Fit
     }
-    val windowSize = LocalWindowInfo.current.containerSize
     // Enough zoom for the double-tap's pixel-for-pixel view, in either screen orientation.
     val oneToOneZoom = bitmap?.takeIf { it.width > 0 && it.height > 0 && windowSize.width > 0 && windowSize.height > 0 }?.let { shown ->
         val source = Size(shown.width.toFloat(), shown.height.toFloat())

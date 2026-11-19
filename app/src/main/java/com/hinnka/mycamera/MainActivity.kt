@@ -8,6 +8,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -40,6 +41,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -50,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
@@ -66,6 +69,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.combine
+import androidx.navigation.NavController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -813,13 +817,24 @@ fun NavigationHost(
     ) {
         onExternalGalleryReviewBack()
     }
-    navController.addOnDestinationChangedListener { _, destination, _ ->
-        BuglyHelper.setUserScene(context, destination.route.hashCode())
+    DisposableEffect(navController) {
+        val listener = NavController.OnDestinationChangedListener { _, destination, _ ->
+            BuglyHelper.setUserScene(context, destination.route.hashCode())
+            // The gallery and viewer turn with the system rotation (and its lock); every other screen stays portrait.
+            val systemRotates = destination.route == Routes.GALLERY || destination.route == Routes.PHOTO_DETAIL
+            OrientationObserver.systemRotates = systemRotates
+            (context as? Activity)?.requestedOrientation =
+                if (systemRotates) ActivityInfo.SCREEN_ORIENTATION_USER else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        navController.addOnDestinationChangedListener(listener)
+        onDispose { navController.removeOnDestinationChangedListener(listener) }
     }
     cameraViewModel.cameraScreenShown = currentRoute == null || currentRoute == Routes.CAMERA
     val containerSize = LocalWindowInfo.current.containerSize
+    // Shorter over longer side, so a turned phone window does not count as a wide one.
     cameraViewModel.isExpanded =
-        (containerSize.width * 1f / containerSize.height) > AspectRatio.RATIO_4_3.getValue(false)
+        (minOf(containerSize.width, containerSize.height) * 1f / maxOf(containerSize.width, containerSize.height)) >
+            AspectRatio.RATIO_4_3.getValue(false)
 
     // Over the lock screen only the camera is open: any other screen asks for the unlock first, stays
     // covered until it is given, and goes back to the camera if it is not.
@@ -847,6 +862,16 @@ fun NavigationHost(
             }
         ) {
             composable(Routes.CAMERA) {
+                // Back from a turned gallery the window is still landscape for a moment; the camera waits for portrait
+                // rather than opening at the wrong size. Split screen and large screens keep any window shape.
+                val configuration = LocalConfiguration.current
+                if (configuration.orientation != Configuration.ORIENTATION_PORTRAIT &&
+                    (LocalContext.current as? Activity)?.isInMultiWindowMode != true &&
+                    configuration.smallestScreenWidthDp < 600
+                ) {
+                    Box(Modifier.fillMaxSize().background(Color.Black))
+                    return@composable
+                }
                 // The thumbnail opens what it shows: the photo still processing, else the newest item a pending
                 // delete has not hidden, and the grid only when there is nothing to show.
                 val openThumbnail: () -> Unit = {
