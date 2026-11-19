@@ -634,9 +634,11 @@ private fun GalleryTopLine(
         } else {
             GalleryTab.entries.forEach { tab ->
                 val chosen = tab == selectedTab
+                // The two tabs share the line between back and the queue evenly.
                 Box(
                     Modifier
-                        .size(84.dp, 48.dp)
+                        .weight(1f)
+                        .height(48.dp)
                         .clickable(interactionSource = null, indication = null, role = Role.Tab) { onTabSelected(tab) },
                     contentAlignment = Alignment.Center
                 ) {
@@ -656,7 +658,6 @@ private fun GalleryTopLine(
                     }
                 }
             }
-            Spacer(Modifier.weight(1f))
             LineButton(
                 AppIcons.StackLine,
                 stringResource(R.string.render_queue_button_description, pendingCount, failedCount),
