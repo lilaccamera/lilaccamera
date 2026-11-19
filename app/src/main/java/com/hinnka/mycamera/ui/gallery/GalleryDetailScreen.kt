@@ -124,8 +124,21 @@ import androidx.compose.runtime.mutableIntStateOf
 import com.hinnka.mycamera.render.RenderJob
 import com.hinnka.mycamera.render.RenderLook
 import androidx.compose.runtime.produceState
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.BiasAlignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.ScaleFactor
+import androidx.compose.ui.semantics.Role
+import com.hinnka.mycamera.ui.camera.ShadowedLineIcon
+import com.hinnka.mycamera.ui.camera.SpacedBuzz
+import com.hinnka.mycamera.ui.camera.ViewfinderTextShadow
+import com.hinnka.mycamera.ui.components.HideNavigationBar
+import com.hinnka.mycamera.ui.components.LabelledIcon
+import com.hinnka.mycamera.ui.components.SonyText
+import com.hinnka.mycamera.utils.OrientationObserver
+import com.hinnka.mycamera.utils.VibrationHelper
+import me.saket.telephoto.zoomable.ZoomableState
 
-private val GalleryToolbarSurface = Color(0xFF0E0E0E)
 internal val GalleryToolbarButton = Color(0xFF242424)
 internal val GalleryToolbarContent = Color(0xFFF2F2F2)
 internal val GallerySheetSurface = Color(0xFF171717)
@@ -187,6 +200,9 @@ fun GalleryDetailScreen(
     isExpanded: Boolean = false,
     onBack: () -> Unit = {},
     onGoToGallery: (() -> Unit)? = null,
+    // Opened from the grid: the first action reads Gallery, and swiping down still goes to the camera.
+    fromGrid: Boolean = false,
+    onGoToCamera: (() -> Unit)? = null,
     onEdit: () -> Unit,
     onViewBurst: ((String) -> Unit)? = null,
     onOpenRenderQueue: () -> Unit = {},
@@ -466,232 +482,108 @@ fun GalleryDetailScreen(
     BackHandler(enabled = !isExpanded) {
         leaveDetail(onBack)
     }
+    // Immersive like the editor; a split-screen pane leaves the system bars alone.
+    if (!isExpanded) HideNavigationBar()
 
-    Scaffold(
-        topBar = {
-            HideableBar(overlaysHidden) {
-            TopAppBar(
-                modifier = Modifier,
-                title = {
-                    if (onGoToGallery != null) {
-                        Surface(
-                            onClick = { leaveDetail(onGoToGallery) },
-                            shape = CircleShape,
-                            color = Color.White.copy(alpha = 0.15f),
-                            contentColor = Color.White
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = AppIcons.GridView,
-                                    contentDescription = "Gallery",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "${pagerState.currentPage + 1} / ${photos.size}",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
-                    } else {
-                        Text(
-                            text = "${pagerState.currentPage + 1} / ${photos.size}",
-                            maxLines = 1,
-                            color = Color.White,
-                            fontSize = 18.sp
-                        )
-                    }
-                },
-                navigationIcon = {
-                    if (!isExpanded) {
-                        IconButton(onClick = { leaveDetail(onBack) }, modifier = Modifier.autoRotate()) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = stringResource(R.string.back),
-                                tint = Color.White
-                            )
-                        }
-                    }
-                },
-                actions = {
-                    // LIVE 标记
-                    if (!isCurrentPhotoProcessing && currentPhoto?.isMotionPhoto == true) {
-                        Box(
-                            modifier = Modifier.padding(8.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    painterResource(R.drawable.ic_live_photo),
-                                    contentDescription = stringResource(R.string.settings_use_live_photo),
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-                    if (!isCurrentPhotoProcessing && currentPhoto != null && currentPhoto.isImage && viewModel.isRaw(currentPhoto.id)) {
-                        val isRefreshing = viewModel.refreshingPhotos.contains(currentPhoto.id)
-                        val infiniteTransition = rememberInfiniteTransition(label = "refresh")
-                        val rotation by infiniteTransition.animateFloat(
-                            initialValue = 0f,
-                            targetValue = 360f,
-                            animationSpec = infiniteRepeatable(
-                                animation = tween(1000, easing = LinearEasing),
-                                repeatMode = RepeatMode.Restart
-                            ),
-                            label = "rotation"
-                        )
+    val haptics = remember(context) { SpacedBuzz(VibrationHelper(context)) }
+    fun explain(text: String) = Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
 
-                        IconButton(
-                            onClick = {
-                                viewModel.refreshRawPreview(currentPhoto) { success ->
-                                    if (success) {
-                                        Toast.makeText(context, R.string.refresh_success, Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        Toast.makeText(context, R.string.refresh_failed, Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            },
-                            enabled = !isRefreshing,
-                            modifier = Modifier.autoRotate()
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = stringResource(R.string.refresh),
-                                tint = if (isRefreshing) Color.White.copy(alpha = 0.5f) else Color.White,
-                                modifier = Modifier.graphicsLayer {
-                                    if (isRefreshing) {
-                                        rotationZ = rotation
-                                    }
-                                }
-                            )
-                        }
-                    }
-                    if (!isCurrentPhotoProcessing && currentPhoto != null && currentPhoto.isImage && currentPhoto.isBurstPhoto) {
-                        IconButton(onClick = { onViewBurst?.invoke(currentPhoto.id) }, modifier = Modifier.autoRotate()) {
-                            Icon(
-                                imageVector = AppIcons.BurstMode,
-                                contentDescription = stringResource(R.string.gallery_view_burst),
-                                tint = Color.White
-                            )
-                        }
-                    }
-                    if (
-                        !isCurrentPhotoProcessing &&
-                        currentPhoto != null &&
-                        currentPhoto.isImage &&
-                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
-                        !DeviceUtil.isHarmonyOS &&
-                        viewModel.canToggleManualHdrEnhance(currentPhoto)
-                    ) {
-                        val hdrEnabled = viewModel.isManualHdrEnhanceEnabled(currentPhoto)
-                        TextButton(
-                            onClick = {
-                                showHdrStrengthPanel = !showHdrStrengthPanel
-                            },
-                        ) {
-                            Text(
-                                text = stringResource(R.string.hdr_label),
-                                color = if (hdrEnabled) AccentColor else Color.White.copy(alpha = 0.72f),
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                    IconButton(onClick = { showInfoDialog = true }, enabled = !isCurrentPhotoProcessing, modifier = Modifier.autoRotate()) {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = stringResource(if (currentPhoto?.isVideo == true) R.string.video_info else R.string.photo_info),
-                            tint = Color.White
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Black.copy(alpha = 0.8f)
+    // The position shows while the pager moves and for a moment after, then fades.
+    var showCount by remember { mutableStateOf(false) }
+    LaunchedEffect(pagerState.isScrollInProgress) {
+        if (pagerState.isScrollInProgress) {
+            showCount = true
+        } else {
+            delay(700)
+            showCount = false
+        }
+    }
+    val countAlpha by animateFloatAsState(
+        if (showCount) 1f else 0f, tween(if (showCount) 100 else 250), label = "countAlpha"
+    )
+
+    // A tap on the LIVE tag plays the shown stack's motion once.
+    var liveTagStack by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(currentPhoto?.id) { liveTagStack = null }
+    LaunchedEffect(liveTagStack) {
+        // shortcut: a motion that never loops back (its clip is missing) is let go after 10 s; read the clip length if that shows.
+        if (liveTagStack != null) {
+            delay(10_000)
+            liveTagStack = null
+        }
+    }
+    val videoSpeeds = remember { mutableStateMapOf<String, Float>() }
+    // On the system tab the tags describe the Lilac photo an exported copy came from.
+    val tagPhoto = currentPhoto?.let { if (viewModel.selectedTab == GalleryTab.SYSTEM) it.relatedPhoto ?: it else it }
+    val tagIsRaw by produceState(false, currentPhoto?.id) {
+        value = false
+        val photo = currentPhoto?.takeIf { it.isImage } ?: return@produceState
+        value = withContext(Dispatchers.IO) { viewModel.isRawMedia(photo) }
+    }
+    val burstCount by produceState(0, currentPhoto?.id) {
+        value = 0
+        val photo = currentPhoto?.takeIf { it.isImage && it.isBurstPhoto } ?: return@produceState
+        value = withContext(Dispatchers.IO) { GalleryManager.getBurstPhotos(context, photo.id).size }
+    }
+    val currentVideoRate by produceState<SlowedCopy.Rate?>(null, currentPhoto?.id) {
+        value = null
+        value = currentPhoto?.takeIf { it.isVideo }?.let { viewModel.videoRate(it) }
+    }
+    val canShowHdr = !isCurrentPhotoProcessing &&
+        currentPhoto != null &&
+        currentPhoto.isImage &&
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+        !DeviceUtil.isHarmonyOS &&
+        viewModel.canToggleManualHdrEnhance(currentPhoto)
+
+    // Swipe down leaves for the camera; only when not zoomed, so it never fights a pan.
+    val swipeDown = remember { Animatable(0f) }
+    val swipeDownEnabled = !isExpanded && !isZoomed && currentPhoto != null
+    LaunchedEffect(swipeDownEnabled) { if (!swipeDownEnabled) swipeDown.snapTo(0f) }
+
+    BoxWithConstraints(
+        modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .then(if (isExpanded) Modifier.systemBarsPadding() else Modifier)
+    ) {
+        val screenWidth = maxWidth
+        val fadeDistance = with(LocalDensity.current) { 160.dp.toPx() }
+        // The rows fade as the page follows a downward swipe.
+        val rowsFade = Modifier.graphicsLayer { alpha = (1f - swipeDown.value / fadeDistance).coerceIn(0f, 1f) }
+        if (photos.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = stringResource(R.string.no_photos),
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 16.sp
                 )
-            )
             }
-        },
-        bottomBar = {
-            HideableBar(overlaysHidden) {
-            GalleryBottomActionBar(
-                leadingAction = {
-                    GalleryCircleActionButton(
-                        icon = Icons.Default.Share,
-                        contentDescription = stringResource(R.string.share),
-                        isLoading = isSharing,
-                        enabled = currentPhoto != null && !isSharing && !isCurrentPhotoProcessing,
-                        onClick = {
-                            currentPhoto?.let(viewModel::sharePhoto)
-                        }
-                    )
-                },
-                groupedActions = {
-                    if (currentPhoto?.isImage == true || currentPhoto?.isVideo == true) {
-                        GalleryGroupedActionButton(
-                            icon = Icons.Default.Edit,
-                            contentDescription = stringResource(R.string.edit),
-                            enabled = !isCurrentPhotoProcessing,
-                            isLoading = preparingEditPhotoId == currentPhoto.id,
-                            onClick = {
-                                viewModel.prepareCurrentPhotoForEdit(
-                                    index = allPhotos.indexOf(currentPhoto),
-                                    onReady = onEdit,
-                                    onFailure = {
-                                        Toast.makeText(
-                                            context,
-                                            R.string.gallery_prepare_edit_failed,
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                )
-                            }
-                        )
-                    }
-
-                    GalleryGroupedActionButton(
-                        icon = Icons.Default.Delete,
-                        contentDescription = stringResource(R.string.delete),
-                        enabled = currentPhoto != null && !isCurrentPhotoProcessing,
-                        onClick = { showDeleteDialog = true }
-                    )
-                },
-                trailingAction = {
-                    GalleryCircleActionButton(
-                        icon = AppIcons.MoreHoriz,
-                        contentDescription = stringResource(R.string.more_options),
-                        enabled = currentPhoto != null && !isCurrentPhotoProcessing,
-                        onClick = { showMoreSheet = true }
-                    )
-                }
-            )
-            }
-        },
-        containerColor = Color.Black,
-        modifier = modifier
-    ) { paddingValues ->
-        // The photo fills the whole screen with the bars drawn over it, so a zoomed photo uses every pixel;
-        // a 4:3 photo at fit size stays clear of both bars. The labels and strip keep to the space between them.
-        val headerHeight = paddingValues.calculateTopPadding()
-        val footerHeight = paddingValues.calculateBottomPadding()
-        Box(modifier = Modifier.fillMaxSize()) {
-            if (photos.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = stringResource(R.string.no_photos),
-                        color = Color.White.copy(alpha = 0.6f),
-                        fontSize = 16.sp
-                    )
-                }
-            } else {
+        } else {
                 HorizontalPager(
                     state = pagerState,
                     // Keyed by stack: a re-render or a deleted version changes the tile, not the page.
                     key = { page -> if (page < photos.size) PhotoStacks.stackIdOf(photos[page]) else page },
-                    modifier = Modifier.fillMaxSize(),
+                    // The swipe-down handler sits outside the page's moving layer, so it reads the finger, not the page.
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(swipeDownEnabled) {
+                            if (!swipeDownEnabled) return@pointerInput
+                            val leaveAt = 110.dp.toPx()
+                            fun settle() { scope.launch { swipeDown.animateTo(0f, spring()) } }
+                            detectVerticalDragGestures(
+                                onDragEnd = {
+                                    if (swipeDown.value > leaveAt) leaveDetail(onGoToCamera ?: onBack)
+                                    // Also when leaving: the camera may first ask about photos still stacking.
+                                    settle()
+                                },
+                                onDragCancel = { settle() },
+                            ) { change, dy ->
+                                change.consume()
+                                scope.launch { swipeDown.snapTo((swipeDown.value + dy).coerceAtLeast(0f)) }
+                            }
+                        }
+                        .graphicsLayer { translationY = swipeDown.value },
                     userScrollEnabled = !isZoomed,
                     beyondViewportPageCount = 1
                 ) { page ->
@@ -773,8 +665,9 @@ fun GalleryDetailScreen(
                                                 !isVideoExporting,
                                             viewModel = viewModel,
                                             previewHandle = videoPreviewHandle,
-                                            // Videos keep clear of the bars: the player's controls sit at its bottom edge.
-                                            modifier = Modifier.fillMaxSize().padding(paddingValues)
+                                            onSpeed = { videoSpeeds[photo.id] = it },
+                                            // Above the action row, so the player's own controls stay usable.
+                                            modifier = Modifier.fillMaxSize().padding(bottom = ViewerActionRowHeight)
                                         )
                                     } else {
                                         val forceSystemOrigin = viewModel.selectedTab == GalleryTab.SYSTEM &&
@@ -796,7 +689,8 @@ fun GalleryDetailScreen(
                                         )
                                         MotionPhotoPlayer(
                                             photo = photo,
-                                            isPlaying = isPlaying,
+                                            isPlaying = isPlaying || liveTagStack == PhotoStacks.stackIdOf(photo),
+                                            onLoop = { liveTagStack = null },
                                             viewModel = viewModel,
                                             modifier = Modifier.fillMaxSize()
                                         )
@@ -806,102 +700,210 @@ fun GalleryDetailScreen(
                         }
                     }
                 }
-            }
-            val currentVersions = photos.getOrNull(pagerState.currentPage)?.let(stacks::versionsOf).orEmpty()
-            // One top-left row, so the version badge and the processing chip sit side by side instead of overlapping.
-            if (currentPhoto != null && !overlaysHidden) {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, end = 16.dp, top = headerHeight + 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val badge = photoBadgeLabel(
-                        context, currentPhoto, currentVersions,
-                        isRaw = currentPhoto.isImage && viewModel.isRawMedia(currentPhoto)
-                    )
-                    if (badge != null) {
-                        Surface(shape = RoundedCornerShape(4.dp), color = Color.Black.copy(alpha = 0.58f)) {
-                            Text(
-                                text = badge,
-                                color = AccentColor,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
+        }
+        val currentVersions = photos.getOrNull(pagerState.currentPage)?.let(stacks::versionsOf).orEmpty()
+
+        // Top row: the grid, the position beside it, the tags centred on the whole width, and a slot on the right.
+        if (currentPhoto != null && tagPhoto != null && !overlaysHidden) {
+            Box(Modifier.fillMaxWidth().height(ViewerTopRowHeight).then(rowsFade)) {
+                if (onGoToGallery != null) {
+                    Box(
+                        Modifier
+                            .size(ViewerTopRowHeight)
+                            .clickable {
+                                haptics.buzz(VibrationHelper.LIGHT_TICK_MS)
+                                leaveDetail(onGoToGallery)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        ShadowedLineIcon(AppIcons.GridLine, 22.dp, SonyText)
                     }
-                    if (viewModel.selectedTab == GalleryTab.PHOTON) {
-                        RenderQueuePhotoChip(
-                            photoId = currentPhoto.id,
-                            onClick = onOpenRenderQueue,
-                            processingInCamera = isCurrentPhotoProcessing,
-                            modifier = Modifier.weight(1f, fill = false)
+                }
+                Text(
+                    text = "${pagerState.currentPage + 1} / ${photos.size}",
+                    color = SonyText,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    style = LocalTextStyle.current.copy(shadow = ViewfinderTextShadow),
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = ViewerTopRowHeight)
+                        .graphicsLayer { alpha = countAlpha }
+                )
+                val tags = viewerTags(
+                    context = context,
+                    photo = tagPhoto,
+                    version = currentPhoto,
+                    versions = currentVersions,
+                    isRaw = tagIsRaw,
+                    burstCount = if (isCurrentPhotoProcessing) 0 else burstCount,
+                    canPlayLive = !isCurrentPhotoProcessing && currentPhoto.isImage && currentPhoto.isMotionPhoto,
+                    livePlaying = liveTagStack != null,
+                    hdrOn = if (canShowHdr) viewModel.isManualHdrEnhanceEnabled(currentPhoto) else null,
+                    videoRate = currentVideoRate,
+                    videoSlowed = (videoSpeeds[currentPhoto.id] ?: 1f) < 1f,
+                    onLive = { liveTagStack = PhotoStacks.stackIdOf(currentPhoto) },
+                    onBurst = { onViewBurst?.invoke(currentPhoto.id) },
+                    onHdr = { showHdrStrengthPanel = !showHdrStrengthPanel },
+                    explain = ::explain,
+                    accent = com.hinnka.mycamera.ui.camera.ModeAmber,
+                )
+                // The right slot (the rating's place) stays empty, so the tags keep to the centre.
+                ViewerTagRow(
+                    tags,
+                    Modifier
+                        .align(Alignment.Center)
+                        .widthIn(max = screenWidth - ViewerTopRowHeight * 2)
+                )
+            }
+        }
+
+        // Item row, above the actions: the version strip, and the render chip (above the strip when both show).
+        // In full view the strip stays, dimmed and lower, so versions can still be switched.
+        val stripBottom by animateDpAsState(
+            if (overlaysHidden) VersionStripRest - FullViewStripDrop else VersionStripRest,
+            label = "stripBottom"
+        )
+        val stripAlpha by animateFloatAsState(if (overlaysHidden) 0.6f else 1f, label = "stripAlpha")
+        val hasStrip = currentPhoto != null && currentVersions.size > 1
+        if (currentPhoto != null && hasStrip) {
+            val renderPendingIds by RenderQueue.pendingPhotoIds.collectAsState()
+            val renderStatus by RenderQueue.status.collectAsState()
+            val runningIds = processingPhotos.keys +
+                listOfNotNull(renderStatus.currentPhotoId.takeIf { renderStatus.running })
+            PhotoVersionStrip(
+                versions = currentVersions,
+                selectedId = currentPhoto.id,
+                runningIds = runningIds,
+                waitingIds = renderPendingIds - runningIds,
+                viewModel = viewModel,
+                onSelect = ::showVersion,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = stripBottom)
+                    .alpha(stripAlpha)
+                    .then(rowsFade)
+            )
+        }
+        if (currentPhoto != null && !overlaysHidden && viewModel.selectedTab == GalleryTab.PHOTON) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 16.dp, end = 16.dp, bottom = if (hasStrip) VersionStripRest + VersionStripHeight else ViewerActionRowHeight)
+                    .then(if (hasStrip) Modifier else Modifier.height(ViewerItemRowHeight))
+                    .then(rowsFade),
+                contentAlignment = Alignment.Center
+            ) {
+                RenderQueuePhotoChip(
+                    photoId = currentPhoto.id,
+                    onClick = onOpenRenderQueue,
+                    processingInCamera = isCurrentPhotoProcessing,
+                )
+            }
+        }
+
+        // Action row on the camera's 70 dp grid: back to where the viewer came from, Share, Edit, Delete, More.
+        if (!overlaysHidden) {
+            val inCamera = stringResource(R.string.viewer_busy_in_camera)
+            val busy = stringResource(R.string.viewer_busy)
+            val noPhoto = stringResource(R.string.no_photos)
+            // Why a control does nothing right now, or null when it works.
+            fun whyNot(working: Boolean = false): String? = when {
+                currentPhoto == null -> noPhoto
+                isCurrentPhotoProcessing -> inCamera
+                working -> busy
+                else -> null
+            }
+            val actions = listOf(
+                if (isExpanded) null else ViewerAction(
+                    icon = if (fromGrid) AppIcons.GridLine else AppIcons.CameraLine,
+                    label = stringResource(if (fromGrid) R.string.gallery else R.string.camera),
+                    whyNot = null,
+                    onClick = { leaveDetail(onBack) }
+                ),
+                ViewerAction(AppIcons.ShareLine, stringResource(R.string.share), whyNot(isSharing)) {
+                    currentPhoto?.let(viewModel::sharePhoto)
+                },
+                if (currentPhoto?.isImage == true || currentPhoto?.isVideo == true) {
+                    ViewerAction(AppIcons.AdjustmentsLine, stringResource(R.string.edit), whyNot(preparingEditPhotoId == currentPhoto.id)) {
+                        viewModel.prepareCurrentPhotoForEdit(
+                            index = allPhotos.indexOf(currentPhoto),
+                            onReady = onEdit,
+                            onFailure = {
+                                Toast.makeText(context, R.string.gallery_prepare_edit_failed, Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
+                } else null,
+                ViewerAction(AppIcons.TrashLine, stringResource(R.string.delete), whyNot()) { showDeleteDialog = true },
+                ViewerAction(AppIcons.DotsLine, stringResource(R.string.viewer_more), whyNot()) { showMoreSheet = true },
+            )
+            Box(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .height(ViewerActionRowHeight)
+                    .then(rowsFade)
+            ) {
+                actions.forEachIndexed { slot, action ->
+                    if (action == null) return@forEachIndexed
+                    // Slots centred at x 40, 110, 180, 250, 320 of a 360 dp width.
+                    Box(
+                        Modifier
+                            .offset(x = screenWidth * ((40f + 70f * slot) / 360f) - ViewerActionSlotWidth / 2)
+                            .width(ViewerActionSlotWidth)
+                            .fillMaxHeight()
+                            .clickable(role = Role.Button) {
+                                val why = action.whyNot
+                                if (why != null) {
+                                    explain(why)
+                                } else {
+                                    haptics.buzz(VibrationHelper.LIGHT_TICK_MS)
+                                    action.onClick()
+                                }
+                            }
+                    ) {
+                        LabelledIcon(
+                            icon = action.icon,
+                            label = action.label,
+                            tint = SonyText,
+                            shadowed = true,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 11.dp)
+                                .alpha(if (action.whyNot == null) 1f else 0.38f)
+                                .autoRotate()
                         )
                     }
                 }
             }
-            // With the bars hidden the strip moves down into the empty footer, centred there, off the photo.
-            val stripBottom by animateDpAsState(
-                if (overlaysHidden) ((footerHeight - VersionStripHeight) / 2).coerceAtLeast(4.dp) else footerHeight + 12.dp,
-                label = "stripBottom"
+        }
+
+        if (!overlaysHidden && showHdrStrengthPanel && canShowHdr && currentPhoto != null) {
+            HdrStrengthPanel(
+                enabled = viewModel.isManualHdrEnhanceEnabled(currentPhoto),
+                strength = hdrStrengthSliderValue,
+                onEnabledChange = {
+                    viewModel.toggleManualHdrEnhance(currentPhoto) { success ->
+                        if (!success) {
+                            Toast.makeText(context, R.string.hdr_toggle_failed, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+                onStrengthChange = { hdrStrengthSliderValue = it },
+                onStrengthChangeFinished = {
+                    viewModel.setManualHdrStrength(currentPhoto, hdrStrengthSliderValue) { success ->
+                        if (!success) {
+                            Toast.makeText(context, R.string.hdr_strength_update_failed, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+                // Under the top row, below the HDR tag.
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = ViewerTopRowHeight)
             )
-            // With the bars hidden the strip dims a little, thumbnails and edge line alike, so the photo leads.
-            val stripAlpha by animateFloatAsState(if (overlaysHidden) 0.6f else 1f, label = "stripAlpha")
-            if (currentPhoto != null && currentVersions.size > 1) {
-                val renderPendingIds by RenderQueue.pendingPhotoIds.collectAsState()
-                val renderStatus by RenderQueue.status.collectAsState()
-                val runningIds = processingPhotos.keys +
-                    listOfNotNull(renderStatus.currentPhotoId.takeIf { renderStatus.running })
-                PhotoVersionStrip(
-                    versions = currentVersions,
-                    selectedId = currentPhoto.id,
-                    runningIds = runningIds,
-                    waitingIds = renderPendingIds - runningIds,
-                    viewModel = viewModel,
-                    onSelect = ::showVersion,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = stripBottom)
-                        .alpha(stripAlpha)
-                )
-            }
-            if (
-                !isCurrentPhotoProcessing &&
-                !overlaysHidden &&
-                showHdrStrengthPanel &&
-                currentPhoto != null &&
-                currentPhoto.isImage &&
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
-                !DeviceUtil.isHarmonyOS &&
-                viewModel.canToggleManualHdrEnhance(currentPhoto)
-            ) {
-                HdrStrengthPanel(
-                    enabled = viewModel.isManualHdrEnhanceEnabled(currentPhoto),
-                    strength = hdrStrengthSliderValue,
-                    onEnabledChange = {
-                        viewModel.toggleManualHdrEnhance(currentPhoto) { success ->
-                            if (!success) {
-                                Toast.makeText(context, R.string.hdr_toggle_failed, Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    },
-                    onStrengthChange = { hdrStrengthSliderValue = it },
-                    onStrengthChangeFinished = {
-                        viewModel.setManualHdrStrength(currentPhoto, hdrStrengthSliderValue) { success ->
-                            if (!success) {
-                                Toast.makeText(context, R.string.hdr_strength_update_failed, Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = headerHeight + 12.dp, end = 12.dp)
-                )
-            }
         }
     }
 
@@ -1337,6 +1339,16 @@ fun GalleryDetailScreen(
     if (showMoreSheet && currentPhoto != null && !isCurrentPhotoProcessing) {
         val moreSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         val moreActions = buildList {
+            add(
+                GalleryMoreAction(
+                    icon = AppIcons.InfoLine,
+                    text = context.getString(if (currentPhoto.isVideo) R.string.video_info else R.string.photo_info),
+                    onClick = {
+                        showMoreSheet = false
+                        showInfoDialog = true
+                    }
+                )
+            )
             if (currentPhoto.isImage && (viewModel.selectedTab == GalleryTab.PHOTON || currentPhoto.relatedPhoto != null)) {
                 add(
                     GalleryMoreAction(
@@ -1438,6 +1450,28 @@ fun GalleryDetailScreen(
                     }
                 )
             )
+
+            if (currentPhoto.isImage && viewModel.isRaw(currentPhoto.id)) {
+                val isRefreshing = viewModel.refreshingPhotos.contains(currentPhoto.id)
+                add(
+                    GalleryMoreAction(
+                        icon = Icons.Default.Refresh,
+                        text = context.getString(R.string.viewer_refresh_preview),
+                        isLoading = isRefreshing,
+                        enabled = !isRefreshing,
+                        onClick = {
+                            showMoreSheet = false
+                            viewModel.refreshRawPreview(currentPhoto) { success ->
+                                Toast.makeText(
+                                    context,
+                                    if (success) R.string.refresh_success else R.string.refresh_failed,
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    )
+                )
+            }
 
             if (isCurrentRawPhoto) {
                 add(
@@ -1692,135 +1726,6 @@ private data class GalleryMoreAction(
 )
 
 @Composable
-private fun GalleryBottomActionBar(
-    leadingAction: @Composable () -> Unit,
-    groupedActions: @Composable RowScope.() -> Unit,
-    trailingAction: @Composable () -> Unit
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = GalleryToolbarSurface,
-        shadowElevation = 10.dp
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding(),
-            contentAlignment = Alignment.Center
-        ) {
-            Row(
-                modifier = Modifier
-                    .widthIn(max = 380.dp)
-                    .fillMaxWidth()
-                    .height(64.dp)
-                    .padding(horizontal = 18.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                leadingAction()
-                Surface(
-                    modifier = Modifier
-                        .height(40.dp)
-                        .widthIn(min = 116.dp)
-                        .shadow(
-                            elevation = 5.dp,
-                            shape = CircleShape,
-                            ambientColor = Color.Black.copy(alpha = 0.18f),
-                            spotColor = Color.Black.copy(alpha = 0.18f)
-                        ),
-                    shape = CircleShape,
-                    color = GalleryToolbarButton,
-                    tonalElevation = 0.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                        content = groupedActions
-                    )
-                }
-                trailingAction()
-            }
-        }
-    }
-}
-
-@Composable
-private fun GalleryCircleActionButton(
-    icon: ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-    isLoading: Boolean = false
-) {
-    val isInteractive = enabled && !isLoading
-    PhysicalButton(
-        modifier = Modifier
-            .size(40.dp)
-            .shadow(
-                elevation = 5.dp,
-                shape = CircleShape,
-                ambientColor = Color.Black.copy(alpha = 0.18f),
-                spotColor = Color.Black.copy(alpha = 0.18f)
-            )
-            .alpha(if (enabled || isLoading) 1f else 0.42f),
-        onClick = onClick,
-        enabled = isInteractive,
-        shape = CircleShape,
-        backgroundColor = GalleryToolbarButton
-    ) {
-        if (isLoading) {
-            CircularProgressIndicator(
-                color = GalleryToolbarContent,
-                modifier = Modifier.size(17.dp),
-                strokeWidth = 1.8.dp
-            )
-        } else {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                tint = GalleryToolbarContent,
-                modifier = Modifier
-                    .size(18.dp)
-                    .autoRotate()
-            )
-        }
-    }
-}
-
-@Composable
-private fun GalleryGroupedActionButton(
-    icon: ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-    isLoading: Boolean = false
-) {
-    IconButton(
-        onClick = onClick,
-        enabled = enabled && !isLoading,
-        modifier = Modifier.size(36.dp)
-    ) {
-        if (isLoading) {
-            CircularProgressIndicator(
-                color = GalleryToolbarContent,
-                modifier = Modifier.size(17.dp),
-                strokeWidth = 1.8.dp
-            )
-        } else {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                tint = GalleryToolbarContent.copy(alpha = if (enabled) 1f else 0.38f),
-                modifier = Modifier
-                    .size(18.dp)
-                    .autoRotate()
-            )
-        }
-    }
-}
-
-@Composable
 private fun GalleryMoreActionCard(
     action: GalleryMoreAction,
     modifier: Modifier = Modifier
@@ -2031,6 +1936,7 @@ private fun VideoDetailPlayer(
     isActive: Boolean,
     viewModel: GalleryViewModel,
     previewHandle: VideoPreviewHandle,
+    onSpeed: (Float) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -2113,7 +2019,10 @@ private fun VideoDetailPlayer(
     val highFrameRate = videoRate?.isHighFrameRate == true
     var playbackSpeed by remember(exoPlayer) { mutableFloatStateOf(1f) }
     if (highFrameRate && exoPlayer != null) {
-        HighFrameRateControls(exoPlayer, playerView) { playbackSpeed = it }
+        HighFrameRateControls(exoPlayer, playerView) {
+            playbackSpeed = it
+            onSpeed(it)
+        }
     }
 
     DisposableEffect(exoPlayer, previewHandle) {
@@ -2306,7 +2215,26 @@ private fun ZoomableImage(
     modifier: Modifier = Modifier
 ) {
     var isLoading by remember { mutableStateOf(true) }
-    val maxZoom = max(photo.width, photo.height) / 500f
+    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val density = LocalDensity.current
+    // Pictures no taller than 3:4 rest between the top row and the item row; taller ones, or any picture while
+    // the screen is turned, fit the whole screen.
+    val rests = OrientationObserver.uiRotationDegrees == 0f &&
+        bitmap?.let { it.width >= it.height * 0.749f } == true
+    val contentScale = remember(rests, density) {
+        if (rests) with(density) { RestScale(ViewerTopRowHeight.toPx(), (ViewerItemRowHeight + ViewerActionRowHeight).toPx()) }
+        else ContentScale.Fit
+    }
+    val windowSize = LocalWindowInfo.current.containerSize
+    // Enough zoom for the double-tap's pixel-for-pixel view, in either screen orientation.
+    val oneToOneZoom = bitmap?.takeIf { it.width > 0 && it.height > 0 && windowSize.width > 0 && windowSize.height > 0 }?.let { shown ->
+        val source = Size(shown.width.toFloat(), shown.height.toFloat())
+        listOf(
+            Size(windowSize.width.toFloat(), windowSize.height.toFloat()),
+            Size(windowSize.height.toFloat(), windowSize.width.toFloat()),
+        ).maxOf { 1f / contentScale.computeScaleFactor(source, it).scaleX }
+    } ?: 1f
+    val maxZoom = max(max(photo.width, photo.height) / 500f, max(oneToOneZoom, MinDoubleTapZoom) * 1.05f)
     val zoomableState = rememberZoomableImageState(
         zoomableState = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = maxZoom))
     )
@@ -2329,7 +2257,6 @@ private fun ZoomableImage(
             displayPhoto.metadata?.hashCode() ?: photo.metadata?.hashCode() ?: 0
         }
 
-        var bitmap by remember { mutableStateOf<Bitmap?>(null) }
         var hdrBitmap by remember { mutableStateOf<Bitmap?>(null) }
         var showHdr by remember { mutableStateOf(false) }
         val hdrAlpha by animateFloatAsState(
@@ -2340,7 +2267,6 @@ private fun ZoomableImage(
         val refreshKey = viewModel.photoRefreshKeys[displayPhoto.id] ?: 0L
         val isSettledActive = isActive && !isScrollInProgress
         // 1.5x the screen's long edge (not 4096): a 4096 px LUT pass bloats the GPU driver memory that renders need.
-        val windowSize = LocalWindowInfo.current.containerSize
         val settledMaxEdge = (max(windowSize.width, windowSize.height) * 1.5f).toInt().coerceIn(1024, 4096)
         val previewMaxEdge = if (isSettledActive) settledMaxEdge else 1024
 
@@ -2382,11 +2308,12 @@ private fun ZoomableImage(
             TelephotoImage(
                 image = remember(it) { BitmapImageSource(it) },
                 contentDescription = displayPhoto.displayName,
-                contentScale = ContentScale.Fit,
+                contentScale = contentScale,
+                alignment = if (rests) RestAlignment else Alignment.Center,
                 state = zoomableState,
                 onClick = { onTap() },
                 onLongClick = {},
-                onDoubleClick = DoubleClickToZoomListener.cycle(maxZoomFactor = 3f),
+                onDoubleClick = OneToOneDoubleClick,
                 modifier = Modifier.fillMaxSize().autoRotate(matchParentSize = true)
             )
         }
@@ -2395,10 +2322,12 @@ private fun ZoomableImage(
             TelephotoImage(
                 image = remember(it) { BitmapImageSource(it) },
                 contentDescription = displayPhoto.displayName,
-                contentScale = ContentScale.Fit,
+                contentScale = contentScale,
+                alignment = if (rests) RestAlignment else Alignment.Center,
                 state = zoomableState,
                 onClick = { onTap() },
                 onLongClick = {},
+                onDoubleClick = OneToOneDoubleClick,
                 modifier = Modifier.fillMaxSize().alpha(hdrAlpha).autoRotate(matchParentSize = true)
             )
         }
@@ -2418,10 +2347,12 @@ fun MotionPhotoPlayer(
     photo: MediaData,
     isPlaying: Boolean,
     viewModel: GalleryViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onLoop: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val currentOnLoop by rememberUpdatedState(onLoop)
     val videoFile = remember(photo.id) {
         viewModel.getMotionPhotoVideo(photo)
     }
@@ -2506,6 +2437,14 @@ fun MotionPhotoPlayer(
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                 }
 
+                override fun onPositionDiscontinuity(
+                    oldPosition: Player.PositionInfo,
+                    newPosition: Player.PositionInfo,
+                    reason: Int
+                ) {
+                    if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) currentOnLoop()
+                }
+
                 override fun onPlayerError(error: PlaybackException) {
                 }
             })
@@ -2568,16 +2507,45 @@ private class BitmapImageSource(private val bitmap: Bitmap) : ZoomableImageSourc
 /** The version strip's height: 48 dp thumbnails plus 8 dp padding above and below. */
 private val VersionStripHeight = 64.dp
 
+// The viewer's rows, from the screen's edges: the top row, the item row above the action row.
+private val ViewerTopRowHeight = 48.dp
+private val ViewerItemRowHeight = 56.dp
+private val ViewerActionRowHeight = 64.dp
+private val ViewerActionSlotWidth = 70.dp
+// The strip centred in the item row, and how far it drops in full view.
+private val VersionStripRest = ViewerActionRowHeight + (ViewerItemRowHeight - VersionStripHeight) / 2
+private val FullViewStripDrop = 56.dp
+
+/** One control on the action row; [whyNot] is said instead when it cannot run now. */
+private class ViewerAction(val icon: ImageVector, val label: String, val whyNot: String?, val onClick: () -> Unit)
+
 /**
- * A bar that keeps its space when hidden, so the layout never moves. Hidden, it is an empty spacer that takes no
- * touches, so the photo under it still pans, long-presses and brings the bars back on a tap.
+ * Fits a picture between the top row and the item row ([top] and [bottom] px kept free), as wide as the screen
+ * allows; with [RestAlignment] it rests in that band rather than in the screen's middle.
  */
-@Composable
-private fun HideableBar(hidden: Boolean, content: @Composable () -> Unit) {
-    var height by remember { mutableIntStateOf(0) }
-    if (hidden) {
-        Spacer(Modifier.height(with(LocalDensity.current) { height.toDp() }))
-        return
+private class RestScale(private val top: Float, private val bottom: Float) : ContentScale {
+    override fun computeScaleFactor(srcSize: Size, dstSize: Size): ScaleFactor {
+        val scale = min(dstSize.width / srcSize.width, (dstSize.height - top - bottom) / srcSize.height)
+        return ScaleFactor(scale, scale)
     }
-    Box(Modifier.onSizeChanged { height = it.height }) { content() }
+}
+
+// The free space above and below the picture split as the rows are: 48 above, 120 below.
+private val RestAlignment = BiasAlignment(0f, 48f / 168f * 2f - 1f)
+
+// Double-tap shows the preview pixel for pixel, never less than a clear step in.
+private const val MinDoubleTapZoom = 1.25f
+
+/** Double-tap: back to fit when zoomed, otherwise one preview pixel per screen pixel, centred at the tap. */
+private object OneToOneDoubleClick : DoubleClickToZoomListener {
+    override suspend fun onDoubleClick(state: ZoomableState, centroid: Offset) {
+        val animation = tween<Float>(240)
+        if ((state.zoomFraction ?: 0f) > 0.01f) {
+            state.resetZoom(animation)
+            return
+        }
+        val fitted = state.contentTransformation.scaleMetadata.initialScale.scaleX
+        if (fitted <= 0f) return
+        state.zoomTo((1f / fitted).coerceAtLeast(MinDoubleTapZoom), centroid, animation)
+    }
 }

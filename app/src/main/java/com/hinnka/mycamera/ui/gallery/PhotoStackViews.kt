@@ -32,6 +32,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
+import com.hinnka.mycamera.ui.components.FramedTag
+import com.hinnka.mycamera.ui.components.SonyDim
+import com.hinnka.mycamera.video.SlowedCopy
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.gallery.MediaData
 import com.hinnka.mycamera.gallery.PhotoStacks
@@ -66,28 +74,130 @@ internal fun stackedFrameCount(version: MediaData): Int? = version.metadata
     ?.takeIf { it > 1 }
 
 /**
- * The top-left badge: "RAW", "RAW · NR 0.42" for a re-render (what sets it apart in its stack),
- * the built-in camera's label, "Stacked · 9 frames" for a Photo mode stack, or null for a photo that is none of these.
- */
-internal fun photoBadgeLabel(context: Context, version: MediaData, versions: List<MediaData>, isRaw: Boolean): String? {
-    if (PhotoStacks.isCameraJpeg(version.metadata)) return context.getString(R.string.photo_version_camera_jpeg_label)
-    val raw = context.getString(R.string.gallery_raw_badge)
-    val label = version.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY)
-        ?: return if (isRaw) raw else stackedFrameCount(version)?.let { context.getString(R.string.photo_version_stacked, it) }
-    val stackLabels = versions.mapNotNull { it.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY) }
-    return "$raw · ${RenderLook.shortLabel(label, stackLabels)}"
-}
-
-/**
  * The tag in a strip thumbnail's corner: CAM (built-in camera), ×9 (Photo mode stack, JPG if it saved no count),
  * RAW (Pro original), R1, R2… (re-renders by age).
  */
-private fun versionTag(version: MediaData, versions: List<MediaData>): String = when {
+internal fun versionTag(version: MediaData, versions: List<MediaData>): String = when {
     PhotoStacks.isCameraJpeg(version.metadata) -> "CAM"
     version.metadata?.captureMode == "jpg_max" -> stackedFrameCount(version)?.let { "×$it" } ?: "JPG"
     version.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY) == null -> "RAW"
     else -> "R" + (versions.takeWhile { it.id != version.id }
         .count { it.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY) != null } + 1)
+}
+
+/** One tag on the viewer's top row: [quiet] tags are grey and the first to go when the row is full. */
+internal data class ViewerTag(
+    val text: String,
+    val color: Color = SonyText,
+    val quiet: Boolean = false,
+    val icon: ImageVector? = null,
+    val onClick: () -> Unit,
+)
+
+/**
+ * What the viewer's top row says about [photo] (the item's own data; on the system tab the Lilac photo it came
+ * from), in a fixed order. [version] is the shown version of a stack of [versions]. Plain tags explain themselves
+ * through [explain]; LIVE, BURST and HDR act instead. An on state shows in [accent]. A [burstCount] of 0 or a null [hdrOn] leaves that tag out.
+ */
+internal fun viewerTags(
+    context: Context,
+    photo: MediaData,
+    version: MediaData,
+    versions: List<MediaData>,
+    isRaw: Boolean,
+    burstCount: Int,
+    canPlayLive: Boolean,
+    livePlaying: Boolean,
+    hdrOn: Boolean?,
+    videoRate: SlowedCopy.Rate?,
+    videoSlowed: Boolean,
+    onLive: () -> Unit,
+    onBurst: () -> Unit,
+    onHdr: () -> Unit,
+    explain: (String) -> Unit,
+    accent: Color,
+): List<ViewerTag> = buildList {
+    val metadata = photo.metadata
+    if (isRaw) add(ViewerTag(context.getString(R.string.gallery_raw_badge)) { explain(context.getString(R.string.viewer_tag_raw_hint)) })
+    stackedFrameCount(photo)?.let { n ->
+        add(ViewerTag("×$n") { explain(context.getString(R.string.viewer_tag_stacked_hint, n)) })
+    }
+    metadata?.multipleExposureFrameCount?.takeIf { metadata.captureMode == "multiple_exposure" && it > 1 }?.let { n ->
+        add(ViewerTag("ME ×$n") { explain(context.getString(R.string.viewer_tag_multiple_exposure_hint, n)) })
+    }
+    if (burstCount > 0) add(ViewerTag("BURST $burstCount", onClick = onBurst))
+    if (canPlayLive) {
+        add(ViewerTag("LIVE", color = if (livePlaying) accent else SonyText, icon = Icons.Filled.PlayArrow, onClick = onLive))
+    }
+    if (hdrOn != null) add(ViewerTag(context.getString(R.string.hdr_label), color = if (hdrOn) accent else SonyText, onClick = onHdr))
+    if (metadata?.computationalAperture != null) add(ViewerTag("PORT") { explain(context.getString(R.string.viewer_tag_portrait_hint)) })
+    if (metadata?.hasAiDenoisedBase == true) add(ViewerTag("AI NR") { explain(context.getString(R.string.viewer_tag_ai_denoise_hint)) })
+    if (videoRate?.isHighFrameRate == true) {
+        val fps = if (videoRate.captureFps >= 900f) 960 else 120
+        add(ViewerTag("$fps FPS", color = if (videoSlowed) accent else SonyText) {
+            explain(context.getString(R.string.viewer_tag_high_frame_rate_hint, fps))
+        })
+    }
+    if (photo.isVideo) {
+        val w = metadata?.videoWidth ?: 0
+        val h = metadata?.videoHeight ?: 0
+        val fps = metadata?.frameRate ?: 0
+        if (w > 0 && h > 0 && fps > 0) {
+            val short = minOf(w, h)
+            val size = when {
+                short >= 2160 -> "4K"
+                short >= 1080 -> "FHD"
+                short >= 720 -> "HD"
+                else -> "${short}p"
+            }
+            add(ViewerTag("$size $fps", color = SonyDim, quiet = true) {
+                explain(context.getString(R.string.viewer_tag_video_format_hint, w, h, fps))
+            })
+        }
+    }
+    if (versions.size > 1) {
+        val tag = versionTag(version, versions).let { if (it == "RAW") "ORIG" else it }
+        // A Photo mode stack's own tag already reads ×9.
+        if (none { it.text == tag }) {
+            val label = version.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY)
+            val about = when {
+                PhotoStacks.isCameraJpeg(version.metadata) -> context.getString(R.string.photo_version_camera_jpeg_label)
+                label != null -> RenderLook.shortLabel(label, versions.mapNotNull { it.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY) })
+                tag == "ORIG" -> context.getString(R.string.viewer_version_original)
+                else -> stackedFrameCount(version)?.let { context.getString(R.string.photo_version_stacked, it) }
+                    ?: context.getString(R.string.viewer_version_photo_mode)
+            }
+            add(ViewerTag(tag, color = SonyDim, quiet = true) { explain(context.getString(R.string.viewer_tag_version_hint, tag, about)) })
+        }
+    }
+}
+
+/**
+ * The tags in one row as wide as they are, never wider than the space given: quiet tags go first, from the end,
+ * then whatever still does not fit is left off at the end.
+ */
+@Composable
+internal fun ViewerTagRow(tags: List<ViewerTag>, modifier: Modifier = Modifier) {
+    Layout(
+        content = { tags.forEach { FramedTag(it.text, color = it.color, icon = it.icon, onClick = it.onClick) } },
+        modifier = modifier
+    ) { measurables, constraints ->
+        val gap = 6.dp.roundToPx()
+        val placeables = measurables.map { it.measure(Constraints()) }
+        val kept = placeables.indices.toMutableList()
+        fun width() = kept.sumOf { placeables[it].width } + gap * (kept.size - 1).coerceAtLeast(0)
+        while (width() > constraints.maxWidth) {
+            kept.remove(kept.lastOrNull { tags[it].quiet } ?: kept.last())
+        }
+        val height = placeables.maxOfOrNull { it.height } ?: 0
+        layout(width().coerceAtLeast(0), height) {
+            var x = 0
+            kept.forEach { i ->
+                placeables[i].placeRelative(x, (height - placeables[i].height) / 2)
+                x += placeables[i].width + gap
+            }
+        }
+    }
 }
 
 /**

@@ -784,7 +784,8 @@ fun NavigationHost(
                     }
                     TextButton(onClick = {
                         showStackMemoryWarning = false
-                        navController.popBackStack()
+                        // The viewer opened from the grid asks this too, a step further from the camera.
+                        if (!navController.popBackStack(Routes.CAMERA, inclusive = false)) navController.popBackStack()
                     }) {
                         Text(
                             stringResource(R.string.stack_memory_warning_camera),
@@ -1027,6 +1028,15 @@ fun NavigationHost(
                         handleGalleryBack()
                     },
                     onGoToGallery = returnToGallery,
+                    fromGrid = navController.previousBackStackEntry?.destination?.route == Routes.GALLERY,
+                    onGoToCamera = {
+                        galleryViewModel.requestGalleryScrollToPhoto(null)
+                        when {
+                            externalGalleryReviewReturnToCaller -> onExternalGalleryReviewBack()
+                            backStacksInFlight > 0 -> showStackMemoryWarning = true
+                            else -> if (!navController.popBackStack(Routes.CAMERA, inclusive = false)) navController.popBackStack()
+                        }
+                    },
                     onEdit = {
                         navController.navigate(Routes.PHOTO_EDIT)
                     },

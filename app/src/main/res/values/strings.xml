@@ -2165,4 +2165,19 @@
     <string name="burst_cover_set">Cover set</string>
     <string name="burst_cover_failed">Couldn’t set the cover</string>
     <string name="gallery_view_burst">View burst</string>
+    <!-- Photo viewer: action row, tags (a tap explains each) and More entries -->
+    <string name="viewer_more">More</string>
+    <string name="viewer_refresh_preview">Refresh preview</string>
+    <string name="viewer_busy_in_camera">Still processing in the camera: a moment</string>
+    <string name="viewer_busy">One moment: still working on the last tap</string>
+    <string name="viewer_tag_raw_hint">RAW: the sensor data (DNG) is kept, so this photo can be rendered again.</string>
+    <string name="viewer_tag_stacked_hint">×%1$d: %1$d frames stacked in Photo mode.</string>
+    <string name="viewer_tag_multiple_exposure_hint">Multiple exposure of %1$d frames.</string>
+    <string name="viewer_tag_portrait_hint">Portrait: background blur saved. Change it in Edit.</string>
+    <string name="viewer_tag_ai_denoise_hint">AI denoise was applied in the editor.</string>
+    <string name="viewer_tag_high_frame_rate_hint">%1$d fps: plays at ¼× without sound. The ¼× / 1× button switches the speed.</string>
+    <string name="viewer_tag_video_format_hint">Video: %1$d × %2$d, %3$d fps.</string>
+    <string name="viewer_tag_version_hint">%1$s: %2$s. Pick another version below.</string>
+    <string name="viewer_version_original">the first render of the RAW</string>
+    <string name="viewer_version_photo_mode">Photo mode</string>
 </resources>
