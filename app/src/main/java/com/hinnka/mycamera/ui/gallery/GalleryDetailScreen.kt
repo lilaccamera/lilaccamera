@@ -2786,9 +2786,8 @@ private class BurstFrames(val photoId: String? = null, val files: List<File> = e
 
 /**
  * Where an upright photo rests, as both its scale and its alignment so every reader agrees. At full width when that
- * clears the item row ([bottom] px): centred between the rows if it also clears the top row ([top] px), otherwise
- * from the screen's top under the see-through top row, so a 3:4 photo keeps the full width. Taller ones fit the
- * screen, centred.
+ * clears the item row ([bottom] px), centred on the gap between the top row ([top] px) and the item row; a little
+ * taller than the gap (a 3:4 photo) runs evenly under both see-through rows. Taller ones fit the screen, centred.
  */
 private class RestFit(private val top: Float, private val bottom: Float) : ContentScale, Alignment {
     override fun computeScaleFactor(srcSize: Size, dstSize: Size): ScaleFactor {
@@ -2799,11 +2798,7 @@ private class RestFit(private val top: Float, private val bottom: Float) : Conte
 
     override fun align(size: IntSize, space: IntSize, layoutDirection: LayoutDirection): IntOffset {
         val free = (space.height - size.height).toFloat()
-        val y = when {
-            free >= top + bottom -> top + (free - top - bottom) / 2f
-            free >= bottom -> 0f
-            else -> free / 2f
-        }
+        val y = if (free >= bottom) maxOf(0f, top + (free - top - bottom) / 2f) else free / 2f
         return IntOffset(((space.width - size.width) / 2f).roundToInt(), y.roundToInt())
     }
 }
