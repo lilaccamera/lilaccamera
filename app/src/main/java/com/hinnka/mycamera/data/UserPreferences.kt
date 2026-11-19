@@ -277,6 +277,8 @@ class UserPreferences internal constructor(
     var defaultVirtualAperture by float("default_virtual_aperture", 0f)  // 默认虚化光圈，0表示关闭
     var useHdrScreenMode by bool("use_hdr_screen_mode", true)
     var deleteExported by bool("delete_exported", true)
+    // The gallery explained what Add to Lilac does; later presses add at once.
+    var addToLilacExplained by bool("add_to_lilac_explained", false)
     // The viewer's settings line and histogram on the picture; off keeps the picture clear.
     var viewerShootingInfo by bool("viewer_shooting_info", false)
     var enableLogicalMultiCameraDiscovery by bool("enable_logical_multi_camera_discovery", false)  // 是否自动探测逻辑多摄物理镜头绑定

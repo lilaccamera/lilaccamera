@@ -96,7 +96,8 @@ enum class GalleryTab {
 
 enum class GalleryBatchOperation {
     PASTE_SETTINGS,
-    EXPORT
+    EXPORT,
+    ADD_TO_LILAC
 }
 
 data class GalleryBatchOperationProgress(
@@ -5644,6 +5645,44 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 PLog.e(TAG, "Failed to import photos", e)
             } finally {
                 _isLoading.value = false
+            }
+        }
+    }
+
+    /** A system item already has a Lilac copy: the one linked to it, or one made from or exported to its file. */
+    fun isInLilac(photo: MediaData): Boolean = photo.relatedPhoto != null || findPhotonPhotoBySourceUri(photo.uri) != null
+
+    /**
+     * Copies the selected system items that have no Lilac copy yet into Lilac's library, then leaves selection.
+     * Reports how many were added and how many already had a copy.
+     */
+    fun addSelectedToLilac(onComplete: (added: Int, alreadyIn: Int) -> Unit) {
+        if (_isExporting.value || _isPastingSettings.value || _batchOperationProgress.value != null) return
+        val selectedSnapshot = selectedPhotos.toList()
+        val toAdd = selectedSnapshot.filterNot(::isInLilac)
+        val alreadyIn = selectedSnapshot.size - toAdd.size
+        if (toAdd.isEmpty()) return onComplete(0, alreadyIn)
+        _batchOperationProgress.value = GalleryBatchOperationProgress(GalleryBatchOperation.ADD_TO_LILAC, 0, toAdd.size)
+        viewModelScope.launch {
+            var added = 0
+            try {
+                val context = getApplication<Application>()
+                toAdd.forEachIndexed { index, photo ->
+                    try {
+                        if (GalleryManager.importPhoto(context, photo.uri, null) != null) added++
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        PLog.e(TAG, "Failed to add ${photo.uri} to Lilac", e)
+                    }
+                    _batchOperationProgress.value = GalleryBatchOperationProgress(GalleryBatchOperation.ADD_TO_LILAC, index + 1, toAdd.size)
+                }
+                exitSelectionMode()
+                // The System tab links each item to its new copy by source URI once Lilac's list is reloaded.
+                loadPhotos(reset = true)
+                onComplete(added, alreadyIn)
+            } finally {
+                _batchOperationProgress.value = null
             }
         }
     }

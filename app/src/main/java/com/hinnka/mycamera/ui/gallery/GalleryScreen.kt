@@ -22,7 +22,6 @@ import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -109,6 +108,7 @@ import com.hinnka.mycamera.ui.components.HaloText
 import com.hinnka.mycamera.ui.components.HideNavigationBar
 import com.hinnka.mycamera.ui.components.SonyText
 import com.hinnka.mycamera.ui.components.SonyDivider
+import com.hinnka.mycamera.ui.settings.SettingsSheet
 import com.hinnka.mycamera.ui.settings.rememberSettingsTick
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
@@ -164,7 +164,7 @@ fun GalleryScreen(
     val selectedImageCount = selectedPhotos.count { it.isImage }
     val selectedTab = viewModel.selectedTab
     val hasPermission = viewModel.hasGalleryPermission
-    val isBatchOperationRunning = isExporting || isPastingSettings
+    val isBatchOperationRunning = isExporting || isPastingSettings || batchOperationProgress != null
     // Re-render dims when no selected photo has a RAW to render again from. The last answer stays while
     // a changed selection is checked, so the button doesn't flash on every added photo.
     val selectedIds = selectedPhotos.map { it.id }
@@ -180,35 +180,6 @@ fun GalleryScreen(
         if (!isBatchOperationRunning) {
             viewModel.exitSelectionMode()
         }
-    }
-
-    fun importSelectedMedia(selection: SelectedVisualMedia) {
-        val uris = selection.uris
-        if (uris.isEmpty()) return
-        val uniqueUris = uris.distinct().also { distinct ->
-            if (distinct.size != uris.size) {
-                PLog.d("GalleryScreen", "Ignoring ${uris.size - distinct.size} duplicate selected media URI(s)")
-            }
-        }
-        val videoUris = uniqueUris.map { selection.pairedVideoUris[it] }
-        viewModel.importPhotos(uniqueUris, videoUris) { importedIds ->
-            if (importedIds.size == 1) {
-                val newPhotoId = importedIds.first()
-                viewModel.setCurrentPhotoById(newPhotoId)
-                viewModel.enterEditMode()
-                onNavigateToEdit(newPhotoId)
-            }
-        }
-    }
-
-    val launcher = rememberLauncherForActivityResult(
-        contract = PickMultipleVisualMediaWithLivePhoto()
-    ) { selection ->
-        PLog.d(
-            "GalleryScreen",
-            "Received photo picker result: ${selection.uris.size} media URI(s), ${selection.pairedVideoUris.size} Live Photo pair(s)"
-        )
-        importSelectedMedia(selection)
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -277,6 +248,17 @@ fun GalleryScreen(
             shown.isEmpty() -> Unit
             shown.any { stacks.versionsOf(it).size > 1 } || exportedCopies(shown) > 0 -> deleteSheet = shown
             else -> runDelete(shown, false)
+        }
+    }
+    var addToLilacExplained by rememberPreference(UserPreferences::addToLilacExplained)
+    var addToLilacSheet by remember { mutableStateOf(false) }
+    fun addToLilac() {
+        viewModel.addSelectedToLilac { added, alreadyIn ->
+            val message = listOfNotNull(
+                context.resources.getQuantityString(R.plurals.gallery_added_to_lilac_count, added, added),
+                context.getString(R.string.gallery_already_in_lilac_count, alreadyIn).takeIf { alreadyIn > 0 },
+            ).joinToString(" · ")
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
         }
     }
     var batchRenderAgain by remember { mutableStateOf<BatchRenderAgain?>(null) }
@@ -456,9 +438,6 @@ fun GalleryScreen(
                     }
                 },
                 onRenderQueue = onRenderQueueClick,
-                onImport = {
-                    launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
-                }
             )
             val landscape = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
             AnimatedVisibility(
@@ -473,13 +452,15 @@ fun GalleryScreen(
                 val progress = batchOperationProgress?.let { it.completed.toFloat() / it.total.coerceAtLeast(1) }
                 ActionRow(
                     listOf(
-                        RowAction(
+                        // System items are only viewed here, so their first action makes them Lilac's own.
+                        if (selectedTab == GalleryTab.SYSTEM) RowAction(
+                            AppIcons.PhotoPlusLine, stringResource(R.string.gallery_add_to_lilac),
+                            running ?: stringResource(R.string.gallery_already_in_lilac).takeIf { selectedPhotos.all(viewModel::isInLilac) }
+                        ) {
+                            if (addToLilacExplained) addToLilac() else addToLilacSheet = true
+                        } else RowAction(
                             AppIcons.FileExportLine, stringResource(R.string.export),
-                            running ?: when {
-                                selectedTab != GalleryTab.PHOTON -> stringResource(R.string.gallery_export_lilac_only)
-                                selectedImageCount == 0 -> stringResource(R.string.gallery_export_photos_only)
-                                else -> null
-                            }
+                            running ?: stringResource(R.string.gallery_export_photos_only).takeIf { selectedImageCount == 0 }
                         ) {
                             viewModel.exportSelectedPhotos { count ->
                                 if (count > 0) Toast.makeText(context, R.string.export_complete, Toast.LENGTH_SHORT).show()
@@ -567,6 +548,21 @@ fun GalleryScreen(
         )
     }
 
+    if (addToLilacSheet) {
+        val count = selectedPhotos.count { !viewModel.isInLilac(it) }
+        SettingsSheet(stringResource(R.string.gallery_add_to_lilac), { addToLilacSheet = false }, stringResource(R.string.gallery_add_to_lilac_about)) {
+            ViewerSheetButtons(
+                pluralStringResource(R.plurals.gallery_add_to_lilac_count, count, count),
+                onCancel = { addToLilacSheet = false },
+                onGo = {
+                    addToLilacSheet = false
+                    addToLilacExplained = true
+                    addToLilac()
+                },
+            )
+        }
+    }
+
     batchRenderAgain?.let { batch ->
         RenderAgainSheet(
             title = pluralStringResource(R.plurals.render_again_batch_title, batch.eligibleCount, batch.eligibleCount),
@@ -600,7 +596,7 @@ private val GalleryActionRowHeight = 64.dp
 private data class BatchRenderAgain(val photoIds: List<String>, val eligibleCount: Int, val appLook: RenderLook)
 
 /**
- * The line floating over the grid, with no fill: back, the Lilac / System tabs, the render queue and import;
+ * The line floating over the grid, with no fill: back, the Lilac / System tabs and the render queue;
  * while selecting, close, the count and the selection's actions.
  */
 @Composable
@@ -615,7 +611,6 @@ private fun GalleryTopLine(
     onBack: () -> Unit,
     onSelectAll: () -> Unit,
     onRenderQueue: () -> Unit,
-    onImport: () -> Unit,
 ) {
     Row(
         Modifier
@@ -691,7 +686,6 @@ private fun GalleryTopLine(
                     }
                 }
             }
-            LineButton(AppIcons.PhotoPlusLine, stringResource(R.string.import_photo), true, onImport)
         }
     }
 }

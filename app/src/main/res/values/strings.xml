@@ -2272,6 +2272,18 @@
     <string name="gallery_export_lilac_only">Export is for Lilac’s own photos</string>
     <string name="gallery_export_photos_only">Export takes photos only</string>
     <string name="gallery_paste_needs_photo">Paste needs a photo in the selection</string>
+    <string name="gallery_add_to_lilac">Add to Lilac</string>
+    <string name="gallery_already_in_lilac">Already in Lilac</string>
+    <string name="gallery_already_in_lilac_count">%d already in Lilac</string>
+    <string name="gallery_add_to_lilac_about">System photos are only viewed here: they stay in the phone’s gallery, and Lilac keeps no versions of them.\n\nAdding one keeps a copy in Lilac’s library, where you can render a RAW again with new settings, keep versions as a stack, and rate or protect it. The original stays in the phone’s gallery.</string>
+    <plurals name="gallery_add_to_lilac_count">
+        <item quantity="one">Add %d photo</item>
+        <item quantity="other">Add %d photos</item>
+    </plurals>
+    <plurals name="gallery_added_to_lilac_count">
+        <item quantity="one">%d added to Lilac</item>
+        <item quantity="other">%d added to Lilac</item>
+    </plurals>
     <string name="gallery_busy_not_selectable">Still processing: it can be selected when it’s done</string>
     <plurals name="gallery_deleted_count">
         <item quantity="one">%d deleted</item>
