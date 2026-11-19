@@ -85,6 +85,7 @@ import com.hinnka.mycamera.ui.components.rawRenderingEngineName
 import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.hinnka.mycamera.ui.prefs.preferenceValue
 import com.hinnka.mycamera.ui.components.ChosenFill
 import com.hinnka.mycamera.ui.components.LilacChip
 import com.hinnka.mycamera.ui.components.LilacDim
@@ -275,7 +276,8 @@ internal fun CameraTopSheet(
     var explained by remember { mutableStateOf<String?>(null) }
     var openPicker by remember { mutableStateOf<String?>(null) }
     // Shooting (0) or Output (1); opens on Shooting and keeps the last pick while the camera screen lives.
-    var qTab by remember { mutableIntStateOf(0) }
+    // Opens on the first page in a new mode; the page shown last is kept only while the mode stays.
+    var qTab by remember(captureMode, useRaw, isPortraitMode, isNightMode) { mutableIntStateOf(0) }
     fun handleContentManagementAction(action: () -> Unit) {
         showContentManagementOptions = false
         action()
@@ -616,10 +618,13 @@ internal fun CameraTopSheet(
                                 MeteringMode.AVERAGE to R.string.quick_metering_average,
                                 MeteringMode.HIGHLIGHT_PRIORITY to R.string.quick_metering_highlight,
                             ).forEach { (mode, label) ->
+                                // Slimmer chips, so the five choices fit beside the name on one line.
                                 QuickChoice(
                                     text = stringResource(label),
                                     selected = meteringMode == mode,
-                                    minWidth = 42.dp,
+                                    minWidth = 0.dp,
+                                    fontSize = 14.sp,
+                                    horizontalPadding = 6.dp,
                                     onClick = { onMeteringModeChange(mode) }
                                 )
                             }
@@ -1143,12 +1148,14 @@ internal val GroupGold = Color(0xFFB28E02)
  */
 @Composable
 internal fun QuickGroup(
-    title: String? = null,
+    groupTitle: String? = null,
     color: Color = GroupRed,
     onGuide: (() -> Unit)? = null,
     divider: Boolean = true,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val titlesShown by preferenceValue { it.panelGroupTitles }
+    val title = groupTitle.takeIf { titlesShown }
     if (!divider) Spacer(Modifier.height(6.dp)) else if (title == null) GroupDivider()
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         if (title != null) {
@@ -1369,7 +1376,15 @@ internal class QuickRows(
 }
 
 @Composable
-internal fun QuickChoice(text: String, selected: Boolean, minWidth: Dp, icon: ImageVector? = null, onClick: () -> Unit) =
+internal fun QuickChoice(
+    text: String,
+    selected: Boolean,
+    minWidth: Dp,
+    icon: ImageVector? = null,
+    fontSize: TextUnit = 15.sp,
+    horizontalPadding: Dp = 10.dp,
+    onClick: () -> Unit
+) =
     LilacChip(
         text = text,
         selected = selected,
@@ -1377,8 +1392,8 @@ internal fun QuickChoice(text: String, selected: Boolean, minWidth: Dp, icon: Im
         minWidth = maxOf(minWidth, 48.dp),
         height = 40.dp,
         touchHeight = 48.dp,
-        fontSize = 15.sp,
-        horizontalPadding = 10.dp,
+        fontSize = fontSize,
+        horizontalPadding = horizontalPadding,
         icon = icon,
         textColor = SonySecondary
     )

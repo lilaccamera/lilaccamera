@@ -1890,6 +1890,11 @@
     <string name="quick_group_output">Output</string>
     <string name="quick_group_picture">Picture</string>
     <string name="quick_group_sound">Sound</string>
+    <string name="quick_group_look">Look</string>
+    <string name="quick_group_log_video">Log video</string>
+    <string name="quick_manage">Manage</string>
+    <string name="settings_panel_group_titles">Group titles</string>
+    <string name="settings_panel_group_titles_description">Name each group in quick settings and Looks, on the line above it. Off keeps the lists shorter.</string>
     <string name="quick_codec">Codec</string>
     <string name="quick_lens">Lens</string>
     <string name="quick_lens_macro">Macro</string>

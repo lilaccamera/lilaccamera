@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -46,7 +47,6 @@ import com.hinnka.mycamera.R
 import com.hinnka.mycamera.lut.LutInfo
 import com.hinnka.mycamera.ui.camera.ModeAmber
 import com.hinnka.mycamera.ui.camera.SheetDim
-import com.hinnka.mycamera.ui.camera.SheetText
 import com.hinnka.mycamera.ui.camera.ViewfinderTextShadow
 import com.hinnka.mycamera.ui.icons.AppIcons
 import com.hinnka.mycamera.ui.theme.PremiumGold
@@ -101,9 +101,9 @@ fun LookStrip(
 
     LazyRow(
         state = listState,
-        contentPadding = PaddingValues(horizontal = if (compact) 10.dp else 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        contentPadding = PaddingValues(horizontal = if (compact) 10.dp else 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 8.dp),
+        verticalAlignment = if (compact) Alignment.CenterVertically else Alignment.Top,
         modifier = modifier
             .fillMaxWidth()
             // The row fades out over 14 dp at both edges.
@@ -140,12 +140,14 @@ fun LookStrip(
                     thumbnail = thumbnail,
                     onClick = onClick,
                     onLongClick = onLongClick,
-                    // 6 dp between looks, 20 dp between sections.
-                    modifier = if (look.sectionStart && look !== looks.first()) Modifier.padding(start = 14.dp) else Modifier
+                    // 8 dp between looks, 20 dp between sections.
+                    modifier = if (look.sectionStart && look !== looks.first()) Modifier.padding(start = 12.dp) else Modifier
                 )
             }
         }
-        if (onManage != null) {
+        if (onManage != null && !compact) {
+            item(key = "manage") { ManageTile(onManage) }
+        } else if (onManage != null) {
             item(key = "manage") {
                 val shape = RoundedCornerShape(10.dp)
                 Box(
@@ -181,16 +183,16 @@ private fun LookStripItem(
     val name = lut.getName()
     Column(
         modifier = modifier
-            .width(56.dp)
+            .width(64.dp)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(Modifier.fillMaxWidth().height(16.dp)) {
+        Box(Modifier.fillMaxWidth().height(20.dp)) {
             if (caption != null) {
                 Text(
                     text = caption.uppercase(),
-                    color = SheetDim,
-                    fontSize = 10.sp,
+                    color = SonySecondary,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
                     letterSpacing = 1.4.sp,
                     maxLines = 1,
@@ -203,10 +205,9 @@ private fun LookStripItem(
         }
         Box(
             modifier = Modifier
-                .size(48.dp)
+                .size(64.dp)
                 .clip(shape)
-                .then(if (thumbnail == null || lut.id == "none") Modifier.background(Color.Black.copy(alpha = 0.4f)) else Modifier)
-                .border(if (selected) 1.5.dp else 1.dp, if (selected) ModeAmber else Color.White.copy(alpha = 0.32f), shape),
+                .then(if (thumbnail == null || lut.id == "none") Modifier.background(Color.Black.copy(alpha = 0.4f)) else Modifier),
             contentAlignment = Alignment.Center
         ) {
             if (lut.id == "none") {
@@ -227,20 +228,49 @@ private fun LookStripItem(
                         .padding(horizontal = 4.dp, vertical = 2.dp)
                 )
             }
+            // The chosen look is a menu choice: a white ring, like the chosen chips, not the accent.
+            if (selected) Box(Modifier.matchParentSize().border(2.5.dp, SonyText, shape))
         }
         Text(
             text = name,
-            color = if (selected) ModeAmber else SheetText,
-            fontSize = 10.sp,
-            lineHeight = 12.sp,
+            color = SonyText,
+            fontSize = 12.sp,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            lineHeight = 14.sp,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
             style = shadow,
             modifier = Modifier
-                .padding(top = 5.dp)
-                .requiredWidth(60.dp)
-                .height(24.dp)
+                .padding(top = 6.dp)
+                .requiredWidth(68.dp)
+                .height(28.dp)
+        )
+    }
+}
+
+/** The strip's last tile, shaped like a look: opens the look, frame and preset managers. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ManageTile(onClick: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        modifier = Modifier.padding(start = 12.dp).width(64.dp).combinedClickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(Modifier.height(20.dp))
+        Box(Modifier.size(64.dp).border(1.5.dp, SonyTrack, shape), contentAlignment = Alignment.Center) {
+            Icon(AppIcons.FoldersLine, contentDescription = null, tint = SonySecondary, modifier = Modifier.size(24.dp))
+        }
+        Text(
+            text = stringResource(R.string.quick_manage),
+            color = SonyText,
+            fontSize = 12.sp,
+            lineHeight = 14.sp,
+            maxLines = 1,
+            textAlign = TextAlign.Center,
+            style = TextStyle(shadow = ViewfinderTextShadow),
+            modifier = Modifier.padding(top = 6.dp).requiredWidth(68.dp).height(28.dp)
         )
     }
 }
