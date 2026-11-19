@@ -165,11 +165,12 @@ fun GalleryScreen(
     val selectedTab = viewModel.selectedTab
     val hasPermission = viewModel.hasGalleryPermission
     val isBatchOperationRunning = isExporting || isPastingSettings
-    // Re-render dims when no selected photo has a RAW to render again from; unknown while checking.
+    // Re-render dims when no selected photo has a RAW to render again from. The last answer stays while
+    // a changed selection is checked, so the button doesn't flash on every added photo.
     val selectedIds = selectedPhotos.map { it.id }
-    val canRenderAgain by produceState<Boolean?>(null, selectedIds) {
-        value = null
-        value = selectedIds.any { RenderQueue.renderAgainSource(context, it) != null }
+    var canRenderAgain by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(selectedIds) {
+        canRenderAgain = if (selectedIds.isEmpty()) null else selectedIds.any { RenderQueue.renderAgainSource(context, it) != null }
     }
     val scope = rememberCoroutineScope()
     var shouldRenderGrid by rememberSaveable { mutableStateOf(false) }
