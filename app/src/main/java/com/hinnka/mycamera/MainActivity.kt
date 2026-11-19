@@ -847,27 +847,31 @@ fun NavigationHost(
             }
         ) {
             composable(Routes.CAMERA) {
+                // The thumbnail opens what it shows: the photo still processing, else the newest item a pending
+                // delete has not hidden, and the grid only when there is nothing to show.
+                val openThumbnail: () -> Unit = {
+                    val openId = cameraViewModel.capturedThumbnail.value
+                        ?.takeUnless { it.finalThumbnailLoaded }
+                        ?.let { captured ->
+                            captured.savedPhotoId ?: captured.photoId.takeIf {
+                                it in GalleryManager.processingPhotos.value ||
+                                    it in galleryViewModel.processingPhotos.value
+                            }
+                        }
+                        ?: galleryViewModel.photos.value.firstOrNull { it.id !in galleryViewModel.hiddenPhotoIds }?.id
+                    if (openId != null) {
+                        galleryViewModel.setCurrentPhotoById(openId)
+                        navController.navigate(Routes.photoDetail(photoId = openId))
+                    } else {
+                        navController.navigate(Routes.GALLERY)
+                    }
+                }
                 if (cameraViewModel.isExpanded) {
                     Row {
                         CameraScreen(
                             viewModel = cameraViewModel,
                             galleryViewModel = galleryViewModel,
-                            onGalleryClick = {
-                                val pendingId = cameraViewModel.capturedThumbnail.value
-                                    ?.takeUnless { it.finalThumbnailLoaded }
-                                    ?.let { captured ->
-                                        captured.savedPhotoId ?: captured.photoId.takeIf {
-                                            it in GalleryManager.processingPhotos.value ||
-                                                it in galleryViewModel.processingPhotos.value
-                                        }
-                                    }
-                                if (pendingId != null) {
-                                    galleryViewModel.setCurrentPhotoById(pendingId)
-                                    navController.navigate(Routes.photoDetail(photoId = pendingId))
-                                } else {
-                                    navController.navigate(Routes.GALLERY)
-                                }
-                            },
+                            onGalleryClick = openThumbnail,
                             onSettingsClick = {
                                 navController.navigate(Routes.settings())
                             },
@@ -912,26 +916,7 @@ fun NavigationHost(
                     CameraScreen(
                         viewModel = cameraViewModel,
                         galleryViewModel = galleryViewModel,
-                        onGalleryClick = {
-                            val pendingId = cameraViewModel.capturedThumbnail.value
-                                ?.takeUnless { it.finalThumbnailLoaded }
-                                ?.let { captured ->
-                                    captured.savedPhotoId ?: captured.photoId.takeIf {
-                                        it in GalleryManager.processingPhotos.value ||
-                                            it in galleryViewModel.processingPhotos.value
-                                    }
-                                }
-                            val latestPhoto = galleryViewModel.latestPhoto.value
-                            if (pendingId != null) {
-                                galleryViewModel.setCurrentPhotoById(pendingId)
-                                navController.navigate(Routes.photoDetail(photoId = pendingId))
-                            } else if (latestPhoto != null && System.currentTimeMillis() - latestPhoto.dateAdded < 3 * 60 * 1000) {
-                                galleryViewModel.setCurrentPhotoById(latestPhoto.id)
-                                navController.navigate(Routes.photoDetail(photoId = latestPhoto.id))
-                            } else {
-                                navController.navigate(Routes.GALLERY)
-                            }
-                        },
+                        onGalleryClick = openThumbnail,
                         onSettingsClick = {
                             navController.navigate(Routes.settings())
                         },

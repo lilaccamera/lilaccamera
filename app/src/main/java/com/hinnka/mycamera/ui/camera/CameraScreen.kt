@@ -274,7 +274,18 @@ fun CameraScreen(
         controlsArrivalPlayed = true
         controlsArrival.animateTo(1f, tween(ControlsArrivalDurationMillis, easing = ControlsArrivalEasing))
     }
-    val newestPhoto by galleryViewModel.latestPhoto.collectAsState()
+    val galleryPhotos by galleryViewModel.photos.collectAsState()
+    // The newest item, photo or video, that a pending delete has not hidden.
+    val newestPhoto = galleryPhotos.firstOrNull { it.id !in galleryViewModel.hiddenPhotoIds }
+    // A capture's preview waits for its own saved photo to load; once that photo is deleted it never will, so let
+    // the preview go and show the newest item instead.
+    LaunchedEffect(newestPhoto?.id) {
+        val captured = viewModel.capturedThumbnail.value ?: return@LaunchedEffect
+        val savedId = captured.savedPhotoId ?: return@LaunchedEffect
+        if (galleryPhotos.none { it.id == savedId } || savedId in galleryViewModel.hiddenPhotoIds) {
+            viewModel.acknowledgeCapturedThumbnail(captured.captureId)
+        }
+    }
     // Over the lock screen the thumbnail shows only what was taken since; older photos need the unlock.
     var shotSinceLaunch by remember { mutableStateOf(false) }
     val latestPhoto = newestPhoto.takeIf { !LocalPhoneLocked.current || shotSinceLaunch }
