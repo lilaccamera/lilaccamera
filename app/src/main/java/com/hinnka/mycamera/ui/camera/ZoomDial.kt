@@ -106,16 +106,31 @@ internal fun zoomText(z: Float): String {
     return if (abs(z - whole) < 0.05f) "$whole×" else String.format(Locale.US, "%.1f×", z)
 }
 
-/**
- * The thumbwheel or the simple pill, centred above the shutter (13 dp clear of it). The wheel's rim and the pill's disc
- * follow the finger; a stop holds the control for a moment and ticks, even while a flick coasts past it; past the ends
- * it stretches and springs back; let go near a stop and it settles there; a tap on a number goes there.
- * [onReading] gets "1.6× · 40 mm" at every change, for the reading over the control.
- */
+/** The zoom stops a control offers for a camera, its range, and the main camera's 35 mm focal length (0 if unknown). */
+internal class ZoomStops(val stops: List<Float>, val min: Float, val max: Float, val mm: Float)
+
+/** The app's zoom stops with the user's custom and hidden focal lengths, up to the controls' 4x. */
+@Composable
+internal fun rememberZoomStops(viewModel: CameraViewModel, availableCameras: List<CameraInfo>, currentCameraId: String): ZoomStops {
+    val currentCamera = availableCameras.find { it.cameraId == currentCameraId }
+    val mainCamera =
+        availableCameras.find { it.lensType == if (currentCamera?.lensType == LensType.FRONT) LensType.FRONT else LensType.BACK_MAIN }
+    val customFocalLengths by preferenceValue { it.customFocalLengths }
+    val hiddenFocalLengths by preferenceValue { it.hiddenFocalLengths }
+    // shortcut: the controls do not offer lens variants or macro lenses; a quick-settings line should show them,
+    // only on phones that have them.
+    val lensZoomStops = viewModel.calculateLensZoomStops(availableCameras, currentCamera)
+    val max = minOf(COLLAR_MAX_ZOOM, viewModel.globalMaxZoom)
+    val min = minOf(viewModel.globalMinZoom, max)
+    val stops = viewModel.allZoomStops(lensZoomStops, mainCamera, currentCamera, customFocalLengths, hiddenFocalLengths)
+        .filter { it in min..max }
+    return ZoomStops(stops, min, max, mainCamera?.focalLength35mmEquivalent ?: 0f)
+}
+
+/** The camera's thumbwheel or pill: [ZoomDialControl] with this camera's stops. */
 @Composable
 internal fun ZoomDial(
     kind: ZoomControl,
-    // The picture lies under the control: the wheel drops its black slot and draws in white.
     overPicture: Boolean,
     viewModel: CameraViewModel,
     zoomRatio: Float,
@@ -124,22 +139,53 @@ internal fun ZoomDial(
     enabled: Boolean,
     onZoom: (Float) -> Unit,
     onReading: (String) -> Unit,
+    fold: () -> Float = { 0f },
+    modifier: Modifier = Modifier
+) = ZoomDialControl(
+    kind = kind,
+    overPicture = overPicture,
+    zoomStops = rememberZoomStops(viewModel, availableCameras, currentCameraId),
+    zoomRatio = zoomRatio,
+    enabled = enabled,
+    onZoom = onZoom,
+    onReading = onReading,
+    fold = fold,
+    // Centred on the shutter: from 8 dp over the control down to the top of the mode zone.
+    modifier = modifier.offset(y = -(111.dp + zoomDialHeight(kind)) / 2)
+)
+
+/** "1.6× · 40 mm", or the zoom alone when the focal length is unknown. */
+internal fun zoomReading(z: Float, mm: Float): String {
+    val millimetres = mm * z
+    return if (millimetres > 0f) "${zoomText(z)} · ${millimetres.roundToInt()} mm" else zoomText(z)
+}
+
+/**
+ * The thumbwheel or the simple pill, drawn in a 176 dp wide box from 8 dp over the control to 3 dp under it; the
+ * wheel's index hangs below the box. Placed centred above the shutter (13 dp clear of it) (13 dp clear of it). The wheel's rim and the pill's disc
+ * follow the finger; a stop holds the control for a moment and ticks, even while a flick coasts past it; past the ends
+ * it stretches and springs back; let go near a stop and it settles there; a tap on a number goes there.
+ * [onReading] gets "1.6× · 40 mm" at every change, for the reading over the control.
+ */
+@Composable
+internal fun ZoomDialControl(
+    kind: ZoomControl,
+    // The picture lies under the control: the wheel drops its black slot and draws in white.
+    overPicture: Boolean,
+    zoomStops: ZoomStops,
+    zoomRatio: Float,
+    enabled: Boolean,
+    onZoom: (Float) -> Unit,
+    onReading: (String) -> Unit,
     // 0 at rest, 1 folded away while the mode list is open.
     fold: () -> Float = { 0f },
     modifier: Modifier = Modifier
 ) {
     val wheel = kind != ZoomControl.PILL
-    val currentCamera = availableCameras.find { it.cameraId == currentCameraId }
-    val mainCamera =
-        availableCameras.find { it.lensType == if (currentCamera?.lensType == LensType.FRONT) LensType.FRONT else LensType.BACK_MAIN }
-    val customFocalLengths by preferenceValue { it.customFocalLengths }
-    val hiddenFocalLengths by preferenceValue { it.hiddenFocalLengths }
-    val lensZoomStops = viewModel.calculateLensZoomStops(availableCameras, currentCamera)
-    val zMax = minOf(COLLAR_MAX_ZOOM, viewModel.globalMaxZoom)
-    val zMin = minOf(viewModel.globalMinZoom, zMax)
-    val stops = viewModel.allZoomStops(lensZoomStops, mainCamera, currentCamera, customFocalLengths, hiddenFocalLengths)
-        .filter { it in zMin..zMax }
-    val mm = mainCamera?.focalLength35mmEquivalent ?: 0f
+    val zMax = zoomStops.max
+    val zMin = zoomStops.min
+    val stops = zoomStops.stops
+    val mm = zoomStops.mm
 
     val scale = remember(stops, zMin, zMax, wheel) { DialScale(stops + zMin + zMax, even = wheel) }
     val stopPos = stops.map { scale.pos(it) }
@@ -171,8 +217,7 @@ internal fun ZoomDial(
         shown = z
         val clamped = z.coerceIn(currentMin, currentMax)
         currentOnZoom(clamped)
-        val millimetres = currentMm * clamped
-        currentOnReading(if (millimetres > 0f) "${zoomText(clamped)} · ${millimetres.roundToInt()} mm" else zoomText(clamped))
+        currentOnReading(zoomReading(clamped, currentMm))
     }
 
     // Moves to the zoom [to], evenly on the control.
@@ -220,7 +265,6 @@ internal fun ZoomDial(
 
     Canvas(
         modifier = modifier
-            .offset(y = -(111.dp + height) / 2)
             .size(176.dp, boxHeight)
             .graphicsLayer { alpha = 1f - fold() }
             .clearAndSetSemantics {

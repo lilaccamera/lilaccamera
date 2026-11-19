@@ -2510,22 +2510,7 @@ fun SettingsScreen(
                     SettingsSection(
                         title = stringResource(R.string.settings_group_interface)
                     ) {
-                        val zoomControlLabels = ZoomControl.entries.map { control ->
-                            control to stringResource(
-                                when (control) {
-                                    ZoomControl.THUMBWHEEL -> R.string.settings_zoom_control_thumbwheel
-                                    ZoomControl.PILL -> R.string.settings_zoom_control_pill
-                                    ZoomControl.COLLAR -> R.string.settings_zoom_control_collar
-                                }
-                            )
-                        }
-                        QualityLevelSetting(
-                            title = stringResource(R.string.settings_zoom_control),
-                            description = null,
-                            levels = zoomControlLabels,
-                            currentLevel = zoomControl,
-                            onLevelSelected = { zoomControl = it }
-                        )
+                        ZoomControlSetting(viewModel, zoomControl) { zoomControl = it }
 
                         SettingsRowDivider()
 

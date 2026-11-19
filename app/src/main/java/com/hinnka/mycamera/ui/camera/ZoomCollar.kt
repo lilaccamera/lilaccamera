@@ -119,25 +119,24 @@ internal fun ZoomCollar(
     // 0 at rest, 1 folded into the shutter while the mode list is open.
     fold: () -> Float = { 0f },
     modifier: Modifier = Modifier
+) = ZoomCollarControl(rememberZoomStops(viewModel, availableCameras, currentCameraId), zoomRatio, enabled, onZoom, onStop, fold, modifier)
+
+/** The collar with the given stops; its box is centred on the shutter's centre. */
+@Composable
+internal fun ZoomCollarControl(
+    zoomStops: ZoomStops,
+    zoomRatio: Float,
+    enabled: Boolean,
+    onZoom: (Float) -> Unit,
+    onStop: (Float) -> Unit,
+    fold: () -> Float = { 0f },
+    modifier: Modifier = Modifier
 ) {
-    val currentCamera = availableCameras.find { it.cameraId == currentCameraId }
-    val mainCamera =
-        availableCameras.find { it.lensType == if (currentCamera?.lensType == LensType.FRONT) LensType.FRONT else LensType.BACK_MAIN }
-
-    // The app's zoom stops, with the user's custom and hidden focal lengths.
-    val customFocalLengths by preferenceValue { it.customFocalLengths }
-    val hiddenFocalLengths by preferenceValue { it.hiddenFocalLengths }
-    val lensZoomStops = viewModel.calculateLensZoomStops(availableCameras, currentCamera)
-    val zoomStops = viewModel.allZoomStops(lensZoomStops, mainCamera, currentCamera, customFocalLengths, hiddenFocalLengths)
-    // shortcut: the collar does not offer lens variants or macro lenses; a quick-settings line should show them,
-    // only on phones that have them.
-
-    val maxZoom = minOf(COLLAR_MAX_ZOOM, viewModel.globalMaxZoom)
-    val stops = zoomStops.filter { it <= maxZoom }
+    val stops = zoomStops.stops
 
     val currentStops by rememberUpdatedState(stops)
-    val currentMin by rememberUpdatedState(viewModel.globalMinZoom)
-    val currentMax by rememberUpdatedState(maxZoom)
+    val currentMin by rememberUpdatedState(zoomStops.min)
+    val currentMax by rememberUpdatedState(zoomStops.max)
     val currentZoom by rememberUpdatedState(zoomRatio)
     val currentOnZoom by rememberUpdatedState(onZoom)
     val currentOnStop by rememberUpdatedState(onStop)
