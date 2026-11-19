@@ -153,6 +153,7 @@ internal enum class CameraShootingMode {
 }
 
 private const val PreviewTransitionRevealDurationMillis = 130
+private const val HeldFrameRevealTimeoutMillis = 2_500L
 private const val PreviewMorphDurationMillis = 280
 private const val ControlsArrivalDurationMillis = 200
 private val ControlsArrivalEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
@@ -444,7 +445,10 @@ fun CameraScreen(
     // prepareCamera opens the camera ahead of the preview; don't leave it open if this screen
     // goes away before the preview surface arrived.
     DisposableEffect(viewModel) {
-        onDispose { viewModel.closeCameraWithoutPreview() }
+        onDispose {
+            viewModel.closeCameraWithoutPreview()
+            viewModel.onPreviewViewGone()
+        }
     }
 
     LaunchedEffect(
@@ -1028,6 +1032,15 @@ fun CameraScreen(
         }
     }
 
+    // Fallback for a camera that never delivers: the held frame fades anyway instead of hanging over the screen.
+    var heldFrameTimedOut by remember { mutableStateOf(false) }
+    if (returnFrame != null) {
+        LaunchedEffect(Unit) {
+            delay(HeldFrameRevealTimeoutMillis)
+            heldFrameTimedOut = true
+        }
+    }
+
     LaunchedEffect(previewFrameRendered) {
         // Deferred start-up work (gallery list, warm-ups) waits for the first camera frame.
         if (previewFrameRendered) StartupGate.open()
@@ -1038,15 +1051,23 @@ fun CameraScreen(
         previewFrameRendered,
         state.captureMode,
         hasPlayedInitialPreviewTransition,
-        canStartShutterAnimation
+        canStartShutterAnimation,
+        heldFrameTimedOut
     ) {
         val canRevealInitialPreview =
             canStartShutterAnimation ||
                 state.captureMode == CaptureMode.VIDEO
         // Open on the camera's first frame: the black splash and this cover read as one closed shutter.
-        if (hasPlayedInitialPreviewTransition || !state.isPreviewActive ||
-            !previewFrameRendered || !canRevealInitialPreview
+        if (hasPlayedInitialPreviewTransition) return@LaunchedEffect
+        if (!heldFrameTimedOut &&
+            (!state.isPreviewActive || !previewFrameRendered || !canRevealInitialPreview)
         ) return@LaunchedEffect
+        if (returnFrame != null) {
+            com.hinnka.mycamera.utils.PLog.i(
+                com.hinnka.mycamera.viewmodel.THUMB_MOTION,
+                "reveal started by ${if (previewFrameRendered) "first frame" else "timeout"}"
+            )
+        }
         previewTransitionActive = true
         previewTransitionRevealing = true
         delay(PreviewTransitionRevealDurationMillis.toLong())
@@ -1650,6 +1671,7 @@ fun CameraScreen(
                             smileThreshold = viewModel.smileThreshold,
                             meteringMode = state.effectiveMeteringMode,
                             onSurfaceTextureReady = { surfaceTexture ->
+                                if (previewSurfaceTexture == null) com.hinnka.mycamera.utils.PLog.i(com.hinnka.mycamera.viewmodel.THUMB_MOTION, "preview surface attached")
                                 previewSurfaceTexture = surfaceTexture
                             },
                             onSurfaceDestroyed = { surfaceTexture ->
@@ -1727,7 +1749,8 @@ fun CameraScreen(
 
                     // Black at start-up until the camera's first frame, then a quick fade-in. Later switches
                     // are never covered: the held frame above moves to the new picture and fades out.
-                    if (!hasPlayedInitialPreviewTransition) {
+                    // Not under a held frame: fading both would dip through black instead of crossing to the live view.
+                    if (!hasPlayedInitialPreviewTransition && returnFrame == null) {
                         Box(
                             Modifier
                                 .fillMaxSize()

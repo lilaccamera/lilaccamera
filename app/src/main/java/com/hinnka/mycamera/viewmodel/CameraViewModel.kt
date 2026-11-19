@@ -2862,6 +2862,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // A new camera screen's preview must draw its own first frame before its cover lifts.
+    fun onPreviewViewGone() {
+        _previewFrameRendered.value = false
+    }
+
     fun onFirstPreviewFrame() {
         if (!_previewFrameRendered.value) PLog.i(THUMB_MOTION, "first preview frame")
         _previewFrameRendered.value = true
