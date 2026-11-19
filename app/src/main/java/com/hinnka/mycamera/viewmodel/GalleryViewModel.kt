@@ -28,7 +28,6 @@ import com.hinnka.mycamera.gallery.MediaType
 import com.hinnka.mycamera.gallery.PostEditGeometry
 import com.hinnka.mycamera.hdr.HdrGainmapStrength
 import com.hinnka.mycamera.hdr.UnifiedGainmapProducer
-import com.hinnka.mycamera.lut.creator.AiPhotoEvaluation
 import com.hinnka.mycamera.lut.BaselineColorCorrectionTarget
 import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.lut.LutInfo
@@ -40,7 +39,6 @@ import com.hinnka.mycamera.video.VideoColorMetadata
 import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.lut.getVideoExportOptions as resolveVideoExportOptions
 import com.hinnka.mycamera.lut.isVideoTransformerExportSupported
-import com.hinnka.mycamera.lut.creator.OpenAIApiClient
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.model.CameraPreset
 import com.hinnka.mycamera.model.ColorRecipeParams
@@ -84,7 +82,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import java.io.File
 import java.io.FileOutputStream
-import java.net.SocketException
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -388,8 +385,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
     private val gridThumbnailSemaphore = Semaphore(4)
-
-    private val aiEvaluationCache = mutableMapOf<String, AiPhotoEvaluation>()
 
     // 可用的 LUT 列表
     var availableLuts: List<LutInfo> by mutableStateOf(emptyList())
@@ -4587,60 +4582,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 null
             }
         }
-    }
-
-    suspend fun evaluatePhotoWithAi(photo: MediaData): Result<AiPhotoEvaluation> = withContext(Dispatchers.IO) {
-        try {
-            val cacheKey = aiEvaluationCacheKey(photo)
-            aiEvaluationCache[cacheKey]?.let {
-                return@withContext Result.success(it)
-            }
-
-            val bitmap = getPreviewBitmap(
-                photo = photo,
-                showOrigin = false,
-                ignoreDenoise = true,
-                maxEdge = 1024
-            ) ?: return@withContext Result.failure(IllegalStateException("Unable to load photo preview"))
-
-            val context = getApplication<Application>()
-            val client = OpenAIApiClient()
-            client.initialize(context)
-            val result = client.evaluateImageQuality(
-                bitmap = bitmap,
-                localeTag = Locale.getDefault().toLanguageTag()
-            )
-            result.onSuccess { aiEvaluationCache[cacheKey] = it }
-            result.onFailure {
-                if (it is SocketException) {
-                    PLog.w(TAG, "AI photo evaluation request failed", it)
-                } else {
-                    PLog.e(TAG, "AI photo evaluation request failed", it)
-                }
-            }
-            result
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            PLog.e(TAG, "Failed to evaluate photo with AI", e)
-            Result.failure(e)
-        }
-    }
-
-    private fun aiEvaluationCacheKey(photo: MediaData): String {
-        val metadata = photo.metadata ?: photo.relatedPhoto?.metadata
-        return listOf(
-            photo.id,
-            photo.uri.toString(),
-            photo.sourceUri?.toString().orEmpty(),
-            photo.thumbnailUri.toString(),
-            photo.displayName,
-            photo.dateAdded.toString(),
-            photo.size.toString(),
-            photo.width.toString(),
-            photo.height.toString(),
-            photo.mimeType.orEmpty(),
-            metadata?.hashCode()?.toString().orEmpty()
-        ).joinToString("|")
     }
 
     fun shouldPrioritizeDetailBitmap(photo: MediaData): Boolean {

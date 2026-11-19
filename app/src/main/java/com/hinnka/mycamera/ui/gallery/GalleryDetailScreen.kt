@@ -1,13 +1,11 @@
 package com.hinnka.mycamera.ui.gallery
 
 import com.hinnka.mycamera.raw.RawPhotonHdrMetadata
-import com.hinnka.mycamera.ui.prefs.preferenceValue
 import com.hinnka.mycamera.data.UserPreferences
 import com.hinnka.mycamera.ui.prefs.rememberPreference
 import com.hinnka.mycamera.ui.components.AppModalBottomSheet
 import android.app.Activity
 import android.content.Context
-import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.graphics.ColorSpace
 import android.net.Uri
@@ -89,8 +87,6 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import coil.request.ImageRequest
 import coil.compose.AsyncImage
 import com.hinnka.mycamera.hdr.HdrGainmapStrength
-import com.hinnka.mycamera.lut.creator.AiPhotoCriterion
-import com.hinnka.mycamera.lut.creator.AiPhotoEvaluation
 import com.hinnka.mycamera.lut.isVideoTransformerExportSupported
 import com.hinnka.mycamera.lut.VideoExportOption
 import com.hinnka.mycamera.lut.VideoExportResolution
@@ -98,7 +94,6 @@ import com.hinnka.mycamera.lut.VideoExportSupport
 import com.hinnka.mycamera.lut.VideoLutEffect
 import com.hinnka.mycamera.ui.camera.autoRotate
 import com.hinnka.mycamera.ui.components.CustomSlider
-import com.hinnka.mycamera.ui.components.PaymentDialog
 import com.hinnka.mycamera.ui.components.PhysicalButton
 import com.hinnka.mycamera.ui.components.ProcessingPhotoPreview
 import com.hinnka.mycamera.utils.DeviceUtil
@@ -235,8 +230,6 @@ fun GalleryDetailScreen(
     var isLoadingVideoExportOptions by remember { mutableStateOf(false) }
     val isSharing by viewModel.isSharing.collectAsState()
     val hasCopiedEditSettings by viewModel.hasCopiedEditSettings.collectAsState()
-    val isPurchased by viewModel.isPurchased.collectAsState()
-    var showAiScoreSheet by remember { mutableStateOf(false) }
     var showMoreSheet by remember { mutableStateOf(false) }
     var showRenderAgainSheet by remember { mutableStateOf(false) }
     var isRenderingAgain by remember { mutableStateOf(false) }
@@ -404,7 +397,6 @@ fun GalleryDetailScreen(
             showVideoExportConfirmDialog = false
             showMoreSheet = false
             showRenderAgainSheet = false
-            showAiScoreSheet = false
             showHdrStrengthPanel = false
         }
     }
@@ -583,7 +575,7 @@ fun GalleryDetailScreen(
                         IconButton(onClick = { onViewBurst?.invoke(currentPhoto.id) }, modifier = Modifier.autoRotate()) {
                             Icon(
                                 imageVector = AppIcons.BurstMode,
-                                contentDescription = "查看连拍照片", // 连拍照片
+                                contentDescription = stringResource(R.string.gallery_view_burst),
                                 tint = Color.White
                             )
                         }
@@ -638,15 +630,6 @@ fun GalleryDetailScreen(
                     )
                 },
                 groupedActions = {
-                    if (currentPhoto?.isImage == true) {
-                        GalleryGroupedActionButton(
-                            icon = AppIcons.AutoAwesome,
-                            contentDescription = stringResource(R.string.gallery_ai_analysis),
-                            enabled = !isCurrentPhotoProcessing,
-                            onClick = { showAiScoreSheet = true }
-                        )
-                    }
-
                     if (currentPhoto?.isImage == true || currentPhoto?.isVideo == true) {
                         GalleryGroupedActionButton(
                             icon = Icons.Default.Edit,
@@ -1350,30 +1333,6 @@ fun GalleryDetailScreen(
         )
     }
 
-    // AI 评分 BottomSheet
-    if (showAiScoreSheet && currentPhoto != null && currentPhoto.isImage && !isCurrentPhotoProcessing) {
-        AiScoreBottomSheet(
-            photo = currentPhoto,
-            viewModel = viewModel,
-            isPurchased = isPurchased,
-            onPurchase = { viewModel.showPaymentDialog = true },
-            onDismissRequest = { showAiScoreSheet = false }
-        )
-    }
-
-    if (viewModel.showPaymentDialog) {
-        val activity = context.findActivity()
-        PaymentDialog(
-            onDismiss = { viewModel.showPaymentDialog = false },
-            onPurchase = {
-                if (activity != null) {
-                    viewModel.purchase(activity)
-                }
-                viewModel.showPaymentDialog = false
-            }
-        )
-    }
-
     // 更多 BottomSheet
     if (showMoreSheet && currentPhoto != null && !isCurrentPhotoProcessing) {
         val moreSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1646,498 +1605,6 @@ fun GalleryDetailScreen(
             onDismissRequest = { showRenderAgainSheet = false }
         )
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AiScoreBottomSheet(
-    photo: MediaData,
-    viewModel: GalleryViewModel,
-    isPurchased: Boolean,
-    onPurchase: () -> Unit,
-    onDismissRequest: () -> Unit
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var requestToken by remember(photo.id) { mutableIntStateOf(0) }
-    var uiState by remember(photo.id) { mutableStateOf<AiEvaluationUiState>(AiEvaluationUiState.Loading) }
-
-    val openAIKey by preferenceValue { it.openAIApiKey }
-    val canEvaluate = isPurchased || !openAIKey.isNullOrBlank()
-
-    LaunchedEffect(photo.id, requestToken, canEvaluate) {
-        if (!canEvaluate) return@LaunchedEffect
-        uiState = AiEvaluationUiState.Loading
-        uiState = viewModel.evaluatePhotoWithAi(photo).fold(
-            onSuccess = { AiEvaluationUiState.Success(it) },
-            onFailure = { AiEvaluationUiState.Error(it) }
-        )
-    }
-
-    AppModalBottomSheet(
-        containerColor = AiEditorialBackground,
-        onDismissRequest = onDismissRequest,
-        sheetState = sheetState,
-        dragHandle = {
-            BottomSheetDefaults.DragHandle(color = AiEditorialOnSurface.copy(alpha = 0.28f))
-        }
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(bottom = 36.dp, start = 20.dp, end = 20.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 24.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(R.string.gallery_ai_quality_title),
-                        color = AiEditorialOnSurface,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(modifier = Modifier.height(5.dp))
-                    Text(
-                        text = stringResource(R.string.gallery_ai_editorial_framework),
-                        color = AiEditorialAccent,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp
-                    )
-                }
-                IconButton(onClick = onDismissRequest) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = stringResource(R.string.cancel),
-                        tint = AiEditorialOnSurface.copy(alpha = 0.62f)
-                    )
-                }
-            }
-
-            if (!canEvaluate) {
-                Text(
-                    text = stringResource(R.string.gallery_ai_premium_required),
-                    color = AiEditorialOnSurface.copy(alpha = 0.68f),
-                    fontSize = 15.sp,
-                    lineHeight = 22.sp,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                Button(
-                    onClick = onPurchase,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AccentColor,
-                        contentColor = OnAccentColor
-                    )
-                ) {
-                    Text(
-                        text = stringResource(R.string.billing_premium_get_access),
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                return@Column
-            }
-
-            when (val state = uiState) {
-                AiEvaluationUiState.Loading -> {
-                    AiScoreLoading()
-                }
-
-                is AiEvaluationUiState.Error -> {
-                    AiScoreError(onRetry = { requestToken += 1 })
-                }
-
-                is AiEvaluationUiState.Success -> {
-                    AiScoreReview(evaluation = state.evaluation)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AiScoreLoading() {
-    Surface(
-        color = AiEditorialSurface,
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, AiEditorialOnSurface.copy(alpha = 0.08f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(vertical = 44.dp, horizontal = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            CircularProgressIndicator(
-                color = AiEditorialAccent,
-                modifier = Modifier.size(30.dp),
-                strokeWidth = 3.dp
-            )
-            Spacer(modifier = Modifier.height(18.dp))
-            Text(
-                text = stringResource(R.string.gallery_ai_analyzing),
-                color = AiEditorialOnSurface,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = stringResource(R.string.gallery_ai_analyzing_description),
-                color = AiEditorialOnSurface.copy(alpha = 0.5f),
-                fontSize = 13.sp,
-                lineHeight = 19.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun AiScoreError(onRetry: () -> Unit) {
-    Surface(
-        color = AiEditorialSurface,
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, AiEditorialOnSurface.copy(alpha = 0.08f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Icon(
-                imageVector = Icons.Default.Info,
-                contentDescription = null,
-                tint = Color(0xFFD98270),
-                modifier = Modifier.size(30.dp)
-            )
-            Spacer(modifier = Modifier.height(14.dp))
-            Text(
-                text = stringResource(R.string.gallery_ai_analysis_failed),
-                color = AiEditorialOnSurface,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = stringResource(R.string.gallery_ai_analysis_failed_description),
-                color = AiEditorialOnSurface.copy(alpha = 0.55f),
-                fontSize = 13.sp,
-                lineHeight = 19.sp
-            )
-            Spacer(modifier = Modifier.height(14.dp))
-            TextButton(onClick = onRetry) {
-                Text(
-                    text = stringResource(R.string.lut_creator_try_again),
-                    color = AiEditorialAccent,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun AiScoreReview(evaluation: AiPhotoEvaluation) {
-    val score = evaluation.overallScore
-    val scoreColor = aiScoreColor(score)
-    val rankText = when {
-        score >= 90 -> stringResource(R.string.gallery_ai_rank_excellent_plus)
-        score >= 82 -> stringResource(R.string.gallery_ai_rank_excellent)
-        score >= 74 -> stringResource(R.string.gallery_ai_rank_good)
-        score >= 65 -> stringResource(R.string.gallery_ai_rank_pass)
-        else -> stringResource(R.string.gallery_ai_rank_needs_work)
-    }
-    val animatedProgress by animateFloatAsState(
-        targetValue = score / 100f,
-        animationSpec = tween(1200, easing = FastOutSlowInEasing),
-        label = "overallScoreProgress"
-    )
-    val animatedScore by animateIntAsState(
-        targetValue = score,
-        animationSpec = tween(1200, easing = FastOutSlowInEasing),
-        label = "overallScore"
-    )
-
-    Surface(
-        color = AiEditorialSurface,
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, AiEditorialOnSurface.copy(alpha = 0.08f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(22.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(R.string.gallery_ai_score_label),
-                        color = AiEditorialOnSurface.copy(alpha = 0.48f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.1.sp
-                    )
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text(
-                            text = animatedScore.toString(),
-                            color = scoreColor,
-                            fontSize = 56.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            lineHeight = 58.sp
-                        )
-                        Text(
-                            text = stringResource(R.string.gallery_ai_score_out_of),
-                            color = AiEditorialOnSurface.copy(alpha = 0.42f),
-                            fontSize = 14.sp,
-                            modifier = Modifier.padding(bottom = 9.dp, start = 4.dp)
-                        )
-                    }
-                }
-                Surface(
-                    color = scoreColor.copy(alpha = 0.12f),
-                    shape = CircleShape,
-                    border = BorderStroke(1.dp, scoreColor.copy(alpha = 0.28f))
-                ) {
-                    Text(
-                        text = rankText,
-                        color = scoreColor,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-            LinearProgressIndicator(
-                progress = { animatedProgress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(5.dp)
-                    .clip(CircleShape),
-                color = scoreColor,
-                trackColor = AiEditorialOnSurface.copy(alpha = 0.08f),
-                strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
-            )
-            Spacer(modifier = Modifier.height(22.dp))
-            HorizontalDivider(color = AiEditorialOnSurface.copy(alpha = 0.08f))
-            Spacer(modifier = Modifier.height(18.dp))
-            Text(
-                text = evaluation.verdict,
-                color = AiEditorialOnSurface.copy(alpha = 0.88f),
-                fontSize = 16.sp,
-                lineHeight = 24.sp
-            )
-        }
-    }
-
-    Spacer(modifier = Modifier.height(12.dp))
-    AiEditorialCallout(
-        title = stringResource(R.string.gallery_ai_strength),
-        text = evaluation.strength,
-        icon = AppIcons.AutoAwesome,
-        accent = AiEditorialAccent
-    )
-    Spacer(modifier = Modifier.height(10.dp))
-    AiEditorialCallout(
-        title = stringResource(R.string.gallery_ai_next_step),
-        text = evaluation.improvement,
-        icon = AppIcons.AutoMirroredArrowRight,
-        accent = Color(0xFF8FAEA3)
-    )
-
-    Spacer(modifier = Modifier.height(28.dp))
-    Text(
-        text = stringResource(R.string.gallery_ai_criteria_title),
-        color = AiEditorialOnSurface,
-        fontSize = 17.sp,
-        fontWeight = FontWeight.SemiBold
-    )
-    Spacer(modifier = Modifier.height(5.dp))
-    Text(
-        text = stringResource(R.string.gallery_ai_criteria_description),
-        color = AiEditorialOnSurface.copy(alpha = 0.48f),
-        fontSize = 12.sp,
-        lineHeight = 18.sp
-    )
-    Spacer(modifier = Modifier.height(14.dp))
-
-    val criteria = listOf(
-        stringResource(R.string.gallery_ai_criterion_visual_impact) to
-            evaluation.scores.visualImpact,
-        stringResource(R.string.gallery_ai_criterion_originality_voice) to
-            evaluation.scores.originalityAndVoice,
-        stringResource(R.string.gallery_ai_criterion_narrative_meaning) to
-            evaluation.scores.narrativeAndMeaning,
-        stringResource(R.string.gallery_ai_criterion_intent_coherence) to
-            evaluation.scores.intentAndCoherence,
-        stringResource(R.string.gallery_ai_criterion_aesthetic_technical) to
-            evaluation.scores.aestheticAndTechnicalExecution
-    )
-    criteria.forEachIndexed { index, (label, criterion) ->
-        AiScoreCriterionCard(
-            index = index + 1,
-            label = label,
-            criterion = criterion
-        )
-        if (index != criteria.lastIndex) {
-            Spacer(modifier = Modifier.height(10.dp))
-        }
-    }
-
-    Spacer(modifier = Modifier.height(18.dp))
-    Text(
-        text = stringResource(R.string.gallery_ai_scale_note),
-        color = AiEditorialOnSurface.copy(alpha = 0.38f),
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
-        modifier = Modifier.padding(horizontal = 4.dp)
-    )
-}
-
-@Composable
-private fun AiEditorialCallout(
-    title: String,
-    text: String,
-    icon: ImageVector,
-    accent: Color
-) {
-    Surface(
-        color = accent.copy(alpha = 0.08f),
-        shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, accent.copy(alpha = 0.18f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier.padding(17.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = accent,
-                modifier = Modifier
-                    .padding(top = 1.dp)
-                    .size(19.dp)
-            )
-            Spacer(modifier = Modifier.width(13.dp))
-            Column {
-                Text(
-                    text = title,
-                    color = accent,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.8.sp
-                )
-                Spacer(modifier = Modifier.height(5.dp))
-                Text(
-                    text = text,
-                    color = AiEditorialOnSurface.copy(alpha = 0.78f),
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun AiScoreCriterionCard(
-    index: Int,
-    label: String,
-    criterion: AiPhotoCriterion
-) {
-    val color = aiScoreColor(criterion.score)
-    val animatedProgress by animateFloatAsState(
-        targetValue = criterion.score / 100f,
-        animationSpec = tween(
-            durationMillis = 900,
-            delayMillis = index * 90,
-            easing = FastOutSlowInEasing
-        ),
-        label = "criterionScore$index"
-    )
-
-    Surface(
-        color = AiEditorialSurface,
-        shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, AiEditorialOnSurface.copy(alpha = 0.07f)),
-        modifier = Modifier
-            .fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(17.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = index.toString().padStart(2, '0'),
-                    color = AiEditorialAccent.copy(alpha = 0.72f),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp,
-                    modifier = Modifier.width(30.dp)
-                )
-                Text(
-                    text = label,
-                    color = AiEditorialOnSurface.copy(alpha = 0.86f),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = criterion.score.toString(),
-                    color = color,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .background(AiEditorialOnSurface.copy(alpha = 0.08f), CircleShape)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .fillMaxWidth(animatedProgress)
-                        .background(color, CircleShape)
-                )
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = criterion.feedback,
-                color = AiEditorialOnSurface.copy(alpha = 0.58f),
-                fontSize = 13.sp,
-                lineHeight = 19.sp
-            )
-        }
-    }
-}
-
-private val AiEditorialBackground = Color(0xFF11110F)
-private val AiEditorialSurface = Color(0xFF1A1A17)
-private val AiEditorialOnSurface = Color(0xFFF3EFE7)
-private val AiEditorialAccent = Color(0xFFE7904F)
-
-private fun aiScoreColor(score: Int): Color =
-    when {
-        score >= 90 -> Color(0xFFF0C96B)
-        score >= 82 -> AiEditorialAccent
-        score >= 74 -> Color(0xFFD7A36D)
-        score >= 65 -> Color(0xFFB8B2A7)
-        else -> Color(0xFFD98270)
-    }
-
-private sealed class AiEvaluationUiState {
-    object Loading : AiEvaluationUiState()
-    data class Success(val evaluation: AiPhotoEvaluation) : AiEvaluationUiState()
-    data class Error(val error: Throwable) : AiEvaluationUiState()
 }
 
 @Composable
@@ -2514,15 +1981,6 @@ private fun resolveUriSize(context: Context, uri: Uri): Long {
     }
 
     return 0L
-}
-
-private fun Context.findActivity(): Activity? {
-    var currentContext = this
-    while (currentContext is ContextWrapper) {
-        if (currentContext is Activity) return currentContext
-        currentContext = currentContext.baseContext
-    }
-    return null
 }
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)

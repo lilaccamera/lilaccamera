@@ -2161,4 +2161,8 @@
     <string name="editor_shallow_value">Shallow %1$d</string>
     <string name="editor_deep_value">Deep %1$d</string>
     <string name="editor_explain_depth_of_field">How much around the focus stays sharp: Shallow keeps a thin slice sharp, Deep keeps more in focus. Auto picks it from the depth at the focus point. The aperture sets how strong the blur is.</string>
+    <string name="burst_use_as_cover">Use as cover</string>
+    <string name="burst_cover_set">Cover set</string>
+    <string name="burst_cover_failed">Couldn’t set the cover</string>
+    <string name="gallery_view_burst">View burst</string>
 </resources>

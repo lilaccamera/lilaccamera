@@ -166,7 +166,7 @@ fun BurstDetailScreen(
                         )
                     }*/
 
-                    // 设为主图
+                    // Use as cover
                     IconButton(
                         onClick = {
                             currentFile?.let { file ->
@@ -174,9 +174,9 @@ fun BurstDetailScreen(
                                 viewModel.setMainBurstPhoto(photoData, file) { success ->
                                     isSaving = false
                                     if (success) {
-                                        Toast.makeText(context, "设置成功", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, context.getString(R.string.burst_cover_set), Toast.LENGTH_SHORT).show()
                                     } else {
-                                        Toast.makeText(context, "设置失败", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, context.getString(R.string.burst_cover_failed), Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             }
@@ -194,7 +194,7 @@ fun BurstDetailScreen(
                         } else {
                             Icon(
                                 imageVector = if (isMainPhoto) Icons.Default.Star else AppIcons.StarBorder,
-                                contentDescription = "设为主图",
+                                contentDescription = stringResource(R.string.burst_use_as_cover),
                                 tint = if (isMainPhoto) AccentColor else Color.White
                             )
                         }
