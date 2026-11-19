@@ -121,6 +121,7 @@ import kotlin.coroutines.resume
 import kotlin.math.min
 import kotlin.math.roundToInt
 import com.hinnka.mycamera.ui.icons.AppIcons
+import kotlin.math.abs
 import kotlin.math.max
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
@@ -219,9 +220,9 @@ fun GalleryDetailScreen(
     onBack: () -> Unit = {},
     onGoToGallery: (() -> Unit)? = null,
     onGoToCamera: (() -> Unit)? = null,
-    // The viewfinder as the camera was left, shown dimmed behind the picture as a swipe down heads back to it.
+    // The viewfinder as the camera was left, shown dimmed behind the picture as a swipe up heads back to it.
     cameraFrame: HeldPreviewFrame? = null,
-    // true as a swipe down passes the point where it leaves, false if it then goes back short.
+    // true as a swipe up passes the point where it leaves, false if it then goes back short.
     onCameraWarmUp: (Boolean) -> Unit = {},
     onEdit: () -> Unit,
     onOpenRenderQueue: () -> Unit = {},
@@ -675,10 +676,11 @@ fun GalleryDetailScreen(
         else list.indexOfFirst { it.id == restored.id }.takeIf { it >= 0 }?.let(viewModel::setCurrentPhoto)
     }
 
-    // Swipe down leaves for the camera; only when not zoomed, so it never fights a pan.
-    val swipeDown = remember { Animatable(0f) }
-    val swipeDownEnabled = !isExpanded && !isZoomed && currentPhoto != null
-    LaunchedEffect(swipeDownEnabled) { if (!swipeDownEnabled) swipeDown.snapTo(0f) }
+    // The picture's vertical swipe offset: up (negative) leaves for the camera, down for the grid; only when not
+    // zoomed, so it never fights a pan.
+    val swipe = remember { Animatable(0f) }
+    val swipeEnabled = !isExpanded && !isZoomed && currentPhoto != null
+    LaunchedEffect(swipeEnabled) { if (!swipeEnabled) swipe.snapTo(0f) }
 
     val groundFade = with(LocalDensity.current) { 300.dp.toPx() }
     val heldImage = remember(cameraFrame) { cameraFrame?.bitmap?.asImageBitmap() }
@@ -687,9 +689,9 @@ fun GalleryDetailScreen(
             .fillMaxSize()
             .drawBehind {
                 drawRect(Color.Black)
-                // The black ground thins as the swipe goes down and the camera's dimmed frame shows through; only
+                // The black ground thins as the swipe goes up and the camera's dimmed frame shows through; only
                 // upright, where the frame's place matches the camera's. The full-screen viewer starts at the root.
-                val reveal = (swipeDown.value / groundFade).coerceIn(0f, 1f)
+                val reveal = (-swipe.value / groundFade).coerceIn(0f, 1f)
                 val frame = cameraFrame ?: return@drawBehind
                 if (reveal <= 0f || heldImage == null || size.width >= size.height) return@drawBehind
                 drawImage(
@@ -715,8 +717,8 @@ fun GalleryDetailScreen(
             PaddingValues(start = ViewerTopRowHeight + navLeft, end = ViewerItemRowHeight + ViewerActionRowHeight + navRight)
         } else null
         val fadeDistance = with(LocalDensity.current) { 160.dp.toPx() }
-        // The rows fade as the page follows a downward swipe.
-        val rowsFade = Modifier.graphicsLayer { alpha = (1f - swipeDown.value / fadeDistance).coerceIn(0f, 1f) }
+        // The rows fade as the page follows a swipe.
+        val rowsFade = Modifier.graphicsLayer { alpha = (1f - abs(swipe.value) / fadeDistance).coerceIn(0f, 1f) }
         if (photos.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
@@ -730,30 +732,39 @@ fun GalleryDetailScreen(
                     state = pagerState,
                     // Keyed by stack: a re-render or a deleted version changes the tile, not the page.
                     key = { page -> if (page < photos.size) PhotoStacks.stackIdOf(photos[page]) else page },
-                    // The swipe-down handler sits outside the page's moving layer, so it reads the finger, not the page.
+                    // The swipe handler sits outside the page's moving layer, so it reads the finger, not the page.
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(swipeDownEnabled) {
-                            if (!swipeDownEnabled) return@pointerInput
+                        .pointerInput(swipeEnabled) {
+                            if (!swipeEnabled) return@pointerInput
                             val leaveAt = 110.dp.toPx()
                             // The camera opens once the swipe would leave, not at its start, so a short look does
                             // not open and close it.
                             var warmed = false
+                            // The drag's direction, set by its first movement; a drag that turns back stops at
+                            // the start line rather than switching to the other way out.
+                            var up: Boolean? = null
+                            var offset = 0f
                             fun settle() {
                                 if (warmed) onCameraWarmUp(false)
                                 warmed = false
-                                scope.launch { swipeDown.animateTo(0f, spring()) }
+                                scope.launch { swipe.animateTo(0f, spring()) }
                             }
                             detectVerticalDragGestures(
+                                onDragStart = {
+                                    // A drag caught during a spring back goes on from where the picture is.
+                                    offset = swipe.value
+                                    up = if (offset != 0f) offset < 0f else null
+                                },
                                 onDragEnd = {
-                                    if (swipeDown.value > leaveAt) {
+                                    if (abs(offset) > leaveAt) {
                                         warmed = false
-                                        leaveDetail(onGoToCamera ?: onBack)
+                                        leaveDetail((if (up == true) onGoToCamera else onGoToGallery) ?: onBack)
                                         // The picture shrinks from where the finger left it; it springs back only
                                         // if the camera first asks about photos still stacking (this screen stays).
                                         scope.launch {
                                             delay(PHOTO_MORPH_MS.toLong())
-                                            swipeDown.animateTo(0f, spring())
+                                            swipe.animateTo(0f, spring())
                                         }
                                     } else {
                                         settle()
@@ -762,18 +773,20 @@ fun GalleryDetailScreen(
                                 onDragCancel = { settle() },
                             ) { change, dy ->
                                 change.consume()
-                                val next = (swipeDown.value + dy).coerceAtLeast(0f)
-                                if (!warmed && next > leaveAt) {
+                                if (up == null && dy != 0f) up = dy < 0f
+                                offset = if (up == true) (offset + dy).coerceAtMost(0f) else (offset + dy).coerceAtLeast(0f)
+                                val next = offset
+                                if (up == true && !warmed && -next > leaveAt) {
                                     warmed = true
                                     onCameraWarmUp(true)
                                 }
-                                scope.launch { swipeDown.snapTo(next) }
+                                scope.launch { swipe.snapTo(next) }
                             }
                         }
                         .graphicsLayer {
-                            translationY = swipeDown.value
+                            translationY = swipe.value
                             // The picture also shrinks as it follows the finger.
-                            val shrink = (1f - swipeDown.value / 600.dp.toPx()).coerceAtLeast(0.35f)
+                            val shrink = (1f - abs(swipe.value) / 600.dp.toPx()).coerceAtLeast(0.35f)
                             scaleX = shrink
                             scaleY = shrink
                         },
