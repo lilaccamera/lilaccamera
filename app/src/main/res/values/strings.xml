@@ -2277,4 +2277,9 @@
         <item quantity="one">%d deleted</item>
         <item quantity="other">%d deleted</item>
     </plurals>
+    <plurals name="gallery_trashed_count">
+        <item quantity="one">%d moved to the trash</item>
+        <item quantity="other">%d moved to the trash</item>
+    </plurals>
+    <string name="gallery_trash_restore_cancelled">Still in the trash</string>
 </resources>

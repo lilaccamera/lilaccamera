@@ -246,6 +246,8 @@ fun GalleryScreen(
         }
     }
 
+    TrashRestoreDialog(viewModel)
+
     // The shown tiles a delete asks about, while its sheet is open.
     var deleteSheet by remember { mutableStateOf<List<MediaData>?>(null) }
     var deleteExportedPref by rememberPreference(UserPreferences::deleteExported)
@@ -1751,5 +1753,21 @@ private fun MediaData.galleryAspectRatio(isLandscape: Boolean): Float {
         }
     } else {
         1f
+    }
+}
+
+/** Launches the system's restore-from-trash dialog that an Undo of a system-tab delete asks for. */
+@Composable
+internal fun TrashRestoreDialog(viewModel: GalleryViewModel, onDone: (restored: MediaData?) -> Unit = {}) {
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        viewModel.finishTrashRestore(result.resultCode == Activity.RESULT_OK, onDone)
+    }
+    LaunchedEffect(viewModel.trashRestoreIntent) {
+        val intent = viewModel.trashRestoreIntent ?: return@LaunchedEffect
+        try {
+            launcher.launch(IntentSenderRequest.Builder(intent.intentSender).build())
+        } catch (e: Exception) {
+            viewModel.finishTrashRestore(false, onDone)
+        }
     }
 }

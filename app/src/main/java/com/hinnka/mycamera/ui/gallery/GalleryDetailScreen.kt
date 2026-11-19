@@ -327,12 +327,9 @@ fun GalleryDetailScreen(
     val systemDeletePhotoLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
+        // The viewer leaves an emptied list once the Undo that follows is over.
         if (result.resultCode == Activity.RESULT_OK) {
-            viewModel.deleteSystemPhotoAfterConfirmation { success ->
-                if (success && viewModel.currentPhotos.value.isEmpty()) {
-                    onBack()
-                }
-            }
+            viewModel.deleteSystemPhotoAfterConfirmation()
         } else {
             viewModel.clearDeleteRequest()
         }
@@ -670,6 +667,12 @@ fun GalleryDetailScreen(
     var undoOffered by remember { mutableStateOf(false) }
     LaunchedEffect(viewModel.pendingDelete) {
         if (viewModel.pendingDelete != null) undoOffered = true else if (undoOffered && photos.isEmpty()) onBack()
+    }
+    // Back to the restored item; a cancelled restore leaves an emptied list, as the delete would have.
+    TrashRestoreDialog(viewModel) { restored ->
+        val list = viewModel.currentPhotos.value
+        if (restored == null) { if (list.isEmpty()) onBack() }
+        else list.indexOfFirst { it.id == restored.id }.takeIf { it >= 0 }?.let(viewModel::setCurrentPhoto)
     }
 
     // Swipe down leaves for the camera; only when not zoomed, so it never fights a pan.
@@ -1278,6 +1281,8 @@ fun GalleryDetailScreen(
             message = viewModel.pendingDelete?.message,
             restartKey = viewModel.pendingDelete,
             onUndo = {
+                // An Undo never leaves the viewer, even while a restore from the trash is still to come.
+                undoOffered = false
                 // Back to the restored item: the shown one is listed first.
                 viewModel.undoPendingDelete()?.photos?.firstOrNull()?.let { restored ->
                     allPhotos.indexOfFirst { it.id == restored.id }.takeIf { it >= 0 }?.let(viewModel::setCurrentPhoto)

@@ -2292,14 +2292,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      */
     fun deleteSystemPhotoAfterConfirmation(onComplete: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
-            pendingDeleteSystemPhoto?.relatedPhoto?.takeIf { it.isVideo }?.let { relatedVideo ->
-                withContext(Dispatchers.IO) {
-                    GalleryManager.deletePhotoOnly(getApplication(), relatedVideo.id)
-                }
-                removePhotonPhotosFromState(setOf(relatedVideo.id))
-                loadPhotosInternal()
+            pendingDeleteSystemPhoto?.let {
+                offerTrashUndo(listOf(it))
+                removeSystemPhotosFromState(setOf(it.id))
             }
-            pendingDeleteSystemPhoto?.let { removeSystemPhotosFromState(setOf(it.id)) }
             // 系统照片已经被 MediaStore 删除，我们只需要刷新列表
             loadSystemPhotosInternal()
 
@@ -2485,7 +2481,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * frame of the burst photo in [photos]. Nothing is deleted before [commitPendingDelete]; if the app dies
      * first, the files stay.
      */
-    class PendingDelete(val photos: List<MediaData>, val burstFrame: File?, val message: String)
+    class PendingDelete(val photos: List<MediaData>, val burstFrame: File?, val message: String, val trashed: Boolean = false) {
+        /** Lilac's records behind system items in the trash (a captured video's), kept until Undo is over. */
+        val trashedRecords: List<MediaData> get() = if (trashed) photos.mapNotNull { it.relatedPhoto }.filter { it.isVideo } else emptyList()
+        /** What the lists leave out meanwhile; trashed system items are already gone from them. */
+        val hiddenIds: Set<String> get() = (if (trashed) trashedRecords else photos).map { it.id }.toSet()
+    }
 
     var pendingDelete by mutableStateOf<PendingDelete?>(null)
         private set
@@ -2497,10 +2498,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private var pendingDeleteJob: Job? = null
 
     /** Deletes app-owned [photos] (or one [burstFrame]) after a 5 s Undo window; an earlier pending delete goes now. */
-    fun deleteWithUndo(photos: List<MediaData>, burstFrame: File?, message: String) {
+    fun deleteWithUndo(photos: List<MediaData>, burstFrame: File?, message: String, trashed: Boolean = false) {
         commitPendingDelete()
-        if (burstFrame != null) hiddenBurstFrames += burstFrame else hiddenPhotoIds += photos.map { it.id }
-        pendingDelete = PendingDelete(photos, burstFrame, message)
+        val pending = PendingDelete(photos, burstFrame, message, trashed)
+        if (burstFrame != null) hiddenBurstFrames += burstFrame else hiddenPhotoIds += pending.hiddenIds
+        pendingDelete = pending
         pendingDeleteJob = viewModelScope.launch {
             delay(5_000)
             commitPendingDelete()
@@ -2512,9 +2514,59 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         pendingDeleteJob?.cancel()
         pendingDeleteJob = null
         pendingDelete = null
-        if (pending.burstFrame != null) hiddenBurstFrames -= pending.burstFrame
-        else hiddenPhotoIds -= pending.photos.map { it.id }.toSet()
+        when {
+            pending.trashed -> requestTrashRestore(pending)
+            pending.burstFrame != null -> hiddenBurstFrames -= pending.burstFrame
+            else -> hiddenPhotoIds -= pending.hiddenIds
+        }
         return pending
+    }
+
+    /** After system items went to the trash: the same Undo, which asks the system to restore them. */
+    private fun offerTrashUndo(photos: List<MediaData>) {
+        val app = getApplication<Application>()
+        deleteWithUndo(photos, null, app.resources.getQuantityString(R.plurals.gallery_trashed_count, photos.size, photos.size), trashed = true)
+    }
+
+    /** The system's restore-from-trash dialog for an Undo; the UI launches it and reports to [finishTrashRestore]. */
+    var trashRestoreIntent by mutableStateOf<android.app.PendingIntent?>(null)
+        private set
+    private var trashRestore: PendingDelete? = null
+
+    private fun requestTrashRestore(pending: PendingDelete) {
+        viewModelScope.launch {
+            val uris = pending.photos.map { it.uri }.filter { it.scheme == "content" }
+            val intent = withContext(Dispatchers.IO) {
+                runCatching { MediaStore.createTrashRequest(getApplication<Application>().contentResolver, uris, false) }
+                    .onFailure { PLog.e(TAG, "Failed to create trash restore request", it) }.getOrNull()
+            }
+            trashRestore = pending
+            // Without a dialog to ask, the items stay in the trash.
+            if (intent != null) trashRestoreIntent = intent else finishTrashRestore(false)
+        }
+    }
+
+    /** The restore dialog's answer: back in the list, or still in the trash, and then Lilac's records go as before. */
+    fun finishTrashRestore(restored: Boolean, onDone: (restored: MediaData?) -> Unit = {}) {
+        val pending = trashRestore ?: return
+        trashRestore = null
+        trashRestoreIntent = null
+        if (restored) {
+            hiddenPhotoIds -= pending.hiddenIds
+            viewModelScope.launch {
+                loadSystemPhotosInternal()
+                onDone(pending.photos.firstOrNull())
+            }
+        } else {
+            Toast.makeText(getApplication(), R.string.gallery_trash_restore_cancelled, Toast.LENGTH_SHORT).show()
+            deleteTrashedRecords(pending)
+            onDone(null)
+        }
+    }
+
+    private fun deleteTrashedRecords(pending: PendingDelete) {
+        val ids = pending.hiddenIds
+        deleteBatchPhotosOnlyInternal(pending.trashedRecords, exitSelection = false) { hiddenPhotoIds -= ids }
     }
 
     /** Runs the pending delete now: its Undo window ended, or the viewer closed or went to the background. */
@@ -2529,6 +2581,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 withContext(Dispatchers.IO) { frame.delete() }
                 hiddenBurstFrames -= frame
             }
+        } else if (pending.trashed) {
+            deleteTrashedRecords(pending)
         } else {
             val ids = pending.photos.map { it.id }.toSet()
             // Hidden until gone from the list, so a deleted item never shows again for a moment.
@@ -2545,15 +2599,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             if (selectedTab == GalleryTab.SYSTEM) {
-                val relatedPhotonVideos = photos.mapNotNull { it.relatedPhoto }.filter { it.isVideo }
-                if (relatedPhotonVideos.isNotEmpty()) {
-                    val context = getApplication<Application>()
-                    withContext(Dispatchers.IO) {
-                        relatedPhotonVideos.forEach { GalleryManager.deletePhotoOnly(context, it.id) }
-                    }
-                    removePhotonPhotosFromState(relatedPhotonVideos.map { it.id }.toSet())
-                    loadPhotosInternal()
-                }
+                offerTrashUndo(photos)
                 removeSystemPhotosFromState(photos.map { it.id }.toSet())
                 // 系统相册刷新
                 loadSystemPhotosInternal()
