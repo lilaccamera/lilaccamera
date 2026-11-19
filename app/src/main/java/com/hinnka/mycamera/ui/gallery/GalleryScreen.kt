@@ -33,12 +33,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -102,6 +99,19 @@ import androidx.recyclerview.widget.DiffUtil
 import android.os.Parcelable
 import kotlin.math.abs
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.hinnka.mycamera.ui.components.HaloIcon
+import com.hinnka.mycamera.ui.components.HaloText
+import com.hinnka.mycamera.ui.components.HideNavigationBar
+import com.hinnka.mycamera.ui.components.SonyText
+import com.hinnka.mycamera.ui.components.SonyDivider
+import com.hinnka.mycamera.ui.settings.rememberSettingsTick
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 
 /**
  * 相册浏览界面
@@ -150,6 +160,7 @@ fun GalleryScreen(
     val isBatchOperationRunning = isExporting || isPastingSettings
     val scope = rememberCoroutineScope()
     var shouldRenderGrid by rememberSaveable { mutableStateOf(false) }
+    val tick = rememberSettingsTick()
 
     BackHandler(enabled = isSelectionMode) {
         if (!isBatchOperationRunning) {
@@ -256,154 +267,9 @@ fun GalleryScreen(
 
 
 
+    // Immersive like the viewer, so the bars do not flash between the grid and a photo.
+    HideNavigationBar()
     Scaffold(
-        topBar = {
-            Column {
-                TopAppBar(
-                    modifier = Modifier,
-                    title = {
-                        if (isSelectionMode) {
-                            Text(
-                                text = stringResource(R.string.items_selected, selectedPhotos.size),
-                                color = Color.White
-                            )
-                        } else {
-                            Text(
-                                text = stringResource(R.string.gallery),
-                                color = Color.White,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(
-                            onClick = {
-                                if (isSelectionMode) {
-                                    viewModel.exitSelectionMode()
-                                } else {
-                                    onBack()
-                                }
-                            },
-                            enabled = !isBatchOperationRunning
-                        ) {
-                            Icon(
-                                imageVector = if (isSelectionMode) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = stringResource(R.string.back),
-                                tint = if (isBatchOperationRunning) {
-                                    Color.White.copy(alpha = 0.38f)
-                                } else {
-                                    Color.White
-                                }
-                            )
-                        }
-                    },
-                    actions = {
-                        if (isSelectionMode && selectedPhotos.isNotEmpty()) {
-                            IconButton(
-                                onClick = {
-                                    val ids = selectedPhotos.map { it.id }
-                                    scope.launch {
-                                        val sources = ids.mapNotNull { loadRenderAgainSource(context, it) }
-                                        if (sources.isEmpty()) {
-                                            Toast.makeText(context, R.string.render_again_not_eligible, Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            batchRenderAgain = BatchRenderAgain(
-                                                photoIds = ids,
-                                                eligibleCount = sources.size,
-                                                appLook = appRenderLook(context, sources.first().metadata.cameraId),
-                                            )
-                                        }
-                                    }
-                                },
-                                enabled = !isBatchOperationRunning
-                            ) {
-                                Icon(
-                                    imageVector = AppIcons.Tune,
-                                    contentDescription = stringResource(R.string.render_again),
-                                    tint = if (isBatchOperationRunning) {
-                                        Color.White.copy(alpha = 0.38f)
-                                    } else {
-                                        Color.White
-                                    }
-                                )
-                            }
-                        }
-                        if (isSelectionMode) {
-                            IconButton(
-                                onClick = {
-                                    val selectable = photos.filterNot { it.id in processingPhotos }
-                                    val allSelected = selectable.all { photo -> selectedPhotos.any { it.id == photo.id } }
-                                    if (allSelected) {
-                                        selectedPhotos.toList().forEach(viewModel::togglePhotoSelection)
-                                    } else {
-                                        selectable.filter { photo -> selectedPhotos.none { it.id == photo.id } }
-                                            .forEach(viewModel::togglePhotoSelection)
-                                    }
-                                },
-                                enabled = !isBatchOperationRunning
-                            ) {
-                                Icon(
-                                    imageVector = AppIcons.SelectAll,
-                                    contentDescription = stringResource(R.string.select_all),
-                                    tint = if (isBatchOperationRunning) {
-                                        Color.White.copy(alpha = 0.38f)
-                                    } else {
-                                        Color.White
-                                    }
-                                )
-                            }
-                        } else {
-                            IconButton(onClick = onRenderQueueClick) {
-                                BadgedBox(
-                                    badge = {
-                                        when {
-                                            // The "!" says it too, not only the error colour.
-                                            renderFailedIds.isNotEmpty() -> Badge { Text("!") }
-                                            renderPendingIds.isNotEmpty() -> Badge(containerColor = AccentColor) {
-                                                Text(renderPendingIds.size.toString(), color = OnAccentColor)
-                                            }
-                                        }
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = AppIcons.Layers,
-                                        contentDescription = stringResource(
-                                            R.string.render_queue_button_description,
-                                            renderPendingIds.size,
-                                            renderFailedIds.size,
-                                        ),
-                                        tint = Color.White
-                                    )
-                                }
-                            }
-                            IconButton(onClick = {
-                                launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
-                            }) {
-                                Icon(
-                                    imageVector = AppIcons.AddPhotoAlternate,
-                                    contentDescription = stringResource(R.string.import_photo),
-                                    tint = Color.White
-                                )
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Black
-                    )
-                )
-                if (!isSelectionMode) {
-                    GalleryTabRow(
-                        selectedTab = selectedTab,
-                        onTabSelected = { tab ->
-                            scope.launch {
-                                viewModel.selectTab(tab)
-                            }
-                        }
-                    )
-                }
-            }
-        },
         bottomBar = {
             // 多选模式下显示操作栏
             AnimatedVisibility(
@@ -616,6 +482,7 @@ fun GalleryScreen(
         containerColor = Color.Black,
         modifier = modifier
     ) { paddingValues ->
+        val pullState = rememberPullToRefreshState()
         PullToRefreshBox(
             isRefreshing = isLoading,
             onRefresh = {
@@ -623,7 +490,16 @@ fun GalleryScreen(
             },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
+                .padding(paddingValues),
+            state = pullState,
+            indicator = {
+                // Below the line floating over the grid.
+                PullToRefreshDefaults.Indicator(
+                    state = pullState,
+                    isRefreshing = isLoading,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 56.dp)
+                )
+            }
         ) {
             if (selectedTab == GalleryTab.SYSTEM && !hasPermission) {
                 // 权限缺失提示
@@ -652,7 +528,7 @@ fun GalleryScreen(
                             }
                             permissionLauncher.launch(permission)
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentColor)
+                        colors = ButtonDefaults.buttonColors(containerColor = SonyText, contentColor = Color.Black)
                     ) {
                         Text(stringResource(R.string.grant_permission))
                     }
@@ -676,7 +552,7 @@ fun GalleryScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator(
-                        color = AccentColor,
+                        color = SonyText,
                         modifier = Modifier.size(28.dp),
                         strokeWidth = 2.dp
                     )
@@ -707,6 +583,56 @@ fun GalleryScreen(
                     modifier = Modifier.fillMaxSize()
                 )
             }
+            GalleryTopLine(
+                isSelectionMode = isSelectionMode,
+                selectedCount = selectedPhotos.size,
+                enabled = !isBatchOperationRunning,
+                selectedTab = selectedTab,
+                onTabSelected = { tab ->
+                    if (tab != selectedTab) tick()
+                    scope.launch {
+                        viewModel.selectTab(tab)
+                    }
+                },
+                pendingCount = renderPendingIds.size,
+                failedCount = renderFailedIds.size,
+                onBack = {
+                    if (isSelectionMode) {
+                        viewModel.exitSelectionMode()
+                    } else {
+                        onBack()
+                    }
+                },
+                onRenderAgain = {
+                    val ids = selectedPhotos.map { it.id }
+                    scope.launch {
+                        val sources = ids.mapNotNull { loadRenderAgainSource(context, it) }
+                        if (sources.isEmpty()) {
+                            Toast.makeText(context, R.string.render_again_not_eligible, Toast.LENGTH_SHORT).show()
+                        } else {
+                            batchRenderAgain = BatchRenderAgain(
+                                photoIds = ids,
+                                eligibleCount = sources.size,
+                                appLook = appRenderLook(context, sources.first().metadata.cameraId),
+                            )
+                        }
+                    }
+                },
+                onSelectAll = {
+                    val selectable = photos.filterNot { it.id in processingPhotos }
+                    val allSelected = selectable.all { photo -> selectedPhotos.any { it.id == photo.id } }
+                    if (allSelected) {
+                        selectedPhotos.toList().forEach(viewModel::togglePhotoSelection)
+                    } else {
+                        selectable.filter { photo -> selectedPhotos.none { it.id == photo.id } }
+                            .forEach(viewModel::togglePhotoSelection)
+                    }
+                },
+                onRenderQueue = onRenderQueueClick,
+                onImport = {
+                    launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                }
+            )
         }
     }
 
@@ -842,33 +768,121 @@ fun GalleryScreen(
 /** The selection a batch re-render applies to; ineligible photos stay in [photoIds] to be counted as skipped. */
 private data class BatchRenderAgain(val photoIds: List<String>, val eligibleCount: Int, val appLook: RenderLook)
 
+/**
+ * The line floating over the grid, with no fill: back, the Lilac / System tabs, the render queue and import;
+ * while selecting, close, the count and the selection's actions.
+ */
 @Composable
-private fun GalleryTabRow(
+private fun GalleryTopLine(
+    isSelectionMode: Boolean,
+    selectedCount: Int,
+    enabled: Boolean,
     selectedTab: GalleryTab,
-    onTabSelected: (GalleryTab) -> Unit
+    onTabSelected: (GalleryTab) -> Unit,
+    pendingCount: Int,
+    failedCount: Int,
+    onBack: () -> Unit,
+    onRenderAgain: () -> Unit,
+    onSelectAll: () -> Unit,
+    onRenderQueue: () -> Unit,
+    onImport: () -> Unit,
 ) {
-    val selectedTabIndex = selectedTab.ordinal
-    TabRow(
-        selectedTabIndex = selectedTabIndex,
-        containerColor = Color.Black,
-        contentColor = Color.White,
-        indicator = { tabPositions ->
-            TabRowDefaults.SecondaryIndicator(
-                modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
-                color = AccentColor
-            )
-        }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Tab(
-            selected = selectedTab == GalleryTab.PHOTON,
-            onClick = { onTabSelected(GalleryTab.PHOTON) },
-            text = { Text(stringResource(R.string.gallery_photon)) }
+        LineButton(
+            if (isSelectionMode) AppIcons.CloseLine else AppIcons.ArrowLeftLine,
+            stringResource(R.string.back),
+            enabled,
+            onBack
         )
-        Tab(
-            selected = selectedTab == GalleryTab.SYSTEM,
-            onClick = { onTabSelected(GalleryTab.SYSTEM) },
-            text = { Text(stringResource(R.string.gallery_system)) }
-        )
+        if (isSelectionMode) {
+            Box(Modifier.padding(start = 4.dp)) {
+                HaloText(stringResource(R.string.items_selected, selectedCount), fontSize = 18.sp)
+            }
+            Spacer(Modifier.weight(1f))
+            if (selectedCount > 0) {
+                LineButton(AppIcons.SlidersLine, stringResource(R.string.render_again), enabled, onRenderAgain)
+            }
+            LineButton(AppIcons.ChecksLine, stringResource(R.string.select_all), enabled, onSelectAll)
+        } else {
+            GalleryTab.entries.forEach { tab ->
+                val chosen = tab == selectedTab
+                Box(
+                    Modifier
+                        .size(84.dp, 48.dp)
+                        .clickable(interactionSource = null, indication = null, role = Role.Tab) { onTabSelected(tab) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    HaloText(
+                        stringResource(if (tab == GalleryTab.PHOTON) R.string.gallery_photon else R.string.gallery_system),
+                        color = if (chosen) SonyText else Color(0xFFBDBDBD),
+                        letterSpacing = 0.3.sp
+                    )
+                    if (chosen) {
+                        Box(
+                            Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 6.dp)
+                                .size(37.dp, 3.dp)
+                                .background(SonyText, RoundedCornerShape(2.dp))
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            LineButton(
+                AppIcons.StackLine,
+                stringResource(R.string.render_queue_button_description, pendingCount, failedCount),
+                true,
+                onRenderQueue
+            ) {
+                val failed = failedCount > 0
+                if (failed || pendingCount > 0) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 6.dp, end = 6.dp)
+                            .height(16.dp)
+                            .widthIn(min = 16.dp)
+                            .background(if (failed) Color(TAG_FAILED_COLOR) else AccentColor, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // The "!" says it too, not only the error colour.
+                        Text(
+                            if (failed) "!" else pendingCount.toString(),
+                            color = if (failed) Color.White else OnAccentColor,
+                            fontSize = 10.5.sp,
+                            lineHeight = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+            LineButton(AppIcons.PhotoPlusLine, stringResource(R.string.import_photo), true, onImport)
+        }
+    }
+}
+
+/** A 48 dp icon button of the floating line; [badge] sits over its corner. */
+@Composable
+private fun LineButton(
+    icon: ImageVector,
+    description: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    badge: @Composable BoxScope.() -> Unit = {}
+) {
+    Box {
+        IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.semantics { contentDescription = description }) {
+            HaloIcon(icon, tint = if (enabled) SonyText else SonyText.copy(alpha = 0.38f))
+        }
+        badge()
     }
 }
 
@@ -921,7 +935,8 @@ private fun GalleryRecyclerGrid(
             modifier = modifier,
             factory = { context ->
                 val container = FrameLayout(context)
-                val spacingPx = (4f * context.resources.displayMetrics.density).toInt().coerceAtLeast(1)
+                val density = context.resources.displayMetrics.density
+                val spacingPx = (4f * density).toInt().coerceAtLeast(1)
                 val recyclerView = RecyclerView(context).apply {
                     layoutParams = FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
@@ -932,7 +947,8 @@ private fun GalleryRecyclerGrid(
                         // Restore state for this specific tab
                         currentScrollState?.let { onRestoreInstanceState(it) }
                     }
-                    setPadding(spacingPx / 2, spacingPx / 2, spacingPx / 2, spacingPx / 2)
+                    // The grid runs under the floating top line and starts below it at rest.
+                    setPadding(spacingPx / 2, (56 * density).toInt(), spacingPx / 2, (16 * density).toInt())
                     clipToPadding = false
                     overScrollMode = RecyclerView.OVER_SCROLL_NEVER
                     isVerticalScrollBarEnabled = false
@@ -957,12 +973,14 @@ private fun GalleryRecyclerGrid(
                     })
                 }
                 container.addView(recyclerView)
+                // Between the grid and the fast scroller, so the scroller stays crisp.
+                container.addView(GridFadeView(context))
 
                 val fastScroller = GalleryFastScrollerView(context, recyclerView).apply {
                     layoutParams = FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT
-                    )
+                    ).apply { topMargin = (56 * density).toInt() }
                 }
                 container.addView(fastScroller)
 
@@ -970,7 +988,8 @@ private fun GalleryRecyclerGrid(
             },
             update = { container ->
                 val recyclerView = container.getChildAt(0) as RecyclerView
-                val fastScroller = container.getChildAt(1) as GalleryFastScrollerView
+                (container.getChildAt(1) as GridFadeView).fadeBottom = isSelectionMode
+                val fastScroller = container.getChildAt(2) as GalleryFastScrollerView
                 val layoutManager = recyclerView.layoutManager as? StaggeredGridLayoutManager
                 if (layoutManager != null && layoutManager.spanCount != spanCount) {
                     layoutManager.spanCount = spanCount
@@ -1054,13 +1073,16 @@ private class GalleryFastScrollerView(
     private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0x29FFFFFF.toInt() // White with 0.16 alpha
     }
+    // The date pill is the viewer's filled pill.
     private val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.WHITE
+        color = SonyDivider.toArgb()
     }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.BLACK
-        textSize = 13 * density
-        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        color = SonyText.toArgb()
+        textSize = android.util.TypedValue.applyDimension(
+            android.util.TypedValue.COMPLEX_UNIT_SP, 14f, context.resources.displayMetrics
+        )
+        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         textAlign = Paint.Align.CENTER
     }
 
@@ -1137,10 +1159,10 @@ private class GalleryFastScrollerView(
             val label = dragLabel!!
             val textBounds = Rect()
             textPaint.getTextBounds(label, 0, label.length, textBounds)
-            val bubblePaddingH = 16 * density
-            val bubblePaddingV = 10 * density
+            val bubblePaddingH = 14 * density
+            val bubbleHeight = 40 * density
+            val bubblePaddingV = (bubbleHeight - textBounds.height()) / 2f
             val bubbleWidth = textBounds.width() + bubblePaddingH * 2
-            val bubbleHeight = textBounds.height() + bubblePaddingV * 2
             val bubbleRight = width - bubbleMargin.toFloat()
             val bubbleLeft = bubbleRight - bubbleWidth
             val bubbleCenterY = thumbTop + thumbHeight / 2f
@@ -1204,6 +1226,39 @@ private class GalleryFastScrollerView(
                 val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
                 sdf.format(java.util.Date(photo.dateAdded))
             }
+        }
+    }
+}
+
+/**
+ * Fades the grid into the black background under the floating line, and over the bottom while selecting.
+ * A black overlay on the black background looks the same as a mask on the grid, without an offscreen layer per frame.
+ */
+private class GridFadeView(context: Context) : View(context) {
+    private val dp = context.resources.displayMetrics.density
+    private val fadeHeight = 120 * dp
+    // The photos show at 20 %, 50 % and 85 % at the edge, at 40 dp and at 84 dp, and fully from 120 dp.
+    private val paint = Paint().apply {
+        shader = android.graphics.LinearGradient(
+            0f, 0f, 0f, fadeHeight,
+            intArrayOf(0xCC000000.toInt(), 0x80000000.toInt(), 0x26000000, 0),
+            floatArrayOf(0f, 40 * dp / fadeHeight, 84 * dp / fadeHeight, 1f),
+            Shader.TileMode.CLAMP
+        )
+    }
+    var fadeBottom = false
+        set(value) {
+            if (field != value) invalidate()
+            field = value
+        }
+
+    override fun onDraw(canvas: Canvas) {
+        canvas.drawRect(0f, 0f, width.toFloat(), fadeHeight, paint)
+        if (fadeBottom) {
+            canvas.save()
+            canvas.scale(1f, -1f, 0f, height / 2f)
+            canvas.drawRect(0f, 0f, width.toFloat(), fadeHeight, paint)
+            canvas.restore()
         }
     }
 }

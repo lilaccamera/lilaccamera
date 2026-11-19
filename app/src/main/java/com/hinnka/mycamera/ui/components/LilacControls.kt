@@ -59,6 +59,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -524,4 +526,58 @@ internal fun UndoBanner(
             }
         }
     }
+}
+
+// The tight dark halo that keeps icons and labels readable over pictures: blur in dp and black alpha per layer,
+// the last one a dp lower.
+private val HaloLayers = listOf(1f to 0.95f, 3f to 0.85f, 8f to 0.6f, 12f to 0.45f)
+
+/** Draws [content] over black, blurred copies of its own shape; below Android 12 [fallback] draws instead. */
+@Composable
+private fun Haloed(fallback: @Composable () -> Unit, content: @Composable () -> Unit) {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return fallback()
+    val density = LocalDensity.current.density
+    Box(contentAlignment = Alignment.Center) {
+        HaloLayers.forEachIndexed { i, (blurDp, alpha) ->
+            val effect = remember(density) {
+                // A CSS blur of b is a sigma of b / 2; the platform turns a radius r into a sigma of 0.577 r + 0.5.
+                val radius = ((blurDp * density / 2f - 0.5f) / 0.57735f).coerceAtLeast(0.5f)
+                android.graphics.RenderEffect.createBlurEffect(
+                    radius, radius,
+                    android.graphics.RenderEffect.createColorFilterEffect(
+                        android.graphics.PorterDuffColorFilter(
+                            android.graphics.Color.argb(alpha, 0f, 0f, 0f), android.graphics.PorterDuff.Mode.SRC_IN
+                        )
+                    ),
+                    android.graphics.Shader.TileMode.DECAL,
+                ).asComposeRenderEffect()
+            }
+            Box(
+                Modifier
+                    .offset(y = if (i == HaloLayers.lastIndex) 1.dp else 0.dp)
+                    .graphicsLayer { renderEffect = effect; clip = false }
+                    .clearAndSetSemantics { }
+            ) { content() }
+        }
+        content()
+    }
+}
+
+/** A line icon over pictures, with the dark halo. */
+@Composable
+internal fun HaloIcon(icon: ImageVector, size: Dp = 26.dp, tint: Color = SonyText) =
+    Haloed({ ShadowedLineIcon(icon, size, tint) }) { Icon(icon, null, tint = tint, modifier = Modifier.size(size)) }
+
+/** A label over pictures, with the dark halo. */
+@Composable
+internal fun HaloText(
+    text: String,
+    color: Color = SonyText,
+    fontSize: TextUnit = 15.sp,
+    fontWeight: FontWeight = FontWeight.Medium,
+    letterSpacing: TextUnit = TextUnit.Unspecified,
+) = Haloed({
+    Text(text, style = LilacTextStyle, color = color, fontSize = fontSize, fontWeight = fontWeight, letterSpacing = letterSpacing, maxLines = 1)
+}) {
+    Text(text, color = color, fontSize = fontSize, fontWeight = fontWeight, letterSpacing = letterSpacing, maxLines = 1)
 }
