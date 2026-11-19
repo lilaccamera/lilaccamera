@@ -24,6 +24,8 @@ import com.hinnka.mycamera.gallery.ProcessingPhoto
 import com.hinnka.mycamera.gallery.MediaData
 import com.hinnka.mycamera.gallery.MediaMetadata
 import com.hinnka.mycamera.gallery.PhotoStacks
+import com.hinnka.mycamera.R
+import android.widget.Toast
 import com.hinnka.mycamera.gallery.MediaType
 import com.hinnka.mycamera.gallery.PostEditGeometry
 import com.hinnka.mycamera.hdr.HdrGainmapStrength
@@ -2081,6 +2083,25 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /** Protected from deletion; on the system tab, through the Lilac photo the item came from. */
+    fun isProtected(photo: MediaData): Boolean = PhotoStacks.isProtected((photo.relatedPhoto ?: photo).metadata)
+
+    /**
+     * Sets [key] to [value] (null removes it) on every version of [photo]'s stack, so the rating and protection
+     * hold whichever version shows; on the system tab, on the Lilac photo the item came from.
+     */
+    fun setStackProperty(photo: MediaData, key: String, value: String?) {
+        val target = photo.relatedPhoto ?: photo
+        val versions = PhotoStacks.of(_photos.value).versionsOf(target)
+        viewModelScope.launch(Dispatchers.IO) {
+            versions.forEach { version ->
+                GalleryManager.updateMetadata(getApplication(), version.id) {
+                    it.copy(customProperties = if (value == null) it.customProperties - key else it.customProperties + (key to value))
+                }
+            }
+        }
+    }
+
     /**
      * 设置当前查看的照片索引
      */
@@ -2145,6 +2166,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * 4. 如果没有导出的照片，或者在 Android 10 及以下，直接删除照片
      */
     fun requestDeletePhoto(photo: MediaData, deleteExported: Boolean = true) {
+        if (isProtected(photo)) {
+            Toast.makeText(getApplication(), R.string.viewer_protected_refused, Toast.LENGTH_SHORT).show()
+            return
+        }
         if (selectedTab == GalleryTab.SYSTEM) {
             viewModelScope.launch {
                 // ContentProvider / MediaStore 请求可能跨进程阻塞，不在主线程创建。
@@ -2306,7 +2331,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * - true: Android 11+ 会使用 MediaStore.createDeleteRequest 弹出系统确认对话框
      * - false: 只删除应用内部照片，不删除系统相册
      */
-    fun deleteSelectedPhotos(deleteExported: Boolean = true, toDelete: List<MediaData> = selectedPhotos.toList()) {
+    fun deleteSelectedPhotos(deleteExported: Boolean = true, requested: List<MediaData> = selectedPhotos.toList()) {
+        val toDelete = requested.filterNot(::isProtected)
+        (requested.size - toDelete.size).takeIf { it > 0 }?.let { kept ->
+            val app = getApplication<Application>()
+            Toast.makeText(app, app.resources.getQuantityString(R.plurals.delete_protected_kept, kept, kept), Toast.LENGTH_SHORT).show()
+        }
         if (toDelete.isEmpty()) return
 
         if (selectedTab == GalleryTab.SYSTEM) {
@@ -2405,7 +2435,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      */
     private fun deleteBatchPhotosOnlyInternal(
         photos: List<MediaData>,
-        deleteExportedDocuments: Boolean = false
+        deleteExportedDocuments: Boolean = false,
+        onDone: () -> Unit = {},
     ) {
         viewModelScope.launch {
             val context = getApplication<Application>()
@@ -2429,6 +2460,63 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             removePhotonPhotosFromState(deletedIds)
             loadPhotosInternal()
             PLog.d(TAG, "Batch deleted $deletedCount photos (app only)")
+            onDone()
+        }
+    }
+
+    /**
+     * A viewer delete shown as done while Undo is offered: the [photos] go, or, with a [burstFrame], only that
+     * frame of the burst photo in [photos]. Nothing is deleted before [commitPendingDelete]; if the app dies
+     * first, the files stay.
+     */
+    class PendingDelete(val photos: List<MediaData>, val burstFrame: File?, val message: String)
+
+    var pendingDelete by mutableStateOf<PendingDelete?>(null)
+        private set
+    /** What the viewer leaves out while its delete waits for Undo or runs. */
+    var hiddenPhotoIds by mutableStateOf(emptySet<String>())
+        private set
+    var hiddenBurstFrames by mutableStateOf(emptySet<File>())
+        private set
+    private var pendingDeleteJob: Job? = null
+
+    /** Deletes app-owned [photos] (or one [burstFrame]) after a 5 s Undo window; an earlier pending delete goes now. */
+    fun deleteWithUndo(photos: List<MediaData>, burstFrame: File?, message: String) {
+        commitPendingDelete()
+        if (burstFrame != null) hiddenBurstFrames += burstFrame else hiddenPhotoIds += photos.map { it.id }
+        pendingDelete = PendingDelete(photos, burstFrame, message)
+        pendingDeleteJob = viewModelScope.launch {
+            delay(5_000)
+            commitPendingDelete()
+        }
+    }
+
+    fun undoPendingDelete(): PendingDelete? {
+        val pending = pendingDelete ?: return null
+        pendingDeleteJob?.cancel()
+        pendingDeleteJob = null
+        pendingDelete = null
+        if (pending.burstFrame != null) hiddenBurstFrames -= pending.burstFrame
+        else hiddenPhotoIds -= pending.photos.map { it.id }.toSet()
+        return pending
+    }
+
+    /** Runs the pending delete now: its Undo window ended, or the viewer closed or went to the background. */
+    fun commitPendingDelete() {
+        val pending = pendingDelete ?: return
+        pendingDelete = null
+        pendingDeleteJob?.cancel()
+        pendingDeleteJob = null
+        val frame = pending.burstFrame
+        if (frame != null) {
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) { frame.delete() }
+                hiddenBurstFrames -= frame
+            }
+        } else {
+            val ids = pending.photos.map { it.id }.toSet()
+            // Hidden until gone from the list, so a deleted item never shows again for a moment.
+            deleteBatchPhotosOnlyInternal(pending.photos) { hiddenPhotoIds -= ids }
         }
     }
 

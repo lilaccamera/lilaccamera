@@ -75,7 +75,7 @@ import kotlin.math.roundToInt
 internal enum class MoreGroup(val color: Color) {
     ITEM(GroupRed),
     LOOK(GroupMagenta),
-    // A "Show on the picture" group (gold) goes here, between Look and Export, once it has a row.
+    SHOW(GroupGold),
     EXPORT(GroupGold),
 }
 
@@ -89,6 +89,8 @@ internal data class GalleryMoreAction(
     val enabled: Boolean = true,
     val isLoading: Boolean = false,
     val whyNot: String? = null,
+    // A switch row: on or off, and a press flips it.
+    val checked: Boolean? = null,
 )
 
 /** A sheet group's title: a 3 dp bar in the group's colour and the name in small capitals. */
@@ -227,6 +229,7 @@ internal fun ViewerMoreSheet(
             val title = when (group) {
                 MoreGroup.ITEM -> stringResource(if (isVideo) R.string.viewer_group_this_video else R.string.viewer_group_this_photo)
                 MoreGroup.LOOK -> stringResource(R.string.viewer_group_look)
+                MoreGroup.SHOW -> stringResource(R.string.viewer_group_show)
                 MoreGroup.EXPORT -> stringResource(R.string.export)
             }
             ViewerGroupHeader(title, group.color)
@@ -248,6 +251,8 @@ internal fun ViewerMoreSheet(
                 ) {
                     if (action.isLoading) {
                         CircularProgressIndicator(color = SettingsText, modifier = Modifier.size(18.dp), strokeWidth = 1.8.dp)
+                    } else if (action.checked != null) {
+                        SettingsSwitch(action.checked, null)
                     }
                 }
             }
@@ -284,6 +289,45 @@ internal fun ViewerHdrSheet(
                 onValueChangeFinished = onStrengthChangeFinished,
             )
         }
+    }
+}
+
+/**
+ * Delete, shown only when there is a choice: [thisOne] or [all] (a stack's versions, a burst's frames), and whether
+ * the exported copies go too; [copies] counts them for a choice (all or not), and the switch shows only when some exist.
+ */
+@Composable
+internal fun ViewerDeleteSheet(
+    thisOne: String?,
+    all: String?,
+    allFirst: Boolean,
+    copies: (all: Boolean) -> Int,
+    videos: Boolean,
+    copiesFirst: Boolean,
+    onDelete: (all: Boolean, withCopies: Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var chooseAll by remember { mutableStateOf(allFirst) }
+    var withCopies by remember { mutableStateOf(copiesFirst) }
+    val copyCount = copies(chooseAll)
+    SettingsSheet(stringResource(R.string.delete), onDismiss) {
+        if (thisOne != null && all != null) {
+            ViewerOption(thisOne, null, chosen = !chooseAll) { chooseAll = false }
+            ViewerOption(all, null, chosen = chooseAll) { chooseAll = true }
+        }
+        if (copyCount > 0) {
+            Box(Modifier.padding(horizontal = 8.dp)) {
+                SettingsRowFrame(
+                    stringResource(if (videos) R.string.delete_exported_videos_count else R.string.delete_exported_photos_count, copyCount),
+                    null,
+                    true,
+                    onClick = { withCopies = !withCopies },
+                ) {
+                    SettingsSwitch(withCopies, { withCopies = it })
+                }
+            }
+        }
+        ViewerSheetButtons(stringResource(R.string.delete), onCancel = onDismiss, onGo = { onDelete(chooseAll, withCopies && copyCount > 0) })
     }
 }
 

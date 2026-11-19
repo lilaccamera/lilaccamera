@@ -21,6 +21,10 @@ class PhotoStacks private constructor(
         const val STACK_ID_PROPERTY = "stackId"
         /** Marks the full-size JPEG the camera delivered beside a Pro RAW, saved as is. */
         const val CAMERA_JPEG_PROPERTY = "cameraJpeg"
+        /** The shot's stars, "1" to "5"; absent is unrated. Every version of a stack carries the same. */
+        const val RATING_PROPERTY = "rating"
+        /** "true" while the shot is protected from deletion; every version of a stack carries the same. */
+        const val PROTECTED_PROPERTY = "protected"
 
         fun of(photos: List<MediaData>): PhotoStacks {
             val groups = photos.groupBy(::stackIdOf)
@@ -35,10 +39,21 @@ class PhotoStacks private constructor(
         fun isCameraJpeg(metadata: MediaMetadata?): Boolean =
             metadata?.customProperties?.get(CAMERA_JPEG_PROPERTY) == "true"
 
-        /** [properties] with the stack membership of [target]: pasted settings never move a photo into another stack. */
+        fun ratingOf(metadata: MediaMetadata?): Int =
+            metadata?.customProperties?.get(RATING_PROPERTY)?.toIntOrNull()?.coerceIn(0, 5) ?: 0
+
+        fun isProtected(metadata: MediaMetadata?): Boolean =
+            metadata?.customProperties?.get(PROTECTED_PROPERTY) == "true"
+
+        /**
+         * [properties] with the stack membership, rating and protection of [target]: pasted settings never move a
+         * photo into another stack, nor copy the source's stars or protection.
+         */
         fun keepStackOf(target: Map<String, String>, properties: Map<String, String>): Map<String, String> =
             (properties - STACK_KEYS) + target.filterKeys { it in STACK_KEYS }
 
-        private val STACK_KEYS = setOf(STACK_ID_PROPERTY, CAMERA_JPEG_PROPERTY, RenderLook.LABEL_PROPERTY)
+        private val STACK_KEYS = setOf(
+            STACK_ID_PROPERTY, CAMERA_JPEG_PROPERTY, RenderLook.LABEL_PROPERTY, RATING_PROPERTY, PROTECTED_PROPERTY,
+        )
     }
 }

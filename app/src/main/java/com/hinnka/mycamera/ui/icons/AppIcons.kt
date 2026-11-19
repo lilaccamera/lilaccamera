@@ -683,6 +683,24 @@ object AppIcons {
     val TripodLine: ImageVector by lazy { lineIcon("AppIcons.TripodLine", "M8 4a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1v3a1 1 0 0 1 -1 1h-6a1 1 0 0 1 -1 -1zM12 8v4M12 12l-5 9M12 12l5 9M12 12v9") }
     val WalkLine: ImageVector by lazy { lineIcon("AppIcons.WalkLine", "M12 4a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M7 21l3 -4M16 21l-2 -4l-3 -3l1 -6M6 12l2 -3l4 -1l3 3l3 1") }
 
+    // The viewer's rating and Protect.
+    private const val STAR_PATH = "M12 17.75l-6.172 3.245l1.179 -6.873l-5 -4.867l6.9 -1l3.086 -6.253l3.086 6.253l6.9 1l-5 4.867l1.179 6.873z"
+    val StarLine: ImageVector by lazy { lineIcon("AppIcons.StarLine", STAR_PATH) }
+    val StarFilled: ImageVector by lazy {
+        ImageVector.Builder("AppIcons.StarFilled", 24f.dp, 24f.dp, 24f, 24f).apply {
+            addPath(
+                pathData = addPathNodes(STAR_PATH),
+                fill = SolidColor(Color.Black),
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineJoin = StrokeJoin.Round,
+            )
+        }.build()
+    }
+    val LockLine: ImageVector by lazy {
+        lineIcon("AppIcons.LockLine", "M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2zM11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0M8 11v-4a4 4 0 1 1 8 0v4")
+    }
+
     private fun lineIcon(name: String, pathData: String): ImageVector = ImageVector.Builder(
         name = name,
         defaultWidth = 24f.dp,

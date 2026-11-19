@@ -5125,18 +5125,16 @@ object GalleryManager {
         }
     }
 
-    /**
-     * 为直接传入的系统 URI 创建删除请求（用于 Android 11+）
-     */
+    /** Asks to move another app's [uri] to the system trash, where it can still be restored. */
     fun createSystemDeleteRequest(context: Context, uri: Uri): PendingIntent? {
         if (uri.scheme != "content") {
             PLog.w(TAG, "createSystemDeleteRequest: URI scheme must be content, but was ${uri.scheme}")
             return null
         }
         return try {
-            MediaStore.createDeleteRequest(context.contentResolver, listOf(uri))
+            MediaStore.createTrashRequest(context.contentResolver, listOf(uri), true)
         } catch (e: Exception) {
-            PLog.e(TAG, "Failed to create system delete request for $uri", e)
+            PLog.e(TAG, "Failed to create system trash request for $uri", e)
             null
         }
     }

@@ -2187,6 +2187,17 @@
     <string name="viewer_group_this_photo">This photo</string>
     <string name="viewer_group_this_video">This video</string>
     <string name="viewer_group_look">Look</string>
+    <string name="viewer_rating">Rating</string>
+    <string name="viewer_rated">Rated %1$d of 5</string>
+    <string name="viewer_rating_cleared">Rating cleared</string>
+    <string name="viewer_protect">Protect</string>
+    <string name="viewer_protect_line">Can’t be deleted while on</string>
+    <string name="viewer_tag_protected_hint">Protected: it can’t be deleted until Protect is off (More).</string>
+    <string name="viewer_protected_refused">Protected. Turn Protect off in More to delete it.</string>
+    <plurals name="delete_protected_kept">
+        <item quantity="one">%d protected item was kept</item>
+        <item quantity="other">%d protected items were kept</item>
+    </plurals>
     <string name="viewer_group_capture">Capture</string>
     <string name="viewer_group_video">Video</string>
     <string name="viewer_group_file">File</string>
@@ -2202,6 +2213,9 @@
     <string name="viewer_off">Off</string>
     <string name="viewer_hdr_display_about">Shows the photo’s extra highlight range on screens that support it.</string>
     <string name="viewer_hdr_show">Show HDR</string>
+    <string name="viewer_group_show">Show on the picture</string>
+    <string name="viewer_shooting_info">Shooting info</string>
+    <string name="viewer_shooting_info_line">Settings and histogram on the picture</string>
     <string name="viewer_copy_look">Copy look settings</string>
     <string name="viewer_paste_look">Paste look settings</string>
     <string name="viewer_paste_look_empty">Copy from a photo first</string>
@@ -2236,6 +2250,18 @@
     <string name="viewer_export_all_frames">Export all frames</string>
     <string name="viewer_delete_this_frame">This frame</string>
     <string name="viewer_delete_whole_burst">Whole burst</string>
+    <string name="viewer_delete_this_version">This version (%1$s)</string>
+    <plurals name="viewer_delete_all_versions">
+        <item quantity="one">%1$d version</item>
+        <item quantity="other">All %1$d versions</item>
+    </plurals>
+    <string name="viewer_deleted_photo">Photo deleted</string>
+    <string name="viewer_deleted_video">Video deleted</string>
+    <string name="viewer_deleted_burst">Burst deleted</string>
+    <string name="viewer_deleted_version">Version %1$s deleted</string>
+    <string name="viewer_deleted_frame">Frame %1$d deleted</string>
+    <string name="viewer_deleted_with_copy">Deleted with its copy</string>
+    <string name="viewer_delete_cancelled">Nothing deleted</string>
     <string name="video_previous_frame">Previous frame</string>
     <string name="video_next_frame">Next frame</string>
     <string name="video_save_frame">Save frame</string>

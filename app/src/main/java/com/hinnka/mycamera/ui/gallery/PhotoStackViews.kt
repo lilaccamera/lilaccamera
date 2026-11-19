@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.Constraints
 import com.hinnka.mycamera.ui.components.FramedTag
+import com.hinnka.mycamera.ui.icons.AppIcons
 import com.hinnka.mycamera.ui.components.SonyDim
 import com.hinnka.mycamera.video.SlowedCopy
 import com.hinnka.mycamera.R
@@ -90,6 +91,16 @@ internal fun versionTag(version: MediaData, versions: List<MediaData>): String =
         .count { it.metadata?.customProperties?.get(RenderLook.LABEL_PROPERTY) != null } + 1)
 }
 
+/** A video's size as the camera names it: 4K, FHD, HD, or its short side. */
+internal fun videoSizeName(width: Int, height: Int): String = minOf(width, height).let { short ->
+    when {
+        short >= 2160 -> "4K"
+        short >= 1080 -> "FHD"
+        short >= 720 -> "HD"
+        else -> "${short}p"
+    }
+}
+
 /** One tag on the viewer's top row: [quiet] tags are grey and the first to go when the row is full. */
 internal data class ViewerTag(
     val text: String,
@@ -116,6 +127,7 @@ internal fun viewerTags(
     hdrOn: Boolean?,
     videoRate: SlowedCopy.Rate?,
     videoSlowed: Boolean,
+    isProtected: Boolean,
     onLive: () -> Unit,
     onHdr: () -> Unit,
     explain: (String) -> Unit,
@@ -136,6 +148,7 @@ internal fun viewerTags(
     if (hdrOn != null) add(ViewerTag(context.getString(R.string.hdr_label), color = if (hdrOn) accent else SonyText, onClick = onHdr))
     if (metadata?.computationalAperture != null) add(ViewerTag("PORT") { explain(context.getString(R.string.viewer_tag_portrait_hint)) })
     if (metadata?.hasAiDenoisedBase == true) add(ViewerTag("AI NR") { explain(context.getString(R.string.viewer_tag_ai_denoise_hint)) })
+    if (isProtected) add(ViewerTag("", icon = AppIcons.LockLine) { explain(context.getString(R.string.viewer_tag_protected_hint)) })
     if (videoRate?.isHighFrameRate == true) {
         val fps = if (videoRate.captureFps >= 900f) 960 else 120
         add(ViewerTag("$fps FPS", color = if (videoSlowed) accent else SonyText) {
@@ -147,14 +160,7 @@ internal fun viewerTags(
         val h = metadata?.videoHeight ?: 0
         val fps = metadata?.frameRate ?: 0
         if (w > 0 && h > 0 && fps > 0) {
-            val short = minOf(w, h)
-            val size = when {
-                short >= 2160 -> "4K"
-                short >= 1080 -> "FHD"
-                short >= 720 -> "HD"
-                else -> "${short}p"
-            }
-            add(ViewerTag("$size $fps", color = SonyDim, quiet = true) {
+            add(ViewerTag("${videoSizeName(w, h)} $fps", color = SonyDim, quiet = true) {
                 explain(context.getString(R.string.viewer_tag_video_format_hint, w, h, fps))
             })
         }

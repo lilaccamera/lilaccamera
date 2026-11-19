@@ -25,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.pager.HorizontalPager
@@ -63,7 +64,6 @@ import com.hinnka.mycamera.gallery.MediaData
 import com.hinnka.mycamera.gallery.PhotoStacks
 import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.ui.theme.AccentColor
-import com.hinnka.mycamera.ui.theme.OnAccentColor
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -144,6 +144,10 @@ import androidx.media3.exoplayer.SeekParameters
 import com.hinnka.mycamera.ui.components.HideNavigationBar
 import com.hinnka.mycamera.ui.components.LabelledIcon
 import com.hinnka.mycamera.ui.components.SonyText
+import com.hinnka.mycamera.ui.components.CurveChannel
+import com.hinnka.mycamera.ui.components.HistogramView
+import com.hinnka.mycamera.ui.components.ImageHistogram
+import androidx.compose.ui.draw.clipToBounds
 import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.utils.VibrationHelper
 import me.saket.telephoto.zoomable.ZoomableState
@@ -211,7 +215,9 @@ fun GalleryDetailScreen(
     modifier: Modifier = Modifier
 ) {
     val allPhotos by viewModel.currentPhotos.collectAsState()
-    val stacks = remember(allPhotos) { PhotoStacks.of(allPhotos) }
+    // A delete waiting for Undo leaves the pages and strips at once; allPhotos keeps it, as the view model's index counts it.
+    val hiddenIds = viewModel.hiddenPhotoIds
+    val stacks = remember(allPhotos, hiddenIds) { PhotoStacks.of(allPhotos.filterNot { it.id in hiddenIds }) }
     // Pages are photo stacks; the strip picks which version of a stack shows (its newest until then).
     val photos = stacks.tiles
     val shownVersionIds = remember { mutableStateMapOf<String, String>() }
@@ -256,6 +262,7 @@ fun GalleryDetailScreen(
     val scope = rememberCoroutineScope()
     var showHdrStrengthPanel by remember { mutableStateOf(false) }
     val videoPreviewHandle = remember { VideoPreviewHandle() }
+    var showShootingInfo by rememberPreference(UserPreferences::viewerShootingInfo)
 
     val currentColorSpace = remember { mutableStateOf<ColorSpace?>(null) }
 
@@ -263,16 +270,17 @@ fun GalleryDetailScreen(
     val deletePhotoLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK || viewModel.selectedTab == GalleryTab.PHOTON) {
-            // User confirmed deletion or we are in PHOTON tab (delete internal photo anyway)
+        // Only a delete with exported copies asks here. Cancelling it keeps everything, the photo too.
+        if (result.resultCode == Activity.RESULT_OK) {
             viewModel.deletePhotoAfterConfirmation { success ->
+                if (success) Toast.makeText(context, R.string.viewer_deleted_with_copy, Toast.LENGTH_SHORT).show()
                 if (success && viewModel.currentPhotos.value.isEmpty()) {
                     onBack()
                 }
             }
         } else {
-            // User cancelled deletion in SYSTEM tab
             viewModel.clearDeleteRequest()
+            Toast.makeText(context, R.string.viewer_delete_cancelled, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -280,12 +288,15 @@ fun GalleryDetailScreen(
     val batchDeletePhotoLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK || viewModel.selectedTab == GalleryTab.PHOTON) {
+        val withCopies = viewModel.selectedTab == GalleryTab.PHOTON
+        if (result.resultCode == Activity.RESULT_OK) {
             viewModel.deleteBatchPhotosAfterConfirmation {
+                if (withCopies) Toast.makeText(context, R.string.viewer_deleted_with_copy, Toast.LENGTH_SHORT).show()
                 if (viewModel.currentPhotos.value.isEmpty()) onBack()
             }
         } else {
             viewModel.clearBatchDeleteRequest()
+            if (withCopies) Toast.makeText(context, R.string.viewer_delete_cancelled, Toast.LENGTH_SHORT).show()
         }
     }
     LaunchedEffect(viewModel.batchDeletePendingIntent) {
@@ -368,6 +379,12 @@ fun GalleryDetailScreen(
         // The view model indexes every version, not the stacks this pager pages through.
         allPhotos.indexOfFirst { it.id == currentPhoto?.id }.takeIf { it >= 0 }?.let(viewModel::setCurrentPhoto)
         currentColorSpace.value = null
+    }
+    // A pending delete that lands while another item shows shifts the view model's index; keep it on the shown item.
+    LaunchedEffect(allPhotos) {
+        if (hiddenIds.isEmpty()) return@LaunchedEffect
+        val index = allPhotos.indexOfFirst { it.id == currentPhoto?.id }
+        if (index >= 0 && index != viewModel.currentPhotoIndex) viewModel.setCurrentPhoto(index)
     }
 
     // 在快到底部时加载更多系统照片
@@ -454,6 +471,9 @@ fun GalleryDetailScreen(
     val isCurrentRawPhoto = !isCurrentPhotoProcessing && currentPhoto?.let {
         it.isImage && (viewModel.selectedTab == GalleryTab.PHOTON || it.relatedPhoto != null) && viewModel.isRaw(it.id)
     } == true
+    // Rating and Protect are photos' and kept in Lilac's own records: on the system tab only with a Lilac copy.
+    val canMark = currentPhoto?.isImage == true && !isCurrentPhotoProcessing &&
+        (viewModel.selectedTab == GalleryTab.PHOTON || currentPhoto.relatedPhoto != null)
     var displayPhotoSize by remember(currentPhoto?.id) { mutableLongStateOf(currentPhoto?.size ?: 0L) }
 
     LaunchedEffect(currentPhoto?.id, currentPhoto?.size, currentPhoto?.uri, currentPhoto?.sourceUri, isCurrentPhotoProcessing) {
@@ -526,15 +546,16 @@ fun GalleryDetailScreen(
         value = withContext(Dispatchers.IO) { viewModel.isRawMedia(photo) }
     }
     // The shown burst's frames, oldest first, and the cover among them: the frame the photo's own file is a copy of.
-    var burstReload by remember { mutableIntStateOf(0) }
-    val burst by produceState(BurstFrames(), currentPhoto?.id, currentPhoto?.id?.let { viewModel.photoRefreshKeys[it] }, burstReload) {
+    // A frame deleted with Undo still pending is left out; the list reloads as it is hidden, restored or gone.
+    val hiddenFrames = viewModel.hiddenBurstFrames
+    val burst by produceState(BurstFrames(), currentPhoto?.id, currentPhoto?.id?.let { viewModel.photoRefreshKeys[it] }, hiddenFrames) {
         val photo = currentPhoto?.takeIf { it.isImage && it.isBurstPhoto }
         if (photo == null) {
             value = BurstFrames()
             return@produceState
         }
         value = withContext(Dispatchers.IO) {
-            val files = GalleryManager.getBurstPhotos(context, photo.id)
+            val files = GalleryManager.getBurstPhotos(context, photo.id).filterNot { it in hiddenFrames }
             val main = GalleryManager.getPhotoFile(context, photo.id)
             BurstFrames(photo.id, files, if (main.exists()) files.indexOfFirst { it.length() == main.length() } else -1)
         }
@@ -561,6 +582,16 @@ fun GalleryDetailScreen(
             withContext(Dispatchers.Main) { onDone(allSuccess) }
         }
     }
+    // The histogram reads the shown item's thumbnail on IO, and only while the shooting info shows.
+    val shootingHistogram by produceState<IntArray?>(
+        null, currentPhoto?.id, currentPhoto?.id?.let { viewModel.photoRefreshKeys[it] }, showShootingInfo, isCurrentPhotoProcessing
+    ) {
+        value = null
+        val photo = currentPhoto?.takeIf { showShootingInfo && it.isImage && !isCurrentPhotoProcessing } ?: return@produceState
+        value = withContext(Dispatchers.IO) {
+            viewModel.getGridThumbnailBitmap(photo)?.let { runCatching { ImageHistogram.fromBitmap(it).binsFor(CurveChannel.MASTER) }.getOrNull() }
+        }
+    }
     val currentVideoRate by produceState<SlowedCopy.Rate?>(null, currentPhoto?.id) {
         value = null
         value = currentPhoto?.takeIf { it.isVideo }?.let { viewModel.videoRate(it) }
@@ -571,6 +602,56 @@ fun GalleryDetailScreen(
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
         !DeviceUtil.isHarmonyOS &&
         viewModel.canToggleManualHdrEnhance(currentPhoto)
+
+    var deleteExportedPref by rememberPreference(UserPreferences::deleteExported)
+    // Copies a delete may also remove: a photo's exports, and the system's file of a video Lilac captured.
+    fun exportedCopies(photos: List<MediaData>): Int = photos.sumOf { photo ->
+        val metadata = photo.metadata
+        val capturedVideo = photo.isVideo && metadata?.isImported != true && !metadata?.sourceUri.isNullOrBlank()
+        (metadata?.exportedUris?.size ?: 0) + if (capturedVideo) 1 else 0
+    }
+    fun deletedMessage(photo: MediaData): String = context.getString(
+        when {
+            photo.isVideo -> R.string.viewer_deleted_video
+            burstStrip -> R.string.viewer_deleted_burst
+            else -> R.string.viewer_deleted_photo
+        }
+    )
+    // App-owned files go after an Undo window; with their exported copies, through the system's dialog at once.
+    fun runDelete(photos: List<MediaData>, frame: File?, withCopies: Boolean, message: String) {
+        when {
+            !withCopies -> viewModel.deleteWithUndo(photos, frame, message)
+            photos.size == 1 -> viewModel.requestDeletePhoto(photos.single(), true)
+            else -> viewModel.deleteSelectedPhotos(true, photos)
+        }
+    }
+    // The Delete action: the sheet only when there is a choice; other apps' files go to the system trash.
+    fun startDelete() {
+        val photo = currentPhoto ?: return
+        when {
+            viewModel.isProtected(photo) -> explain(context.getString(R.string.viewer_protected_refused))
+            viewModel.selectedTab == GalleryTab.SYSTEM -> viewModel.requestDeletePhoto(photo)
+            stacks.versionsOf(photo).size > 1 || burstStrip || exportedCopies(listOf(photo)) > 0 -> showDeleteDialog = true
+            else -> runDelete(listOf(photo), null, false, deletedMessage(photo))
+        }
+    }
+    // The pending delete runs when the viewer closes or the app goes to the background, not only after 5 s.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) viewModel.commitPendingDelete()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.commitPendingDelete()
+        }
+    }
+    // The last item deleted: once its Undo is over, leave, as a confirmed delete always did.
+    var undoOffered by remember { mutableStateOf(false) }
+    LaunchedEffect(viewModel.pendingDelete) {
+        if (viewModel.pendingDelete != null) undoOffered = true else if (undoOffered && photos.isEmpty()) onBack()
+    }
 
     // Swipe down leaves for the camera; only when not zoomed, so it never fights a pan.
     val swipeDown = remember { Animatable(0f) }
@@ -786,12 +867,45 @@ fun GalleryDetailScreen(
                     hdrOn = if (canShowHdr) viewModel.isManualHdrEnhanceEnabled(currentPhoto) else null,
                     videoRate = currentVideoRate,
                     videoSlowed = (videoSlowedChoice ?: currentVideoRate?.isHighFrameRate) == true,
+                    isProtected = viewModel.isProtected(currentPhoto),
                     onLive = { liveTagStack = PhotoStacks.stackIdOf(currentPhoto) },
                     onHdr = { showHdrStrengthPanel = !showHdrStrengthPanel },
                     explain = ::explain,
                     accent = com.hinnka.mycamera.ui.camera.ModeAmber,
                 )
-                // The right slot (the rating's place) stays empty, so the tags keep to the centre.
+                // The right slot holds the rating, or stays empty, so the tags keep to the centre.
+                if (canMark) {
+                    val rating = PhotoStacks.ratingOf(tagPhoto.metadata)
+                    val tint = if (rating > 0) SonyText else com.hinnka.mycamera.ui.components.SonyDim
+                    val ratingLabel = stringResource(R.string.viewer_rating)
+                    Row(
+                        Modifier
+                            .align(Alignment.CenterEnd)
+                            .size(ViewerTopRowHeight)
+                            .clickable(role = Role.Button, onClickLabel = ratingLabel) {
+                                haptics.buzz(VibrationHelper.LIGHT_TICK_MS)
+                                val next = (rating + 1) % 6
+                                viewModel.setStackProperty(currentPhoto, PhotoStacks.RATING_PROPERTY, next.takeIf { it > 0 }?.toString())
+                                explain(
+                                    if (next > 0) context.getString(R.string.viewer_rated, next)
+                                    else context.getString(R.string.viewer_rating_cleared)
+                                )
+                            },
+                        horizontalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ShadowedLineIcon(if (rating > 0) AppIcons.StarFilled else AppIcons.StarLine, 22.dp, tint)
+                        if (rating > 0) {
+                            Text(
+                                "$rating",
+                                color = tint,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                style = LocalTextStyle.current.copy(shadow = ViewfinderTextShadow),
+                            )
+                        }
+                    }
+                }
                 ViewerTagRow(
                     tags,
                     Modifier
@@ -821,10 +935,10 @@ fun GalleryDetailScreen(
             val tile = photos.getOrNull(page) ?: return
             val photo = shownVersion(tile)
             val versions = stacks.versionsOf(tile)
-            val ghostBurst by produceState(BurstFrames(), photo.id, ghost) {
+            val ghostBurst by produceState(BurstFrames(), photo.id, ghost, hiddenFrames) {
                 if (!ghost || !photo.isImage || !photo.isBurstPhoto || versions.size > 1) return@produceState
                 value = withContext(Dispatchers.IO) {
-                    val files = GalleryManager.getBurstPhotos(context, photo.id)
+                    val files = GalleryManager.getBurstPhotos(context, photo.id).filterNot { it in hiddenFrames }
                     val main = GalleryManager.getPhotoFile(context, photo.id)
                     BurstFrames(photo.id, files, if (main.exists()) files.indexOfFirst { it.length() == main.length() } else -1)
                 }
@@ -920,6 +1034,57 @@ fun GalleryDetailScreen(
             }
         }
 
+        // Shooting info on the picture's bottom edge, just above the item row; left out while a stack's processing
+        // line sits there, above its strip.
+        val renderFailedIds by RenderQueue.failedPhotoIds.collectAsState()
+        val chipAboveStrip = currentVersions.size > 1 &&
+            currentPhoto?.id?.let { it in runningIds || it in renderPendingIds || it in renderFailedIds } == true
+        if (showShootingInfo && currentPhoto != null && tagPhoto != null && !overlaysHidden && !isCurrentPhotoProcessing && !chipAboveStrip) {
+            val meta = tagPhoto.metadata ?: currentPhoto.metadata
+            val settings = if (currentPhoto.isVideo) {
+                val w = meta?.videoWidth?.takeIf { it > 0 } ?: currentPhoto.width
+                val h = meta?.videoHeight?.takeIf { it > 0 } ?: currentPhoto.height
+                listOfNotNull(
+                    if (w > 0 && h > 0) videoSizeName(w, h) else null,
+                    meta?.frameRate?.takeIf { it > 0 }?.let { "$it fps" },
+                    currentPhoto.durationMs?.let(::clipTime),
+                )
+            } else {
+                listOfNotNull(
+                    meta?.aperture,
+                    meta?.shutterSpeed,
+                    meta?.iso?.let { "ISO $it" },
+                    meta?.exposureBias?.let { if (it == 0f) "±0.0" else "%+.1f".format(it).replace('-', '−') },
+                    meta?.focalLength35mm?.let { it.substringBefore("mm").trim() + " mm" },
+                )
+            }
+            Row(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, bottom = ViewerActionRowHeight + ViewerItemRowHeight)
+                    .height(28.dp)
+                    .then(rowsFade),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(Modifier.weight(1f).clipToBounds(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    settings.forEach {
+                        Text(
+                            it,
+                            color = SonyText,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            softWrap = false,
+                            style = LocalTextStyle.current.copy(shadow = ViewfinderTextShadow),
+                        )
+                    }
+                }
+                shootingHistogram?.let { HistogramView(it, Modifier.size(64.dp, 22.dp)) }
+            }
+        }
+
         // Action row on the camera's 70 dp grid: back to where the viewer came from, Share, Edit, Delete, More.
         if (!overlaysHidden) {
             val inCamera = stringResource(R.string.viewer_busy_in_camera)
@@ -955,7 +1120,7 @@ fun GalleryDetailScreen(
                         )
                     }
                 } else null,
-                ViewerAction(AppIcons.TrashLine, stringResource(R.string.delete), whyNot()) { showDeleteDialog = true },
+                ViewerAction(AppIcons.TrashLine, stringResource(R.string.delete), whyNot(), ::startDelete),
                 ViewerAction(AppIcons.DotsLine, stringResource(R.string.viewer_more), whyNot()) { showMoreSheet = true },
             )
             Box(
@@ -998,139 +1163,102 @@ fun GalleryDetailScreen(
                 }
             }
         }
+
+        // Undo for the last delete, above the action row, while the view model keeps that delete waiting.
+        viewModel.pendingDelete?.let { pending ->
+            Row(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = ViewerActionRowHeight + 12.dp)
+                    .widthIn(max = 340.dp)
+                    .heightIn(min = 36.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Color.Black.copy(alpha = 0.88f))
+                    .border(1.dp, com.hinnka.mycamera.ui.components.SonyTrack, RoundedCornerShape(18.dp))
+                    .padding(start = 14.dp, end = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    pending.message,
+                    color = SonyText,
+                    fontSize = 13.sp,
+                    modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp, top = 9.dp, bottom = 9.dp),
+                )
+                Box(
+                    Modifier
+                        .height(44.dp)
+                        .clickable(role = Role.Button) {
+                            haptics.buzz(VibrationHelper.LIGHT_TICK_MS)
+                            // Back to the restored item: the shown one is listed first.
+                            viewModel.undoPendingDelete()?.photos?.firstOrNull()?.let { restored ->
+                                allPhotos.indexOfFirst { it.id == restored.id }.takeIf { it >= 0 }?.let(viewModel::setCurrentPhoto)
+                            }
+                        }
+                        .padding(horizontal = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        stringResource(R.string.editor_undo),
+                        color = com.hinnka.mycamera.ui.camera.ModeAmber,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+        }
     }
 
-    var deleteExportedPref by rememberPreference(UserPreferences::deleteExported)
-
-    // 删除确认对话框
-    if (showDeleteDialog && !isCurrentPhotoProcessing) {
-        val exportedPhotosCount = remember(currentPhoto, currentPhoto?.metadata, currentPhoto?.metadata?.exportedUris) {
-            val baseCount = currentPhoto?.metadata?.exportedUris?.size ?: 0
-            val sourceUri = currentPhoto?.metadata?.sourceUri
-            val isVideoAndCaptured = currentPhoto?.isVideo == true &&
-                    currentPhoto.metadata?.isImported != true &&
-                    !sourceUri.isNullOrBlank()
-            baseCount + (if (isVideoAndCaptured) 1 else 0)
+    // Delete, when there is a choice to make.
+    if (showDeleteDialog && !isCurrentPhotoProcessing && currentPhoto != null) {
+        val versions = stacks.versionsOf(currentPhoto)
+        val stack = versions.size > 1
+        fun targets(all: Boolean) = when {
+            stack && all -> (listOf(currentPhoto) + versions).distinct().filterNot { it.id in processingPhotos }
+            burstStrip && !all -> emptyList()
+            else -> listOf(currentPhoto)
         }
-        var deleteExportedState by remember(showDeleteDialog) { mutableStateOf(deleteExportedPref) }
-        val deleteVersions = currentPhoto?.let(stacks::versionsOf).orEmpty()
-
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text(stringResource(R.string.delete)) },
-            text = {
-                Column {
-                    Text(stringResource(R.string.delete_confirm))
-                    if (viewModel.selectedTab == GalleryTab.PHOTON) {
-                        if (exportedPhotosCount > 0) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { deleteExportedState = !deleteExportedState }
-                                    .padding(vertical = 4.dp)
-                            ) {
-                                Checkbox(
-                                    checked = deleteExportedState,
-                                    onCheckedChange = { deleteExportedState = it },
-                                    colors = CheckboxDefaults.colors(
-                                        checkedColor = AccentColor,
-                    checkmarkColor = OnAccentColor,
-                                        uncheckedColor = Color.White.copy(alpha = 0.6f)
-                                    )
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = if (currentPhoto?.isVideo == true) {
-                                        stringResource(R.string.delete_exported_videos_count, exportedPhotosCount)
-                                    } else {
-                                        stringResource(R.string.delete_exported_photos_count, exportedPhotosCount)
-                                    },
-                                    color = Color.White,
-                                    fontSize = 14.sp
-                                )
-                            }
-                        }
-                    }
-                }
+        ViewerDeleteSheet(
+            thisOne = when {
+                stack -> stringResource(R.string.viewer_delete_this_version, versionTag(currentPhoto, versions))
+                burstStrip -> stringResource(R.string.viewer_delete_this_frame)
+                else -> null
             },
-            confirmButton = {
-                fun resolveDeleteExported(): Boolean {
-                    if (viewModel.selectedTab == GalleryTab.PHOTON && exportedPhotosCount > 0) {
-                        deleteExportedPref = deleteExportedState
-                        return deleteExportedState
+            all = when {
+                stack -> pluralStringResource(R.plurals.viewer_delete_all_versions, versions.size, versions.size)
+                burstStrip -> stringResource(R.string.viewer_delete_whole_burst)
+                else -> null
+            },
+            // The cover goes only with the whole burst.
+            allFirst = !stack && burstStrip && shownFrame == null,
+            copies = { exportedCopies(targets(it)) },
+            videos = currentPhoto.isVideo,
+            copiesFirst = deleteExportedPref,
+            onDelete = { all, withCopies ->
+                showDeleteDialog = false
+                if (exportedCopies(targets(all)) > 0) deleteExportedPref = withCopies
+                when {
+                    stack && !all -> {
+                        // The next newer version shows in its place; the newest leaves the next older.
+                        versions.getOrNull(versions.indexOf(currentPhoto) + 1)?.let(::showVersion)
+                        runDelete(
+                            targets(false), null, withCopies,
+                            context.getString(R.string.viewer_deleted_version, versionTag(currentPhoto, versions)),
+                        )
                     }
-                    return true
-                }
-                if (deleteVersions.size > 1) {
-                    DeleteVersionsButtons(
-                        thisVersionText = stringResource(R.string.delete_this_version),
-                        allVersionsText = pluralStringResource(R.plurals.delete_all_versions, deleteVersions.size, deleteVersions.size),
-                        onDeleteThis = {
-                            currentPhoto?.let { photo ->
-                                // The view model keeps its index after a delete, so point it at the next newer
-                                // version first; the newest one leaves the next older in its place. Either stays in this stack.
-                                deleteVersions.getOrNull(deleteVersions.indexOf(photo) + 1)?.let { newer ->
-                                    showVersion(newer)
-                                    viewModel.setCurrentPhoto(allPhotos.indexOf(newer))
-                                }
-                                viewModel.requestDeletePhoto(photo, resolveDeleteExported())
-                            }
-                            showDeleteDialog = false
-                        },
-                        onDeleteAll = {
-                            viewModel.deleteSelectedPhotos(
-                                resolveDeleteExported(),
-                                deleteVersions.filterNot { it.id in processingPhotos }
+                    !stack && burstStrip && !all -> {
+                        if (shownFrameIndex == null) {
+                            explain(context.getString(R.string.viewer_burst_cover_delete))
+                        } else {
+                            runDelete(
+                                listOf(currentPhoto), burst.files[shownFrameIndex], false,
+                                context.getString(R.string.viewer_deleted_frame, shownFrameIndex + 1),
                             )
-                            showDeleteDialog = false
-                        },
-                        onCancel = { showDeleteDialog = false },
-                    )
-                } else if (burstStrip) {
-                    DeleteVersionsButtons(
-                        thisVersionText = stringResource(R.string.viewer_delete_this_frame),
-                        allVersionsText = stringResource(R.string.viewer_delete_whole_burst),
-                        onDeleteThis = {
-                            val frame = shownFrame
-                            if (frame == null) {
-                                explain(context.getString(R.string.viewer_burst_cover_delete))
-                            } else {
-                                scope.launch {
-                                    withContext(Dispatchers.IO) { frame.delete() }
-                                    burstReload++
-                                }
-                            }
-                            showDeleteDialog = false
-                        },
-                        onDeleteAll = {
-                            currentPhoto?.let { viewModel.requestDeletePhoto(it, resolveDeleteExported()) }
-                            showDeleteDialog = false
-                        },
-                        onCancel = { showDeleteDialog = false },
-                    )
-                } else {
-                    TextButton(
-                        onClick = {
-                            currentPhoto?.let { viewModel.requestDeletePhoto(it, resolveDeleteExported()) }
-                            showDeleteDialog = false
                         }
-                    ) {
-                        Text(stringResource(R.string.delete), color = Color.Red)
                     }
+                    else -> runDelete(targets(all), null, withCopies, deletedMessage(currentPhoto))
                 }
             },
-            dismissButton = {
-                if (deleteVersions.size <= 1 && !burstStrip) {
-                    TextButton(onClick = { showDeleteDialog = false }) {
-                        Text(stringResource(R.string.cancel))
-                    }
-                }
-            },
-            containerColor = Color(0xFF2D2D2D),
-            titleContentColor = Color.White,
-            textContentColor = Color.White
+            onDismiss = { showDeleteDialog = false },
         )
     }
 
@@ -1246,7 +1374,21 @@ fun GalleryDetailScreen(
                     }
                 )
             )
-            // Protect's row belongs here, after Info.
+            if (canMark) {
+                val protectedNow = viewModel.isProtected(currentPhoto)
+                add(
+                    GalleryMoreAction(
+                        group = MoreGroup.ITEM,
+                        icon = AppIcons.LockLine,
+                        text = context.getString(R.string.viewer_protect),
+                        secondLine = context.getString(R.string.viewer_protect_line),
+                        checked = protectedNow,
+                        onClick = {
+                            viewModel.setStackProperty(currentPhoto, PhotoStacks.PROTECTED_PROPERTY, if (protectedNow) null else "true")
+                        }
+                    )
+                )
+            }
             if (burstStrip) {
                 add(
                     GalleryMoreAction(
@@ -1408,6 +1550,17 @@ fun GalleryDetailScreen(
                     )
                 )
             }
+
+            add(
+                GalleryMoreAction(
+                    group = MoreGroup.SHOW,
+                    icon = AppIcons.InfoLine,
+                    text = context.getString(R.string.viewer_shooting_info),
+                    secondLine = context.getString(R.string.viewer_shooting_info_line),
+                    checked = showShootingInfo,
+                    onClick = { showShootingInfo = !showShootingInfo }
+                )
+            )
 
             if (currentPhoto.isImage && (viewModel.selectedTab == GalleryTab.PHOTON || currentPhoto.relatedPhoto != null)) {
                 add(
