@@ -292,7 +292,7 @@ object RenderQueue {
     }
 
     /**
-     * Returns the QUEUED jobs, oldest first. Drops jobs whose DNG is gone and, in the main process,
+     * Returns the QUEUED jobs, asked-for first, then oldest. Drops jobs whose DNG is gone and, in the main process,
      * applies results a finished render left behind (`:queue` leaves them to the main process).
      */
     suspend fun scan(context: Context): List<RenderJob> = withContext(Dispatchers.IO) {
@@ -325,18 +325,32 @@ object RenderQueue {
                 }
                 RenderJob.State.SKIPPED -> null
             }
-        }.sortedBy { it.second }.map { it.first }
+        }.sortedWith(compareByDescending<Pair<RenderJob, Long>> { it.first.renderNowAt }.thenBy { it.second }).map { it.first }
         _pendingPhotoIds.value = queued.mapTo(HashSet()) { it.photoId }
         _failedPhotoIds.value = failed
         queued
     }
 
-    /** QUEUED, FAILED and SKIPPED jobs, oldest DNG first. Read-only (unlike [scan]), so a screen may call it any time. */
+    /** QUEUED, FAILED and SKIPPED jobs in queue order (asked-for first, then oldest DNG). Read-only (unlike [scan]), so a screen may call it any time. */
     suspend fun jobs(context: Context): List<RenderJob> = withContext(Dispatchers.IO) {
         GalleryManager.getPhotosBaseDir(context)
             .listFiles { dir -> File(dir, RenderJob.JOB_FILE).isFile }.orEmpty()
             .mapNotNull { dir -> RenderJob.read(context, dir.name)?.takeIf { it.state != RenderJob.State.DONE } }
-            .sortedBy { GalleryManager.getDngFile(context, it.photoId).lastModified() }
+            .sortedWith(
+                compareByDescending<RenderJob> { it.renderNowAt }
+                    .thenBy { GalleryManager.getDngFile(context, it.photoId).lastModified() }
+            )
+    }
+
+    /** Puts a QUEUED job first in line; a render running now finishes first. */
+    suspend fun renderNext(context: Context, photoId: String) {
+        withJobLock(context) {
+            withContext(Dispatchers.IO) {
+                RenderJob.read(context, photoId)?.takeIf { it.state == RenderJob.State.QUEUED }
+                    ?.let { RenderJob.write(context, it.copy(renderNowAt = System.currentTimeMillis())) }
+            }
+        }
+        start(context)
     }
 
     /**

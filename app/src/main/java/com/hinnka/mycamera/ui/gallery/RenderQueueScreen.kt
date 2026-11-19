@@ -35,6 +35,21 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.hinnka.mycamera.R
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import com.hinnka.mycamera.ui.camera.ModeAmber
+import com.hinnka.mycamera.ui.camera.ViewfinderTextShadow
+import com.hinnka.mycamera.ui.components.SonySecondary
+import com.hinnka.mycamera.ui.components.SonyText
+import com.hinnka.mycamera.ui.components.SonyTrack
 import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.render.RawRenderService
 import com.hinnka.mycamera.render.RenderJob
@@ -438,9 +453,9 @@ private fun MemoryInfoRow(icon: ImageVector, title: Int?, text: Int) {
 }
 
 /**
- * The photo viewer's one processing label. A queued RAW photo gets its queue state as a chip that opens
- * [RenderQueueScreen]; a photo still finishing in the camera ([processingInCamera]) gets the same chip,
- * not tappable. Draws nothing otherwise.
+ * The photo viewer's processing line: a queued RAW photo's queue state with the one button that acts on it, and
+ * Queue, which opens [RenderQueueScreen]. A photo still finishing in the camera ([processingInCamera]) gets the
+ * line without buttons. Draws nothing otherwise.
  */
 @Composable
 fun RenderQueuePhotoChip(
@@ -450,76 +465,162 @@ fun RenderQueuePhotoChip(
     processingInCamera: Boolean = false,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val status by RenderQueue.status.collectAsState()
     val pendingIds by RenderQueue.pendingPhotoIds.collectAsState()
     val failedIds by RenderQueue.failedPhotoIds.collectAsState()
+    // Render now and Render reorder or rewrite job files without always changing the keys below.
+    var reload by remember { mutableIntStateOf(0) }
     // Skipped jobs and the queue order are only in the job files; every scan changes one of these keys.
-    val jobs by produceState(emptyList<RenderJob>(), pendingIds, failedIds, status.running, status.currentPhotoId) {
+    val jobs by produceState(emptyList<RenderJob>(), pendingIds, failedIds, status.running, status.currentPhotoId, reload) {
         value = RenderQueue.jobs(context)
     }
-    val paused = remember(jobs, status.pausingText) { RenderQueue.isPaused(context) }
+    var pauseAsked by remember { mutableIntStateOf(0) }
+    val paused = remember(jobs, status.pausingText, pauseAsked) { RenderQueue.isPaused(context) }
     val processing = status.running && photoId == status.currentPhotoId
     val job = jobs.firstOrNull { it.photoId == photoId }
     if (!processing && job == null) {
-        if (processingInCamera) InCameraProcessingChip(modifier)
+        if (processingInCamera) {
+            ProcessingLine(modifier, { CircularProgressIndicator(Modifier.size(24.dp), color = SonyText, strokeWidth = 2.5.dp) },
+                stringResource(R.string.processing_chip_in_camera))
+        }
         return
     }
     val failed = !processing && job?.state == RenderJob.State.FAILED
-    val state = when {
-        // Opens the queue screen, which says how to let it finish.
+    val setPaused: (Boolean) -> Unit = { pause ->
+        RenderQueue.setPaused(context, pause)
+        if (!pause) RenderQueue.start(context)
+        pauseAsked++
+    }
+    val icon: @Composable () -> Unit
+    val text: String
+    var detail: String? = null
+    var button: Pair<String, () -> Unit>? = null
+    when {
+        // Queue only: the queue screen says how to let it finish.
         status.running && status.memoryKills >= RenderQueue.MEMORY_HINT_KILLS &&
-            (processing || job?.state == RenderJob.State.QUEUED) -> stringResource(R.string.render_chip_struggle)
-        processing -> stringResource(R.string.render_chip_processing, (status.photoProgress * 100).roundToInt())
-        failed -> stringResource(R.string.render_chip_failed)
-        job?.state == RenderJob.State.SKIPPED -> stringResource(R.string.render_chip_skipped)
-        paused -> stringResource(R.string.render_chip_paused)
+            (processing || job?.state == RenderJob.State.QUEUED) -> {
+            icon = { LineStateIcon(AppIcons.AlertLine, SonyText) }
+            text = stringResource(R.string.render_memory_struggle_title)
+            detail = stringResource(R.string.viewer_proc_struggle_line)
+        }
+        processing -> {
+            icon = { ProgressRing(status.photoProgress) }
+            if (paused) {
+                // The render stops only at its next checkpoint.
+                text = stringResource(R.string.viewer_proc_pausing)
+                detail = status.pausingText ?: stringResource(R.string.render_queue_pausing)
+                button = stringResource(R.string.render_queue_resume) to { setPaused(false) }
+            } else {
+                text = stringResource(R.string.viewer_proc_rendering, (status.photoProgress * 100).roundToInt())
+                detail = status.stageText.takeIf { it != 0 }?.let { stringResource(it) }
+                button = stringResource(R.string.render_queue_pause) to { setPaused(true) }
+            }
+        }
+        failed -> {
+            icon = { LineStateIcon(AppIcons.AlertLine, MaterialTheme.colorScheme.error) }
+            text = stringResource(R.string.viewer_proc_failed)
+            detail = stringResource(R.string.viewer_proc_raw_safe)
+            button = stringResource(R.string.viewer_proc_retry) to { scope.launch { RenderQueue.retry(context, listOfNotNull(job)) } }
+        }
+        job?.state == RenderJob.State.SKIPPED -> {
+            icon = { LineStateIcon(AppIcons.PauseLine, SonySecondary) }
+            text = stringResource(R.string.render_chip_skipped)
+            detail = stringResource(R.string.viewer_proc_raw_safe)
+            button = stringResource(R.string.viewer_proc_render) to {
+                scope.launch {
+                    RenderQueue.unskip(context, photoId)
+                    reload++
+                }
+            }
+        }
+        paused -> {
+            icon = { LineStateIcon(AppIcons.PauseLine, SonySecondary) }
+            text = stringResource(R.string.render_chip_paused)
+            detail = stringResource(R.string.viewer_proc_paused_line)
+            button = stringResource(R.string.render_queue_resume) to { setPaused(false) }
+        }
         else -> {
             val position = jobs.filter { it.state == RenderJob.State.QUEUED && it.photoId != status.currentPhotoId }
                 .indexOfFirst { it.photoId == photoId } + 1
+            icon = { LineStateIcon(AppIcons.ClockLine, SonySecondary) }
             if (position == 1 && status.running && status.waitingForMemory) {
-                stringResource(R.string.render_queue_stage_waiting_memory)
+                text = stringResource(R.string.render_queue_stage_waiting_memory)
             } else {
+                text = stringResource(R.string.viewer_proc_waiting)
                 // RuleBasedNumberFormat is not in the public SDK; MessageFormat's ordinal type uses it internally.
                 val ordinal = MessageFormat("{0,ordinal}", context.resources.configuration.locales[0]).format(arrayOf(position))
-                stringResource(R.string.render_chip_waiting, ordinal)
+                detail = stringResource(R.string.viewer_proc_in_line, ordinal)
+                val next = stringResource(R.string.viewer_proc_next)
+                button = stringResource(R.string.viewer_proc_render_now) to {
+                    scope.launch {
+                        RenderQueue.renderNext(context, photoId)
+                        reload++
+                    }
+                    android.widget.Toast.makeText(context, next, android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
-    val label = stringResource(R.string.render_chip_queue, state)
-    val description = stringResource(R.string.render_chip_description, label)
-    AssistChip(
-        onClick = onClick,
-        label = { Text(label) },
-        leadingIcon = if (processing) {
-            { CircularProgressIndicator(progress = { status.photoProgress }, modifier = Modifier.size(AssistChipDefaults.IconSize), strokeWidth = 2.dp) }
-        } else null,
-        // The arrow says this chip opens the queue; the in-camera chip has none.
-        trailingIcon = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) },
-        colors = AssistChipDefaults.assistChipColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-            labelColor = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-        ),
-        border = null,
-        modifier = modifier.semantics { contentDescription = description }
-    )
+    val description = stringResource(R.string.render_chip_description, listOfNotNull(text, detail).joinToString(" · "))
+    ProcessingLine(modifier, icon, text, detail, failed) {
+        button?.let { (label, action) -> ViewerPill(onClick = action, text = label) }
+        ViewerPill(
+            onClick = onClick,
+            text = stringResource(R.string.viewer_proc_queue),
+            trailing = AppIcons.ChevronRightLine,
+            description = description,
+        )
+    }
 }
 
-/** Same look as the queue chip, but not tappable: Photo mode shots finish in the camera, not in the queue. */
+/** 28 dp: the line's state icon, or its progress ring, sits in this box. */
+private val ProcessingIconSize = 28.dp
+
+/** The processing line's layout: the state icon, a main line with an optional [detail] under it, then [buttons]. */
 @Composable
-private fun InCameraProcessingChip(modifier: Modifier) {
-    val surface = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    AssistChip(
-        onClick = {},
-        enabled = false,
-        label = { Text(stringResource(R.string.processing_chip_in_camera)) },
-        leadingIcon = { CircularProgressIndicator(modifier = Modifier.size(AssistChipDefaults.IconSize), strokeWidth = 2.dp, color = onSurface) },
-        colors = AssistChipDefaults.assistChipColors(
-            disabledContainerColor = surface,
-            disabledLabelColor = onSurface,
-            disabledLeadingIconContentColor = onSurface,
-        ),
-        border = null,
-        modifier = modifier
-    )
+private fun ProcessingLine(
+    modifier: Modifier,
+    icon: @Composable () -> Unit,
+    text: String,
+    detail: String? = null,
+    error: Boolean = false,
+    buttons: @Composable RowScope.() -> Unit = {},
+) {
+    Row(
+        modifier.fillMaxWidth().height(56.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(Modifier.size(ProcessingIconSize), contentAlignment = Alignment.Center) { icon() }
+        Column(Modifier.weight(1f)) {
+            val shadow = TextStyle(shadow = ViewfinderTextShadow)
+            Text(text, color = if (error) MaterialTheme.colorScheme.error else SonyText, fontSize = 14.sp, lineHeight = 17.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, style = shadow)
+            if (detail != null) {
+                Text(detail, color = SonySecondary, fontSize = 12.sp, lineHeight = 15.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, style = shadow)
+            }
+        }
+        buttons()
+    }
+}
+
+@Composable
+private fun LineStateIcon(icon: ImageVector, tint: Color) {
+    Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+}
+
+/** The render's share done as an orange arc over a dark track. */
+@Composable
+private fun ProgressRing(progress: Float) {
+    val amber = ModeAmber
+    Canvas(Modifier.size(ProcessingIconSize)) {
+        val stroke = 3.dp.toPx()
+        val inset = 3.dp.toPx()  // an 11 dp radius in the 28 dp box
+        val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
+        drawArc(SonyTrack, 0f, 360f, false, Offset(inset, inset), arcSize, style = Stroke(stroke))
+        drawArc(amber, -90f, 360f * progress.coerceIn(0f, 1f), false, Offset(inset, inset), arcSize,
+            style = Stroke(stroke, cap = StrokeCap.Butt))
+    }
 }
