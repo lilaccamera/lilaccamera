@@ -700,8 +700,9 @@ fun GalleryDetailScreen(
     ) {
         val screenWidth = maxWidth
         val screenHeight = maxHeight
-        // Turned, the top row becomes the left edge and the item and action rows the right edge; the picture rests
-        // in the band between them. The columns keep clear of a navigation bar on either side.
+        // Turned, the top row becomes the left edge and the item and action rows the right edge; the controls keep
+        // to the band between them while the picture is centred on the whole screen. The columns keep clear of a
+        // navigation bar on either side.
         val landscape = maxWidth > maxHeight
         val navBar = WindowInsets.navigationBars.asPaddingValues()
         val navLeft = if (landscape && !isExpanded) navBar.calculateLeftPadding(LayoutDirection.Ltr) else 0.dp
@@ -862,7 +863,6 @@ fun GalleryDetailScreen(
                                             modifier = Modifier
                                                 .fillMaxSize()
                                                 .pointerInput(Unit) { detectTapGestures(onTap = { overlaysHidden = !overlaysHidden }) }
-                                                .then(if (band != null) Modifier.padding(band) else Modifier)
                                         )
                                     } else {
                                         val forceSystemOrigin = viewModel.selectedTab == GalleryTab.SYSTEM &&
@@ -2134,8 +2134,8 @@ private fun BoxScope.VideoTransport(
     if (!barsShown) return
     Box(
         Modifier
+            // On the picture's centre, which is the screen's in either orientation.
             .align(Alignment.Center)
-            .then(inBand)
             .then(fade)
             .size(64.dp)
             .clip(CircleShape)
@@ -2448,24 +2448,18 @@ private fun ZoomableImage(
     val density = LocalDensity.current
     val windowSize = LocalWindowInfo.current.containerSize
     // Pictures no taller than 3:4 rest between the top row and the item row; taller ones fit the whole screen.
-    // In a turned window every picture rests between the side columns. Turned UI over an upright window fits.
-    val turned = windowSize.width > windowSize.height
+    // A turned window fits every picture to its full height, centred, partly under the side columns: the bands
+    // between the columns would leave a 4:3 photo small and off-centre. Turned UI over an upright window fits.
     val rests = OrientationObserver.uiRotationDegrees == 0f &&
-        bitmap?.let { turned || (windowSize.height > windowSize.width && it.width >= it.height * 0.749f) } == true
-    val contentScale = remember(rests, turned, density) {
-        val side = with(density) { ViewerTopRowHeight.toPx() }
-        val far = with(density) { (ViewerItemRowHeight + ViewerActionRowHeight).toPx() }
-        when {
-            !rests -> ContentScale.Fit
-            turned -> RestScale(left = side, right = far)
-            else -> RestScale(top = side, bottom = far)
+        bitmap?.let { windowSize.height > windowSize.width && it.width >= it.height * 0.749f } == true
+    val contentScale = remember(rests, density) {
+        if (rests) {
+            RestScale(top = with(density) { ViewerTopRowHeight.toPx() }, bottom = with(density) { (ViewerItemRowHeight + ViewerActionRowHeight).toPx() })
+        } else {
+            ContentScale.Fit
         }
     }
-    val alignment = when {
-        !rests -> Alignment.Center
-        turned -> SideRestAlignment
-        else -> RestAlignment
-    }
+    val alignment = if (rests) RestAlignment else Alignment.Center
     // Enough zoom for the double-tap's pixel-for-pixel view, in either screen orientation.
     val oneToOneZoom = bitmap?.takeIf { it.width > 0 && it.height > 0 && windowSize.width > 0 && windowSize.height > 0 }?.let { shown ->
         val source = Size(shown.width.toFloat(), shown.height.toFloat())
@@ -2813,26 +2807,21 @@ private class BurstFrames(val photoId: String? = null, val files: List<File> = e
 private class ViewerAction(val icon: ImageVector, val label: String, val whyNot: String?, val onClick: () -> Unit)
 
 /**
- * Fits a picture between the top row and the item row ([top] and [bottom] px kept free), or turned between the
- * side columns ([left] and [right]); with [RestAlignment] or [SideRestAlignment] it rests in that band rather than
- * in the screen's middle.
+ * Fits a picture between the top row and the item row ([top] and [bottom] px kept free); with [RestAlignment] it
+ * rests in that band rather than in the screen's middle.
  */
 private class RestScale(
-    private val left: Float = 0f,
     private val top: Float = 0f,
-    private val right: Float = 0f,
     private val bottom: Float = 0f,
 ) : ContentScale {
     override fun computeScaleFactor(srcSize: Size, dstSize: Size): ScaleFactor {
-        val scale = min((dstSize.width - left - right) / srcSize.width, (dstSize.height - top - bottom) / srcSize.height)
+        val scale = min(dstSize.width / srcSize.width, (dstSize.height - top - bottom) / srcSize.height)
         return ScaleFactor(scale, scale)
     }
 }
 
 // The free space above and below the picture split as the rows are: 48 above, 120 below.
 private val RestAlignment = BiasAlignment(0f, 48f / 168f * 2f - 1f)
-// Turned, the same split left and right: 48 on the left, 120 on the right.
-private val SideRestAlignment = BiasAlignment(48f / 168f * 2f - 1f, 0f)
 
 // Double-tap shows the preview pixel for pixel, never less than a clear step in.
 private const val MinDoubleTapZoom = 1.25f
