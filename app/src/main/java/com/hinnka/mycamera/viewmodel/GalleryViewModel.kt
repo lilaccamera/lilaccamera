@@ -1452,6 +1452,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             hasMoreSystemPhotos = false
 
             val newPhotos = repository.getAllSystemPhotos()
+            // Known before the tiles bind: the grid reads them only on bind.
+            updateRawPhotoStates(newPhotos)
             _systemPhotos.value = newPhotos
             systemOffset = newPhotos.size
             hasMoreSystemPhotos = false
@@ -1504,9 +1506,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 } ?: fresh
             }
             val currentId = getCurrentPhoto()?.id
+            updateRawPhotoStates(mergedList)
             _photos.value = mergedList
             mergeProcessingPhotos(currentId)
-            updateRawPhotoStates(_photos.value)
             photonOffset = mergedList.size
             hasMorePhotonPhotos = false
             _latestPhoto.value = _photos.value.firstOrNull()
@@ -1555,14 +1557,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /** Both tabs share the map (ids differ), so the grid's RAW tag follows the viewer's rule without a read on bind. */
     private suspend fun updateRawPhotoStates(photos: List<MediaData>) {
-        val context = getApplication<Application>()
         val states = withContext(Dispatchers.IO) {
-            photos.associate { photo ->
-                photo.id to (photo.isImage && GalleryManager.getDngFile(context, photo.id).exists())
-            }
+            photos.associate { photo -> photo.id to (photo.isImage && isRawMedia(photo)) }
         }
-        rawPhotoStates.clear()
         rawPhotoStates.putAll(states)
     }
 

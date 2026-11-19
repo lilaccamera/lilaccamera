@@ -19,7 +19,6 @@ import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.LinearLayout
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -86,6 +85,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
+import androidx.annotation.DrawableRes
+import androidx.core.content.ContextCompat
+import com.hinnka.mycamera.video.SlowedCopy
 import androidx.recyclerview.widget.DiffUtil
 import android.os.Parcelable
 import kotlin.math.abs
@@ -373,7 +378,7 @@ fun GalleryScreen(
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = galleryBackgroundColor()
+                        containerColor = Color.Black
                     )
                 )
                 if (!isSelectionMode) {
@@ -597,7 +602,7 @@ fun GalleryScreen(
                 }
             }
         },
-        containerColor = galleryBackgroundColor(),
+        containerColor = Color.Black,
         modifier = modifier
     ) { paddingValues ->
         PullToRefreshBox(
@@ -679,6 +684,7 @@ fun GalleryScreen(
                     viewModel = viewModel,
                     selectedPhotos = selectedPhotos,
                     processingPhotos = processingPhotos,
+                    failedIds = renderFailedIds,
                     isSelectionMode = isSelectionMode,
                     isSelectionEnabled = !isBatchOperationRunning,
                     isLoadingMore = (selectedTab == GalleryTab.SYSTEM && isSystemLoadingMore) ||
@@ -831,7 +837,7 @@ private fun GalleryTabRow(
     val selectedTabIndex = selectedTab.ordinal
     TabRow(
         selectedTabIndex = selectedTabIndex,
-        containerColor = galleryBackgroundColor(),
+        containerColor = Color.Black,
         contentColor = Color.White,
         indicator = { tabPositions ->
             TabRowDefaults.SecondaryIndicator(
@@ -860,6 +866,7 @@ private fun GalleryRecyclerGrid(
     viewModel: GalleryViewModel,
     selectedPhotos: List<MediaData>,
     processingPhotos: Map<String, ProcessingPhoto>,
+    failedIds: Set<String>,
     isSelectionMode: Boolean,
     isSelectionEnabled: Boolean,
     isLoadingMore: Boolean,
@@ -968,6 +975,7 @@ private fun GalleryRecyclerGrid(
                     viewModel = viewModel,
                     selectedPhotoIds = selectedPhotoIds,
                     processingPhotos = processingPhotos,
+                    failedIds = failedIds,
                     isSelectionMode = isSelectionMode,
                     isSelectionEnabled = isSelectionEnabled,
                     isLoadingMore = isLoadingMore,
@@ -1022,7 +1030,7 @@ private class GalleryFastScrollerView(
     private val bubbleMargin = (48 * density).toInt()
 
     private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xE6FF5722.toInt() // Selection overlay annotation
+        color = 0xFFE0E0E0.toInt()
     }
     private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0x29FFFFFF.toInt() // White with 0.16 alpha
@@ -1203,6 +1211,12 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
     private var viewModel: GalleryViewModel? = null
     private var selectedPhotoIds: Set<String> = emptySet()
     private var processingPhotos: Map<String, ProcessingPhoto> = emptyMap()
+    private var failedIds: Set<String> = emptySet()
+    // Tag facts read from disk once per item, so a rebind never reads again.
+    private val burstCounts = HashMap<String, Int>()
+    private val videoRates = HashMap<String, SlowedCopy.Rate>()
+    // Each rate read opens a MediaMetadataRetriever; a fast fling must not open one per video tile at once.
+    private val rateGate = Semaphore(2)
     private var isSelectionMode: Boolean = false
     private var isSelectionEnabled: Boolean = true
     private var isLoadingMore: Boolean = false
@@ -1221,6 +1235,7 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
         viewModel: GalleryViewModel,
         selectedPhotoIds: Set<String>,
         processingPhotos: Map<String, ProcessingPhoto>,
+        failedIds: Set<String>,
         isSelectionMode: Boolean,
         isSelectionEnabled: Boolean,
         isLoadingMore: Boolean,
@@ -1233,6 +1248,7 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
         val oldLoadingMore = this.isLoadingMore
         val oldSelectedPhotoIds = this.selectedPhotoIds
         val oldProcessingPhotos = this.processingPhotos
+        val oldFailedIds = this.failedIds
         val oldIsSelectionMode = this.isSelectionMode
         val oldIsSelectionEnabled = this.isSelectionEnabled
         val oldIsLandscape = this.isLandscape
@@ -1243,6 +1259,7 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
         this.viewModel = viewModel
         this.selectedPhotoIds = selectedPhotoIds
         this.processingPhotos = processingPhotos
+        this.failedIds = failedIds
         this.isSelectionMode = isSelectionMode
         this.isSelectionEnabled = isSelectionEnabled
         this.isLoadingMore = isLoadingMore
@@ -1290,7 +1307,8 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                         val isSelected = id in selectedPhotoIds
                         wasSelected == isSelected && oldEntry.photo == newEntry.photo &&
                             oldEntry.versionCount == newEntry.versionCount &&
-                            oldProcessingPhotos[id] == processingPhotos[id]
+                            oldProcessingPhotos[id] == processingPhotos[id] &&
+                            (id in oldFailedIds) == (id in failedIds)
                     }
 
                     else -> false
@@ -1367,6 +1385,29 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                     photo = photo,
                     versionCount = entry.versionCount,
                     processingPhoto = processingPhotos[photo.id],
+                    tags = {
+                        gridTags(
+                            context = holder.itemView.context,
+                            photo = photo,
+                            versionCount = entry.versionCount,
+                            tab = selectedTab,
+                            isRaw = model.isRawInGallery(photo.id),
+                            burstCount = burstCounts[photo.id] ?: 0,
+                            videoRate = videoRates[photo.id],
+                            isProtected = model.isProtected(photo),
+                            failed = photo.id in failedIds,
+                        )
+                    },
+                    loadTagFacts = {
+                        if (photo.isImage && photo.isBurstPhoto && photo.id !in burstCounts) {
+                            burstCounts[photo.id] = withContext(Dispatchers.IO) {
+                                GalleryManager.getBurstPhotos(holder.itemView.context, photo.id).size
+                            }
+                        }
+                        if (photo.isVideo && photo.id !in videoRates) {
+                            videoRates[photo.id] = rateGate.withPermit { model.videoRate(photo) }
+                        }
+                    },
                     viewModel = model,
                     isSelected = photo.id in selectedPhotoIds,
                     isSelectionMode = isSelectionMode,
@@ -1440,6 +1481,8 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
             photo: MediaData,
             versionCount: Int,
             processingPhoto: ProcessingPhoto?,
+            tags: () -> List<GridTag>,
+            loadTagFacts: suspend () -> Unit,
             viewModel: GalleryViewModel,
             isSelected: Boolean,
             isSelectionMode: Boolean,
@@ -1462,15 +1505,18 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                 isSelectionMode = isSelectionMode && processingPhoto == null,
                 isLandscape = isLandscape,
                 rotationDegrees = rotationDegrees,
-                isProcessing = processingPhoto != null,
                 onClick = onClick,
                 onLongClick = onLongClick
             )
+            view.bindTags(tags())
             view.bindProcessingPreview(processingPhoto)
             if (processingPhoto == null) {
                 job = scope.launch {
                     val bitmap = viewModel.getGridThumbnailBitmap(photo)
                     view.bindThumbnail(photo.id, bitmap)
+                    // BURST n and 120 / 960 FPS need a disk read; their tags appear once known.
+                    loadTagFacts()
+                    view.bindTags(tags())
                 }
             }
         }
@@ -1502,15 +1548,7 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
     private val imageView: ImageView
     private val selectionOverlay: View
     private val selectionIcon: ImageView
-    private val videoBadge: LinearLayout
-    private val videoDuration: TextView
-    private val motionIcon: ImageView
-    private val burstIcon: ImageView
-    private val stackBadge: LinearLayout
-    private val stackCount: TextView
-    private val rawBadge: TextView
-    private val importedBadge: TextView
-    private val relatedBadge: View
+    private val tagViews: List<TextView>
     private var aspectRatio: Float = 1f
     private var boundPhotoId: String? = null
     private val processingShimmer = ProcessingPhotoShimmerView(context)
@@ -1527,15 +1565,7 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
         imageView = findViewById(R.id.gallery_photo_image)
         selectionOverlay = findViewById(R.id.gallery_photo_selection_overlay)
         selectionIcon = findViewById(R.id.gallery_photo_selection_icon)
-        videoBadge = findViewById(R.id.gallery_photo_video_badge)
-        videoDuration = findViewById(R.id.gallery_photo_video_duration)
-        motionIcon = findViewById(R.id.gallery_photo_motion_icon)
-        burstIcon = findViewById(R.id.gallery_photo_burst_icon)
-        stackBadge = findViewById(R.id.gallery_photo_stack_badge)
-        stackCount = findViewById(R.id.gallery_photo_stack_count)
-        rawBadge = findViewById(R.id.gallery_photo_raw_badge)
-        importedBadge = findViewById(R.id.gallery_photo_imported_badge)
-        relatedBadge = findViewById(R.id.gallery_photo_related_badge)
+        tagViews = listOf(findViewById(R.id.gallery_photo_tag_1), findViewById(R.id.gallery_photo_tag_2))
         contentLayer.addView(processingShimmer, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
@@ -1552,7 +1582,6 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
         isSelectionMode: Boolean,
         isLandscape: Boolean,
         rotationDegrees: Float,
-        isProcessing: Boolean,
         onClick: () -> Unit,
         onLongClick: () -> Unit
     ) {
@@ -1566,25 +1595,6 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
             if (isSelected) R.drawable.ic_gallery_check_circle else R.drawable.ic_gallery_radio_unchecked
         )
 
-        videoBadge.visibility = if (photo.isVideo) VISIBLE else GONE
-        videoDuration.text = photo.getFormattedDuration()
-        motionIcon.visibility = if (photo.isMotionPhoto) VISIBLE else GONE
-        burstIcon.visibility = if (photo.isBurstPhoto) VISIBLE else GONE
-        val isRawPhoto = !isProcessing && when (viewModel.selectedTab) {
-            GalleryTab.PHOTON -> viewModel.isRawInGallery(photo.id)
-            GalleryTab.SYSTEM -> photo.isSystemRawImage()
-        }
-        rawBadge.visibility = if (photo.isImage && isRawPhoto) VISIBLE else GONE
-        stackBadge.visibility = if (versionCount > 1 && !isProcessing) VISIBLE else GONE
-        stackCount.text = versionCount.toString()
-        stackBadge.contentDescription =
-            context.resources.getQuantityString(R.plurals.gallery_stack_versions, versionCount, versionCount)
-        rawBadge.text = context.getString(R.string.gallery_raw_badge)
-        importedBadge.visibility =
-            if (viewModel.selectedTab == GalleryTab.PHOTON && photo.sourceUri != null) VISIBLE else GONE
-        importedBadge.text = context.getString(R.string.imported)
-        relatedBadge.visibility =
-            if (viewModel.selectedTab == GalleryTab.SYSTEM && photo.relatedPhoto != null) VISIBLE else GONE
 
         setOnClickListener { onClick() }
         setOnLongClickListener {
@@ -1600,6 +1610,24 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
                 .start()
         }
         requestLayout()
+    }
+
+    fun bindTags(tags: List<GridTag>) {
+        val iconSize = (10 * resources.displayMetrics.density).toInt()
+        tagViews.forEachIndexed { i, view ->
+            val tag = tags.getOrNull(i)
+            view.visibility = if (tag == null) GONE else VISIBLE
+            if (tag == null) return@forEachIndexed
+            view.text = tag.text
+            view.contentDescription = tag.description
+            view.setTextColor(if (tag.failed) TAG_FAILED_COLOR else TAG_COLOR)
+            view.setBackgroundResource(if (tag.failed) R.drawable.bg_gallery_tile_tag_failed else R.drawable.bg_gallery_tile_tag)
+            val icon = tag.icon.takeIf { it != 0 }?.let { ContextCompat.getDrawable(context, it)?.mutate() }
+            icon?.setBounds(0, 0, iconSize, iconSize)
+            icon?.setTint(TAG_COLOR)
+            view.setCompoundDrawablesRelative(icon, null, null, null)
+            view.compoundDrawablePadding = if (tag.text.isEmpty()) 0 else iconSize / 5
+        }
     }
 
     fun bindThumbnail(photoId: String, bitmap: Bitmap?) {
@@ -1690,22 +1718,57 @@ private fun Bitmap.galleryBitmapAspectRatio(): Float {
     }
 }
 
-private fun MediaData.isSystemRawImage(): Boolean {
-    if (!isImage) return false
-    if (mimeType?.let { type ->
-            type.contains("raw", ignoreCase = true) ||
-                    type.contains("dng", ignoreCase = true)
-        } == true
-    ) {
-        return true
-    }
+private const val TAG_COLOR = 0xFFE0E0E0.toInt()
+private const val TAG_FAILED_COLOR = 0xFFEA2546.toInt()
 
-    return displayName.substringAfterLast('.', missingDelimiterValue = "")
-        .lowercase()
-        .let { extension ->
-            extension in setOf("dng", "arw", "cr2", "cr3", "nef", "nrw", "orf", "pef", "raf", "rw2", "srw")
-        }
-}
+/** A tile tag: [icon] (a drawable, 0 for none) goes before [text]. */
+private data class GridTag(
+    val text: String,
+    @DrawableRes val icon: Int = 0,
+    val failed: Boolean = false,
+    val description: String? = null,
+)
+
+/**
+ * The tile's tags, in the viewer's words, at most two: a failed render first, then what kind of shot it is,
+ * then the lock, then the rest. [burstCount] 0 and a null [videoRate] leave those tags out until known.
+ */
+private fun gridTags(
+    context: Context,
+    photo: MediaData,
+    versionCount: Int,
+    tab: GalleryTab,
+    isRaw: Boolean,
+    burstCount: Int,
+    videoRate: SlowedCopy.Rate?,
+    isProtected: Boolean,
+    failed: Boolean,
+): List<GridTag> = buildList {
+    if (failed) add(GridTag("FAILED", failed = true))
+    if (isRaw && photo.isImage) add(GridTag(context.getString(R.string.gallery_raw_badge)))
+    stackedFrameCount(photo)?.let { add(GridTag("×$it")) }
+    val metadata = photo.metadata
+    metadata?.multipleExposureFrameCount?.takeIf { metadata.captureMode == "multiple_exposure" && it > 1 }?.let {
+        add(GridTag("ME ×$it"))
+    }
+    if (burstCount > 0) add(GridTag("BURST $burstCount"))
+    if (photo.isImage && photo.isMotionPhoto) add(GridTag("LIVE", R.drawable.ic_gallery_play))
+    if (photo.isVideo) add(GridTag(photo.getFormattedDuration(), R.drawable.ic_gallery_play))
+    if (videoRate?.isHighFrameRate == true) add(GridTag(if (videoRate.captureFps >= 900f) "960 FPS" else "120 FPS"))
+    if (isProtected) {
+        add(GridTag("", R.drawable.ic_gallery_tag_lock, description = context.getString(R.string.viewer_tag_protected_hint)))
+    }
+    if (versionCount > 1) {
+        add(
+            GridTag(
+                versionCount.toString(), R.drawable.ic_material_layers_24,
+                description = context.resources.getQuantityString(R.plurals.gallery_stack_versions, versionCount, versionCount)
+            )
+        )
+    }
+    if (tab == GalleryTab.PHOTON && photo.sourceUri != null) add(GridTag("IMPORT", description = context.getString(R.string.imported)))
+    if (tab == GalleryTab.SYSTEM && photo.relatedPhoto != null) add(GridTag("LILAC"))
+}.take(2)
 
 private fun MediaData.galleryAspectRatio(isLandscape: Boolean): Float {
     val rawWidth = if (isVideo) {
@@ -1730,14 +1793,5 @@ private fun MediaData.galleryAspectRatio(isLandscape: Boolean): Float {
         }
     } else {
         1f
-    }
-}
-
-/** The system's Material You dark background (tinted from the wallpaper), or the old near-black before Android 12. */
-@Composable
-private fun galleryBackgroundColor(): Color {
-    val context = LocalContext.current
-    return remember(context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dynamicDarkColorScheme(context).background else Color(0xFF151515)
     }
 }

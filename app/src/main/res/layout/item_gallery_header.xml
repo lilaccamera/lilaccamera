@@ -3,19 +3,22 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:gravity="center_vertical"
+    android:minHeight="40dp"
     android:orientation="horizontal"
-    android:paddingHorizontal="6dp">
+    android:paddingStart="8dp"
+    android:paddingEnd="6dp">
 
     <TextView
         android:id="@+id/gallery_header_title"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:fontFamily="sans"
-        android:paddingVertical="10dp"
-        android:textColor="#E6FFFFFF"
-        android:textSize="14sp"
-        android:textStyle="bold" />
+        android:fontFamily="sans-serif-medium"
+        android:letterSpacing="0.109"
+        android:paddingTop="4dp"
+        android:textAllCaps="true"
+        android:textColor="#FF9E9E9E"
+        android:textSize="11sp" />
 
     <CheckBox
         android:id="@+id/gallery_header_selection"
