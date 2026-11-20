@@ -28,8 +28,8 @@ android {
         targetSdk = 36
         // Lilac's own numbering. A release is tagged v<versionName>; a beta's name has a suffix (0.2.0-beta.1).
         // Raise versionCode for every release, betas included, or the update will not install.
-        versionCode = 165
-        versionName = "0.1.0"
+        versionCode = 166
+        versionName = "0.2.0"
         manifestPlaceholders["appLabel"] = "@string/app_name"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
