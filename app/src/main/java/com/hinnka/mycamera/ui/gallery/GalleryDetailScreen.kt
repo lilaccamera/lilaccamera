@@ -1904,6 +1904,8 @@ private fun VideoDetailPlayer(
 
     var lutConfig by remember { mutableStateOf<com.hinnka.mycamera.lut.LutConfig?>(null) }
     var recipeParams by remember { mutableStateOf<com.hinnka.mycamera.model.ColorRecipeParams?>(null) }
+    // Playback waits for the look, which decides whether the clip needs the GPU effect at all.
+    var lookLoaded by remember(photo.id) { mutableStateOf(false) }
     val refreshKey = viewModel.photoRefreshKeys[photo.id] ?: 0L
 
     LaunchedEffect(photo.id, refreshKey) {
@@ -1923,6 +1925,7 @@ private fun VideoDetailPlayer(
             withContext(Dispatchers.Main) {
                 lutConfig = config
                 recipeParams = params
+                lookLoaded = true
             }
         }
     }
@@ -1950,7 +1953,6 @@ private fun VideoDetailPlayer(
         PLog.d("VideoDetailPlayer", "Creating ExoPlayer for detail video.")
         ExoPlayer.Builder(context).build().apply {
             repeatMode = Player.REPEAT_MODE_OFF
-            setVideoEffects(listOf(videoLutEffect))
 
             addListener(object : Player.Listener {
                 override fun onPlaybackStateChanged(state: Int) {
@@ -1975,10 +1977,20 @@ private fun VideoDetailPlayer(
         }
     }
 
-    LaunchedEffect(exoPlayer, isActive, lifecycle) {
+    LaunchedEffect(exoPlayer, isActive, lifecycle, lookLoaded) {
         PLog.d("VideoDetailPlayer", "VideoDetailPlayer isActive changed: $isActive, player: $exoPlayer")
-        if (exoPlayer != null && isActive) {
+        if (exoPlayer != null && isActive && lookLoaded) {
             delay(150) // Wait for transitions to complete and EGL surface to be fully ready
+            // A clip without a look plays straight to the screen. With one, frames larger than 1080p are scaled
+            // down first: a 4K stream through the GL effect faults the Adreno 540 and drops the app's GPU contexts.
+            val effects = when {
+                lutConfig == null && recipeParams == null -> emptyList()
+                minOf(photo.width, photo.height) > 1080 ->
+                    listOf(androidx.media3.effect.Presentation.createForShortSide(1080), videoLutEffect)
+                else -> listOf(videoLutEffect)
+            }
+            PLog.d("VideoDetailPlayer", "Video effects: ${effects.size} for ${photo.id} (${photo.width}x${photo.height})")
+            exoPlayer.setVideoEffects(effects)
             PLog.d("VideoDetailPlayer", "Preparing and starting ExoPlayer.")
             // Read before playback so the transport, which sets speed and sound, knows a 120 fps clip by READY.
             viewModel.videoRate(photo)
