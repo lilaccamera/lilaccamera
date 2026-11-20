@@ -925,7 +925,7 @@ fun GalleryDetailScreen(
         if (currentPhoto != null && tagPhoto != null && !overlaysHidden) {
             Box(
                 (if (landscape) Modifier.padding(start = navLeft).width(ViewerTopRowHeight).fillMaxHeight()
-                else Modifier.fillMaxWidth().height(ViewerTopRowHeight))
+                else Modifier.fillMaxWidth().height(ViewerTopRowHeight).offset(y = -ViewerTopRowLift))
                     .then(rowsFade)
                     .photoMorphEdge(top = true)
             ) {
@@ -2522,7 +2522,7 @@ private fun ZoomableImage(
     // between the columns would leave a 4:3 photo small and off-centre. Turned UI over an upright window fits.
     val rests = OrientationObserver.uiRotationDegrees == 0f && windowSize.height > windowSize.width
     val restFit = remember(rests, density) {
-        if (rests) RestFit(top = with(density) { ViewerTopRowHeight.toPx() }, bottom = with(density) { (ViewerItemRowHeight + ViewerActionRowHeight).toPx() }) else null
+        if (rests) RestFit(top = with(density) { ViewerTopRowSpace.toPx() }, bottom = with(density) { (ViewerItemRowHeight + ViewerActionRowHeight).toPx() }) else null
     }
     val contentScale: ContentScale = restFit ?: ContentScale.Fit
     val alignment: Alignment = restFit ?: Alignment.Center
@@ -2847,6 +2847,10 @@ private val VersionStripHeight = 56.dp
 
 // The viewer's rows, from the screen's edges: the top row, the item row above the action row.
 private val ViewerTopRowHeight = 48.dp
+// Upright, the top row's icons sit this much higher than centred, so the photo's space starts at
+// ViewerTopRowSpace and a 3:4 photo fits there at full width; the 48 dp tap areas reach that far over its edge.
+private val ViewerTopRowLift = 4.dp
+private val ViewerTopRowSpace = ViewerTopRowHeight - ViewerTopRowLift * 2
 private val ViewerItemRowHeight = 56.dp
 private val ViewerActionRowHeight = 64.dp
 // The strip centred in the item row, and how far it drops in full view.
