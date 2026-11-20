@@ -51,7 +51,7 @@ Why wait? Developing one 19 MP RAW needs about 1 GB of memory. On a 4 GB phone o
 
 <!-- screenshot: the Processing photos screen -->
 
-Open it from the gallery's layers icon, or from the chip on a waiting photo. The thumbnail's edge on the camera screen shows its progress too.
+Open it from the render queue button in the gallery's top line, or from the processing line in the viewer. The thumbnail's edge on the camera screen shows its progress too.
 
 - **Pause** waits for the next save point, so no work is lost, then holds new photos until you tap **Resume**. Pause and Resume are also in the notification.
 - **Skip** takes a photo out of the line. Its RAW file is kept; tap **Process** to put it back.

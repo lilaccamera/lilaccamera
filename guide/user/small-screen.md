@@ -4,7 +4,7 @@ icon: lucide/smartphone
 
 # Built for a small screen
 
-The XZ1 Compact has a 4.6-inch screen of 720 × 1280 pixels. Lilac's interface was rebuilt for it, so the camera and the editor work with one thumb and every word fits.
+The XZ1 Compact has a 4.6-inch screen of 720 × 1280 pixels. Lilac's interface was rebuilt for it, so the camera, the gallery and the editor work with one thumb and every word fits.
 
 ## The camera screen
 

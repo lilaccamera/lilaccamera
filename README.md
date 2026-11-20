@@ -58,7 +58,7 @@ GCam processes photos well but knows nothing about Sony's camera. Lilac runs GCa
 
 ## Built for a 4.6-inch screen
 
-Lilac's interface is not PhotonCamera's. The camera and the editor were rebuilt around one rule: a 4.6-inch phone held in one hand. Every button is in thumb reach, the viewfinder takes gestures, the shutter is the mode dial, and the side keys are camera controls. More in [Built for a small screen](https://lilaccamera.github.io/user/small-screen/).
+Lilac's interface is not PhotonCamera's. The camera, the gallery and the editor were rebuilt around one rule: a 4.6-inch phone held in one hand. Every button is in thumb reach, the viewfinder takes gestures, the shutter is the mode dial, and the side keys are camera controls. More in [Built for a small screen](https://lilaccamera.github.io/user/small-screen/).
 
 ## Get Lilac
 
@@ -70,7 +70,7 @@ Lilac's interface is not PhotonCamera's. The camera and the editor were rebuilt 
 The [user guide](https://lilaccamera.github.io/) explains what Lilac does differently; its source is in [`guide/`](guide/index.md). Camera basics, and the colour tools Lilac shares with PhotonCamera, are not covered there.
 
 - **How Lilac works:** [Sony camera features](https://lilaccamera.github.io/user/hardware/), [how a picture is made](https://lilaccamera.github.io/user/how-pictures-are-made/), [built for a small screen](https://lilaccamera.github.io/user/small-screen/), [focus and faces](https://lilaccamera.github.io/user/focus/), [optimizations and tweaks](https://lilaccamera.github.io/user/optimizations/)
-- **Using Lilac:** [getting started](https://lilaccamera.github.io/user/getting-started/), [Photo and Night](https://lilaccamera.github.io/user/photo-mode/), [Pro](https://lilaccamera.github.io/user/pro-mode/), [HDR](https://lilaccamera.github.io/user/hdr/), [Portrait](https://lilaccamera.github.io/user/portrait/), [Video](https://lilaccamera.github.io/user/video/), [Editor](https://lilaccamera.github.io/user/editor/), [Troubleshooting](https://lilaccamera.github.io/user/troubleshooting/)
+- **Using Lilac:** [getting started](https://lilaccamera.github.io/user/getting-started/), [Photo and Night](https://lilaccamera.github.io/user/photo-mode/), [Pro](https://lilaccamera.github.io/user/pro-mode/), [HDR](https://lilaccamera.github.io/user/hdr/), [Portrait](https://lilaccamera.github.io/user/portrait/), [Video](https://lilaccamera.github.io/user/video/), [Gallery and viewer](https://lilaccamera.github.io/user/gallery/), [Editor](https://lilaccamera.github.io/user/editor/), [Troubleshooting](https://lilaccamera.github.io/user/troubleshooting/)
 - **Testers and ROMs:** [Sony bridge](https://lilaccamera.github.io/bridge/install/) (adb script or root file browser), [ROM integration](https://lilaccamera.github.io/rom/integration/)
 
 <details>

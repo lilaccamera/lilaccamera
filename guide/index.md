@@ -81,7 +81,7 @@ Other phones are not tested. Testers can add the bridge themselves: [install the
 
 ## Rebuilt for a 4.6-inch screen
 
-Lilac's interface is not PhotonCamera's. The camera and the editor were rebuilt around one rule: a 4.6-inch phone held in one hand.
+Lilac's interface is not PhotonCamera's. The camera, the gallery and the editor were rebuilt around one rule: a 4.6-inch phone held in one hand.
 
 <div class="lilac-split" markdown="0">
 <figure class="lilac-fig lilac-fig--phone">
@@ -158,7 +158,7 @@ Lilac's interface is not PhotonCamera's. The camera and the editor were rebuilt 
 <li><a href="user/photo-mode/">Photo and Night</a></li>
 <li><a href="user/pro-mode/">Pro</a> · <a href="user/hdr/">HDR</a></li>
 <li><a href="user/portrait/">Portrait</a> · <a href="user/video/">Video</a></li>
-<li><a href="user/editor/">Editor</a></li>
+<li><a href="user/gallery/">Gallery and viewer</a> · <a href="user/editor/">Editor</a></li>
 <li><a href="user/troubleshooting/">Troubleshooting</a></li>
 </ul></div>
 <div><h3>Testers and ROMs</h3><ul>
