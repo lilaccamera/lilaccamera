@@ -37,7 +37,7 @@ Pro photos are finished in the background; see [the render queue](pro-mode.md#th
     Android stopped the same photo twice to free memory. Swipe Lilac Camera away from Recents; if it still stops, restart the phone. See [when renders keep stopping](pro-mode.md#when-renders-keep-stopping).
 
 ??? question "“Couldn’t process after 3 tries. The RAW file is kept.”"
-    The photo failed three times or hung for five minutes. Nothing is lost. Open the gallery, tap the layers icon (it shows **!**) and tap **Try again**. Restarting the phone first gives it the most room.
+    The photo failed three times or hung for five minutes. Nothing is lost. Open the gallery, tap the render queue button in its top line (it shows **!**) and tap **Try again**. Restarting the phone first gives it the most room.
 
 ??? question "“Processing starts when you open the app, or tap Process now.”"
     Processing was stopped, for example by Force stop. Tap **Process now**.

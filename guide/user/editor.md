@@ -4,7 +4,7 @@ icon: lucide/sliders-horizontal
 
 # Photo editor
 
-Open a photo in the gallery and tap the pencil. The button waits while a photo is still processing.
+Open a photo in the [viewer](gallery.md#the-viewer) and tap **Edit** in the action row. The button waits while a photo is still processing.
 
 <figure class="lilac-fig lilac-fig--phone" markdown="0">
 <svg viewBox="0 0 340 407" role="img" aria-labelledby="ed-t ed-d" class="phone">

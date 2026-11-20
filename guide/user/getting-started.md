@@ -95,4 +95,4 @@ In Night that button becomes Night's Fast or Accurate switch instead. Looks cann
 
 ## The latest photo
 
-Tap the thumbnail to open the gallery. Its edge shows processing: a running arc while a photo is processed, a dotted ring while photos wait, pause bars when processing is paused, and an amber ring when Android keeps stopping a Pro photo for memory. See [Pro mode](pro-mode.md#the-render-queue).
+Tap the thumbnail to open the [viewer](gallery.md#opening-them) on the photo still processing, or else the newest photo or video. Its edge shows processing: a running arc while a photo is processed, a dotted ring while photos wait, pause bars when processing is paused, and an amber ring when Android keeps stopping a Pro photo for memory. See [Pro mode](pro-mode.md#the-render-queue).

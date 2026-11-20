@@ -59,6 +59,7 @@ nav:
       - HDR: user/hdr.md
       - Portrait: user/portrait.md
       - Video: user/video.md
+      - Gallery and viewer: user/gallery.md
       - Editor: user/editor.md
   - Troubleshooting: user/troubleshooting.md
   - Sony bridge: bridge/install.md

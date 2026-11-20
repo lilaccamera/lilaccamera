@@ -29,7 +29,7 @@ The frame-rate item lists only the rates the camera really offers (30 fps by def
 
 Lilac draws these frames itself, so looks, sound and Pause work as in normal video. Starting from 30 fps takes a moment longer while the camera switches mode.
 
-A 120 fps video is an ordinary real-time file with sound: other apps play it at full speed. Lilac's gallery opens it **four times slower, without sound**; the pill at the bottom switches between ¼× and 1×. **Share** and **Export** ask **Slowed** (four times slower, no sound) or **Full speed** (the file as recorded).
+A 120 fps video is an ordinary real-time file with sound: other apps play it at full speed. Lilac's [viewer](gallery.md#videos) plays the slowed part of it **four times slower, without sound**, shown as a band on the timeline whose ends you can drag, and the rest at full speed; the **¼× / 1×** choice above the timeline switches the speed. **Share** and **Export** ask **Slowed** (four times slower, no sound) or **Full speed** (the file as recorded).
 
 ## Stabilisation
 
