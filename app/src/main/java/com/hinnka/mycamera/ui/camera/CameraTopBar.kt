@@ -228,12 +228,12 @@ private fun formatRecordingDuration(elapsedMs: Long): String {
     return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%02d:%02d".format(minutes, seconds)
 }
 
-/** A 2 dp line icon in white, with a dark copy one dp lower that keeps it readable on a bright picture. */
+/** A 2 dp line icon in [tint], with a dark copy one dp lower that keeps it readable on a bright picture. */
 @Composable
-internal fun ShadowedLineIcon(icon: ImageVector, size: Dp) {
+internal fun ShadowedLineIcon(icon: ImageVector, size: Dp, tint: Color = Color.White) {
     Box {
         Icon(icon, null, tint = Color.Black.copy(alpha = 0.5f), modifier = Modifier.offset(y = 1.dp).size(size))
-        Icon(icon, null, tint = Color.White, modifier = Modifier.size(size))
+        Icon(icon, null, tint = tint, modifier = Modifier.size(size))
     }
 }
 

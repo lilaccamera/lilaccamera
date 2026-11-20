@@ -1,12 +1,5 @@
 package com.hinnka.mycamera.ui.components
 
-import android.content.Context
-import android.graphics.Canvas
-import android.graphics.LinearGradient
-import android.graphics.Paint
-import android.graphics.Shader
-import android.os.SystemClock
-import android.view.View
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -71,24 +64,5 @@ fun ProcessingPhotoPreview(photo: ProcessingPhoto, modifier: Modifier = Modifier
             )
         }
         // Labelled by the viewer's processing chip (RenderQueuePhotoChip), so one label says in camera or RAW queue.
-    }
-}
-
-/** RecyclerView equivalent of the detail preview's subtle diagonal sweep. */
-class ProcessingPhotoShimmerView(context: Context) : View(context) {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        if (!isShown) return
-        val distance = width + height.toFloat()
-        val progress = (SystemClock.uptimeMillis() % 2200L) / 2200f * 3f - 1f
-        val center = progress * distance
-        paint.shader = LinearGradient(
-            center - distance * 0.22f, 0f, center, height * 0.35f,
-            intArrayOf(0x00FFFFFF, 0x20FFFFFF, 0x00FFFFFF), null, Shader.TileMode.CLAMP
-        )
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
-        postInvalidateOnAnimation()
     }
 }

@@ -49,6 +49,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import com.hinnka.mycamera.ui.gallery.HeldFrameDim
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -152,6 +153,7 @@ internal enum class CameraShootingMode {
 }
 
 private const val PreviewTransitionRevealDurationMillis = 130
+private const val HeldFrameRevealTimeoutMillis = 2_500L
 private const val PreviewMorphDurationMillis = 280
 private const val ControlsArrivalDurationMillis = 200
 private val ControlsArrivalEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
@@ -274,7 +276,18 @@ fun CameraScreen(
         controlsArrivalPlayed = true
         controlsArrival.animateTo(1f, tween(ControlsArrivalDurationMillis, easing = ControlsArrivalEasing))
     }
-    val newestPhoto by galleryViewModel.latestPhoto.collectAsState()
+    val galleryPhotos by galleryViewModel.photos.collectAsState()
+    // The newest item, photo or video, that a pending delete has not hidden.
+    val newestPhoto = galleryPhotos.firstOrNull { it.id !in galleryViewModel.hiddenPhotoIds }
+    // A capture's preview waits for its own saved photo to load; once that photo is deleted it never will, so let
+    // the preview go and show the newest item instead.
+    LaunchedEffect(newestPhoto?.id) {
+        val captured = viewModel.capturedThumbnail.value ?: return@LaunchedEffect
+        val savedId = captured.savedPhotoId ?: return@LaunchedEffect
+        if (galleryPhotos.none { it.id == savedId } || savedId in galleryViewModel.hiddenPhotoIds) {
+            viewModel.acknowledgeCapturedThumbnail(captured.captureId)
+        }
+    }
     // Over the lock screen the thumbnail shows only what was taken since; older photos need the unlock.
     var shotSinceLaunch by remember { mutableStateOf(false) }
     val latestPhoto = newestPhoto.takeIf { !LocalPhoneLocked.current || shotSinceLaunch }
@@ -386,8 +399,15 @@ fun CameraScreen(
     var previewTransitionRevealing by remember { mutableStateOf(false) }
     // A switch that only changes the pipeline (Photo <-> Pro) shows no cover; the controls change over the viewfinder.
     var previewTransitionCovered by remember { mutableStateOf(true) }
+    // Back from the viewer: the frame held on the way there shows dimmed until the camera's first frame.
+    val returnFrame = remember {
+        viewModel.heldPreviewFrame.also {
+            com.hinnka.mycamera.utils.PLog.i(com.hinnka.mycamera.viewmodel.THUMB_MOTION, "camera screen composed, held frame=${it != null}")
+        }
+    }
+    val returnFrameImage = remember { returnFrame?.bitmap?.asImageBitmap() }
     // The frame being left, kept (cropped to the new viewfinder) under the cover until the live view lands.
-    var previewTransitionFrame by remember { mutableStateOf<ImageBitmap?>(null) }
+    var previewTransitionFrame by remember { mutableStateOf(returnFrameImage) }
     var previewTransitionToken by remember { mutableIntStateOf(0) }
     var previewTransitionAwaitingResume by remember { mutableStateOf(false) }
     var previewTransitionSawPause by remember { mutableStateOf(false) }
@@ -425,7 +445,10 @@ fun CameraScreen(
     // prepareCamera opens the camera ahead of the preview; don't leave it open if this screen
     // goes away before the preview surface arrived.
     DisposableEffect(viewModel) {
-        onDispose { viewModel.closeCameraWithoutPreview() }
+        onDispose {
+            viewModel.closeCameraWithoutPreview()
+            viewModel.onPreviewViewGone()
+        }
     }
 
     LaunchedEffect(
@@ -684,8 +707,8 @@ fun CameraScreen(
     // The held frame moves from the old picture rectangle to the new one while the camera restarts.
     // Drawn in a Compose layer above the preview: the preview surface itself changes size only once.
     val previewMorphProgress = remember { Animatable(1f) }
-    var previewMorphFrom by remember { mutableStateOf<Rect?>(null) }
-    var previewMorphTo by remember { mutableStateOf<Rect?>(null) }
+    var previewMorphFrom by remember { mutableStateOf(returnFrame?.bounds) }
+    var previewMorphTo by remember { mutableStateOf(returnFrame?.bounds) }
     LaunchedEffect(previewBounds) {
         val target = previewBounds ?: return@LaunchedEffect
         val shown = previewMorphTo
@@ -1009,6 +1032,15 @@ fun CameraScreen(
         }
     }
 
+    // Fallback for a camera that never delivers: the held frame fades anyway instead of hanging over the screen.
+    var heldFrameTimedOut by remember { mutableStateOf(false) }
+    if (returnFrame != null) {
+        LaunchedEffect(Unit) {
+            delay(HeldFrameRevealTimeoutMillis)
+            heldFrameTimedOut = true
+        }
+    }
+
     LaunchedEffect(previewFrameRendered) {
         // Deferred start-up work (gallery list, warm-ups) waits for the first camera frame.
         if (previewFrameRendered) StartupGate.open()
@@ -1019,20 +1051,29 @@ fun CameraScreen(
         previewFrameRendered,
         state.captureMode,
         hasPlayedInitialPreviewTransition,
-        canStartShutterAnimation
+        canStartShutterAnimation,
+        heldFrameTimedOut
     ) {
         val canRevealInitialPreview =
             canStartShutterAnimation ||
                 state.captureMode == CaptureMode.VIDEO
         // Open on the camera's first frame: the black splash and this cover read as one closed shutter.
-        if (hasPlayedInitialPreviewTransition || !state.isPreviewActive ||
-            !previewFrameRendered || !canRevealInitialPreview
+        if (hasPlayedInitialPreviewTransition) return@LaunchedEffect
+        if (!heldFrameTimedOut &&
+            (!state.isPreviewActive || !previewFrameRendered || !canRevealInitialPreview)
         ) return@LaunchedEffect
+        if (returnFrame != null) {
+            com.hinnka.mycamera.utils.PLog.i(
+                com.hinnka.mycamera.viewmodel.THUMB_MOTION,
+                "reveal started by ${if (previewFrameRendered) "first frame" else "timeout"}"
+            )
+        }
         previewTransitionActive = true
         previewTransitionRevealing = true
         delay(PreviewTransitionRevealDurationMillis.toLong())
         previewTransitionActive = false
         hasPlayedInitialPreviewTransition = true
+        viewModel.heldPreviewFrame = null
     }
 
     var showGhostPermissionDialog by remember { mutableStateOf(false) }
@@ -1416,6 +1457,7 @@ fun CameraScreen(
                         .background(Color.Black)
                         .onGloballyPositioned { coordinates ->
                             previewBounds = coordinates.boundsInRoot()
+                            viewModel.previewBoundsInRoot = previewBounds
                         }
                         .pointerInput(state.availableCameras) {
                             val switchThreshold = max(size.width * 0.25f, 96.dp.toPx())
@@ -1629,6 +1671,7 @@ fun CameraScreen(
                             smileThreshold = viewModel.smileThreshold,
                             meteringMode = state.effectiveMeteringMode,
                             onSurfaceTextureReady = { surfaceTexture ->
+                                if (previewSurfaceTexture == null) com.hinnka.mycamera.utils.PLog.i(com.hinnka.mycamera.viewmodel.THUMB_MOTION, "preview surface attached")
                                 previewSurfaceTexture = surfaceTexture
                             },
                             onSurfaceDestroyed = { surfaceTexture ->
@@ -1706,7 +1749,8 @@ fun CameraScreen(
 
                     // Black at start-up until the camera's first frame, then a quick fade-in. Later switches
                     // are never covered: the held frame above moves to the new picture and fades out.
-                    if (!hasPlayedInitialPreviewTransition) {
+                    // Not under a held frame: fading both would dip through black instead of crossing to the live view.
+                    if (!hasPlayedInitialPreviewTransition && returnFrame == null) {
                         Box(
                             Modifier
                                 .fillMaxSize()
@@ -1903,6 +1947,7 @@ fun CameraScreen(
                 exposureCount = exposureCount,
                 onGalleryThumbnailBoundsChanged = { bounds ->
                     galleryThumbnailBounds = bounds
+                    viewModel.thumbnailBoundsInRoot = bounds
                 },
                 onCaptureButtonBoundsChanged = { bounds ->
                     captureButtonBounds = bounds
@@ -1951,6 +1996,8 @@ fun CameraScreen(
                     viewModel.capture()
                 },
                 onGalleryClick = {
+                    // A split screen keeps the camera running beside the viewer, so nothing to hold there.
+                    if (!viewModel.isExpanded) viewModel.holdPreviewFrame()
                     onGalleryClick()
                 },
                 isXpan = isXpan,
@@ -2040,6 +2087,7 @@ fun CameraScreen(
                     val rect = androidx.compose.ui.geometry.lerp(from, to, previewMorphProgress.value).translate(-layerOrigin)
                     // Fades on the new camera's first frame, even while it is still moving.
                     drawCenterCropped(frame, rect, alpha = cover)
+                    if (frame === returnFrameImage) drawRect(Color.Black, rect.topLeft, rect.size, alpha = HeldFrameDim * cover)
                 }
             }
 

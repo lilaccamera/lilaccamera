@@ -24,11 +24,12 @@ import com.hinnka.mycamera.gallery.ProcessingPhoto
 import com.hinnka.mycamera.gallery.MediaData
 import com.hinnka.mycamera.gallery.MediaMetadata
 import com.hinnka.mycamera.gallery.PhotoStacks
+import com.hinnka.mycamera.R
+import android.widget.Toast
 import com.hinnka.mycamera.gallery.MediaType
 import com.hinnka.mycamera.gallery.PostEditGeometry
 import com.hinnka.mycamera.hdr.HdrGainmapStrength
 import com.hinnka.mycamera.hdr.UnifiedGainmapProducer
-import com.hinnka.mycamera.lut.creator.AiPhotoEvaluation
 import com.hinnka.mycamera.lut.BaselineColorCorrectionTarget
 import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.lut.LutInfo
@@ -40,7 +41,6 @@ import com.hinnka.mycamera.video.VideoColorMetadata
 import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.lut.getVideoExportOptions as resolveVideoExportOptions
 import com.hinnka.mycamera.lut.isVideoTransformerExportSupported
-import com.hinnka.mycamera.lut.creator.OpenAIApiClient
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.model.CameraPreset
 import com.hinnka.mycamera.model.ColorRecipeParams
@@ -84,7 +84,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import java.io.File
 import java.io.FileOutputStream
-import java.net.SocketException
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -97,7 +96,8 @@ enum class GalleryTab {
 
 enum class GalleryBatchOperation {
     PASTE_SETTINGS,
-    EXPORT
+    EXPORT,
+    ADD_TO_LILAC
 }
 
 data class GalleryBatchOperationProgress(
@@ -281,6 +281,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     var preparingEditPhotoId by mutableStateOf<String?>(null)
         private set
 
+    // The picture on screen as the viewer opens the editor, or as the editor goes back: the next screen shows it at
+    // once, by reference, while it renders its own, so the move between them has a picture from the first frame.
+    var editHandoff: Bitmap? = null
+    fun takeEditHandoff(): Bitmap? = editHandoff.also { editHandoff = null }
+    // The camera thumbnail's decoded picture and its photo: the viewer opened from it starts with this.
+    var cameraThumbnail: Pair<String, Bitmap>? = null
+
     // LUT 编辑状态
     var editLutId = MutableStateFlow<String?>(null)
         private set
@@ -388,8 +395,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
     private val gridThumbnailSemaphore = Semaphore(4)
-
-    private val aiEvaluationCache = mutableMapOf<String, AiPhotoEvaluation>()
 
     // 可用的 LUT 列表
     var availableLuts: List<LutInfo> by mutableStateOf(emptyList())
@@ -1448,6 +1453,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             hasMoreSystemPhotos = false
 
             val newPhotos = repository.getAllSystemPhotos()
+            // Known before the tiles bind: the grid reads them only on bind.
+            updateRawPhotoStates(newPhotos)
             _systemPhotos.value = newPhotos
             systemOffset = newPhotos.size
             hasMoreSystemPhotos = false
@@ -1500,9 +1507,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 } ?: fresh
             }
             val currentId = getCurrentPhoto()?.id
+            updateRawPhotoStates(mergedList)
             _photos.value = mergedList
             mergeProcessingPhotos(currentId)
-            updateRawPhotoStates(_photos.value)
             photonOffset = mergedList.size
             hasMorePhotonPhotos = false
             _latestPhoto.value = _photos.value.firstOrNull()
@@ -1551,14 +1558,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /** Both tabs share the map (ids differ), so the grid's RAW tag follows the viewer's rule without a read on bind. */
     private suspend fun updateRawPhotoStates(photos: List<MediaData>) {
-        val context = getApplication<Application>()
         val states = withContext(Dispatchers.IO) {
-            photos.associate { photo ->
-                photo.id to (photo.isImage && GalleryManager.getDngFile(context, photo.id).exists())
-            }
+            photos.associate { photo -> photo.id to (photo.isImage && isRawMedia(photo)) }
         }
-        rawPhotoStates.clear()
         rawPhotoStates.putAll(states)
     }
 
@@ -2086,6 +2090,25 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /** Protected from deletion; on the system tab, through the Lilac photo the item came from. */
+    fun isProtected(photo: MediaData): Boolean = PhotoStacks.isProtected((photo.relatedPhoto ?: photo).metadata)
+
+    /**
+     * Sets [key] to [value] (null removes it) on every version of [photo]'s stack, so the rating and protection
+     * hold whichever version shows; on the system tab, on the Lilac photo the item came from.
+     */
+    fun setStackProperty(photo: MediaData, key: String, value: String?) {
+        val target = photo.relatedPhoto ?: photo
+        val versions = PhotoStacks.of(_photos.value).versionsOf(target)
+        viewModelScope.launch(Dispatchers.IO) {
+            versions.forEach { version ->
+                GalleryManager.updateMetadata(getApplication(), version.id) {
+                    it.copy(customProperties = if (value == null) it.customProperties - key else it.customProperties + (key to value))
+                }
+            }
+        }
+    }
+
     /**
      * 设置当前查看的照片索引
      */
@@ -2150,6 +2173,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * 4. 如果没有导出的照片，或者在 Android 10 及以下，直接删除照片
      */
     fun requestDeletePhoto(photo: MediaData, deleteExported: Boolean = true) {
+        if (isProtected(photo)) {
+            Toast.makeText(getApplication(), R.string.viewer_protected_refused, Toast.LENGTH_SHORT).show()
+            return
+        }
         if (selectedTab == GalleryTab.SYSTEM) {
             viewModelScope.launch {
                 // ContentProvider / MediaStore 请求可能跨进程阻塞，不在主线程创建。
@@ -2266,14 +2293,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      */
     fun deleteSystemPhotoAfterConfirmation(onComplete: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
-            pendingDeleteSystemPhoto?.relatedPhoto?.takeIf { it.isVideo }?.let { relatedVideo ->
-                withContext(Dispatchers.IO) {
-                    GalleryManager.deletePhotoOnly(getApplication(), relatedVideo.id)
-                }
-                removePhotonPhotosFromState(setOf(relatedVideo.id))
-                loadPhotosInternal()
+            pendingDeleteSystemPhoto?.let {
+                offerTrashUndo(listOf(it))
+                removeSystemPhotosFromState(setOf(it.id))
             }
-            pendingDeleteSystemPhoto?.let { removeSystemPhotosFromState(setOf(it.id)) }
             // 系统照片已经被 MediaStore 删除，我们只需要刷新列表
             loadSystemPhotosInternal()
 
@@ -2304,6 +2327,16 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /** [requested] without its protected items, saying how many were kept. */
+    fun unprotected(requested: List<MediaData>): List<MediaData> {
+        val toDelete = requested.filterNot(::isProtected)
+        (requested.size - toDelete.size).takeIf { it > 0 }?.let { kept ->
+            val app = getApplication<Application>()
+            Toast.makeText(app, app.resources.getQuantityString(R.plurals.delete_protected_kept, kept, kept), Toast.LENGTH_SHORT).show()
+        }
+        return toDelete
+    }
+
     /**
      * 批量删除选中的照片
      *
@@ -2311,7 +2344,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * - true: Android 11+ 会使用 MediaStore.createDeleteRequest 弹出系统确认对话框
      * - false: 只删除应用内部照片，不删除系统相册
      */
-    fun deleteSelectedPhotos(deleteExported: Boolean = true, toDelete: List<MediaData> = selectedPhotos.toList()) {
+    fun deleteSelectedPhotos(deleteExported: Boolean = true, requested: List<MediaData> = selectedPhotos.toList()) {
+        val toDelete = unprotected(requested)
         if (toDelete.isEmpty()) return
 
         if (selectedTab == GalleryTab.SYSTEM) {
@@ -2332,9 +2366,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
 
                 try {
-                    val pendingIntent = MediaStore.createDeleteRequest(
+                    // The system trash: one system dialog, and the items stay recoverable there.
+                    val pendingIntent = MediaStore.createTrashRequest(
                         context.contentResolver,
-                        uris
+                        uris,
+                        true
                     )
                     pendingDeletePhotos = toDelete
                     batchDeletePendingIntent = pendingIntent
@@ -2410,7 +2446,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      */
     private fun deleteBatchPhotosOnlyInternal(
         photos: List<MediaData>,
-        deleteExportedDocuments: Boolean = false
+        deleteExportedDocuments: Boolean = false,
+        // False for a delete that ran after its Undo window: a selection started since then stays.
+        exitSelection: Boolean = true,
+        onDone: () -> Unit = {},
     ) {
         viewModelScope.launch {
             val context = getApplication<Application>()
@@ -2430,10 +2469,125 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
 
-            exitSelectionMode()
+            if (exitSelection) exitSelectionMode()
             removePhotonPhotosFromState(deletedIds)
             loadPhotosInternal()
             PLog.d(TAG, "Batch deleted $deletedCount photos (app only)")
+            onDone()
+        }
+    }
+
+    /**
+     * A viewer delete shown as done while Undo is offered: the [photos] go, or, with a [burstFrame], only that
+     * frame of the burst photo in [photos]. Nothing is deleted before [commitPendingDelete]; if the app dies
+     * first, the files stay.
+     */
+    class PendingDelete(val photos: List<MediaData>, val burstFrame: File?, val message: String, val trashed: Boolean = false) {
+        /** Lilac's records behind system items in the trash (a captured video's), kept until Undo is over. */
+        val trashedRecords: List<MediaData> get() = if (trashed) photos.mapNotNull { it.relatedPhoto }.filter { it.isVideo } else emptyList()
+        /** What the lists leave out meanwhile; trashed system items are already gone from them. */
+        val hiddenIds: Set<String> get() = (if (trashed) trashedRecords else photos).map { it.id }.toSet()
+    }
+
+    var pendingDelete by mutableStateOf<PendingDelete?>(null)
+        private set
+    /** What the viewer leaves out while its delete waits for Undo or runs. */
+    var hiddenPhotoIds by mutableStateOf(emptySet<String>())
+        private set
+    var hiddenBurstFrames by mutableStateOf(emptySet<File>())
+        private set
+    private var pendingDeleteJob: Job? = null
+
+    /** Deletes app-owned [photos] (or one [burstFrame]) after a 5 s Undo window; an earlier pending delete goes now. */
+    fun deleteWithUndo(photos: List<MediaData>, burstFrame: File?, message: String, trashed: Boolean = false) {
+        commitPendingDelete()
+        val pending = PendingDelete(photos, burstFrame, message, trashed)
+        if (burstFrame != null) hiddenBurstFrames += burstFrame else hiddenPhotoIds += pending.hiddenIds
+        pendingDelete = pending
+        pendingDeleteJob = viewModelScope.launch {
+            delay(5_000)
+            commitPendingDelete()
+        }
+    }
+
+    fun undoPendingDelete(): PendingDelete? {
+        val pending = pendingDelete ?: return null
+        pendingDeleteJob?.cancel()
+        pendingDeleteJob = null
+        pendingDelete = null
+        when {
+            pending.trashed -> requestTrashRestore(pending)
+            pending.burstFrame != null -> hiddenBurstFrames -= pending.burstFrame
+            else -> hiddenPhotoIds -= pending.hiddenIds
+        }
+        return pending
+    }
+
+    /** After system items went to the trash: the same Undo, which asks the system to restore them. */
+    private fun offerTrashUndo(photos: List<MediaData>) {
+        val app = getApplication<Application>()
+        deleteWithUndo(photos, null, app.resources.getQuantityString(R.plurals.gallery_trashed_count, photos.size, photos.size), trashed = true)
+    }
+
+    /** The system's restore-from-trash dialog for an Undo; the UI launches it and reports to [finishTrashRestore]. */
+    var trashRestoreIntent by mutableStateOf<android.app.PendingIntent?>(null)
+        private set
+    private var trashRestore: PendingDelete? = null
+
+    private fun requestTrashRestore(pending: PendingDelete) {
+        viewModelScope.launch {
+            val uris = pending.photos.map { it.uri }.filter { it.scheme == "content" }
+            val intent = withContext(Dispatchers.IO) {
+                runCatching { MediaStore.createTrashRequest(getApplication<Application>().contentResolver, uris, false) }
+                    .onFailure { PLog.e(TAG, "Failed to create trash restore request", it) }.getOrNull()
+            }
+            trashRestore = pending
+            // Without a dialog to ask, the items stay in the trash.
+            if (intent != null) trashRestoreIntent = intent else finishTrashRestore(false)
+        }
+    }
+
+    /** The restore dialog's answer: back in the list, or still in the trash, and then Lilac's records go as before. */
+    fun finishTrashRestore(restored: Boolean, onDone: (restored: MediaData?) -> Unit = {}) {
+        val pending = trashRestore ?: return
+        trashRestore = null
+        trashRestoreIntent = null
+        if (restored) {
+            hiddenPhotoIds -= pending.hiddenIds
+            viewModelScope.launch {
+                loadSystemPhotosInternal()
+                onDone(pending.photos.firstOrNull())
+            }
+        } else {
+            Toast.makeText(getApplication(), R.string.gallery_trash_restore_cancelled, Toast.LENGTH_SHORT).show()
+            deleteTrashedRecords(pending)
+            onDone(null)
+        }
+    }
+
+    private fun deleteTrashedRecords(pending: PendingDelete) {
+        val ids = pending.hiddenIds
+        deleteBatchPhotosOnlyInternal(pending.trashedRecords, exitSelection = false) { hiddenPhotoIds -= ids }
+    }
+
+    /** Runs the pending delete now: its Undo window ended, or the viewer closed or went to the background. */
+    fun commitPendingDelete() {
+        val pending = pendingDelete ?: return
+        pendingDelete = null
+        pendingDeleteJob?.cancel()
+        pendingDeleteJob = null
+        val frame = pending.burstFrame
+        if (frame != null) {
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) { frame.delete() }
+                hiddenBurstFrames -= frame
+            }
+        } else if (pending.trashed) {
+            deleteTrashedRecords(pending)
+        } else {
+            val ids = pending.photos.map { it.id }.toSet()
+            // Hidden until gone from the list, so a deleted item never shows again for a moment.
+            deleteBatchPhotosOnlyInternal(pending.photos, exitSelection = false) { hiddenPhotoIds -= ids }
         }
     }
 
@@ -2446,15 +2600,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             if (selectedTab == GalleryTab.SYSTEM) {
-                val relatedPhotonVideos = photos.mapNotNull { it.relatedPhoto }.filter { it.isVideo }
-                if (relatedPhotonVideos.isNotEmpty()) {
-                    val context = getApplication<Application>()
-                    withContext(Dispatchers.IO) {
-                        relatedPhotonVideos.forEach { GalleryManager.deletePhotoOnly(context, it.id) }
-                    }
-                    removePhotonPhotosFromState(relatedPhotonVideos.map { it.id }.toSet())
-                    loadPhotosInternal()
-                }
+                offerTrashUndo(photos)
                 removeSystemPhotosFromState(photos.map { it.id }.toSet())
                 // 系统相册刷新
                 loadSystemPhotosInternal()
@@ -4295,6 +4441,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         recipeParamsOverride: ColorRecipeParams? = null,
         maxEdge: Int = FULL_QUALITY_PREVIEW_MAX_EDGE,
         ignoreBokeh: Boolean = false,
+        // Names a passed [bitmap]'s source, so different sources for one photo do not share a cache entry.
+        cacheTag: String? = null,
     ): Bitmap? {
         if (photo.isVideo) return null
         return withContext(Dispatchers.IO) {
@@ -4413,8 +4561,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
 
                 // 使用多级缓存优化性能
+                val tagSuffix = cacheTag?.let { "_$it" }.orEmpty()
                 val previewCacheKey = previewCacheKey(photo, finalMetadata, showOrigin, maxEdge) +
-                    if (ignoreBokeh) "_nobokeh" else ""
+                    (if (ignoreBokeh) "_nobokeh" else "") + tagSuffix
 
                 val cached = previewBitmapCache.get(previewCacheKey)
                 if (cached != null && !cached.isRecycled) {
@@ -4470,7 +4619,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
                 // 只在全分辨率路径下缓存原始底图（避免低分辨率污染 origin 缓存）
                 if (showOrigin && maxEdge >= FULL_QUALITY_PREVIEW_MAX_EDGE) {
-                    previewBitmapCache.put(previewCacheKey(photo, finalMetadata, true), currentBitmap)
+                    previewBitmapCache.put(previewCacheKey(photo, finalMetadata, true) + tagSuffix, currentBitmap)
                 }
 
                 if (showOrigin) {
@@ -4587,60 +4736,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 null
             }
         }
-    }
-
-    suspend fun evaluatePhotoWithAi(photo: MediaData): Result<AiPhotoEvaluation> = withContext(Dispatchers.IO) {
-        try {
-            val cacheKey = aiEvaluationCacheKey(photo)
-            aiEvaluationCache[cacheKey]?.let {
-                return@withContext Result.success(it)
-            }
-
-            val bitmap = getPreviewBitmap(
-                photo = photo,
-                showOrigin = false,
-                ignoreDenoise = true,
-                maxEdge = 1024
-            ) ?: return@withContext Result.failure(IllegalStateException("Unable to load photo preview"))
-
-            val context = getApplication<Application>()
-            val client = OpenAIApiClient()
-            client.initialize(context)
-            val result = client.evaluateImageQuality(
-                bitmap = bitmap,
-                localeTag = Locale.getDefault().toLanguageTag()
-            )
-            result.onSuccess { aiEvaluationCache[cacheKey] = it }
-            result.onFailure {
-                if (it is SocketException) {
-                    PLog.w(TAG, "AI photo evaluation request failed", it)
-                } else {
-                    PLog.e(TAG, "AI photo evaluation request failed", it)
-                }
-            }
-            result
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            PLog.e(TAG, "Failed to evaluate photo with AI", e)
-            Result.failure(e)
-        }
-    }
-
-    private fun aiEvaluationCacheKey(photo: MediaData): String {
-        val metadata = photo.metadata ?: photo.relatedPhoto?.metadata
-        return listOf(
-            photo.id,
-            photo.uri.toString(),
-            photo.sourceUri?.toString().orEmpty(),
-            photo.thumbnailUri.toString(),
-            photo.displayName,
-            photo.dateAdded.toString(),
-            photo.size.toString(),
-            photo.width.toString(),
-            photo.height.toString(),
-            photo.mimeType.orEmpty(),
-            metadata?.hashCode()?.toString().orEmpty()
-        ).joinToString("|")
     }
 
     fun shouldPrioritizeDetailBitmap(photo: MediaData): Boolean {
@@ -5550,6 +5645,44 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 PLog.e(TAG, "Failed to import photos", e)
             } finally {
                 _isLoading.value = false
+            }
+        }
+    }
+
+    /** A system item already has a Lilac copy: the one linked to it, or one made from or exported to its file. */
+    fun isInLilac(photo: MediaData): Boolean = photo.relatedPhoto != null || findPhotonPhotoBySourceUri(photo.uri) != null
+
+    /**
+     * Copies the selected system items that have no Lilac copy yet into Lilac's library, then leaves selection.
+     * Reports how many were added and how many already had a copy.
+     */
+    fun addSelectedToLilac(onComplete: (added: Int, alreadyIn: Int) -> Unit) {
+        if (_isExporting.value || _isPastingSettings.value || _batchOperationProgress.value != null) return
+        val selectedSnapshot = selectedPhotos.toList()
+        val toAdd = selectedSnapshot.filterNot(::isInLilac)
+        val alreadyIn = selectedSnapshot.size - toAdd.size
+        if (toAdd.isEmpty()) return onComplete(0, alreadyIn)
+        _batchOperationProgress.value = GalleryBatchOperationProgress(GalleryBatchOperation.ADD_TO_LILAC, 0, toAdd.size)
+        viewModelScope.launch {
+            var added = 0
+            try {
+                val context = getApplication<Application>()
+                toAdd.forEachIndexed { index, photo ->
+                    try {
+                        if (GalleryManager.importPhoto(context, photo.uri, null) != null) added++
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        PLog.e(TAG, "Failed to add ${photo.uri} to Lilac", e)
+                    }
+                    _batchOperationProgress.value = GalleryBatchOperationProgress(GalleryBatchOperation.ADD_TO_LILAC, index + 1, toAdd.size)
+                }
+                exitSelectionMode()
+                // The System tab links each item to its new copy by source URI once Lilac's list is reloaded.
+                loadPhotos(reset = true)
+                onComplete(added, alreadyIn)
+            } finally {
+                _batchOperationProgress.value = null
             }
         }
     }

@@ -17,6 +17,29 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.areNavigationBarsVisible
+import androidx.compose.foundation.layout.areStatusBarsVisible
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -208,7 +231,10 @@ internal fun SettingsChevron(enabled: Boolean = true) = Icon(
     tint = SettingsQuiet.copy(alpha = if (enabled) 1f else 0.5f),
 )
 
-/** Black bottom sheet with a hairline top edge and the setting's name. */
+/**
+ * Black bottom sheet with a hairline top edge and the setting's name. In a turned window (only the viewer and the
+ * gallery turn) it is a full-height panel from the right edge instead, with the same look.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SettingsSheet(
@@ -218,6 +244,22 @@ internal fun SettingsSheet(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val lineFadePx = with(LocalDensity.current) { 24.dp.toPx() }
+    val window = LocalWindowInfo.current.containerSize
+    if (window.width > window.height) {
+        SidePanel(onDismiss) {
+            SheetBody(
+                Modifier
+                    .fillMaxHeight()
+                    .width(300.dp)
+                    // Taps on the panel never reach the scrim, which closes it.
+                    .pointerInput(Unit) { awaitEachGesture { awaitFirstDown() } }
+                    .background(Color.Black, PanelShape)
+                    .border(1.dp, Brush.horizontalGradient(listOf(SettingsRaised, Color.Transparent), endX = lineFadePx), PanelShape),
+                title, description, content,
+            )
+        }
+        return
+    }
     // The app's sheet keeps the status bar hidden when the screen behind it hides it.
     AppModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -226,36 +268,90 @@ internal fun SettingsSheet(
         shape = SheetShape,
         dragHandle = null,
     ) {
-        Column(
+        SheetBody(
             Modifier
                 .fillMaxWidth()
                 // On the content, not the sheet: the sheet's modifier reaches a full-screen layer.
                 // The line follows the rounded top edge and fades out down the sides.
-                .border(1.dp, Brush.verticalGradient(listOf(SettingsRaised, Color.Transparent), endY = lineFadePx), SheetShape)
-                .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
-                .padding(start = 8.dp, end = 8.dp, bottom = 12.dp)
-        ) {
+                .border(1.dp, Brush.verticalGradient(listOf(SettingsRaised, Color.Transparent), endY = lineFadePx), SheetShape),
+            title, description, content,
+        )
+    }
+}
+
+/** A sheet's scrolling content: the name, an optional [description], then [content]. */
+@Composable
+private fun SheetBody(
+    modifier: Modifier,
+    title: String,
+    description: String?,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier
+            .verticalScroll(rememberScrollState())
+            .navigationBarsPadding()
+            .padding(start = 8.dp, end = 8.dp, bottom = 12.dp)
+    ) {
+        Text(
+            title,
+            color = SettingsText,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 18.dp, bottom = 6.dp),
+        )
+        if (description != null) {
             Text(
-                title,
-                color = SettingsText,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 18.dp, bottom = 6.dp),
+                description,
+                color = SettingsDim,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+                modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
             )
-            if (description != null) {
-                Text(
-                    description,
-                    color = SettingsDim,
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp,
-                    modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
-                )
+        }
+        content()
+    }
+}
+
+/**
+ * A modal panel sliding in from the right edge over the bottom sheet's scrim; a tap on the scrim or Back closes it.
+ * Its window shows or hides the system bars as the screen behind it does, as the bottom sheet's does.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun SidePanel(onDismiss: () -> Unit, panel: @Composable () -> Unit) {
+    val statusBarsVisible = WindowInsets.areStatusBarsVisible
+    val navigationBarsVisible = WindowInsets.areNavigationBarsVisible
+    Dialog(onDismiss, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        val window = generateSequence(LocalView.current.parent) { it.parent }
+            .filterIsInstance<DialogWindowProvider>().firstOrNull()?.window
+        DisposableEffect(window, statusBarsVisible, navigationBarsVisible) {
+            window?.setDimAmount(0f)  // the scrim below dims instead
+            window?.let { WindowCompat.getInsetsController(it, it.decorView) }?.apply {
+                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                if (statusBarsVisible) show(WindowInsetsCompat.Type.statusBars()) else hide(WindowInsetsCompat.Type.statusBars())
+                if (navigationBarsVisible) show(WindowInsetsCompat.Type.navigationBars()) else hide(WindowInsetsCompat.Type.navigationBars())
             }
-            content()
+            onDispose { }
+        }
+        val shown = remember { MutableTransitionState(false) }.apply { targetState = true }
+        Box(Modifier.fillMaxSize()) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(BottomSheetDefaults.ScrimColor)
+                    .clickable(interactionSource = null, indication = null, onClick = onDismiss)
+            )
+            AnimatedVisibility(
+                shown,
+                Modifier.align(Alignment.CenterEnd),
+                enter = slideInHorizontally(tween(220, easing = CubicBezierEasing(0.2f, 0.8f, 0.3f, 1f))) { it },
+            ) { panel() }
         }
     }
 }
+
+private val PanelShape = RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp)
 
 /** Single choice: the chosen option is a light fill with black text. Picking one ticks and closes. */
 @Composable

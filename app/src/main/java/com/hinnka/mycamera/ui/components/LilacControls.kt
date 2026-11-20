@@ -1,6 +1,10 @@
 package com.hinnka.mycamera.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -14,18 +18,24 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,7 +49,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -48,23 +61,32 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hinnka.mycamera.ui.camera.CondensedBold
 import com.hinnka.mycamera.ui.camera.ModeAmber
+import com.hinnka.mycamera.ui.camera.ShadowedLineIcon
 import com.hinnka.mycamera.ui.camera.SpacedBuzz
 import com.hinnka.mycamera.ui.camera.ViewfinderTextShadow
+import com.hinnka.mycamera.ui.camera.autoRotate
+import android.widget.Toast
+import com.hinnka.mycamera.R
 import com.hinnka.mycamera.ui.icons.AppIcons
 import com.hinnka.mycamera.utils.VibrationHelper
 import kotlinx.coroutines.delay
@@ -345,4 +367,273 @@ internal fun LilacRuler(
             }
         }
     }
+}
+
+/**
+ * A framed tag as Sony's camera draws one: bold condensed text in a thin rounded frame, 22 dp tall in a
+ * 48 dp tap area. [color] is [SonyText] by default, the accent when the tag's state is on, [SonyDim] when quiet.
+ * A tap ticks and runs [onClick], which should explain the tag. A [wrap] tag (stacked on a 48 dp edge) is at most
+ * 46 dp wide, breaks onto a second line when wider, and its tap area reaches 6 dp above and below.
+ */
+@Composable
+internal fun FramedTag(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = SonyText,
+    icon: ImageVector? = null,
+    onClick: (() -> Unit)? = null,
+    wrap: Boolean = false,
+) {
+    val context = LocalContext.current
+    val haptics = remember(context) { SpacedBuzz(VibrationHelper(context)) }
+    Box(
+        modifier = modifier
+            .then(if (wrap) Modifier else Modifier.height(48.dp))
+            .then(
+                if (onClick == null) Modifier
+                else Modifier.clickable(role = Role.Button) {
+                    haptics.buzz(VibrationHelper.LIGHT_TICK_MS)
+                    onClick()
+                }
+            )
+            .then(if (wrap) Modifier.padding(vertical = 6.dp) else Modifier),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            modifier = Modifier
+                .then(if (wrap) Modifier.heightIn(min = 22.dp).widthIn(max = 46.dp) else Modifier.height(22.dp))
+                .border(1.5.dp, color, RoundedCornerShape(4.dp))
+                .padding(horizontal = if (wrap) 3.dp else 5.dp, vertical = if (wrap) 3.dp else 0.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = if (wrap) Arrangement.spacedBy(1.dp, Alignment.CenterHorizontally) else Arrangement.spacedBy(2.dp)
+        ) {
+            if (icon != null) Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(13.dp))
+            Text(
+                text = text,
+                color = color,
+                maxLines = if (wrap) 2 else 1,
+                style = TextStyle(
+                    fontFamily = CondensedBold,
+                    fontSize = 13.sp,
+                    lineHeight = if (wrap) 14.sp else TextUnit.Unspecified,
+                    textAlign = if (wrap) TextAlign.Center else TextAlign.Unspecified,
+                    shadow = ViewfinderTextShadow,
+                    platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+                )
+            )
+        }
+    }
+}
+
+/**
+ * An icon over its one-line label, as the Settings tab bar draws its tabs: a 24 dp icon in a 26 dp box, a 5 dp gap,
+ * an 11 sp label. [shadowed] gives both the viewfinder's shadow, for use over a picture.
+ */
+@Composable
+internal fun LabelledIcon(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    shadowed: Boolean = false,
+) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) {
+            if (shadowed) ShadowedLineIcon(icon, 24.dp, tint)
+            else Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+        }
+        Spacer(Modifier.height(5.dp))
+        Text(
+            label,
+            color = tint,
+            fontSize = 11.sp,
+            lineHeight = 14.sp,
+            maxLines = 1,
+            softWrap = false,
+            style = if (shadowed) LocalTextStyle.current.merge(LilacTextStyle) else LocalTextStyle.current,
+            modifier = Modifier.height(14.dp)
+        )
+    }
+}
+
+/** A slot of [ActionRow]: a [whyNot] dims it, and a tap then shows that reason instead of running [onClick]. */
+internal class RowAction(val icon: ImageVector, val label: String, val whyNot: String?, val onClick: () -> Unit)
+
+private val ActionSlotWidth = 70.dp
+
+/**
+ * The viewer's action row on the camera's 70 dp grid: [slots] centred at x 40, 110, 180, 250, 320 of a 360 dp width,
+ * a null slot left empty. [vertical] stacks them 70 dp apart, centred, for a right-edge column. The caller sizes it.
+ */
+@Composable
+internal fun ActionRow(slots: List<RowAction?>, vertical: Boolean, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val haptics = remember(context) { SpacedBuzz(VibrationHelper(context)) }
+    BoxWithConstraints(modifier) {
+        slots.forEachIndexed { slot, action ->
+            if (action == null) return@forEachIndexed
+            Box(
+                (if (vertical) {
+                    Modifier
+                        .offset(y = (maxHeight - ActionSlotWidth * 5) / 2 + ActionSlotWidth * slot)
+                        .height(ActionSlotWidth)
+                        .fillMaxWidth()
+                } else {
+                    Modifier
+                        .offset(x = maxWidth * ((40f + 70f * slot) / 360f) - ActionSlotWidth / 2)
+                        .width(ActionSlotWidth)
+                        .fillMaxHeight()
+                })
+                    .clickable(role = Role.Button) {
+                        val why = action.whyNot
+                        if (why != null) {
+                            Toast.makeText(context, why, Toast.LENGTH_SHORT).show()
+                        } else {
+                            haptics.buzz(VibrationHelper.LIGHT_TICK_MS)
+                            action.onClick()
+                        }
+                    }
+            ) {
+                LabelledIcon(
+                    icon = action.icon,
+                    label = action.label,
+                    tint = SonyText,
+                    shadowed = true,
+                    modifier = (if (vertical) Modifier.align(Alignment.Center) else Modifier.align(Alignment.TopCenter).padding(top = 11.dp))
+                        .alpha(if (action.whyNot == null) 1f else 0.38f)
+                        .autoRotate()
+                )
+            }
+        }
+    }
+}
+
+private val UndoBannerEasing = CubicBezierEasing(0.2f, 0.8f, 0.3f, 1f)
+
+/**
+ * A full-width 56 dp bar offering Undo while [message] is not null, for the place directly above a bottom action row.
+ * It slides up from behind that row and back down when [message] goes null; a line along its top counts down
+ * [durationMs], restarting whenever [restartKey] changes.
+ */
+@Composable
+internal fun UndoBanner(
+    message: String?,
+    onUndo: () -> Unit,
+    modifier: Modifier = Modifier,
+    restartKey: Any? = message,
+    durationMs: Int = 5000,
+) {
+    val context = LocalContext.current
+    val haptics = remember(context) { SpacedBuzz(VibrationHelper(context)) }
+    // The exit slide keeps showing the last message.
+    var lastMessage by remember { mutableStateOf(message.orEmpty()) }
+    if (message != null) lastMessage = message
+    val countdown = remember { Animatable(1f) }
+    LaunchedEffect(restartKey) {
+        if (message == null) return@LaunchedEffect
+        countdown.snapTo(1f)
+        countdown.animateTo(0f, tween(durationMs, easing = LinearEasing))
+    }
+    AnimatedVisibility(
+        visible = message != null,
+        modifier = modifier.fillMaxWidth().clipToBounds(),
+        enter = slideInVertically(tween(220, easing = UndoBannerEasing)) { it },
+        exit = slideOutVertically(tween(220, easing = UndoBannerEasing)) { it },
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                // Touches on the bar never reach the picture behind it.
+                .pointerInput(Unit) { awaitEachGesture { awaitFirstDown() } }
+                .background(Color.Black)
+                .drawBehind {
+                    drawRect(SonyTrack, size = Size(size.width, 1.dp.toPx()))
+                    drawRect(SonyText, size = Size(size.width * countdown.value, 2.dp.toPx()))
+                }
+                .padding(start = 16.dp, end = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                lastMessage,
+                color = SonyText,
+                fontSize = 16.sp,
+                lineHeight = 20.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(end = 12.dp),
+            )
+            Row(
+                Modifier
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(role = Role.Button) {
+                        haptics.buzz(VibrationHelper.LIGHT_TICK_MS)
+                        onUndo()
+                    }
+                    .padding(vertical = 4.dp)
+                    .background(ChosenFill, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(AppIcons.UndoLine, contentDescription = null, tint = Color.Black, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(stringResource(R.string.editor_undo), color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
+// The tight dark halo that keeps icons and labels readable over pictures: blur in dp and black alpha per layer,
+// the last one a dp lower.
+private val HaloLayers = listOf(1f to 0.95f, 3f to 0.85f, 8f to 0.6f, 12f to 0.45f)
+
+/** Draws [content] over black, blurred copies of its own shape; below Android 12 [fallback] draws instead. */
+@Composable
+private fun Haloed(fallback: @Composable () -> Unit, content: @Composable () -> Unit) {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return fallback()
+    val density = LocalDensity.current.density
+    Box(contentAlignment = Alignment.Center) {
+        HaloLayers.forEachIndexed { i, (blurDp, alpha) ->
+            val effect = remember(density) {
+                // A CSS blur of b is a sigma of b / 2; the platform turns a radius r into a sigma of 0.577 r + 0.5.
+                val radius = ((blurDp * density / 2f - 0.5f) / 0.57735f).coerceAtLeast(0.5f)
+                android.graphics.RenderEffect.createBlurEffect(
+                    radius, radius,
+                    android.graphics.RenderEffect.createColorFilterEffect(
+                        android.graphics.PorterDuffColorFilter(
+                            android.graphics.Color.argb(alpha, 0f, 0f, 0f), android.graphics.PorterDuff.Mode.SRC_IN
+                        )
+                    ),
+                    android.graphics.Shader.TileMode.DECAL,
+                ).asComposeRenderEffect()
+            }
+            Box(
+                Modifier
+                    .offset(y = if (i == HaloLayers.lastIndex) 1.dp else 0.dp)
+                    .graphicsLayer { renderEffect = effect; clip = false }
+                    .clearAndSetSemantics { }
+            ) { content() }
+        }
+        content()
+    }
+}
+
+/** A line icon over pictures, with the dark halo. */
+@Composable
+internal fun HaloIcon(icon: ImageVector, size: Dp = 26.dp, tint: Color = SonyText) =
+    Haloed({ ShadowedLineIcon(icon, size, tint) }) { Icon(icon, null, tint = tint, modifier = Modifier.size(size)) }
+
+/** A label over pictures, with the dark halo. */
+@Composable
+internal fun HaloText(
+    text: String,
+    color: Color = SonyText,
+    fontSize: TextUnit = 15.sp,
+    fontWeight: FontWeight = FontWeight.Medium,
+    letterSpacing: TextUnit = TextUnit.Unspecified,
+) = Haloed({
+    Text(text, style = LilacTextStyle, color = color, fontSize = fontSize, fontWeight = fontWeight, letterSpacing = letterSpacing, maxLines = 1)
+}) {
+    Text(text, color = color, fontSize = fontSize, fontWeight = fontWeight, letterSpacing = letterSpacing, maxLines = 1)
 }

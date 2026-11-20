@@ -17,17 +17,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -59,7 +55,7 @@ import com.hinnka.mycamera.raw.RawNoiseProfileInfo
 import com.hinnka.mycamera.raw.RawNoiseProfileManager
 import com.hinnka.mycamera.render.RenderLook
 import com.hinnka.mycamera.render.RenderQueue
-import com.hinnka.mycamera.ui.components.AppModalBottomSheet
+import com.hinnka.mycamera.ui.settings.SettingsSheet
 import com.hinnka.mycamera.ui.components.SliderSettingItem
 import com.hinnka.mycamera.ui.components.SwitchSettingItem
 import com.hinnka.mycamera.ui.icons.AppIcons
@@ -117,42 +113,9 @@ internal fun RenderAgainSheet(
     val accent = AccentColor
     fun tintIf(changed: (RenderLook) -> Boolean): Color? = photoLook?.takeIf(changed)?.let { accent }
 
-    AppModalBottomSheet(
-        containerColor = GallerySheetSurface,
-        shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
-        scrimColor = Color.Black.copy(alpha = 0.64f),
-        onDismissRequest = onDismissRequest,
-        contentColor = GalleryToolbarContent,
-        dragHandle = {
-            BottomSheetDefaults.DragHandle(width = 36.dp, height = 4.dp, color = GalleryToolbarContent.copy(alpha = 0.24f))
-        },
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 16.dp)) {
-            Column(modifier = Modifier.padding(horizontal = 4.dp)) {
-                Text(
-                    text = title,
-                    color = GalleryToolbarContent,
-                    fontSize = 21.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = (-0.2).sp,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = stringResource(R.string.render_again_subtitle),
-                    color = GalleryToolbarContent.copy(alpha = 0.6f),
-                    fontSize = 13.sp,
-                    lineHeight = 17.sp,
-                )
-            }
-            Spacer(modifier = Modifier.height(14.dp))
-            HorizontalDivider(color = GalleryToolbarContent.copy(alpha = 0.09f))
-
-            Column(
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .verticalScroll(rememberScrollState())
-                    .padding(top = 6.dp),
-            ) {
+    SettingsSheet(title, onDismissRequest, stringResource(R.string.render_again_subtitle)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 4.dp)) {
+            Column {
                 if (photoLook != null && photoLook != appLook) {
                     RenderAgainSegments(
                         label = stringResource(R.string.render_again_start_from),

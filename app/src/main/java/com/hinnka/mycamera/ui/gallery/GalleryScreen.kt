@@ -19,11 +19,9 @@ import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.LinearLayout
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -34,12 +32,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -48,6 +43,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -71,7 +67,13 @@ import com.hinnka.mycamera.gallery.PhotoStacks
 import com.hinnka.mycamera.gallery.ProcessingPhoto
 import com.hinnka.mycamera.render.RenderLook
 import com.hinnka.mycamera.render.RenderQueue
-import com.hinnka.mycamera.ui.components.ProcessingPhotoShimmerView
+import com.hinnka.mycamera.ui.components.ActionRow
+import com.hinnka.mycamera.ui.components.EdgeRingStyle
+import com.hinnka.mycamera.ui.components.RowAction
+import com.hinnka.mycamera.ui.components.UndoBanner
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
+import com.hinnka.mycamera.ui.components.TileEdgeLineView
 import coil.load
 import coil.dispose
 import com.hinnka.mycamera.ui.theme.AccentColor
@@ -85,10 +87,36 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import android.graphics.RenderEffect
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
+import android.graphics.Shader
+import androidx.annotation.DrawableRes
+import androidx.core.content.ContextCompat
+import com.hinnka.mycamera.video.SlowedCopy
 import androidx.recyclerview.widget.DiffUtil
 import android.os.Parcelable
 import kotlin.math.abs
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.hinnka.mycamera.ui.components.HaloIcon
+import com.hinnka.mycamera.ui.components.HaloText
+import com.hinnka.mycamera.ui.components.HideNavigationBar
+import com.hinnka.mycamera.ui.components.SonyText
+import com.hinnka.mycamera.ui.components.SonyDivider
+import com.hinnka.mycamera.ui.settings.SettingsSheet
+import com.hinnka.mycamera.ui.settings.rememberSettingsTick
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 
 /**
  * 相册浏览界面
@@ -104,12 +132,18 @@ fun GalleryScreen(
     modifier: Modifier = Modifier
 ) {
     val allPhotos by viewModel.currentPhotos.collectAsState()
-    val stacks = remember(allPhotos) { PhotoStacks.of(allPhotos) }
+    // Deleted items waiting for Undo leave the grid at once.
+    val hiddenIds = viewModel.hiddenPhotoIds
+    val stacks = remember(allPhotos, hiddenIds) { PhotoStacks.of(allPhotos.filterNot { it.id in hiddenIds }) }
     // One tile per photo stack: selection and batch actions act on the version the tile shows.
     val photos = stacks.tiles
     val processingPhotos by viewModel.processingPhotos.collectAsState()
     val renderPendingIds by RenderQueue.pendingPhotoIds.collectAsState()
     val renderFailedIds by RenderQueue.failedPhotoIds.collectAsState()
+    // Only the photo being rendered, so the status' progress ticks do not rebind the grid.
+    val renderingId by remember {
+        RenderQueue.status.map { it.currentPhotoId.takeIf { _ -> it.running } }.distinctUntilChanged()
+    }.collectAsState(null)
     var previousProcessingIds by remember { mutableStateOf(processingPhotos.keys.toSet()) }
     LaunchedEffect(processingPhotos.keys) {
         (previousProcessingIds - processingPhotos.keys).forEach(viewModel::invalidatePreviewCache)
@@ -130,43 +164,22 @@ fun GalleryScreen(
     val selectedImageCount = selectedPhotos.count { it.isImage }
     val selectedTab = viewModel.selectedTab
     val hasPermission = viewModel.hasGalleryPermission
-    val isBatchOperationRunning = isExporting || isPastingSettings
+    val isBatchOperationRunning = isExporting || isPastingSettings || batchOperationProgress != null
+    // Re-render dims when no selected photo has a RAW to render again from. The last answer stays while
+    // a changed selection is checked, so the button doesn't flash on every added photo.
+    val selectedIds = selectedPhotos.map { it.id }
+    var canRenderAgain by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(selectedIds) {
+        canRenderAgain = if (selectedIds.isEmpty()) null else selectedIds.any { RenderQueue.renderAgainSource(context, it) != null }
+    }
     val scope = rememberCoroutineScope()
     var shouldRenderGrid by rememberSaveable { mutableStateOf(false) }
+    val tick = rememberSettingsTick()
 
     BackHandler(enabled = isSelectionMode) {
         if (!isBatchOperationRunning) {
             viewModel.exitSelectionMode()
         }
-    }
-
-    fun importSelectedMedia(selection: SelectedVisualMedia) {
-        val uris = selection.uris
-        if (uris.isEmpty()) return
-        val uniqueUris = uris.distinct().also { distinct ->
-            if (distinct.size != uris.size) {
-                PLog.d("GalleryScreen", "Ignoring ${uris.size - distinct.size} duplicate selected media URI(s)")
-            }
-        }
-        val videoUris = uniqueUris.map { selection.pairedVideoUris[it] }
-        viewModel.importPhotos(uniqueUris, videoUris) { importedIds ->
-            if (importedIds.size == 1) {
-                val newPhotoId = importedIds.first()
-                viewModel.setCurrentPhotoById(newPhotoId)
-                viewModel.enterEditMode()
-                onNavigateToEdit(newPhotoId)
-            }
-        }
-    }
-
-    val launcher = rememberLauncherForActivityResult(
-        contract = PickMultipleVisualMediaWithLivePhoto()
-    ) { selection ->
-        PLog.d(
-            "GalleryScreen",
-            "Received photo picker result: ${selection.uris.size} media URI(s), ${selection.pairedVideoUris.size} Live Photo pair(s)"
-        )
-        importSelectedMedia(selection)
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -204,7 +217,50 @@ fun GalleryScreen(
         }
     }
 
-    var showDeleteDialog by remember { mutableStateOf(false) }
+    TrashRestoreDialog(viewModel)
+
+    // The shown tiles a delete asks about, while its sheet is open.
+    var deleteSheet by remember { mutableStateOf<List<MediaData>?>(null) }
+    var deleteExportedPref by rememberPreference(UserPreferences::deleteExported)
+    // Copies a delete may also remove: a photo's exports, and the system's file of a video Lilac captured.
+    fun exportedCopies(photos: List<MediaData>): Int = photos.sumOf { photo ->
+        val metadata = photo.metadata
+        val capturedVideo = photo.isVideo && metadata?.isImported != true && !metadata?.sourceUri.isNullOrBlank()
+        (metadata?.exportedUris?.size ?: 0) + if (capturedVideo) 1 else 0
+    }
+    fun deleteTargets(shown: List<MediaData>, all: Boolean): List<MediaData> =
+        if (all) shown.flatMap(stacks::versionsOf).distinct().filterNot { it.id in processingPhotos } else shown
+    // App-owned files go after an Undo window; with their exported copies, through the system's dialog at once.
+    fun runDelete(photos: List<MediaData>, withCopies: Boolean) {
+        if (photos.isEmpty()) return
+        if (withCopies) {
+            viewModel.deleteSelectedPhotos(true, photos)
+        } else {
+            viewModel.deleteWithUndo(photos, null, context.resources.getQuantityString(R.plurals.gallery_deleted_count, photos.size, photos.size))
+            viewModel.exitSelectionMode()
+        }
+    }
+    // The Delete action: the sheet only when there is a choice; other apps' files go to the system trash.
+    fun startDelete() {
+        if (selectedTab == GalleryTab.SYSTEM) return viewModel.deleteSelectedPhotos()
+        val shown = viewModel.unprotected(selectedPhotos.toList())
+        when {
+            shown.isEmpty() -> Unit
+            shown.any { stacks.versionsOf(it).size > 1 } || exportedCopies(shown) > 0 -> deleteSheet = shown
+            else -> runDelete(shown, false)
+        }
+    }
+    var addToLilacExplained by rememberPreference(UserPreferences::addToLilacExplained)
+    var addToLilacSheet by remember { mutableStateOf(false) }
+    fun addToLilac() {
+        viewModel.addSelectedToLilac { added, alreadyIn ->
+            val message = listOfNotNull(
+                context.resources.getQuantityString(R.plurals.gallery_added_to_lilac_count, added, added),
+                context.getString(R.string.gallery_already_in_lilac_count, alreadyIn).takeIf { alreadyIn > 0 },
+            ).joinToString(" · ")
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
     var batchRenderAgain by remember { mutableStateOf<BatchRenderAgain?>(null) }
     var isBatchRenderingAgain by remember { mutableStateOf(false) }
 
@@ -230,375 +286,25 @@ fun GalleryScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 loadCurrentTabData()
             }
+            // A pending delete runs when the app goes to the background, not only after its Undo window.
+            if (event == Lifecycle.Event.ON_STOP) viewModel.commitPendingDelete()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.commitPendingDelete()
         }
     }
 
 
 
+    // Immersive like the viewer, so the bars do not flash between the grid and a photo.
+    HideNavigationBar()
     Scaffold(
-        topBar = {
-            Column {
-                TopAppBar(
-                    modifier = Modifier,
-                    title = {
-                        if (isSelectionMode) {
-                            Text(
-                                text = stringResource(R.string.items_selected, selectedPhotos.size),
-                                color = Color.White
-                            )
-                        } else {
-                            Text(
-                                text = stringResource(R.string.gallery),
-                                color = Color.White,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(
-                            onClick = {
-                                if (isSelectionMode) {
-                                    viewModel.exitSelectionMode()
-                                } else {
-                                    onBack()
-                                }
-                            },
-                            enabled = !isBatchOperationRunning
-                        ) {
-                            Icon(
-                                imageVector = if (isSelectionMode) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = stringResource(R.string.back),
-                                tint = if (isBatchOperationRunning) {
-                                    Color.White.copy(alpha = 0.38f)
-                                } else {
-                                    Color.White
-                                }
-                            )
-                        }
-                    },
-                    actions = {
-                        if (isSelectionMode && selectedPhotos.isNotEmpty()) {
-                            IconButton(
-                                onClick = {
-                                    val ids = selectedPhotos.map { it.id }
-                                    scope.launch {
-                                        val sources = ids.mapNotNull { loadRenderAgainSource(context, it) }
-                                        if (sources.isEmpty()) {
-                                            Toast.makeText(context, R.string.render_again_not_eligible, Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            batchRenderAgain = BatchRenderAgain(
-                                                photoIds = ids,
-                                                eligibleCount = sources.size,
-                                                appLook = appRenderLook(context, sources.first().metadata.cameraId),
-                                            )
-                                        }
-                                    }
-                                },
-                                enabled = !isBatchOperationRunning
-                            ) {
-                                Icon(
-                                    imageVector = AppIcons.Tune,
-                                    contentDescription = stringResource(R.string.render_again),
-                                    tint = if (isBatchOperationRunning) {
-                                        Color.White.copy(alpha = 0.38f)
-                                    } else {
-                                        Color.White
-                                    }
-                                )
-                            }
-                        }
-                        if (isSelectionMode) {
-                            IconButton(
-                                onClick = {
-                                    val selectable = photos.filterNot { it.id in processingPhotos }
-                                    val allSelected = selectable.all { photo -> selectedPhotos.any { it.id == photo.id } }
-                                    if (allSelected) {
-                                        selectedPhotos.toList().forEach(viewModel::togglePhotoSelection)
-                                    } else {
-                                        selectable.filter { photo -> selectedPhotos.none { it.id == photo.id } }
-                                            .forEach(viewModel::togglePhotoSelection)
-                                    }
-                                },
-                                enabled = !isBatchOperationRunning
-                            ) {
-                                Icon(
-                                    imageVector = AppIcons.SelectAll,
-                                    contentDescription = stringResource(R.string.select_all),
-                                    tint = if (isBatchOperationRunning) {
-                                        Color.White.copy(alpha = 0.38f)
-                                    } else {
-                                        Color.White
-                                    }
-                                )
-                            }
-                        } else {
-                            IconButton(onClick = onRenderQueueClick) {
-                                BadgedBox(
-                                    badge = {
-                                        when {
-                                            // The "!" says it too, not only the error colour.
-                                            renderFailedIds.isNotEmpty() -> Badge { Text("!") }
-                                            renderPendingIds.isNotEmpty() -> Badge(containerColor = AccentColor) {
-                                                Text(renderPendingIds.size.toString(), color = OnAccentColor)
-                                            }
-                                        }
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = AppIcons.Layers,
-                                        contentDescription = stringResource(
-                                            R.string.render_queue_button_description,
-                                            renderPendingIds.size,
-                                            renderFailedIds.size,
-                                        ),
-                                        tint = Color.White
-                                    )
-                                }
-                            }
-                            IconButton(onClick = {
-                                launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
-                            }) {
-                                Icon(
-                                    imageVector = AppIcons.AddPhotoAlternate,
-                                    contentDescription = stringResource(R.string.import_photo),
-                                    tint = Color.White
-                                )
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = galleryBackgroundColor()
-                    )
-                )
-                if (!isSelectionMode) {
-                    GalleryTabRow(
-                        selectedTab = selectedTab,
-                        onTabSelected = { tab ->
-                            scope.launch {
-                                viewModel.selectTab(tab)
-                            }
-                        }
-                    )
-                }
-            }
-        },
-        bottomBar = {
-            // 多选模式下显示操作栏
-            AnimatedVisibility(
-                visible = isSelectionMode && selectedPhotos.isNotEmpty(),
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-            ) {
-                Surface(
-                    color = Color(0xFF1A1A1A),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        batchOperationProgress?.let { progress ->
-                            val progressLabel = when (progress.operation) {
-                                GalleryBatchOperation.PASTE_SETTINGS ->
-                                    R.string.pasting_settings_progress
-                                GalleryBatchOperation.EXPORT ->
-                                    R.string.exporting_progress
-                            }
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp, end = 16.dp, top = 12.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = stringResource(
-                                        progressLabel,
-                                        progress.completed,
-                                        progress.total
-                                    ),
-                                    color = Color.White.copy(alpha = 0.8f),
-                                    fontSize = 12.sp
-                                )
-                                LinearProgressIndicator(
-                                    progress = {
-                                        progress.completed.toFloat() /
-                                            progress.total.coerceAtLeast(1).toFloat()
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(4.dp),
-                                    color = AccentColor,
-                                    trackColor = Color.White.copy(alpha = 0.15f)
-                                )
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            // 删除按钮
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.clickable(
-                                    enabled = !isBatchOperationRunning
-                                ) {
-                                    showDeleteDialog = true
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = stringResource(R.string.delete),
-                                    tint = if (isBatchOperationRunning) {
-                                        Color.White.copy(alpha = 0.38f)
-                                    } else {
-                                        Color.White
-                                    },
-                                    modifier = Modifier.size(28.dp)
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = stringResource(R.string.delete),
-                                    color = Color.White,
-                                    fontSize = 12.sp
-                                )
-                            }
-
-                            // 分享按钮
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.clickable(
-                                    enabled = !isSharing && !isBatchOperationRunning
-                                ) {
-                                    viewModel.shareSelectedPhotos()
-                                }
-                            ) {
-                                if (isSharing) {
-                                    CircularProgressIndicator(
-                                        color = Color.White,
-                                        modifier = Modifier.size(28.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = Icons.Default.Share,
-                                        contentDescription = stringResource(R.string.share),
-                                        tint = if (isBatchOperationRunning) {
-                                            Color.White.copy(alpha = 0.38f)
-                                        } else {
-                                            Color.White
-                                        },
-                                        modifier = Modifier.size(28.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = stringResource(R.string.share),
-                                    color = Color.White,
-                                    fontSize = 12.sp
-                                )
-                            }
-
-                            // 批量粘贴设置
-                            val canPasteSettings = hasCopiedEditSettings &&
-                                selectedImageCount > 0 &&
-                                !isBatchOperationRunning
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.clickable(enabled = canPasteSettings) {
-                                    viewModel.pasteCopiedSettingsToSelectedPhotos {
-                                            successCount,
-                                            total ->
-                                            Toast.makeText(
-                                                context,
-                                                context.getString(
-                                                    R.string.paste_settings_complete,
-                                                    successCount,
-                                                    total
-                                                ),
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                    }
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = AppIcons.ContentCopy,
-                                    contentDescription =
-                                        stringResource(R.string.paste_settings),
-                                    tint = if (canPasteSettings) {
-                                        AccentColor
-                                    } else {
-                                        Color.White.copy(alpha = 0.38f)
-                                    },
-                                    modifier = Modifier.size(28.dp)
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = stringResource(R.string.paste_settings),
-                                    color = if (canPasteSettings) {
-                                        Color.White
-                                    } else {
-                                        Color.White.copy(alpha = 0.38f)
-                                    },
-                                    fontSize = 12.sp
-                                )
-                            }
-
-                            // 批量导出
-                            if (viewModel.selectedTab == GalleryTab.PHOTON) {
-                                val canExport = selectedImageCount > 0 &&
-                                    !isBatchOperationRunning
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    modifier = Modifier.clickable(enabled = canExport) {
-                                        viewModel.exportSelectedPhotos { count ->
-                                            if (count > 0) {
-                                                Toast.makeText(
-                                                    context,
-                                                    R.string.export_complete,
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
-                                            }
-                                        }
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = AppIcons.Output,
-                                        contentDescription =
-                                            stringResource(R.string.export),
-                                        tint = if (canExport) {
-                                            AccentColor
-                                        } else {
-                                            Color.White.copy(alpha = 0.38f)
-                                        },
-                                        modifier = Modifier.size(28.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = stringResource(R.string.export),
-                                        color = if (canExport) {
-                                            Color.White
-                                        } else {
-                                            Color.White.copy(alpha = 0.38f)
-                                        },
-                                        fontSize = 12.sp
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        containerColor = galleryBackgroundColor(),
+        containerColor = Color.Black,
         modifier = modifier
     ) { paddingValues ->
+        val pullState = rememberPullToRefreshState()
         PullToRefreshBox(
             isRefreshing = isLoading,
             onRefresh = {
@@ -606,7 +312,16 @@ fun GalleryScreen(
             },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
+                .padding(paddingValues),
+            state = pullState,
+            indicator = {
+                // Below the line floating over the grid.
+                PullToRefreshDefaults.Indicator(
+                    state = pullState,
+                    isRefreshing = isLoading,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 56.dp)
+                )
+            }
         ) {
             if (selectedTab == GalleryTab.SYSTEM && !hasPermission) {
                 // 权限缺失提示
@@ -635,7 +350,7 @@ fun GalleryScreen(
                             }
                             permissionLauncher.launch(permission)
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentColor)
+                        colors = ButtonDefaults.buttonColors(containerColor = SonyText, contentColor = Color.Black)
                     ) {
                         Text(stringResource(R.string.grant_permission))
                     }
@@ -659,7 +374,7 @@ fun GalleryScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator(
-                        color = AccentColor,
+                        color = SonyText,
                         modifier = Modifier.size(28.dp),
                         strokeWidth = 2.dp
                     )
@@ -678,118 +393,174 @@ fun GalleryScreen(
                     viewModel = viewModel,
                     selectedPhotos = selectedPhotos,
                     processingPhotos = processingPhotos,
+                    failedIds = renderFailedIds,
+                    runningIds = processingPhotos.keys + listOfNotNull(renderingId),
+                    pendingIds = renderPendingIds,
                     isSelectionMode = isSelectionMode,
                     isSelectionEnabled = !isBatchOperationRunning,
                     isLoadingMore = (selectedTab == GalleryTab.SYSTEM && isSystemLoadingMore) ||
                             (selectedTab == GalleryTab.PHOTON && isPhotonLoadingMore),
                     onPhotoClick = onPhotoClick,
                     onLoadMore = { scope.launch { viewModel.loadCurrentTabMore() } },
+                    isRefreshing = isLoading,
+                    onSelectTab = { tab -> scope.launch { viewModel.selectTab(tab) } },
                     modifier = Modifier.fillMaxSize()
                 )
             }
+            GalleryTopLine(
+                isSelectionMode = isSelectionMode,
+                selectedCount = selectedPhotos.size,
+                enabled = !isBatchOperationRunning,
+                selectedTab = selectedTab,
+                onTabSelected = { tab ->
+                    if (tab != selectedTab) tick()
+                    scope.launch {
+                        viewModel.selectTab(tab)
+                    }
+                },
+                pendingCount = renderPendingIds.size,
+                failedCount = renderFailedIds.size,
+                onBack = {
+                    if (isSelectionMode) {
+                        viewModel.exitSelectionMode()
+                    } else {
+                        onBack()
+                    }
+                },
+                onSelectAll = {
+                    val selectable = photos.filterNot { it.id in processingPhotos }
+                    val allSelected = selectable.all { photo -> selectedPhotos.any { it.id == photo.id } }
+                    if (allSelected) {
+                        selectedPhotos.toList().forEach(viewModel::togglePhotoSelection)
+                    } else {
+                        selectable.filter { photo -> selectedPhotos.none { it.id == photo.id } }
+                            .forEach(viewModel::togglePhotoSelection)
+                    }
+                },
+                onRenderQueue = onRenderQueueClick,
+            )
+            val landscape = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
+            AnimatedVisibility(
+                visible = isSelectionMode && selectedPhotos.isNotEmpty(),
+                enter = if (landscape) fadeIn() else slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = if (landscape) fadeOut() else slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                modifier = if (landscape) Modifier.align(Alignment.CenterEnd).width(GalleryActionRowHeight).fillMaxHeight()
+                else Modifier.align(Alignment.BottomStart).fillMaxWidth().height(GalleryActionRowHeight)
+            ) {
+                val busy = stringResource(R.string.viewer_busy)
+                val running = if (isBatchOperationRunning) busy else null
+                val progress = batchOperationProgress?.let { it.completed.toFloat() / it.total.coerceAtLeast(1) }
+                ActionRow(
+                    listOf(
+                        // System items are only viewed here, so their first action makes them Lilac's own.
+                        if (selectedTab == GalleryTab.SYSTEM) RowAction(
+                            AppIcons.PhotoPlusLine, stringResource(R.string.gallery_add_to_lilac),
+                            running ?: stringResource(R.string.gallery_already_in_lilac).takeIf { selectedPhotos.all(viewModel::isInLilac) }
+                        ) {
+                            if (addToLilacExplained) addToLilac() else addToLilacSheet = true
+                        } else RowAction(
+                            AppIcons.FileExportLine, stringResource(R.string.export),
+                            running ?: stringResource(R.string.gallery_export_photos_only).takeIf { selectedImageCount == 0 }
+                        ) {
+                            viewModel.exportSelectedPhotos { count ->
+                                if (count > 0) Toast.makeText(context, R.string.export_complete, Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        RowAction(AppIcons.ShareLine, stringResource(R.string.share), running ?: busy.takeIf { isSharing }) {
+                            viewModel.shareSelectedPhotos()
+                        },
+                        RowAction(
+                            AppIcons.ClipboardLine, stringResource(R.string.gallery_paste_look),
+                            running ?: when {
+                                !hasCopiedEditSettings -> stringResource(R.string.viewer_paste_nothing)
+                                selectedImageCount == 0 -> stringResource(R.string.gallery_paste_needs_photo)
+                                else -> null
+                            }
+                        ) {
+                            viewModel.pasteCopiedSettingsToSelectedPhotos { successCount, total ->
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.paste_settings_complete, successCount, total),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        },
+                        RowAction(AppIcons.TrashLine, stringResource(R.string.delete), running, ::startDelete),
+                        RowAction(
+                            AppIcons.RefreshLine, stringResource(R.string.gallery_re_render),
+                            running ?: stringResource(R.string.render_again_not_eligible).takeIf { canRenderAgain == false }
+                        ) {
+                            val ids = selectedPhotos.map { it.id }
+                            scope.launch {
+                                val sources = ids.mapNotNull { loadRenderAgainSource(context, it) }
+                                if (sources.isEmpty()) {
+                                    Toast.makeText(context, R.string.render_again_not_eligible, Toast.LENGTH_SHORT).show()
+                                } else {
+                                    batchRenderAgain = BatchRenderAgain(
+                                        photoIds = ids,
+                                        eligibleCount = sources.size,
+                                        appLook = appRenderLook(context, sources.first().metadata.cameraId),
+                                    )
+                                }
+                            }
+                        },
+                    ),
+                    vertical = landscape,
+                    // Export, Share and Paste progress as a line along the row's top edge (turned: its start edge).
+                    modifier = Modifier.fillMaxSize().drawBehind {
+                        if (progress == null) return@drawBehind
+                        val line = 2.dp.toPx()
+                        if (landscape) drawRect(SonyText, size = Size(line, size.height * progress))
+                        else drawRect(SonyText, size = Size(size.width * progress, line))
+                    }
+                )
+            }
+            UndoBanner(
+                message = viewModel.pendingDelete?.message,
+                restartKey = viewModel.pendingDelete,
+                onUndo = { viewModel.undoPendingDelete() },
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(bottom = if (landscape) 0.dp else GalleryActionRowHeight, end = if (landscape) GalleryActionRowHeight else 0.dp),
+            )
         }
     }
 
-    var deleteExportedPref by rememberPreference(UserPreferences::deleteExported)
-
-    // 删除确认对话框
     HighFrameRateChoiceDialog(viewModel)
 
-    if (showDeleteDialog) {
-        val exportedPhotosCount = remember(selectedPhotos) {
-            selectedPhotos.sumOf { photo ->
-                val baseCount = photo.metadata?.exportedUris?.size ?: 0
-                val sourceUri = photo.metadata?.sourceUri
-                val isVideoAndCaptured = photo.isVideo &&
-                        photo.metadata?.isImported != true &&
-                        !sourceUri.isNullOrBlank()
-                baseCount + (if (isVideoAndCaptured) 1 else 0)
-            }
-        }
-        val selectedOnlyVideos = remember(selectedPhotos) {
-            selectedPhotos.isNotEmpty() && selectedPhotos.all { it.isVideo }
-        }
-        var deleteExportedState by remember(showDeleteDialog) { mutableStateOf(deleteExportedPref) }
-
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text(stringResource(R.string.delete)) },
-            text = {
-                Column {
-                    Text(
-                        text = stringResource(R.string.delete_multiple_confirm, selectedPhotos.size)
-                    )
-                    if (viewModel.selectedTab == GalleryTab.PHOTON) {
-                        if (exportedPhotosCount > 0) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { deleteExportedState = !deleteExportedState }
-                                    .padding(vertical = 4.dp)
-                            ) {
-                                Checkbox(
-                                    checked = deleteExportedState,
-                                    onCheckedChange = { deleteExportedState = it },
-                                    colors = CheckboxDefaults.colors(
-                                        checkedColor = AccentColor,
-                    checkmarkColor = OnAccentColor,
-                                        uncheckedColor = Color.White.copy(alpha = 0.6f)
-                                    )
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = if (selectedOnlyVideos) {
-                                        stringResource(R.string.delete_exported_videos_count, exportedPhotosCount)
-                                    } else {
-                                        stringResource(R.string.delete_exported_photos_count, exportedPhotosCount)
-                                    },
-                                    color = Color.White,
-                                    fontSize = 14.sp
-                                )
-                            }
-                        }
-                    }
-                }
+    deleteSheet?.let { shown ->
+        val anyStack = shown.any { stacks.versionsOf(it).size > 1 }
+        ViewerDeleteSheet(
+            thisOne = if (anyStack) stringResource(R.string.delete_shown_versions) else null,
+            all = if (anyStack) stringResource(R.string.delete_all_versions_selected) else null,
+            allFirst = false,
+            copies = { exportedCopies(deleteTargets(shown, it)) },
+            videos = shown.all { it.isVideo },
+            copiesFirst = deleteExportedPref,
+            onDelete = { all, withCopies ->
+                deleteSheet = null
+                val targets = deleteTargets(shown, all)
+                if (exportedCopies(targets) > 0) deleteExportedPref = withCopies
+                // Shown tiles were checked already; this only finds protected versions behind them.
+                runDelete(if (all) viewModel.unprotected(targets) else targets, withCopies)
             },
-            confirmButton = {
-                fun delete(photos: List<MediaData>) {
-                    val finalDeleteExported = if (viewModel.selectedTab == GalleryTab.PHOTON && exportedPhotosCount > 0) deleteExportedState else true
-                    if (viewModel.selectedTab == GalleryTab.PHOTON && exportedPhotosCount > 0) {
-                        deleteExportedPref = deleteExportedState
-                    }
-                    viewModel.deleteSelectedPhotos(finalDeleteExported, photos)
-                    showDeleteDialog = false
-                }
-                val shown = selectedPhotos.toList()
-                if (shown.any { stacks.versionsOf(it).size > 1 }) {
-                    DeleteVersionsButtons(
-                        thisVersionText = stringResource(R.string.delete_shown_versions),
-                        allVersionsText = stringResource(R.string.delete_all_versions_selected),
-                        onDeleteThis = { delete(shown) },
-                        onDeleteAll = {
-                            delete(shown.flatMap(stacks::versionsOf).filterNot { it.id in processingPhotos })
-                        },
-                        onCancel = { showDeleteDialog = false },
-                    )
-                } else {
-                    TextButton(onClick = { delete(shown) }) {
-                        Text(stringResource(R.string.delete), color = Color.Red)
-                    }
-                }
-            },
-            dismissButton = {
-                if (selectedPhotos.none { stacks.versionsOf(it).size > 1 }) {
-                    TextButton(onClick = { showDeleteDialog = false }) {
-                        Text(stringResource(R.string.cancel))
-                    }
-                }
-            },
-            containerColor = Color(0xFF2D2D2D),
-            titleContentColor = Color.White,
-            textContentColor = Color.White
+            onDismiss = { deleteSheet = null },
         )
+    }
+
+    if (addToLilacSheet) {
+        val count = selectedPhotos.count { !viewModel.isInLilac(it) }
+        SettingsSheet(stringResource(R.string.gallery_add_to_lilac), { addToLilacSheet = false }, stringResource(R.string.gallery_add_to_lilac_about)) {
+            ViewerSheetButtons(
+                pluralStringResource(R.plurals.gallery_add_to_lilac_count, count, count),
+                onCancel = { addToLilacSheet = false },
+                onGo = {
+                    addToLilacSheet = false
+                    addToLilacExplained = true
+                    addToLilac()
+                },
+            )
+        }
     }
 
     batchRenderAgain?.let { batch ->
@@ -819,36 +590,121 @@ fun GalleryScreen(
     }
 }
 
+private val GalleryActionRowHeight = 64.dp
+
 /** The selection a batch re-render applies to; ineligible photos stay in [photoIds] to be counted as skipped. */
 private data class BatchRenderAgain(val photoIds: List<String>, val eligibleCount: Int, val appLook: RenderLook)
 
+/**
+ * The line floating over the grid, with no fill: back, the Lilac / System tabs and the render queue;
+ * while selecting, close, the count and the selection's actions.
+ */
 @Composable
-private fun GalleryTabRow(
+private fun GalleryTopLine(
+    isSelectionMode: Boolean,
+    selectedCount: Int,
+    enabled: Boolean,
     selectedTab: GalleryTab,
-    onTabSelected: (GalleryTab) -> Unit
+    onTabSelected: (GalleryTab) -> Unit,
+    pendingCount: Int,
+    failedCount: Int,
+    onBack: () -> Unit,
+    onSelectAll: () -> Unit,
+    onRenderQueue: () -> Unit,
 ) {
-    val selectedTabIndex = selectedTab.ordinal
-    TabRow(
-        selectedTabIndex = selectedTabIndex,
-        containerColor = galleryBackgroundColor(),
-        contentColor = Color.White,
-        indicator = { tabPositions ->
-            TabRowDefaults.SecondaryIndicator(
-                modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
-                color = AccentColor
-            )
-        }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Tab(
-            selected = selectedTab == GalleryTab.PHOTON,
-            onClick = { onTabSelected(GalleryTab.PHOTON) },
-            text = { Text(stringResource(R.string.gallery_photon)) }
+        LineButton(
+            if (isSelectionMode) AppIcons.CloseLine else AppIcons.ArrowLeftLine,
+            stringResource(R.string.back),
+            enabled,
+            onBack
         )
-        Tab(
-            selected = selectedTab == GalleryTab.SYSTEM,
-            onClick = { onTabSelected(GalleryTab.SYSTEM) },
-            text = { Text(stringResource(R.string.gallery_system)) }
-        )
+        if (isSelectionMode) {
+            Box(Modifier.padding(start = 4.dp)) {
+                HaloText(stringResource(R.string.items_selected, selectedCount), fontSize = 18.sp)
+            }
+            Spacer(Modifier.weight(1f))
+            LineButton(AppIcons.ChecksLine, stringResource(R.string.select_all), enabled, onSelectAll)
+        } else {
+            GalleryTab.entries.forEach { tab ->
+                val chosen = tab == selectedTab
+                // The two tabs share the line between back and the queue evenly.
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .clickable(interactionSource = null, indication = null, role = Role.Tab) { onTabSelected(tab) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    HaloText(
+                        stringResource(if (tab == GalleryTab.PHOTON) R.string.gallery_photon else R.string.gallery_system),
+                        color = if (chosen) SonyText else Color(0xFFBDBDBD),
+                        letterSpacing = 0.3.sp
+                    )
+                    if (chosen) {
+                        Box(
+                            Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 6.dp)
+                                .size(37.dp, 3.dp)
+                                .background(SonyText, RoundedCornerShape(2.dp))
+                        )
+                    }
+                }
+            }
+            LineButton(
+                AppIcons.StackLine,
+                stringResource(R.string.render_queue_button_description, pendingCount, failedCount),
+                true,
+                onRenderQueue
+            ) {
+                val failed = failedCount > 0
+                if (failed || pendingCount > 0) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 6.dp, end = 6.dp)
+                            .height(16.dp)
+                            .widthIn(min = 16.dp)
+                            .background(if (failed) Color(TAG_FAILED_COLOR) else AccentColor, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // The "!" says it too, not only the error colour.
+                        Text(
+                            if (failed) "!" else pendingCount.toString(),
+                            color = if (failed) Color.White else OnAccentColor,
+                            fontSize = 10.5.sp,
+                            lineHeight = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A 48 dp icon button of the floating line; [badge] sits over its corner. */
+@Composable
+private fun LineButton(
+    icon: ImageVector,
+    description: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    badge: @Composable BoxScope.() -> Unit = {}
+) {
+    Box {
+        IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.semantics { contentDescription = description }) {
+            HaloIcon(icon, tint = if (enabled) SonyText else SonyText.copy(alpha = 0.38f))
+        }
+        badge()
     }
 }
 
@@ -859,14 +715,20 @@ private fun GalleryRecyclerGrid(
     viewModel: GalleryViewModel,
     selectedPhotos: List<MediaData>,
     processingPhotos: Map<String, ProcessingPhoto>,
+    failedIds: Set<String>,
+    runningIds: Set<String>,
+    pendingIds: Set<String>,
     isSelectionMode: Boolean,
     isSelectionEnabled: Boolean,
     isLoadingMore: Boolean,
     onPhotoClick: (GalleryTab, Int) -> Unit,
     onLoadMore: () -> Unit,
+    isRefreshing: Boolean,
+    onSelectTab: (GalleryTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val selectedPhotoIds = selectedPhotos.map { it.id }.toSet()
+    val accent = AccentColor.toArgb()
     val adapter = remember {
         GalleryRecyclerAdapter()
     }
@@ -876,6 +738,10 @@ private fun GalleryRecyclerGrid(
     var systemScrollState by rememberSaveable { mutableStateOf<Parcelable?>(null) }
 
     val currentScrollState = if (selectedTab == GalleryTab.PHOTON) photonScrollState else systemScrollState
+    val configuration = LocalConfiguration.current
+    val spanCount = if (configuration.screenWidthDp > configuration.screenHeightDp) 5 else 3
+    // The tab whose grid was last shown, so a tab change slides the new grid in but opening the screen does not.
+    val shownTab = remember { arrayOf(selectedTab) }
 
     key(selectedTab) {
         val currentTab = selectedTab
@@ -894,19 +760,21 @@ private fun GalleryRecyclerGrid(
         AndroidView(
             modifier = modifier,
             factory = { context ->
-                val container = FrameLayout(context)
-                val spacingPx = (4f * context.resources.displayMetrics.density).toInt().coerceAtLeast(1)
+                val container = GalleryGridFrame(context).apply { tab = currentTab }
+                val density = context.resources.displayMetrics.density
+                val spacingPx = (4f * density).toInt().coerceAtLeast(1)
                 val recyclerView = RecyclerView(context).apply {
                     layoutParams = FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT
                     )
-                    layoutManager = StaggeredGridLayoutManager(3, RecyclerView.VERTICAL).apply {
+                    layoutManager = StaggeredGridLayoutManager(spanCount, RecyclerView.VERTICAL).apply {
                         gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_MOVE_ITEMS_BETWEEN_SPANS
                         // Restore state for this specific tab
                         currentScrollState?.let { onRestoreInstanceState(it) }
                     }
-                    setPadding(spacingPx / 2, spacingPx / 2, spacingPx / 2, spacingPx / 2)
+                    // The grid runs under the floating top line and starts below it at rest.
+                    setPadding(spacingPx / 2, (56 * density).toInt(), spacingPx / 2, (16 * density).toInt())
                     clipToPadding = false
                     overScrollMode = RecyclerView.OVER_SCROLL_NEVER
                     isVerticalScrollBarEnabled = false
@@ -931,21 +799,42 @@ private fun GalleryRecyclerGrid(
                     })
                 }
                 container.addView(recyclerView)
+                // Between the grid and the fast scroller, so the scroller stays crisp.
+                container.addView(GridFadeView(context))
 
                 val fastScroller = GalleryFastScrollerView(context, recyclerView).apply {
                     layoutParams = FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT
-                    )
+                    ).apply { topMargin = (56 * density).toInt() }
                 }
                 container.addView(fastScroller)
 
+                if (shownTab[0] != currentTab) container.slideIn()
+                shownTab[0] = currentTab
                 container
             },
             update = { container ->
+                container.swipeEnabled = !isSelectionMode && !isRefreshing
+                container.onSwitch = onSelectTab
                 val recyclerView = container.getChildAt(0) as RecyclerView
-                val fastScroller = container.getChildAt(1) as GalleryFastScrollerView
-                val spanCount = 3 // Keep 3 columns as requested
+                (container.getChildAt(1) as GridFadeView).fadeBottom = isSelectionMode
+                val fastScroller = container.getChildAt(2) as GalleryFastScrollerView
+                // Room for the floating action row while selecting: 72 dp under the grid, or turned, a 64 dp column
+                // at the end, with the fast scroller to its left.
+                val density = container.resources.displayMetrics.density
+                val half = (4f * density).toInt().coerceAtLeast(1) / 2
+                val column = if (isSelectionMode && spanCount == 5) (64 * density).toInt() else 0
+                recyclerView.setPadding(
+                    half, recyclerView.paddingTop, half + column,
+                    ((if (isSelectionMode && column == 0) 72 else 16) * density).toInt()
+                )
+                (fastScroller.layoutParams as FrameLayout.LayoutParams).let {
+                    if (it.rightMargin != column) {
+                        it.rightMargin = column
+                        fastScroller.layoutParams = it
+                    }
+                }
                 val layoutManager = recyclerView.layoutManager as? StaggeredGridLayoutManager
                 if (layoutManager != null && layoutManager.spanCount != spanCount) {
                     layoutManager.spanCount = spanCount
@@ -966,6 +855,10 @@ private fun GalleryRecyclerGrid(
                     viewModel = viewModel,
                     selectedPhotoIds = selectedPhotoIds,
                     processingPhotos = processingPhotos,
+                    failedIds = failedIds,
+                    runningIds = runningIds,
+                    waitingIds = pendingIds - runningIds,
+                    accent = accent,
                     isSelectionMode = isSelectionMode,
                     isSelectionEnabled = isSelectionEnabled,
                     isLoadingMore = isLoadingMore,
@@ -1013,25 +906,29 @@ private class GalleryFastScrollerView(
 ) : View(context) {
     var onScrollEnd: (() -> Unit)? = null
     private val density = context.resources.displayMetrics.density
+    // Only a slim bar, no rail, as Sony's album draws it; it widens while held.
     private val thumbWidth = (4 * density).toInt()
-    private val thumbHeight = (56 * density).toInt()
-    private val trackWidth = (6 * density).toInt()
+    private val heldThumbWidth = (6 * density).toInt()
+    private val thumbHeight = (48 * density).toInt()
+    private val thumbInset = 4 * density
     private val touchAreaWidth = (24 * density).toInt()
     private val bubbleMargin = (48 * density).toInt()
 
     private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xE6FF5722.toInt() // Selection overlay annotation
+        color = 0xFFE0E0E0.toInt()
+        // A soft dark edge keeps the bar visible over bright photos.
+        setShadowLayer(3 * density, 0f, 0f, 0xB3000000.toInt())
     }
-    private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x29FFFFFF.toInt() // White with 0.16 alpha
-    }
+    // The date pill is the viewer's filled pill.
     private val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.WHITE
+        color = SonyDivider.toArgb()
     }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.BLACK
-        textSize = 13 * density
-        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        color = SonyText.toArgb()
+        textSize = android.util.TypedValue.applyDimension(
+            android.util.TypedValue.COMPLEX_UNIT_SP, 14f, context.resources.displayMetrics
+        )
+        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         textAlign = Paint.Align.CENTER
     }
 
@@ -1095,23 +992,19 @@ private class GalleryFastScrollerView(
         val progress = offset.toFloat() / (range - extent).toFloat()
         val thumbTop = (progress * usableHeight).coerceIn(0f, usableHeight.toFloat())
 
-        // Draw track
-        val trackLeft = width - trackWidth.toFloat()
-        canvas.drawRoundRect(trackLeft, 0f, width.toFloat(), height.toFloat(), 999f, 999f, trackPaint)
-
-        // Draw thumb
-        val thumbLeft = width - thumbWidth.toFloat() - (1 * density)
-        canvas.drawRoundRect(thumbLeft, thumbTop, width.toFloat() - (1 * density), thumbTop + thumbHeight, 999f, 999f, thumbPaint)
+        val thumbRight = width - thumbInset
+        val thumbLeft = thumbRight - (if (isDragging) heldThumbWidth else thumbWidth)
+        canvas.drawRoundRect(thumbLeft, thumbTop, thumbRight, thumbTop + thumbHeight, 999f, 999f, thumbPaint)
 
         // Draw bubble
         if (isDragging && dragLabel != null) {
             val label = dragLabel!!
             val textBounds = Rect()
             textPaint.getTextBounds(label, 0, label.length, textBounds)
-            val bubblePaddingH = 16 * density
-            val bubblePaddingV = 10 * density
+            val bubblePaddingH = 14 * density
+            val bubbleHeight = 40 * density
+            val bubblePaddingV = (bubbleHeight - textBounds.height()) / 2f
             val bubbleWidth = textBounds.width() + bubblePaddingH * 2
-            val bubbleHeight = textBounds.height() + bubblePaddingV * 2
             val bubbleRight = width - bubbleMargin.toFloat()
             val bubbleLeft = bubbleRight - bubbleWidth
             val bubbleCenterY = thumbTop + thumbHeight / 2f
@@ -1179,6 +1072,39 @@ private class GalleryFastScrollerView(
     }
 }
 
+/**
+ * Fades the grid into the black background under the floating line, and over the bottom while selecting.
+ * A black overlay on the black background looks the same as a mask on the grid, without an offscreen layer per frame.
+ */
+private class GridFadeView(context: Context) : View(context) {
+    private val dp = context.resources.displayMetrics.density
+    private val fadeHeight = 120 * dp
+    // The photos show at 20 %, 50 % and 85 % at the edge, at 40 dp and at 84 dp, and fully from 120 dp.
+    private val paint = Paint().apply {
+        shader = android.graphics.LinearGradient(
+            0f, 0f, 0f, fadeHeight,
+            intArrayOf(0xCC000000.toInt(), 0x80000000.toInt(), 0x26000000, 0),
+            floatArrayOf(0f, 40 * dp / fadeHeight, 84 * dp / fadeHeight, 1f),
+            Shader.TileMode.CLAMP
+        )
+    }
+    var fadeBottom = false
+        set(value) {
+            if (field != value) invalidate()
+            field = value
+        }
+
+    override fun onDraw(canvas: Canvas) {
+        canvas.drawRect(0f, 0f, width.toFloat(), fadeHeight, paint)
+        if (fadeBottom) {
+            canvas.save()
+            canvas.scale(1f, -1f, 0f, height / 2f)
+            canvas.drawRect(0f, 0f, width.toFloat(), fadeHeight, paint)
+            canvas.restore()
+        }
+    }
+}
+
 private class GalleryGridSpacingDecoration(
     private val spacingPx: Int
 ) : RecyclerView.ItemDecoration() {
@@ -1201,6 +1127,15 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
     private var viewModel: GalleryViewModel? = null
     private var selectedPhotoIds: Set<String> = emptySet()
     private var processingPhotos: Map<String, ProcessingPhoto> = emptyMap()
+    private var failedIds: Set<String> = emptySet()
+    private var runningIds: Set<String> = emptySet()
+    private var waitingIds: Set<String> = emptySet()
+    private var accent: Int = 0
+    // Tag facts read from disk once per item, so a rebind never reads again.
+    private val burstCounts = HashMap<String, Int>()
+    private val videoRates = HashMap<String, SlowedCopy.Rate>()
+    // Each rate read opens a MediaMetadataRetriever; a fast fling must not open one per video tile at once.
+    private val rateGate = Semaphore(2)
     private var isSelectionMode: Boolean = false
     private var isSelectionEnabled: Boolean = true
     private var isLoadingMore: Boolean = false
@@ -1219,6 +1154,10 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
         viewModel: GalleryViewModel,
         selectedPhotoIds: Set<String>,
         processingPhotos: Map<String, ProcessingPhoto>,
+        failedIds: Set<String>,
+        runningIds: Set<String>,
+        waitingIds: Set<String>,
+        accent: Int,
         isSelectionMode: Boolean,
         isSelectionEnabled: Boolean,
         isLoadingMore: Boolean,
@@ -1231,6 +1170,10 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
         val oldLoadingMore = this.isLoadingMore
         val oldSelectedPhotoIds = this.selectedPhotoIds
         val oldProcessingPhotos = this.processingPhotos
+        val oldFailedIds = this.failedIds
+        val oldRunningIds = this.runningIds
+        val oldWaitingIds = this.waitingIds
+        val oldAccent = this.accent
         val oldIsSelectionMode = this.isSelectionMode
         val oldIsSelectionEnabled = this.isSelectionEnabled
         val oldIsLandscape = this.isLandscape
@@ -1241,6 +1184,10 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
         this.viewModel = viewModel
         this.selectedPhotoIds = selectedPhotoIds
         this.processingPhotos = processingPhotos
+        this.failedIds = failedIds
+        this.runningIds = runningIds
+        this.waitingIds = waitingIds
+        this.accent = accent
         this.isSelectionMode = isSelectionMode
         this.isSelectionEnabled = isSelectionEnabled
         this.isLoadingMore = isLoadingMore
@@ -1276,6 +1223,7 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
 
                 // If anything about the UI state changed, we should rebind
                 if (oldIsSelectionMode != isSelectionMode || oldIsLandscape != isLandscape || oldRotationDegrees != rotationDegrees) return false
+                if (oldAccent != accent) return false
 
                 return when {
                     oldEntry is GalleryGridEntry.Header && newEntry is GalleryGridEntry.Header ->
@@ -1288,7 +1236,10 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                         val isSelected = id in selectedPhotoIds
                         wasSelected == isSelected && oldEntry.photo == newEntry.photo &&
                             oldEntry.versionCount == newEntry.versionCount &&
-                            oldProcessingPhotos[id] == processingPhotos[id]
+                            oldProcessingPhotos[id] == processingPhotos[id] &&
+                            (id in oldFailedIds) == (id in failedIds) &&
+                            (id in oldRunningIds) == (id in runningIds) &&
+                            (id in oldWaitingIds) == (id in waitingIds)
                     }
 
                     else -> false
@@ -1365,6 +1316,35 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                     photo = photo,
                     versionCount = entry.versionCount,
                     processingPhoto = processingPhotos[photo.id],
+                    tags = {
+                        gridTags(
+                            context = holder.itemView.context,
+                            photo = photo,
+                            versionCount = entry.versionCount,
+                            tab = selectedTab,
+                            isRaw = model.isRawInGallery(photo.id),
+                            burstCount = burstCounts[photo.id] ?: 0,
+                            videoRate = videoRates[photo.id],
+                            isProtected = model.isProtected(photo),
+                            failed = photo.id in failedIds,
+                        )
+                    },
+                    loadTagFacts = {
+                        if (photo.isImage && photo.isBurstPhoto && photo.id !in burstCounts) {
+                            burstCounts[photo.id] = withContext(Dispatchers.IO) {
+                                GalleryManager.getBurstPhotos(holder.itemView.context, photo.id).size
+                            }
+                        }
+                        if (photo.isVideo && photo.id !in videoRates) {
+                            videoRates[photo.id] = rateGate.withPermit { model.videoRate(photo) }
+                        }
+                    },
+                    edge = when (photo.id) {
+                        in runningIds -> EdgeRingStyle.RUNNING
+                        in waitingIds -> EdgeRingStyle.DOTTED
+                        else -> null
+                    },
+                    accent = accent,
                     viewModel = model,
                     isSelected = photo.id in selectedPhotoIds,
                     isSelectionMode = isSelectionMode,
@@ -1381,7 +1361,9 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                         }
                     },
                     onLongClick = {
-                        if (photo.id !in processingPhotos) {
+                        if (photo.id in processingPhotos || (!isSelectionMode && (photo.id in runningIds || photo.id in waitingIds))) {
+                            Toast.makeText(holder.itemView.context, R.string.gallery_busy_not_selectable, Toast.LENGTH_SHORT).show()
+                        } else {
                             if (!isSelectionMode) {
                                 model.enterSelectionMode()
                             }
@@ -1438,6 +1420,10 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
             photo: MediaData,
             versionCount: Int,
             processingPhoto: ProcessingPhoto?,
+            tags: () -> List<GridTag>,
+            loadTagFacts: suspend () -> Unit,
+            edge: EdgeRingStyle?,
+            accent: Int,
             viewModel: GalleryViewModel,
             isSelected: Boolean,
             isSelectionMode: Boolean,
@@ -1460,15 +1446,19 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                 isSelectionMode = isSelectionMode && processingPhoto == null,
                 isLandscape = isLandscape,
                 rotationDegrees = rotationDegrees,
-                isProcessing = processingPhoto != null,
                 onClick = onClick,
                 onLongClick = onLongClick
             )
+            view.bindTags(tags())
+            view.bindQueueState(edge, accent, chosen = isSelectionMode && isSelected)
             view.bindProcessingPreview(processingPhoto)
             if (processingPhoto == null) {
                 job = scope.launch {
                     val bitmap = viewModel.getGridThumbnailBitmap(photo)
                     view.bindThumbnail(photo.id, bitmap)
+                    // BURST n and 120 / 960 FPS need a disk read; their tags appear once known.
+                    loadTagFacts()
+                    view.bindTags(tags())
                 }
             }
         }
@@ -1500,18 +1490,10 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
     private val imageView: ImageView
     private val selectionOverlay: View
     private val selectionIcon: ImageView
-    private val videoBadge: LinearLayout
-    private val videoDuration: TextView
-    private val motionIcon: ImageView
-    private val burstIcon: ImageView
-    private val stackBadge: LinearLayout
-    private val stackCount: TextView
-    private val rawBadge: TextView
-    private val importedBadge: TextView
-    private val relatedBadge: View
+    private val tagViews: List<TextView>
     private var aspectRatio: Float = 1f
     private var boundPhotoId: String? = null
-    private val processingShimmer = ProcessingPhotoShimmerView(context)
+    private val edgeLine = TileEdgeLineView(context)
 
     init {
         LayoutInflater.from(context).inflate(R.layout.item_gallery_photo, this, true)
@@ -1525,19 +1507,11 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
         imageView = findViewById(R.id.gallery_photo_image)
         selectionOverlay = findViewById(R.id.gallery_photo_selection_overlay)
         selectionIcon = findViewById(R.id.gallery_photo_selection_icon)
-        videoBadge = findViewById(R.id.gallery_photo_video_badge)
-        videoDuration = findViewById(R.id.gallery_photo_video_duration)
-        motionIcon = findViewById(R.id.gallery_photo_motion_icon)
-        burstIcon = findViewById(R.id.gallery_photo_burst_icon)
-        stackBadge = findViewById(R.id.gallery_photo_stack_badge)
-        stackCount = findViewById(R.id.gallery_photo_stack_count)
-        rawBadge = findViewById(R.id.gallery_photo_raw_badge)
-        importedBadge = findViewById(R.id.gallery_photo_imported_badge)
-        relatedBadge = findViewById(R.id.gallery_photo_related_badge)
-        contentLayer.addView(processingShimmer, FrameLayout.LayoutParams(
+        tagViews = listOf(findViewById(R.id.gallery_photo_tag_1), findViewById(R.id.gallery_photo_tag_2))
+        // In the content layer, so in landscape the line turns with the picture and stays on the tile's edge.
+        contentLayer.addView(edgeLine, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
-        processingShimmer.visibility = GONE
         clipChildren = false
         clipToPadding = false
     }
@@ -1550,7 +1524,6 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
         isSelectionMode: Boolean,
         isLandscape: Boolean,
         rotationDegrees: Float,
-        isProcessing: Boolean,
         onClick: () -> Unit,
         onLongClick: () -> Unit
     ) {
@@ -1564,25 +1537,6 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
             if (isSelected) R.drawable.ic_gallery_check_circle else R.drawable.ic_gallery_radio_unchecked
         )
 
-        videoBadge.visibility = if (photo.isVideo) VISIBLE else GONE
-        videoDuration.text = photo.getFormattedDuration()
-        motionIcon.visibility = if (photo.isMotionPhoto) VISIBLE else GONE
-        burstIcon.visibility = if (photo.isBurstPhoto) VISIBLE else GONE
-        val isRawPhoto = !isProcessing && when (viewModel.selectedTab) {
-            GalleryTab.PHOTON -> viewModel.isRawInGallery(photo.id)
-            GalleryTab.SYSTEM -> photo.isSystemRawImage()
-        }
-        rawBadge.visibility = if (photo.isImage && isRawPhoto) VISIBLE else GONE
-        stackBadge.visibility = if (versionCount > 1 && !isProcessing) VISIBLE else GONE
-        stackCount.text = versionCount.toString()
-        stackBadge.contentDescription =
-            context.resources.getQuantityString(R.plurals.gallery_stack_versions, versionCount, versionCount)
-        rawBadge.text = context.getString(R.string.gallery_raw_badge)
-        importedBadge.visibility =
-            if (viewModel.selectedTab == GalleryTab.PHOTON && photo.sourceUri != null) VISIBLE else GONE
-        importedBadge.text = context.getString(R.string.imported)
-        relatedBadge.visibility =
-            if (viewModel.selectedTab == GalleryTab.SYSTEM && photo.relatedPhoto != null) VISIBLE else GONE
 
         setOnClickListener { onClick() }
         setOnLongClickListener {
@@ -1600,6 +1554,24 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
         requestLayout()
     }
 
+    fun bindTags(tags: List<GridTag>) {
+        val iconSize = (10 * resources.displayMetrics.density).toInt()
+        tagViews.forEachIndexed { i, view ->
+            val tag = tags.getOrNull(i)
+            view.visibility = if (tag == null) GONE else VISIBLE
+            if (tag == null) return@forEachIndexed
+            view.text = tag.text
+            view.contentDescription = tag.description
+            view.setTextColor(if (tag.failed) TAG_FAILED_COLOR else TAG_COLOR)
+            view.setBackgroundResource(if (tag.failed) R.drawable.bg_gallery_tile_tag_failed else R.drawable.bg_gallery_tile_tag)
+            val icon = tag.icon.takeIf { it != 0 }?.let { ContextCompat.getDrawable(context, it)?.mutate() }
+            icon?.setBounds(0, 0, iconSize, iconSize)
+            icon?.setTint(TAG_COLOR)
+            view.setCompoundDrawablesRelative(icon, null, null, null)
+            view.compoundDrawablePadding = if (tag.text.isEmpty()) 0 else iconSize / 5
+        }
+    }
+
     fun bindThumbnail(photoId: String, bitmap: Bitmap?) {
         if (boundPhotoId != photoId || bitmap == null || bitmap.isRecycled) return
         val bitmapAspectRatio = bitmap.galleryBitmapAspectRatio()
@@ -1610,10 +1582,21 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
         imageView.setImageBitmap(bitmap)
     }
 
+    /** A rendering or waiting tile carries the edge line, its picture softened and dimmed; a [chosen] one the solid edge. */
+    fun bindQueueState(style: EdgeRingStyle?, accent: Int, chosen: Boolean) {
+        edgeLine.style = if (chosen) EdgeRingStyle.SOLID else style
+        edgeLine.accent = accent
+        edgeLine.contentDescription = if (style == null || chosen) null else context.getString(R.string.gallery_photo_processing)
+        val busy = style != null
+        imageView.colorFilter = if (busy) PorterDuffColorFilter(0xFFCCCCCC.toInt(), PorterDuff.Mode.MULTIPLY) else null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Android's blur radius is about 1.7 sigma: 3.5 dp gives the 2 dp sigma of the design's blur.
+            val radius = 3.5f * resources.displayMetrics.density
+            imageView.setRenderEffect(if (busy) RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP) else null)
+        }
+    }
+
     fun bindProcessingPreview(processingPhoto: ProcessingPhoto?) {
-        processingShimmer.visibility = if (processingPhoto == null) GONE else VISIBLE
-        processingShimmer.contentDescription = if (processingPhoto == null) null
-            else context.getString(R.string.gallery_photo_processing)
         if (processingPhoto == null) return
         val thumbnail = processingPhoto.thumbnail?.takeUnless { it.isRecycled }
         if (thumbnail != null) {
@@ -1621,12 +1604,11 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
         } else {
             imageView.load(processingPhoto.photo.thumbnailUri)
         }
-        processingShimmer.invalidate()
     }
 
     fun clearThumbnail() {
         boundPhotoId = null
-        processingShimmer.visibility = GONE
+        edgeLine.style = null
         imageView.dispose()
         imageView.setImageDrawable(null)
     }
@@ -1688,22 +1670,57 @@ private fun Bitmap.galleryBitmapAspectRatio(): Float {
     }
 }
 
-private fun MediaData.isSystemRawImage(): Boolean {
-    if (!isImage) return false
-    if (mimeType?.let { type ->
-            type.contains("raw", ignoreCase = true) ||
-                    type.contains("dng", ignoreCase = true)
-        } == true
-    ) {
-        return true
-    }
+private const val TAG_COLOR = 0xFFE0E0E0.toInt()
+private const val TAG_FAILED_COLOR = 0xFFEA2546.toInt()
 
-    return displayName.substringAfterLast('.', missingDelimiterValue = "")
-        .lowercase()
-        .let { extension ->
-            extension in setOf("dng", "arw", "cr2", "cr3", "nef", "nrw", "orf", "pef", "raf", "rw2", "srw")
-        }
-}
+/** A tile tag: [icon] (a drawable, 0 for none) goes before [text]. */
+private data class GridTag(
+    val text: String,
+    @DrawableRes val icon: Int = 0,
+    val failed: Boolean = false,
+    val description: String? = null,
+)
+
+/**
+ * The tile's tags, in the viewer's words, at most two: a failed render first, then what kind of shot it is,
+ * then the lock, then the rest. [burstCount] 0 and a null [videoRate] leave those tags out until known.
+ */
+private fun gridTags(
+    context: Context,
+    photo: MediaData,
+    versionCount: Int,
+    tab: GalleryTab,
+    isRaw: Boolean,
+    burstCount: Int,
+    videoRate: SlowedCopy.Rate?,
+    isProtected: Boolean,
+    failed: Boolean,
+): List<GridTag> = buildList {
+    if (failed) add(GridTag("FAILED", failed = true))
+    if (isRaw && photo.isImage) add(GridTag(context.getString(R.string.gallery_raw_badge)))
+    stackedFrameCount(photo)?.let { add(GridTag("×$it")) }
+    val metadata = photo.metadata
+    metadata?.multipleExposureFrameCount?.takeIf { metadata.captureMode == "multiple_exposure" && it > 1 }?.let {
+        add(GridTag("ME ×$it"))
+    }
+    if (burstCount > 0) add(GridTag("BURST $burstCount"))
+    if (photo.isImage && photo.isMotionPhoto) add(GridTag("LIVE", R.drawable.ic_gallery_play))
+    if (photo.isVideo) add(GridTag(photo.getFormattedDuration(), R.drawable.ic_gallery_play))
+    if (videoRate?.isHighFrameRate == true) add(GridTag(if (videoRate.captureFps >= 900f) "960 FPS" else "120 FPS"))
+    if (isProtected) {
+        add(GridTag("", R.drawable.ic_gallery_tag_lock, description = context.getString(R.string.viewer_tag_protected_hint)))
+    }
+    if (versionCount > 1) {
+        add(
+            GridTag(
+                versionCount.toString(), R.drawable.ic_material_layers_24,
+                description = context.resources.getQuantityString(R.plurals.gallery_stack_versions, versionCount, versionCount)
+            )
+        )
+    }
+    if (tab == GalleryTab.PHOTON && photo.sourceUri != null) add(GridTag("IMPORT", description = context.getString(R.string.imported)))
+    if (tab == GalleryTab.SYSTEM && photo.relatedPhoto != null) add(GridTag("LILAC"))
+}.take(2)
 
 private fun MediaData.galleryAspectRatio(isLandscape: Boolean): Float {
     val rawWidth = if (isVideo) {
@@ -1731,11 +1748,18 @@ private fun MediaData.galleryAspectRatio(isLandscape: Boolean): Float {
     }
 }
 
-/** The system's Material You dark background (tinted from the wallpaper), or the old near-black before Android 12. */
+/** Launches the system's restore-from-trash dialog that an Undo of a system-tab delete asks for. */
 @Composable
-private fun galleryBackgroundColor(): Color {
-    val context = LocalContext.current
-    return remember(context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dynamicDarkColorScheme(context).background else Color(0xFF151515)
+internal fun TrashRestoreDialog(viewModel: GalleryViewModel, onDone: (restored: MediaData?) -> Unit = {}) {
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        viewModel.finishTrashRestore(result.resultCode == Activity.RESULT_OK, onDone)
+    }
+    LaunchedEffect(viewModel.trashRestoreIntent) {
+        val intent = viewModel.trashRestoreIntent ?: return@LaunchedEffect
+        try {
+            launcher.launch(IntentSenderRequest.Builder(intent.intentSender).build())
+        } catch (e: Exception) {
+            viewModel.finishTrashRestore(false, onDone)
+        }
     }
 }

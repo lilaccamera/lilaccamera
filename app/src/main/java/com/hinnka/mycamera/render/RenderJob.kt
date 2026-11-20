@@ -50,6 +50,8 @@ data class RenderJob(
     val rawRendered: Boolean = false,
     /** Set by the render once the auto-save export is done, so a retry does not save a second copy. */
     val exported: Boolean = false,
+    /** When the user asked for this photo next ([System.currentTimeMillis]), 0 if never; the latest ask goes first. */
+    val renderNowAt: Long = 0L,
 ) {
     /** SKIPPED: taken out of the queue by the user; the DNG stays and the queue never renders it. */
     enum class State { QUEUED, DONE, FAILED, SKIPPED }

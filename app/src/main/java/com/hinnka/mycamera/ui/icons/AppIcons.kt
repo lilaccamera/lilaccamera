@@ -471,6 +471,16 @@ object AppIcons {
     val GaugeLine: ImageVector by lazy { lineIcon("AppIcons.GaugeLine", "M5.636 19.364a9 9 0 1 1 12.728 0M16 9l-4 4") }
     val ChevronRightLine: ImageVector by lazy { lineIcon("AppIcons.ChevronRightLine", "M9 6l6 6l-6 6") }
     val ChevronUpLine: ImageVector by lazy { lineIcon("AppIcons.ChevronUpLine", "M6 15l6 -6l6 6") }
+    val ChevronLeftLine: ImageVector by lazy { lineIcon("AppIcons.ChevronLeftLine", "M15 6l-6 6l6 6") }
+    val VolumeLine: ImageVector by lazy {
+        lineIcon("AppIcons.VolumeLine", "M15 8a5 5 0 0 1 0 8M17.7 5a9 9 0 0 1 0 14M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5")
+    }
+    val VolumeOffLine: ImageVector by lazy {
+        lineIcon("AppIcons.VolumeOffLine", "M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5M16 10l4 4m0 -4l-4 4")
+    }
+    val PhotoDownLine: ImageVector by lazy {
+        lineIcon("AppIcons.PhotoDownLine", "M15 8h.01M12.5 21h-6.5a3 3 0 0 1 -3 -3v-12a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v6.5M3 16l5 -5c.928 -.893 2.072 -.893 3 0l4 4M14 14l1 -1c.653 -.629 1.413 -.815 2.13 -.559M19 16v6M22 19l-3 3l-3 -3")
+    }
     val ToolboxLine: ImageVector by lazy {
         lineIcon(
             "AppIcons.ToolboxLine",
@@ -501,6 +511,10 @@ object AppIcons {
             "M15 8h.01M3 6a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3zM3 16l5 -5c.928 -.893 2.072 -.893 3 0l5 5" +
                 "M14 14l1 -1c.928 -.893 2.072 -.893 3 0l3 3"
         )
+    }
+    val ClockLine: ImageVector by lazy { lineIcon("AppIcons.ClockLine", "M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0M12 7v5l3 3") }
+    val AlertLine: ImageVector by lazy {
+        lineIcon("AppIcons.AlertLine", "M10.24 3.957l-8.422 14.06a1.989 1.989 0 0 0 1.7 2.983h16.845a1.989 1.989 0 0 0 1.7 -2.983l-8.423 -14.06a1.989 1.989 0 0 0 -3.4 0zM12 9v4M12 17h.01")
     }
     val CloseLine: ImageVector by lazy { lineIcon("AppIcons.CloseLine", "M18 6l-12 12M6 6l12 12") }
     val PlusLine: ImageVector by lazy { lineIcon("AppIcons.PlusLine", "M12 5v14M5 12h14") }
@@ -585,6 +599,26 @@ object AppIcons {
         )
     }
     val SearchLine: ImageVector by lazy { lineIcon("AppIcons.SearchLine", "M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0M21 21l-6 -6") }
+    // The photo viewer's grid, share, delete and more.
+    val GridLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.GridLine",
+            "M4 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1zM14 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z" +
+                "M4 15a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1zM14 15a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z"
+        )
+    }
+    val ShareLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.ShareLine",
+            "M3 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M15 6a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M15 18a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M8.7 10.7l6.6 -3.4M8.7 13.3l6.6 3.4"
+        )
+    }
+    val TrashLine: ImageVector by lazy {
+        lineIcon("AppIcons.TrashLine", "M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3")
+    }
+    val DotsLine: ImageVector by lazy {
+        lineIcon("AppIcons.DotsLine", "M4 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M18 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0")
+    }
     val CropLine: ImageVector by lazy { lineIcon("AppIcons.CropLine", "M8 5v10a1 1 0 0 0 1 1h10M5 8h10a1 1 0 0 1 1 1v10") }
     val FiltersLine: ImageVector by lazy {
         lineIcon(
@@ -648,6 +682,24 @@ object AppIcons {
     val MacroLine: ImageVector by lazy { lineIcon("AppIcons.MacroLine", "M6 15a6 6 0 1 0 12 0M18 15a6 6 0 0 0 -6 6M12 21a6 6 0 0 0 -6 -6M12 21v-10M12 11a5 5 0 0 1 -5 -5v-3l3 2l2 -2l2 2l3 -2v3a5 5 0 0 1 -5 5z") }
     val TripodLine: ImageVector by lazy { lineIcon("AppIcons.TripodLine", "M8 4a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1v3a1 1 0 0 1 -1 1h-6a1 1 0 0 1 -1 -1zM12 8v4M12 12l-5 9M12 12l5 9M12 12v9") }
     val WalkLine: ImageVector by lazy { lineIcon("AppIcons.WalkLine", "M12 4a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M7 21l3 -4M16 21l-2 -4l-3 -3l1 -6M6 12l2 -3l4 -1l3 3l3 1") }
+
+    // The viewer's rating and Protect.
+    private const val STAR_PATH = "M12 17.75l-6.172 3.245l1.179 -6.873l-5 -4.867l6.9 -1l3.086 -6.253l3.086 6.253l6.9 1l-5 4.867l1.179 6.873z"
+    val StarLine: ImageVector by lazy { lineIcon("AppIcons.StarLine", STAR_PATH) }
+    val StarFilled: ImageVector by lazy {
+        ImageVector.Builder("AppIcons.StarFilled", 24f.dp, 24f.dp, 24f, 24f).apply {
+            addPath(
+                pathData = addPathNodes(STAR_PATH),
+                fill = SolidColor(Color.Black),
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineJoin = StrokeJoin.Round,
+            )
+        }.build()
+    }
+    val LockLine: ImageVector by lazy {
+        lineIcon("AppIcons.LockLine", "M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2zM11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0M8 11v-4a4 4 0 1 1 8 0v4")
+    }
 
     private fun lineIcon(name: String, pathData: String): ImageVector = ImageVector.Builder(
         name = name,
@@ -1430,6 +1482,23 @@ object AppIcons {
         )
     }
     val StackLine: ImageVector by lazy { lineIcon("AppIcons.StackLine", "M12 4l-8 4l8 4l8 -4zM4 12l8 4l8 -4M4 16l8 4l8 -4") }
+    val ChecksLine: ImageVector by lazy { lineIcon("AppIcons.ChecksLine", "M7 12l5 5l10 -10M2 12l5 5m5 -5l5 -5") }
+    val FileExportLine: ImageVector by lazy {
+        lineIcon("AppIcons.FileExportLine", "M14 3v4a1 1 0 0 0 1 1h4M11.5 21h-4.5a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v5m-5 6h7m-3 -3l3 3l-3 3")
+    }
+    val ClipboardLine: ImageVector by lazy {
+        lineIcon("AppIcons.ClipboardLine", "M9 5h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2h-2M9 5a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2z")
+    }
+    val RefreshLine: ImageVector by lazy {
+        lineIcon("AppIcons.RefreshLine", "M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4")
+    }
+    val PhotoPlusLine: ImageVector by lazy {
+        lineIcon(
+            "AppIcons.PhotoPlusLine",
+            "M15 8h.01M12.5 21h-6.5a3 3 0 0 1 -3 -3v-12a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v6.5M3 16l5 -5c.928 -.893 2.072 -.893 3 0l4 4" +
+                "M14 14l1 -1c.67 -.644 1.45 -.824 2.182 -.54M16 19h6M19 16v6"
+        )
+    }
 
     val Photo: ImageVector
         get() {

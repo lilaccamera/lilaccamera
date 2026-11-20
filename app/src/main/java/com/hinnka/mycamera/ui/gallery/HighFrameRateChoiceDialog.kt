@@ -1,24 +1,9 @@
 package com.hinnka.mycamera.ui.gallery
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import com.hinnka.mycamera.R
+import com.hinnka.mycamera.ui.settings.SettingsSheet
 import com.hinnka.mycamera.video.SlowedCopy
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 
@@ -31,55 +16,24 @@ fun HighFrameRateChoiceDialog(viewModel: GalleryViewModel) {
         choice.onPick(slowed)
     }
     fun length(ms: Long?) = ms?.let { " · " + formatLength(it) } ?: ""
-    AlertDialog(
-        onDismissRequest = { viewModel.highFrameRateChoice = null },
-        title = {
-            Text(
-                stringResource(
-                    if (choice.forExport) R.string.hfr_export_title else R.string.hfr_share_title,
-                    choice.captureFps,
-                )
-            )
-        },
-        text = {
-            Column {
-                Text(
-                    stringResource(R.string.hfr_choice_line),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-                ChoiceRow(
-                    stringResource(R.string.hfr_choice_slowed),
-                    stringResource(R.string.hfr_choice_slowed_detail) + length(choice.durationMs?.times(SlowedCopy.FACTOR)),
-                ) { pick(true) }
-                ChoiceRow(
-                    stringResource(R.string.hfr_choice_full),
-                    stringResource(R.string.hfr_choice_full_detail) + length(choice.durationMs),
-                ) { pick(false) }
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = { viewModel.highFrameRateChoice = null }) {
-                Text(stringResource(R.string.cancel))
-            }
-        },
-    )
-}
-
-@Composable
-private fun ChoiceRow(title: String, detail: String, onClick: () -> Unit) {
-    HorizontalDivider()
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
+    SettingsSheet(
+        title = stringResource(
+            if (choice.forExport) R.string.hfr_export_title else R.string.hfr_share_title,
+            choice.captureFps,
+        ),
+        onDismiss = { viewModel.highFrameRateChoice = null },
+        description = stringResource(R.string.hfr_choice_line),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+        ViewerOption(
+            stringResource(R.string.hfr_choice_slowed),
+            stringResource(R.string.hfr_choice_slowed_detail) + length(choice.durationMs?.times(SlowedCopy.FACTOR)),
+            chosen = false,
+        ) { pick(true) }
+        ViewerOption(
+            stringResource(R.string.hfr_choice_full),
+            stringResource(R.string.hfr_choice_full_detail) + length(choice.durationMs),
+            chosen = false,
+        ) { pick(false) }
     }
 }
 

@@ -5,9 +5,12 @@ import com.hinnka.mycamera.ui.prefs.rememberUserPreferencesRepository
 import com.hinnka.mycamera.ui.prefs.preferenceValue
 import com.hinnka.mycamera.data.ContentRepository
 import android.Manifest
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -20,6 +23,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -27,6 +34,9 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.animation.EnterExitState
+import com.hinnka.mycamera.ui.gallery.PhotoMorphProxy
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
@@ -40,6 +50,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -50,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
@@ -66,7 +78,9 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.combine
+import androidx.navigation.NavController
 import androidx.navigation.NavType
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -91,10 +105,13 @@ import com.hinnka.mycamera.ui.camera.FilmDetailScreen
 import com.hinnka.mycamera.ui.camera.FilmLibraryScreen
 import com.hinnka.mycamera.ui.camera.ToolboxScreen
 import com.hinnka.mycamera.ui.camera.PuzzleScreen
-import com.hinnka.mycamera.ui.gallery.BurstDetailScreen
 import com.hinnka.mycamera.ui.gallery.GalleryDetailScreen
 import com.hinnka.mycamera.ui.gallery.GalleryScreen
 import com.hinnka.mycamera.ui.gallery.GalleryEditScreen
+import com.hinnka.mycamera.ui.gallery.LocalPhotoMorph
+import com.hinnka.mycamera.ui.gallery.PHOTO_MORPH_MS
+import com.hinnka.mycamera.ui.gallery.PhotoMorph
+import com.hinnka.mycamera.ui.gallery.PhotoMorphEasing
 import com.hinnka.mycamera.ui.gallery.RenderQueueScreen
 import com.hinnka.mycamera.ui.settings.FilterManagementScreen
 import com.hinnka.mycamera.ui.settings.FrameEditorScreen
@@ -127,7 +144,6 @@ object Routes {
     const val CAMERA = "camera"
     const val GALLERY = "gallery"
     const val PHOTO_DETAIL = "photo_detail/{tab}/{index}?photoId={photoId}"
-    const val BURST_DETAIL = "burst_detail/{photoId}"
     const val PHOTO_EDIT = "photo_edit"
     const val SETTINGS = "settings?target={target}"
     const val FILTER_MANAGEMENT = "filter_management?locateLutId={locateLutId}&videoLut={videoLut}"
@@ -166,8 +182,6 @@ object Routes {
             ?.joinToString(prefix = "?", separator = "&")
             .orEmpty()
     }
-
-    fun burstDetail(photoId: String) = "burst_detail/$photoId"
 
     fun frameEditor(frameId: String? = null, imageFrame: Boolean = false): String {
         return buildString {
@@ -371,6 +385,8 @@ open class MainActivity : AppCompatActivity() {
         StartupTrace.mark("MainActivity.permissions checked", "hasPermissions=$hasPermissions")
 
         handleIntent(intent)
+        // A restored activity keeps the screen it was on.
+        if (savedInstanceState == null && GalleryLauncher.launched(intent)) pendingRoute = Routes.GALLERY
         StartupTrace.mark("MainActivity.intent handled", "pendingRoute=$pendingRoute")
 
         lifecycleScope.launch {
@@ -508,6 +524,7 @@ open class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         showOverLockScreen()
         handleIntent(intent)
+        if (GalleryLauncher.launched(intent)) pendingRoute = Routes.GALLERY
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -737,6 +754,7 @@ private fun AppUpdateInstallPrompt() {
     )
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun NavigationHost(
     cameraViewModel: CameraViewModel,
@@ -784,7 +802,8 @@ fun NavigationHost(
                     }
                     TextButton(onClick = {
                         showStackMemoryWarning = false
-                        navController.popBackStack()
+                        // The viewer opened from the grid asks this too, a step further from the camera.
+                        if (!navController.popBackStack(Routes.CAMERA, inclusive = false)) navController.popBackStack()
                     }) {
                         Text(
                             stringResource(R.string.stack_memory_warning_camera),
@@ -806,7 +825,8 @@ fun NavigationHost(
 
     androidx.compose.runtime.LaunchedEffect(pendingRoute) {
         pendingRoute?.let {
-            navController.navigate(it)
+            // The grid opens once, above the camera, whichever screen was showing.
+            if (it == Routes.GALLERY) returnToGallery() else navController.navigate(it)
             onRouteHandled()
         }
     }
@@ -816,13 +836,42 @@ fun NavigationHost(
     ) {
         onExternalGalleryReviewBack()
     }
-    navController.addOnDestinationChangedListener { _, destination, _ ->
-        BuglyHelper.setUserScene(context, destination.route.hashCode())
+    // The latest navigation went between the viewer and the editor or the camera: the picture moves from one to the other.
+    var photoMorph by remember { mutableStateOf(false) }
+    // The camera opens ahead of its screen on the way back from the viewer, but not while stacks still need the
+    // memory (the camera may then ask first) nor when the viewer returns to another app.
+    val warmUpCamera = { if (backStacksInFlight == 0 && !externalGalleryReviewReturnToCaller) cameraViewModel.warmUpCamera() }
+    DisposableEffect(navController) {
+        var lastRoute: String? = null
+        val listener = NavController.OnDestinationChangedListener { _, destination, _ ->
+            BuglyHelper.setUserScene(context, destination.route.hashCode())
+            photoMorph = photoMorphs(lastRoute, destination.route)
+            // A picture handed to the next screen only serves a move; elsewhere it would just hold memory.
+            if (!photoMorph) galleryViewModel.editHandoff = null
+            lastRoute = destination.route
+            // The gallery and viewer turn with the system rotation (and its lock); every other screen stays portrait.
+            val systemRotates = destination.route == Routes.GALLERY || destination.route == Routes.PHOTO_DETAIL
+            OrientationObserver.systemRotates = systemRotates
+            (context as? Activity)?.requestedOrientation =
+                if (systemRotates) ActivityInfo.SCREEN_ORIENTATION_USER else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        navController.addOnDestinationChangedListener(listener)
+        onDispose { navController.removeOnDestinationChangedListener(listener) }
     }
     cameraViewModel.cameraScreenShown = currentRoute == null || currentRoute == Routes.CAMERA
+    // Started on the gallery (its launcher icon or another app's request): the camera under it stays shut until
+    // the user goes back to it, rather than opening for the moment before the grid shows.
+    var holdCamera by remember { mutableStateOf(pendingRoute == Routes.GALLERY) }
+    var leftCamera by remember { mutableStateOf(false) }
+    LaunchedEffect(currentRoute) {
+        if (currentRoute != null && currentRoute != Routes.CAMERA) leftCamera = true
+        else if (currentRoute == Routes.CAMERA && leftCamera) holdCamera = false
+    }
     val containerSize = LocalWindowInfo.current.containerSize
+    // Shorter over longer side, so a turned phone window does not count as a wide one.
     cameraViewModel.isExpanded =
-        (containerSize.width * 1f / containerSize.height) > AspectRatio.RATIO_4_3.getValue(false)
+        (minOf(containerSize.width, containerSize.height) * 1f / maxOf(containerSize.width, containerSize.height)) >
+            AspectRatio.RATIO_4_3.getValue(false)
 
     // Over the lock screen only the camera is open: any other screen asks for the unlock first, stays
     // covered until it is given, and goes back to the camera if it is not.
@@ -832,45 +881,65 @@ fun NavigationHost(
             if (!unlocked) navController.popBackStack(Routes.CAMERA, inclusive = false)
         }
     }
-    Box(modifier = Modifier.fillMaxSize()) {
+    // Between the viewer and the editor the screens only fade: the picture moving between them carries the motion.
+    val morphFade = tween<Float>(PHOTO_MORPH_MS, easing = PhotoMorphEasing)
+    fun AnimatedContentTransitionScope<NavBackStackEntry>.morphs() =
+        photoMorphs(initialState.destination.route, targetState.destination.route)
+    SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
         NavHost(
             navController = navController,
             startDestination = Routes.CAMERA,
             enterTransition = {
-                slideInHorizontally(initialOffsetX = { it }) + fadeIn()
+                if (morphs()) fadeIn(morphFade) else slideInHorizontally(initialOffsetX = { it }) + fadeIn()
             },
             exitTransition = {
-                slideOutHorizontally(targetOffsetX = { -it }) + fadeOut()
+                if (morphs()) fadeOut(morphFade) else slideOutHorizontally(targetOffsetX = { -it }) + fadeOut()
             },
             popEnterTransition = {
-                slideInHorizontally(initialOffsetX = { -it }) + fadeIn()
+                if (morphs()) fadeIn(morphFade) else slideInHorizontally(initialOffsetX = { -it }) + fadeIn()
             },
             popExitTransition = {
-                slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
+                if (morphs()) fadeOut(morphFade) else slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
             }
         ) {
             composable(Routes.CAMERA) {
+                // Back from a turned gallery the window is still landscape for a moment; the camera waits for portrait
+                // rather than opening at the wrong size. Split screen and large screens keep any window shape.
+                val configuration = LocalConfiguration.current
+                if (holdCamera || configuration.orientation != Configuration.ORIENTATION_PORTRAIT &&
+                    (LocalContext.current as? Activity)?.isInMultiWindowMode != true &&
+                    configuration.smallestScreenWidthDp < 600
+                ) {
+                    Box(Modifier.fillMaxSize().background(Color.Black))
+                    return@composable
+                }
+                // The thumbnail opens what it shows: the photo still processing, else the newest item a pending
+                // delete has not hidden, and the grid only when there is nothing to show.
+                val openThumbnail: () -> Unit = {
+                    val openId = cameraViewModel.capturedThumbnail.value
+                        ?.takeUnless { it.finalThumbnailLoaded }
+                        ?.let { captured ->
+                            captured.savedPhotoId ?: captured.photoId.takeIf {
+                                it in GalleryManager.processingPhotos.value ||
+                                    it in galleryViewModel.processingPhotos.value
+                            }
+                        }
+                        ?: galleryViewModel.photos.value.firstOrNull { it.id !in galleryViewModel.hiddenPhotoIds }?.id
+                    if (openId != null) {
+                        galleryViewModel.setCurrentPhotoById(openId)
+                        // The viewer starts with the thumbnail's picture, so the move has one from its first frame.
+                        galleryViewModel.editHandoff = galleryViewModel.cameraThumbnail?.takeIf { it.first == openId }?.second
+                        navController.navigate(Routes.photoDetail(photoId = openId))
+                    } else {
+                        navController.navigate(Routes.GALLERY)
+                    }
+                }
                 if (cameraViewModel.isExpanded) {
                     Row {
                         CameraScreen(
                             viewModel = cameraViewModel,
                             galleryViewModel = galleryViewModel,
-                            onGalleryClick = {
-                                val pendingId = cameraViewModel.capturedThumbnail.value
-                                    ?.takeUnless { it.finalThumbnailLoaded }
-                                    ?.let { captured ->
-                                        captured.savedPhotoId ?: captured.photoId.takeIf {
-                                            it in GalleryManager.processingPhotos.value ||
-                                                it in galleryViewModel.processingPhotos.value
-                                        }
-                                    }
-                                if (pendingId != null) {
-                                    galleryViewModel.setCurrentPhotoById(pendingId)
-                                    navController.navigate(Routes.photoDetail(photoId = pendingId))
-                                } else {
-                                    navController.navigate(Routes.GALLERY)
-                                }
-                            },
+                            onGalleryClick = openThumbnail,
                             onSettingsClick = {
                                 navController.navigate(Routes.settings())
                             },
@@ -905,9 +974,6 @@ fun NavigationHost(
                             onEdit = {
                                 navController.navigate(Routes.PHOTO_EDIT)
                             },
-                            onViewBurst = { photoId ->
-                                navController.navigate(Routes.burstDetail(photoId))
-                            },
                             onOpenRenderQueue = {
                                 navController.navigate(Routes.RENDER_QUEUE)
                             },
@@ -915,29 +981,12 @@ fun NavigationHost(
                         )
                     }
                 } else {
+                  val cameraScreen = this
+                  Box(Modifier.fillMaxSize()) {
                     CameraScreen(
                         viewModel = cameraViewModel,
                         galleryViewModel = galleryViewModel,
-                        onGalleryClick = {
-                            val pendingId = cameraViewModel.capturedThumbnail.value
-                                ?.takeUnless { it.finalThumbnailLoaded }
-                                ?.let { captured ->
-                                    captured.savedPhotoId ?: captured.photoId.takeIf {
-                                        it in GalleryManager.processingPhotos.value ||
-                                            it in galleryViewModel.processingPhotos.value
-                                    }
-                                }
-                            val latestPhoto = galleryViewModel.latestPhoto.value
-                            if (pendingId != null) {
-                                galleryViewModel.setCurrentPhotoById(pendingId)
-                                navController.navigate(Routes.photoDetail(photoId = pendingId))
-                            } else if (latestPhoto != null && System.currentTimeMillis() - latestPhoto.dateAdded < 3 * 60 * 1000) {
-                                galleryViewModel.setCurrentPhotoById(latestPhoto.id)
-                                navController.navigate(Routes.photoDetail(photoId = latestPhoto.id))
-                            } else {
-                                navController.navigate(Routes.GALLERY)
-                            }
-                        },
+                        onGalleryClick = openThumbnail,
                         onSettingsClick = {
                             navController.navigate(Routes.settings())
                         },
@@ -965,6 +1014,12 @@ fun NavigationHost(
                             navController.navigate(Routes.PRESET_MANAGEMENT)
                         },
                     )
+                    CompositionLocalProvider(
+                        LocalPhotoMorph provides PhotoMorph(this@SharedTransitionLayout, cameraScreen, photoMorph)
+                    ) {
+                        ThumbnailPhotoMorph(cameraViewModel, galleryViewModel)
+                    }
+                  }
                 }
             }
 
@@ -1013,66 +1068,64 @@ fun NavigationHost(
                 val tab = backStackEntry.arguments?.getString("tab") ?: GalleryTab.PHOTON.name
                 val photoId = backStackEntry.arguments?.getString("photoId")
                 BackHandler(enabled = warnBeforeCamera) { showStackMemoryWarning = true }
-                GalleryDetailScreen(
-                    viewModel = galleryViewModel,
-                    initialIndex = index,
-                    selectedTab = GalleryTab.valueOf(tab),
-                    photoId = photoId,
-                    onBack = {
-                        if (externalGalleryReviewReturnToCaller ||
-                            navController.previousBackStackEntry?.destination?.route != Routes.GALLERY
-                        ) {
+                CompositionLocalProvider(LocalPhotoMorph provides PhotoMorph(this@SharedTransitionLayout, this, photoMorph)) {
+                    GalleryDetailScreen(
+                        viewModel = galleryViewModel,
+                        initialIndex = index,
+                        selectedTab = GalleryTab.valueOf(tab),
+                        photoId = photoId,
+                        onBack = {
+                            if (externalGalleryReviewReturnToCaller ||
+                                navController.previousBackStackEntry?.destination?.route != Routes.GALLERY
+                            ) {
+                                galleryViewModel.requestGalleryScrollToPhoto(null)
+                            }
+                            if (navController.previousBackStackEntry?.destination?.route == Routes.CAMERA) warmUpCamera()
+                            handleGalleryBack()
+                        },
+                        onGoToGallery = returnToGallery,
+                        onGoToCamera = {
                             galleryViewModel.requestGalleryScrollToPhoto(null)
+                            when {
+                                externalGalleryReviewReturnToCaller -> onExternalGalleryReviewBack()
+                                backStacksInFlight > 0 -> showStackMemoryWarning = true
+                                else -> {
+                                    warmUpCamera()
+                                    if (!navController.popBackStack(Routes.CAMERA, inclusive = false)) navController.popBackStack()
+                                }
+                            }
+                        },
+                        cameraFrame = cameraViewModel.heldPreviewFrame,
+                        onCameraWarmUp = { on -> if (!on) cameraViewModel.abandonCameraWarmUp() else warmUpCamera() },
+                        onEdit = {
+                            navController.navigate(Routes.PHOTO_EDIT)
+                        },
+                        onOpenRenderQueue = {
+                            navController.navigate(Routes.RENDER_QUEUE)
                         }
-                        handleGalleryBack()
-                    },
-                    onGoToGallery = returnToGallery,
-                    onEdit = {
-                        navController.navigate(Routes.PHOTO_EDIT)
-                    },
-                    onViewBurst = { id ->
-                        navController.navigate(Routes.burstDetail(id))
-                    },
-                    onOpenRenderQueue = {
-                        navController.navigate(Routes.RENDER_QUEUE)
-                    }
-                )
-            }
-
-            composable(
-                route = Routes.BURST_DETAIL,
-                arguments = listOf(navArgument("photoId") { type = NavType.StringType })
-            ) { backStackEntry ->
-                val photoId = backStackEntry.arguments?.getString("photoId") ?: ""
-                BurstDetailScreen(
-                    viewModel = galleryViewModel,
-                    photoId = photoId,
-                    onEdit = {
-                        navController.navigate(Routes.PHOTO_EDIT)
-                    },
-                    onBack = {
-                        navController.popBackStack()
-                    }
-                )
+                    )
+                }
             }
 
             composable(Routes.PHOTO_EDIT) {
-                GalleryEditScreen(
-                    viewModel = galleryViewModel,
-                    cameraViewModel = cameraViewModel,
-                    onBack = {
-                        navController.popBackStack()
-                    },
-                    onOpenFrameEditor = { frameId ->
-                        navController.navigate(Routes.frameEditor(frameId = frameId))
-                    },
-                    onFilterManagementClick = { lutId ->
-                        navController.navigate(Routes.filterManagement(lutId))
-                    },
-                    onCreatePresetClick = {
-                        navController.navigate(Routes.presetEditor(null))
-                    }
-                )
+                CompositionLocalProvider(LocalPhotoMorph provides PhotoMorph(this@SharedTransitionLayout, this, photoMorph)) {
+                    GalleryEditScreen(
+                        viewModel = galleryViewModel,
+                        cameraViewModel = cameraViewModel,
+                        onBack = {
+                            navController.popBackStack()
+                        },
+                        onOpenFrameEditor = { frameId ->
+                            navController.navigate(Routes.frameEditor(frameId = frameId))
+                        },
+                        onFilterManagementClick = { lutId ->
+                            navController.navigate(Routes.filterManagement(lutId))
+                        },
+                        onCreatePresetClick = {
+                            navController.navigate(Routes.presetEditor(null))
+                        }
+                    )
+                }
             }
 
             composable(
@@ -1345,5 +1398,48 @@ fun PermissionScreen(
                 Text(text = stringResource(R.string.grant_permission))
             }
         }
+    }
+}
+
+/** The routes between which the picture moves rather than the screens sliding. */
+private fun photoMorphs(from: String?, to: String?): Boolean = setOf(from, to).let {
+    it == setOf(Routes.PHOTO_DETAIL, Routes.PHOTO_EDIT) || it == setOf(Routes.CAMERA, Routes.PHOTO_DETAIL)
+}
+
+/**
+ * The camera's end of the move to and from the viewer: the picture at the thumbnail's photo. Coming back it is the
+ * viewer's picture, handed over as it was left. Not with the controls turned: the thumbnail is turned too, so the
+ * screens just fade.
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun BoxScope.ThumbnailPhotoMorph(cameraViewModel: CameraViewModel, galleryViewModel: GalleryViewModel) {
+    val morph = LocalPhotoMorph.current ?: return
+    val bounds = cameraViewModel.thumbnailBoundsInRoot
+    if (!morph.running || bounds == null || OrientationObserver.uiRotationDegrees != 0f) return
+    val entering = morph.screen.transition.targetState == EnterExitState.Visible
+    val picture = remember {
+        (if (entering) galleryViewModel.takeEditHandoff() else null) ?: galleryViewModel.cameraThumbnail?.second
+    } ?: return
+    PhotoMorphProxy(picture, bounds)
+}
+
+/** The optional "Lilac Gallery" launcher icon: an alias of [MainActivity] that opens on the gallery grid. */
+object GalleryLauncher {
+    // Relative to the manifest's namespace, which is MainActivity's package, not to the (suffixed) application id.
+    private val className = MainActivity::class.java.name.substringBeforeLast('.') + ".GalleryLauncher"
+
+    fun launched(intent: Intent?): Boolean = intent?.component?.className == className
+
+    fun isEnabled(context: Context): Boolean =
+        context.packageManager.getComponentEnabledSetting(ComponentName(context, className)) ==
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+
+    fun setEnabled(context: Context, enabled: Boolean) {
+        context.packageManager.setComponentEnabledSetting(
+            ComponentName(context, className),
+            if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+            PackageManager.DONT_KILL_APP,
+        )
     }
 }
